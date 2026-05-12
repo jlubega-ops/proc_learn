@@ -1,0 +1,42 @@
+{
+  "name": "proc_learn",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "dev": "next dev",
+    "build": "next build",
+    "start": "next start",
+    "lint": "eslint",
+    "postinstall": "prisma generate",
+    "db:push": "prisma db push",
+    "db:seed": "node prisma/seed.cjs"
+  },
+  "prisma": {
+    "seed": "node prisma/seed.cjs"
+  },
+  "dependencies": {
+    "@emotion/react": "^11.14.0",
+    "@emotion/styled": "^11.14.1",
+    "@mui/icons-material": "^9.0.0",
+    "@mui/material": "^9.0.0",
+    "@mui/material-nextjs": "^9.0.0",
+    "@prisma/client": "^6.19.0",
+    "@tinymce/tinymce-react": "^6.3.0",
+    "bcryptjs": "^3.0.3",
+    "date-fns": "^4.1.0",
+    "iron-session": "^8.0.4",
+    "next": "16.2.3",
+    "nodemailer": "^6.10.1",
+    "react": "19.2.4",
+    "react-dom": "19.2.4",
+    "xlsx": "^0.18.5"
+  },
+  "devDependencies": {
+    "@tailwindcss/postcss": "^4",
+    "babel-plugin-react-compiler": "1.0.0",
+    "eslint": "^9",
+    "eslint-config-next": "16.2.3",
+    "prisma": "^6.19.0",
+    "tailwindcss": "^4"
+  }
+}

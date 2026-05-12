@@ -1,0 +1,108 @@
+---
+description: Proc Learn (MUBS) — Next.js + Prisma + Materio UI standards for every prompt
+alwaysApply: true
+---
+
+# Proc Learn — Project rules (always follow)
+
+**Product:** Proc Learn — Makerere University Business School (MUBS), for students. Priorities: security, clear navigation, fast UI on low bandwidth, accessibility.
+
+**Stack:** Next.js (read `node_modules/next/dist/docs/` before using APIs; heed deprecations), **JavaScript only** (no TypeScript), Prisma, MUI + Tailwind as in the reference template. **Request interception:** use **`src/proxy.js`** with export **`proxy(request)`** (or `export default function proxy`) — see `node_modules/next/dist/docs/01-app/03-api-reference/03-file-conventions/proxy.md`. **`middleware.js` is deprecated** in this Next.js generation; do not add new middleware files; route guards belong in `proxy.js` plus server layouts/API checks as today.
+
+## UI template (single source of truth)
+
+- **Reference:** `uitemplate/javascript-version/` (Materio MUI Next.js — JS). Mirror layout, component patterns, `@core` theme structure, and styling conventions when building the app.
+- **Branding:** Extend theme via `userTheme` / merged theme pattern from the template. **Primary:** `#008bd0`. **Secondary accents:** `#fff200`, `#ed1c24` (use sparingly). Keep visual consistency with template spacing, cards, tables, dialogs, and navigation.
+- **Product name visibility (“Proc Learn”):** The written product name **Proc Learn** (two words, title case) must be **obvious at a glance** wherever users orient themselves: **auth screens** (`/login`, `/forgot-password`, activation/reset) show it **inside the main auth card** (large primary-blue wordmark on a light, legible card). **Login** may use a **full-bleed blurred campus image** behind the card for atmosphere; the card stays the focal surface. Prefer **no document scroll** on login (fit within **`100dvh`**, compact spacing); only allow **in-card** scrolling if a future layout truly cannot fit small viewports. **Signed-in shell:** sidebar and/or top bar must keep **Proc Learn** clearly legible (prefer **bold / extra-bold** app title next to the crest, not only micro-copy). Do not bury the name solely in footer or legal lines; pairing with MUBS / org copy is fine as **secondary** typography. Avoid ambiguous styling that reads as one word (“ProcLearn”) in UI lockups unless an icon glyph is space-constrained.
+- **Responsive (strict):** Mobile-first; **every** screen, table, dialog, toolbar, and form control must remain **usable and readable on small viewports** (wrap, stack, `w-full` / responsive grids, scroll where appropriate). Do not ship layouts that require horizontal page scroll on a typical phone width.
+- **Dashboard content width:** Signed-in **main** and **footer** use one shared inner column: **`DASHBOARD_MAIN_INNER_CLASS`** from **`src/lib/dashboard-content-width.js`** (`mx-auto w-full max-w-6xl`, wired in **`dashboard-layout-client.js`**). **Do not** wrap each page in a different `max-w-5xl` / `max-w-2xl` shell — that breaks alignment across routes. Pages use **`w-full`** inside the shell; use **`max-w-md`** (or similar) **only** inside a card for intentional narrow forms (e.g. a centered sub-form), not for the whole page root.
+- **Dark / light mode (strict):** **Every** user-visible control (inputs, selects, tables, dialogs, cards, filters, nav chrome) must be **theme-adaptive** — use shared tokens (`globals.css` `var(--background)` / `var(--foreground)` via `html.dark`, Tailwind `bg-background` / `dark:`, and/or shared MUI `sx` such as **`themedTextFieldSx`** / **`admin*Sx`** in `src/lib/admin-mui-surfaces.js`). Do not rely on MUI’s default light **Paper** palette on signed-in surfaces. **Signed-in users:** persist theme in **`UserSettings` (Prisma)**; sync via session APIs. **Guests:** `localStorage` cache. **Auth pages (`/login`, `/forgot-password`):** always **light** UI. Icons: prefer **MUI Icons** (`@mui/icons-material`, e.g. `*Rounded`).
+
+## UX patterns
+
+- **Pointer cursor:** Any control that behaves like a **click** (native **`button`**, **`a[href]`**, **`select`**, **`summary`**, **`[role="button"]`**, **MUI `Button` / `IconButton` / `MenuItem`**, icon-only triggers, etc.) must show **`cursor: pointer`** in its default / enabled state, and **`cursor: not-allowed`** when **disabled** or clearly non-interactive. Prefer the shared **`globals.css`** `@layer base` rules so defaults stay consistent; add **`cursor-pointer` / `disabled:cursor-not-allowed`** in Tailwind when a component bypasses native tags (e.g. **`div`** with **`onClick`**).
+- **Tooltips:** Meaningful controls (especially dense UI) should have `title` / MUI `Tooltip` describing what the control does.
+- **Actions (strict):** **Row-scoped** actions (edit, delete, suspend, resend, etc.) must use **MUI `IconButton` + `Tooltip` + `aria-label`** — **never** plain text-only buttons in the Actions column. Keep row action icons on **one line** (no wrapping) and use **semantic icon colors** consistently (e.g. edit/primary, destructive/error, start/info, submit/success). Prefer opening full detail/submission experiences on **dedicated routes/pages** instead of dense in-table modals. **Primary toolbar** actions (e.g. “Add …”, “Refresh”) should include a **leading icon** where it improves recognition, and must remain **responsive** (`flex-wrap`, full-width buttons on narrow screens when needed). **Academic year** options from **`GET /api/meta/academic-years`** stay **newest first**.
+- **Loading:** Show loading states for data fetches and for **in-flight** mutations. For **blocking** work (sign-in, sign-out, role switch, heavy saves), use a **visible spinner plus a short status phrase** (e.g. MUI **`CircularProgress`** on the control and/or a **card / full-screen overlay** with `aria-busy` / `role="status"`). Avoid a silent disabled button with no explanation.
+- **Date formatting:** Use **`date-fns`** for app date/time formatting (avoid ad-hoc `toLocaleString()` differences). In dense tables, prefer concise calendar date format (e.g. `Jan 15, 2026`) unless time is specifically required.
+- **Color semantics (strict):** Avoid dull/low-contrast neutral badges (e.g. gray chip + dark text) on signed-in surfaces, especially in dark mode. Use consistent semantic colors across the app: **success/green** for positive/completed, **error/red** for destructive/closed/failure, **warning/yellow** for pending/not-started/attention, **info/blue** for in-progress, and **secondary/purple** for categorical accents. Keep these mappings consistent route-to-route.
+- **Confirmations:** Destructive or irreversible actions use **in-app modals** — never `window.alert`, `confirm`, or `prompt`.
+- **Pagination:** All list/table endpoints and UIs that show tabular or long lists must be paginated (server + UI).
+- **Toasts / snackbars (API outcomes):** User-visible results of **mutations and auth API calls** (login, logout, saves, deletes, OAuth errors, etc.) must surface through **`useToast()`** from **`src/components/providers/toast-provider.js`** (**MUI `Snackbar` + `Alert`**, `variant="filled"`, **`anchorOrigin` top-right**). Use **only** `severity: "error"` (**red**) for failures and **`severity: "success"`** (**green**) for successes — **never** `info`, `warning`, or other severities on app toasts. Pass an object `{ message, severity, duration? }`; string-only `showToast(msg)` is treated as **error**. Keep **field-level validation** on the inputs; use toasts for **server / network messages** and **success confirmations** (e.g. “Signed in successfully.”). Do not rely on long-lived inline red banners for API errors when a toast is appropriate.
+- **Offline / online:** Detect connectivity (e.g. `navigator.onLine` + `online`/`offline` events, optionally `fetch` heartbeat). When offline: prominent **red** message — e.g. “You are not connected to the internet. Please connect and try again.” When back online: **green** — e.g. “You are back online. You can continue.” (Gmail-style awareness, not necessarily identical copy).
+
+## Forms and validation (strict)
+
+- **Never rely on HTML5 `required` (or other browser constraint attributes) as the primary gate.** Use **`noValidate`** on forms and implement explicit validation (same spirit as **`LoginForm`** + **`validateLoginFields`**): run checks on submit, set a field→message map, show **`error` + `helperText`** on each `TextField`, and **block** the network request until client validation passes.
+- **Toasts:** On client validation failure you may show a short **error** toast (e.g. “Please fix the highlighted fields.”). On server/network failure, use a **red** toast with the API message (sentence case). On success, **green** toast.
+- **Server:** Re-validate everything; never trust the client. Normalize (trim, canonical email casing, etc.).
+- **Sex (product):** Collect **only Male or Female** (optional unless product says otherwise) in **staff/student admin forms** and accept **only `MALE` / `FEMALE` / null** on relevant APIs (`parseOptionalMaleFemaleSex` in `src/lib/validation/sex-male-female.js`). Do not offer “Other” / “Prefer not to say” in those forms.
+- **Rich text:** Use **TinyMCE** for all rich text areas (configure keys via `.env`).
+
+## Security, data, and Prisma
+
+- **Roles:** Students have **only** `STUDENT` in `user_role`. Staff may have multiple staff roles and may **activate student view** without a `STUDENT` row. **Active role** is `user_settings.active_role` and drives nav, UI, and server authorization; switch with **`POST /api/user/active-role`**, then refresh client session and **`router.replace`** to the default post-auth path (no hard reload).
+- **Secrets / config:** All environment-specific values live in **`.env`** (and documented in `.env.example` without secrets). Do not hardcode credentials or URLs. **Iron-session** accepts **`SESSION_SECRET`** or, if unset, **`NEXTAUTH_SECRET`** (min 32 chars). Use **`APP_URL`** for app/email links; code falls back to **`NEXTAUTH_URL`** if needed. Document **Google OAuth** (`GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, callback URL in Google console) and **`SESSION_IDLE_MINUTES`** (default **30**) for idle logout.
+- **IDs:** Use **opaque UUIDs** (v4 or v7 as appropriate) for primary keys / public identifiers in the database.
+- **Prisma:** Use **exactly one** shared Prisma Client instance (singleton module, e.g. `lib/prisma.js`) — never instantiate ad hoc clients in random files.
+- **Deletes:** Model relationships with **`onDelete: Cascade`** (or equivalent) so related rows do not become orphaned junk.
+- **Activity logging:** Every security-relevant and admin-relevant action must go through the shared **activity log** service (see **Activity log (data contract)** below). Do not ad-hoc `console.log` for audit trails.
+
+## Authentication & sessions
+
+- **Sign-in methods:** **Institutional email + password** and **Sign in with Google**. Only users **pre-created in the system** may authenticate (no self-registration). **Email/password:** validate **well-formed email on the client before submit** and again on the server; accept **only email** (no username login) — **resolve to one user row** by normalized email; never trust the client for identity.
+- **Google OAuth:** On successful Google sign-in, match an existing user (by institutional email rules below). If no matching account, reject with a clear message. **Google sign-in activates the account** (no separate password activation step for that path).
+- **Suspended users:** On login attempt (any method), return a **clear, user-facing message** (e.g. account suspended — contact admin). The **suspension reason** is **mandatory when an admin suspends** an account; store it in DB and show it to **admins** (e.g. user list / dialog); the end-user message stays generic unless product policy says otherwise.
+- **Idle timeout:** If the user has **no interaction** with the app for **30 minutes**, **expire the session** and require sign-in again. Track activity via **session sliding expiry** and/or **last-activity timestamp** server-side; align client heartbeat only if needed and keep it lightweight.
+- **Single active session per user:** **One concurrent login per user** across devices. A **new successful login** must **invalidate** the previous session (e.g. rotate **session version / token id** stored in DB and checked on each request, or equivalent). Previous device gets **signed out on next request** or via a short client poll — prefer server validation on each authenticated API call.
+- **Login auditing:** **Every successful login** (email/password or Google) must write an **activity log** entry.
+- **Activation / reset tokens:** Store **only hashed** tokens; enforce **expiry** (7d activation, 1h reset) and **single-use**; rate-limit request endpoints; use **HTTPS** and **Secure** cookies in production.
+
+## User provisioning & MUBS identity
+
+- **Who may create users:** **System admin** may create **all** user types. **Lecturer** and **examiner** may **only** create **students** (never staff roles).
+- **Staff create (examiner / lecturer / system admin):** Collect **email**, **first name**, **last name**, optional **middle name**, optional **profile photo** (upload via protected media pipeline **or** external URL field — validate URL). **Email must match** `letters@mubs.ac.ug` (local-part **letters only**, domain **`mubs.ac.ug`**). Validate on **client and server**.
+- **Student create / edit:** Collect **first name**, **last name**, optional **middle name**, optional **profile photo**, **school email** (`digits@mubs.ac.ug`), **student number** (digits, **1–32**), **registration number**, **programme** (active only), **year of study** (**1–3**, programme default when programme changes), **academic year** (see below). **Email and student number are independent:** the UI **prefills** student number from the digits in the email while “in sync”; the user may **change** the student number so it **does not** match the email local part. Server must **not** require equality — only validate **student email shape** (`isStudentMubsEmail`) and **student number** (`isValidStudentNumberDigits`).
+- **Programmes:** Maintained by system admin (`Name`, `ShortName`, `IsActive`). Inactive programmes must **not** appear in student creation selects.
+- **Academic years:** Provide a **select** of academic years in the form `YYYY/YYYY+1` (e.g. `2025/2026`, `2026/2027`). **Auto-generate** options from the **current calendar year** (authoritative “today” from server): always include **current** and **next** academic year labels as appropriate for the calendar date, plus **three prior** academic years in the same pattern (e.g. if “now” is 2026, include `2024/2025`, `2023/2024`, `2022/2023` as the backward window — adjust algorithm so labels are consistent and timezone-safe). Allow admin workflows for **historical** years beyond the auto list if product requires it.
+- **Account activation (password users):** After user creation, send **email** with **activation link** to set password; link **valid 7 days**. Store a **hashed token**, single-use, expiry enforced server-side.
+- **Password reset:** **Forgot password** sends email with reset link, **valid 1 hour**. Same pattern: hashed token, expiry, single-use.
+- **User list (admin):** Show **last login** (display **“Never”** if null). **Status:** **active** (has logged in at least once and not suspended), **suspended**, or **pending activation** as applicable. For **suspended**, provide an action to open a **dialog** showing **suspension reason** (from DB). Provide **“Resend / reset activation link”** only when **never logged in** or **account not yet activated** (hide otherwise).
+
+## Password reset & notifications (audit)
+
+- **Password reset** must: (1) write **activity log** entry, (2) send **email** notification, (3) create **in-system notification** (see Notifications below). Same standards for other high-impact security events where product requires it.
+
+## Activity log (data contract)
+
+Use one **`ActivityLog`** (or equivalent) model and a single **`logActivity()`** helper. Suggested fields (refine in Prisma as needed): **`actorUserId`** (who performed), **`userAffectedId`** (who was targeted, nullable), **`eventName`** (short stable key, e.g. `USER_LOGIN`, `PASSWORD_RESET_REQUEST`), **`actionType`** enum (`CREATE`, `READ`, `UPDATE`, `DELETE`, `LOGIN`, `LOGOUT`, …), **`description`** (full human-readable sentence for auditors), **`origin`** (`web` | `mobile`), **`ipAddress`**, **`userAgent`/`browser`**, **`createdAt`**, optional **`metadata`** (JSON for structured extras). Index by `actorUserId`, `userAffectedId`, `eventName`, `createdAt` for admin queries.
+
+## Notifications (data contract & UX)
+
+- **Channels:** A user may receive **in-app only**, **email only**, or **both** per notification type / template.
+- **Model (suggested):** **`title`**, **`message`**, **`readAt`** (null = unread), **`inSystem`** (boolean — show in app inbox), **`emailSent`** (boolean — was emailed), **`recipientUserId`**, **`createdAt`**, optional **`linkUrl`** / **`relatedEntityType`/`Id`**. Users **must not delete** notifications; only **mark as read** (and optional admin purge job later if ever required — default **no delete** in UI).
+- **Navbar:** **Bell icon** with **unread in-app count** badge. **Click bell:** dropdown of up to **5 most recent unread** (title + snippet + time); each row opens a **dialog** with full details and marks **read** on open. Link **“View all notifications”** → full-page **Gmail-style** list (paginated, filters read/unread). Use **loading** states and **accessible** patterns (keyboard, `aria-live` for new items where appropriate).
+
+## Files, uploads, and performance
+
+- **Public vs private files:** Branding (logos, banners) under **`public/assets/`**. **Private** uploads (profiles, submissions, etc.) **must not** use `public/` (URLs are always public). Store under **`PROC_LEARN_UPLOAD_ROOT`** (e.g. `storage/uploads/`) with opaque `storageKey` in **`MediaObject`**; serve only via **`/api/media/[id]`** after auth + ownership checks.
+- **Form drafts:** Use **`src/lib/form-draft.js`** + **`useFormDraft`** — debounced **`localStorage`** drafts for resilience; avoid per-keystroke server traffic.
+- **Caching:** Use sensible HTTP caching, Next.js caching, and/or SWR/React Query patterns so every refresh does not blindly refetch; dedupe in-flight requests; revalidate when data must be fresh.
+- **Bundle / network:** Prefer lean dependencies, code-splitting, and small payloads for slow connections.
+
+## Accessibility
+
+- Semantic HTML, labels tied to inputs, focus order, keyboard use for interactive controls, sufficient contrast where brand allows, and **screen reader** friendly names (`aria-label` / `aria-describedby` where tooltips alone are insufficient).
+
+## Code organization
+
+- **Utilities:** Centralize repeated logic in shared helpers; **before adding a new helper**, search the codebase for an existing function that does the same job — avoid duplicate utilities.
+- **Navigation:** Menu items include **icons** alongside labels.
+
+## Special pages
+
+- **404**, **password reset**, and **account activation** flows must match app branding (Proc Learn / MUBS), logos, and the Materio-based layout — not generic browser defaults.
+
+## Before implementing
+
+- Re-read this rule and the relevant section of `uitemplate/javascript-version/` for the closest existing pattern before inventing new UI structure.

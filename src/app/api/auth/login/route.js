@@ -1,0 +1,155 @@
+import { NextResponse } from "next/server";
+import bcrypt from "bcryptjs";
+import { UserAccountStatus } from "@prisma/client";
+import { getAppSession } from "@/lib/auth/session";
+import { buildIronSessionOptions } from "@/lib/auth/session-options";
+import { buildSessionPayloadForUserId } from "@/lib/auth/session-payload";
+import { prisma } from "@/lib/prisma";
+import { grantedRoles, pickHighestGrantedRole } from "@/lib/roles";
+import {
+  normalizeLoginEmail,
+  validateLoginFields,
+} from "@/lib/validation/login";
+import { writeAuditLog, AuditEvent } from "@/lib/audit-log";
+import { getRequestIp, getRequestUserAgent } from "@/lib/request-meta";
+
+export const runtime = "nodejs";
+
+export async function POST(request) {
+  const ip = getRequestIp(request);
+  const userAgent = getRequestUserAgent(request);
+
+  if (!buildIronSessionOptions()) {
+    return NextResponse.json(
+      { error: "Server auth is not configured (SESSION_SECRET)." },
+      { status: 503 },
+    );
+  }
+
+  const session = await getAppSession();
+  if (!session) {
+    return NextResponse.json(
+      { error: "Server auth is not configured (SESSION_SECRET)." },
+      { status: 503 },
+    );
+  }
+
+  let body;
+  try {
+    body = await request.json();
+  } catch {
+    return NextResponse.json({ error: "Invalid request body." }, { status: 400 });
+  }
+
+  const rawId = body?.identifier ?? body?.email;
+  const password = typeof body?.password === "string" ? body.password : "";
+  const fieldErrors = validateLoginFields({
+    identifier: rawId,
+    password,
+  });
+  if (Object.keys(fieldErrors).length > 0) {
+    return NextResponse.json(
+      { error: "Validation failed.", fields: fieldErrors },
+      { status: 400 },
+    );
+  }
+
+  const email = normalizeLoginEmail(rawId);
+  const user = await prisma.user.findUnique({
+    where: { email },
+    include: { settings: true, userRoles: true },
+  });
+
+  if (!user) {
+    await writeAuditLog({
+      eventType: AuditEvent.LOGIN_FAILURE,
+      ip,
+      userAgent,
+      meta: { email },
+    });
+    return NextResponse.json(
+      { error: "Invalid email or password." },
+      { status: 401 },
+    );
+  }
+
+  if (user.accountStatus === UserAccountStatus.SUSPENDED) {
+    await writeAuditLog({
+      eventType: AuditEvent.LOGIN_FAILURE,
+      actorUserId: user.id,
+      targetUserId: user.id,
+      ip,
+      userAgent,
+      meta: { email, reason: "suspended" },
+    });
+    return NextResponse.json(
+      { error: "Your account has been suspended. Contact support." },
+      { status: 403 },
+    );
+  }
+
+  if (!user.activatedAt) {
+    await writeAuditLog({
+      eventType: AuditEvent.LOGIN_FAILURE,
+      actorUserId: user.id,
+      targetUserId: user.id,
+      ip,
+      userAgent,
+      meta: { email, reason: "pending_activation" },
+    });
+    return NextResponse.json(
+      {
+        error:
+          "This account is not activated yet. Use the link in your invitation email, sign in with Google if enabled, or use Forgot password — after you set a new password your account will be activated.",
+      },
+      { status: 403 },
+    );
+  }
+
+  const passwordOk = await bcrypt.compare(password, user.passwordHash);
+  if (!passwordOk) {
+    await writeAuditLog({
+      eventType: AuditEvent.LOGIN_FAILURE,
+      targetUserId: user.id,
+      ip,
+      userAgent,
+      meta: { email },
+    });
+    return NextResponse.json(
+      { error: "Invalid email or password." },
+      { status: 401 },
+    );
+  }
+
+  session.userId = user.id;
+  await session.save();
+
+  const granted = grantedRoles(user.userRoles);
+  const loginActiveRole = pickHighestGrantedRole(granted);
+  await prisma.userSettings.upsert({
+    where: { userId: user.id },
+    create: {
+      userId: user.id,
+      theme: "light",
+      activeRole: loginActiveRole,
+    },
+    update: { activeRole: loginActiveRole },
+  });
+
+  await prisma.user.update({
+    where: { id: user.id },
+    data: { lastLoginAt: new Date() },
+  });
+
+  await writeAuditLog({
+    eventType: AuditEvent.LOGIN_SUCCESS,
+    actorUserId: user.id,
+    targetUserId: user.id,
+    ip,
+    userAgent,
+    meta: { email },
+  });
+
+  const payload = await buildSessionPayloadForUserId(user.id);
+  return NextResponse.json({ ok: true, ...payload });
+}
