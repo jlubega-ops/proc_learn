@@ -5,14 +5,20 @@ import { ROLE } from "@/lib/roles";
  * @param {string} [activeRole]
  */
 export function getDashboardPageMeta(pathname, activeRole) {
+  if (pathname.includes("/org-admin/organisation-structure"))
+    return { title: "Organisation structure", subtitle: "Project system administration" };
+  if (pathname.includes("/org-admin/financial-years"))
+    return { title: "Financial years", subtitle: "Project system administration" };
+  if (pathname.includes("/org-admin/planning-period"))
+    return { title: "Planning period", subtitle: "Project system administration" };
+  if (pathname.includes("/org-admin/process-workflow"))
+    return { title: "Process workflow", subtitle: "Project system administration" };
   if (pathname.includes("/org-admin/users"))
-    return { title: "Organization users", subtitle: "Project system administration" };
+    return { title: "User accounts", subtitle: "Project system administration" };
   if (pathname.includes("/org-admin/departments"))
-    return { title: "Departments", subtitle: "Project system administration" };
+    return { title: "Departments / units", subtitle: "Project system administration" };
   if (pathname.includes("/org-admin/roles"))
-    return { title: "Organization roles", subtitle: "Project system administration" };
-  if (pathname.includes("/workflow"))
-    return { title: "Workflow", subtitle: "Project operations workspace" };
+    return { title: "Roles & Permissions", subtitle: "Project system administration" };
   if (pathname === "/" || pathname === "")
     return { title: "Home", subtitle: "Dashboard overview" };
   if (pathname.startsWith("/projects") || pathname.startsWith("/cases")) {
@@ -25,6 +31,10 @@ export function getDashboardPageMeta(pathname, activeRole) {
     return { title: "Settings", subtitle: "Preferences and account" };
   if (pathname.startsWith("/profile"))
     return { title: "Profile", subtitle: "Your account" };
+  if (pathname.startsWith("/project-settings/roles"))
+    return { title: "Project roles", subtitle: "Organisation roles for student workspaces" };
+  if (pathname.startsWith("/project-settings"))
+    return { title: "Project settings", subtitle: "Configure student project behaviour" };
   if (pathname.startsWith("/admin/activity"))
     return { title: "Activity logs", subtitle: "Audit trail (system admin)" };
   if (pathname.startsWith("/admin"))

@@ -1,3 +1,4 @@
+import { Suspense } from "react";
 import { redirect } from "next/navigation";
 import { Role } from "@prisma/client";
 import { getSessionUser, sessionActiveRole } from "@/lib/api/get-session-user";
@@ -14,7 +15,7 @@ export default async function ProjectsPage() {
   }
 
   const activeRole = sessionActiveRole(user) || Role.STUDENT;
-  if (![Role.STUDENT, Role.LECTURER, Role.EXAMINER].includes(activeRole)) {
+  if (![Role.STUDENT, Role.LECTURER, Role.EXAMINER, Role.SYSTEM_ADMIN].includes(activeRole)) {
     redirect("/");
   }
 
@@ -25,7 +26,9 @@ export default async function ProjectsPage() {
         Projects are the parent workspace for student practice and assignments. Access, enrollment,
         publishing, and submissions are role-aware.
       </p>
-      <ProjectsPanel />
+      <Suspense fallback={<p className="text-sm text-zinc-500">Loading projects…</p>}>
+        <ProjectsPanel />
+      </Suspense>
     </div>
   );
 }

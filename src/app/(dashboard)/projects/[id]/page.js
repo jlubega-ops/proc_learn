@@ -4,40 +4,10 @@ import Chip from "@mui/material/Chip";
 import { format, isValid, parseISO } from "date-fns";
 import { getSessionUser, sessionActiveRole } from "@/lib/api/get-session-user";
 import { prisma } from "@/lib/prisma";
-import { canViewProjectByRole } from "@/lib/projects/access";
 
 export const metadata = {
   title: "Project details",
 };
-
-function fmtDate(value) {
-  if (!value) return "—";
-  const d = typeof value === "string" ? parseISO(value) : new Date(value);
-  if (!isValid(d)) return "—";
-  return format(d, "MMM d, yyyy h:mm a");
-}
-
-function fmtDuration(seconds) {
-  if (!seconds || seconds <= 0) return "—";
-  const h = Math.floor(seconds / 3600);
-  const m = Math.floor((seconds % 3600) / 60);
-  return `${h}h ${m}m`;
-}
-
-function statusColor(status) {
-  if (status === "COMPLETED" || status === "SUBMITTED") return "success";
-  if (status === "IN_PROGRESS") return "info";
-  if (status === "NOT_STARTED") return "warning";
-  return "primary";
-}
-
-function visibilityColor(visibility) {
-  return visibility === "PUBLIC" ? "secondary" : "warning";
-}
-
-function purposeColor(purpose) {
-  return purpose === "ASSIGNMENT" ? "secondary" : "primary";
-}
 
 export default async function ProjectDetailsPage({ params }) {
   const user = await getSessionUser();
@@ -56,7 +26,8 @@ export default async function ProjectDetailsPage({ params }) {
       },
     },
   });
-  if (!canViewProjectByRole({ userId: user.id, activeRole, project })) notFound();
+  if (!project) notFound();
+
   const isStudentOwnedProject = project.creatorRole === Role.STUDENT && project.ownerUserId === user.id;
   const showStaffFields = !isStudentOwnedProject;
 
@@ -138,3 +109,31 @@ export default async function ProjectDetailsPage({ params }) {
   );
 }
 
+function fmtDate(value) {
+  if (!value) return "—";
+  const d = typeof value === "string" ? parseISO(value) : new Date(value);
+  if (!isValid(d)) return "—";
+  return format(d, "MMM d, yyyy h:mm a");
+}
+
+function fmtDuration(seconds) {
+  if (!seconds || seconds <= 0) return "—";
+  const h = Math.floor(seconds / 3600);
+  const m = Math.floor((seconds % 3600) / 60);
+  return `${h}h ${m}m`;
+}
+
+function statusColor(status) {
+  if (status === "COMPLETED" || status === "SUBMITTED") return "success";
+  if (status === "IN_PROGRESS") return "info";
+  if (status === "NOT_STARTED") return "warning";
+  return "primary";
+}
+
+function visibilityColor(visibility) {
+  return visibility === "PUBLIC" ? "secondary" : "warning";
+}
+
+function purposeColor(purpose) {
+  return purpose === "ASSIGNMENT" ? "secondary" : "primary";
+}

@@ -4,7 +4,7 @@ import { getSessionUser, sessionActiveRole } from "@/lib/api/get-session-user";
 import { prisma } from "@/lib/prisma";
 import { canViewProjectByRole } from "@/lib/projects/access";
 
-export default async function ProjectWorkflowPage({ params }) {
+export default async function ProjectWorkflowRedirectPage({ params }) {
   const user = await getSessionUser();
   if (!user) redirect("/login?next=/projects");
   const activeRole = sessionActiveRole(user) || Role.STUDENT;
@@ -29,12 +29,5 @@ export default async function ProjectWorkflowPage({ params }) {
   });
   if (!canViewProjectByRole({ userId: user.id, activeRole, project })) notFound();
 
-  return (
-    <div className="w-full rounded-xl border border-zinc-200 bg-white p-4 dark:border-zinc-800 dark:bg-zinc-900">
-      <h1 className="text-lg font-semibold text-zinc-900 dark:text-white">Workflow</h1>
-      <p className="mt-2 text-sm text-zinc-600 dark:text-zinc-300">
-        This is the project-specific workflow space for <span className="font-semibold">{project.name}</span>.
-      </p>
-    </div>
-  );
+  redirect(`/projects/${id}/org-admin/process-workflow`);
 }

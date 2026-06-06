@@ -9,6 +9,8 @@ export default function AdminPage() {
     { href: "/admin/activity", title: "Activity logs", desc: "Search and filter audit events." },
     { href: "/admin/staff", title: "Staff users", desc: "Administrators, lecturers, examiners." },
     { href: "/admin/programmes", title: "Programmes", desc: "Names, short codes, active flag." },
+    { href: "/project-settings", title: "Project settings", desc: "Organisation roles and student project configuration." },
+    { href: "/project-settings/roles", title: "Project roles", desc: "CRUD organisation roles used in student workspaces." },
     { href: "/admin/staff/new", title: "Add staff", desc: "Lecturer, examiner, or system admin." },
     { href: "/students/manage", title: "All students", desc: "Search, filter, edit student records." },
     { href: "/students/new", title: "Add student", desc: "MUBS student email and programme." },

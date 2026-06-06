@@ -36,8 +36,9 @@ import UploadFileRounded from "@mui/icons-material/UploadFileRounded";
 import LogoutRounded from "@mui/icons-material/LogoutRounded";
 import ContentCopyRounded from "@mui/icons-material/ContentCopyRounded";
 import AutorenewRounded from "@mui/icons-material/AutorenewRounded";
+import SettingsRounded from "@mui/icons-material/SettingsRounded";
 import dynamic from "next/dynamic";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import { format, isValid, parseISO } from "date-fns";
 import { useToast } from "@/components/providers/toast-provider";
 import { useAuthSession } from "@/components/providers/auth-session-provider";
@@ -253,9 +254,12 @@ export function ProjectsPanel() {
   const isStudent = activeRole === "STUDENT";
   const isLecturer = activeRole === "LECTURER";
   const isExaminer = activeRole === "EXAMINER";
+  const isSystemAdmin = activeRole === "SYSTEM_ADMIN";
+  const isStaffViewer = isLecturer || isExaminer || isSystemAdmin;
   const canCreate = isStudent || isLecturer || isExaminer;
   const filterOptions = STUDENT_FILTERS;
   const staffPurposeFilters = isLecturer ? LECTURER_PURPOSE_FILTERS : STAFF_PURPOSE_FILTERS;
+  const searchParams = useSearchParams();
 
   const [loading, setLoading] = useState(true);
   const [refetching, setRefetching] = useState(false);
@@ -272,6 +276,7 @@ export function ProjectsPanel() {
   const [openEditor, setOpenEditor] = useState(false);
   const [busyEditor, setBusyEditor] = useState(false);
   const [editingId, setEditingId] = useState("");
+  const [editingManagedStudent, setEditingManagedStudent] = useState(false);
   const [form, setForm] = useState(defaultForm());
   const [fieldErrors, setFieldErrors] = useState({});
 
@@ -305,7 +310,7 @@ export function ProjectsPanel() {
           pageSize: String(rowsPerPage),
         });
         qp.set("filter", filter);
-        if (isLecturer || isExaminer) {
+        if (isLecturer || isExaminer || isSystemAdmin) {
           qp.set("scope", staffScope);
           qp.set("purpose", staffPurpose);
           qp.set("status", staffStatus);
@@ -336,6 +341,7 @@ export function ProjectsPanel() {
       filter,
       isLecturer,
       isExaminer,
+      isSystemAdmin,
       staffScope,
       staffPurpose,
       staffStatus,
@@ -358,8 +364,17 @@ export function ProjectsPanel() {
     setOpenStatus("all");
   }, [activeRole]);
 
+  useEffect(() => {
+    const scope = searchParams.get("scope");
+    if (scope === "student" && (isExaminer || isSystemAdmin)) {
+      setStaffScope("student");
+      setPage(0);
+    }
+  }, [searchParams, isExaminer, isSystemAdmin]);
+
   const resetEditorState = useCallback(() => {
     setEditingId("");
+    setEditingManagedStudent(false);
     setForm(defaultForm());
     setFieldErrors({});
     setOpenEditor(false);
@@ -379,13 +394,14 @@ export function ProjectsPanel() {
     setOpenEditor(true);
   };
 
-  const openEdit = (row) => {
+  const openEdit = (row, managedStudent = false) => {
     setEditingId(row.id);
+    setEditingManagedStudent(Boolean(managedStudent));
     setForm({
       name: row.name || "",
       description: row.description || "",
       organizationName: row.organizationName || "",
-      purpose: isExaminer ? "ASSIGNMENT" : "PRACTICE",
+      purpose: row.purpose || (isExaminer ? "ASSIGNMENT" : "PRACTICE"),
       visibility: row.visibility || "PRIVATE",
       openAt: row.openAt ? new Date(row.openAt).toISOString().slice(0, 16) : "",
       closeAt: row.closeAt ? new Date(row.closeAt).toISOString().slice(0, 16) : "",
@@ -404,7 +420,8 @@ export function ProjectsPanel() {
   };
 
   const saveProject = async () => {
-    const nextErrors = validateClientForm(activeRole, form);
+    const formRole = editingManagedStudent ? "EXAMINER" : activeRole;
+    const nextErrors = validateClientForm(formRole, form);
     setFieldErrors(nextErrors);
     if (Object.keys(nextErrors).length > 0) {
       showToast({ message: "Please fix the highlighted fields.", severity: "error" });
@@ -423,7 +440,7 @@ export function ProjectsPanel() {
         questionFileUrl: String(form.questionFileUrl || "").trim(),
         enrollmentAccessKey: String(form.enrollmentAccessKey || "").trim().toUpperCase(),
         duration:
-          activeRole !== "STUDENT" &&
+          formRole !== "STUDENT" &&
           Number(form.durationHours || 0) * 60 + Number(form.durationMinutes || 0) > 0
             ? `${Number(form.durationHours || 0)}h ${Number(form.durationMinutes || 0)}m`
             : "",
@@ -686,6 +703,16 @@ export function ProjectsPanel() {
     }
   };
 
+  const canManageStudentSettings = useMemo(
+    () => (row) => {
+      if (row.creatorRole !== "STUDENT") return false;
+      if (isSystemAdmin) return true;
+      if (isExaminer && row.visibility === "PUBLIC") return true;
+      return false;
+    },
+    [isSystemAdmin, isExaminer],
+  );
+
   const canEditOrDelete = useMemo(
     () => (row) => {
       if (row.ownerUserId !== session?.userId) return false;
@@ -754,7 +781,7 @@ export function ProjectsPanel() {
             </Select>
           </FormControl>
         ) : null}
-        {isLecturer || isExaminer ? (
+        {isLecturer || isExaminer || isSystemAdmin ? (
           <FormControl size="small" className="w-full sm:w-44" sx={themedTextFieldSx}>
             <InputLabel id="project-scope-filter-label">Source</InputLabel>
             <Select
@@ -774,7 +801,7 @@ export function ProjectsPanel() {
             </Select>
           </FormControl>
         ) : null}
-        {isLecturer || isExaminer ? (
+        {isStaffViewer ? (
           <FormControl size="small" className="w-full sm:w-44" sx={themedTextFieldSx}>
             <InputLabel id="project-purpose-filter-label">Purpose</InputLabel>
             <Select
@@ -794,7 +821,7 @@ export function ProjectsPanel() {
             </Select>
           </FormControl>
         ) : null}
-        {isLecturer || isExaminer ? (
+        {isStaffViewer ? (
           <FormControl size="small" className="w-full sm:w-44" sx={themedTextFieldSx}>
             <InputLabel id="project-status-filter-label">Status</InputLabel>
             <Select
@@ -891,6 +918,19 @@ export function ProjectsPanel() {
                     <TableCell>{formatDuration(row.durationSeconds)}</TableCell>
                     <TableCell align="right">
                       <div className="flex flex-nowrap items-center justify-end gap-1 whitespace-nowrap">
+                        {canManageStudentSettings(row) && !canEditOrDelete(row) ? (
+                          <Tooltip title="Manage project settings">
+                            <IconButton
+                              size="small"
+                              aria-label="Manage project settings"
+                              onClick={() => openEdit(row, true)}
+                              disabled={busyEditor}
+                              color="primary"
+                            >
+                              <SettingsRounded fontSize="small" />
+                            </IconButton>
+                          </Tooltip>
+                        ) : null}
                         {canEditOrDelete(row) ? (
                           <Tooltip title="Edit project">
                             <IconButton
@@ -981,7 +1021,13 @@ export function ProjectsPanel() {
       </Box>
 
       <Dialog open={openEditor} onClose={() => (busyEditor ? null : resetEditorState())} fullWidth maxWidth="md">
-        <DialogTitle>{editingId ? "Edit project" : "Create project"}</DialogTitle>
+        <DialogTitle>
+          {editingId
+            ? editingManagedStudent
+              ? "Manage student project settings"
+              : "Edit project"
+            : "Create project"}
+        </DialogTitle>
         <DialogContent dividers sx={adminDialogPaperSx} className="space-y-4">
           <TextField
             margin="dense"

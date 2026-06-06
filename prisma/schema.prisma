@@ -219,10 +219,16 @@ model Project {
   durationSeconds   Int?              @map("duration_seconds")
   enrollmentKey     String?           @map("enrollment_key") @db.VarChar(16)
   requiresEnrollment Boolean          @default(false) @map("requires_enrollment")
+  /// Short immutable code that distinguishes this project and its org items from others.
+  projectCode       String?           @unique @map("project_code") @db.VarChar(8)
   createdAt         DateTime          @default(now()) @map("created_at")
   updatedAt         DateTime          @updatedAt @map("updated_at")
 
   enrollments       ProjectEnrollment[]
+  orgUsers          ProjectOrgUser[]
+  orgDepartments    ProjectOrgDepartment[]
+  orgFinancialYears ProjectOrgFinancialYear[]
+  orgPlanningPeriods ProjectOrgPlanningPeriod[]
 
   @@index([ownerUserId, createdAt])
   @@index([creatorRole, purpose, isPublished])
@@ -247,4 +253,110 @@ model ProjectEnrollment {
   @@index([studentUserId, status])
   @@index([projectId, status])
   @@map("project_enrollment")
+}
+
+/// Global catalogue of organisation roles available inside student project workspaces.
+model ProjectOrgRole {
+  id          String   @id @default(uuid())
+  name        String   @unique @db.VarChar(128)
+  description String?  @db.VarChar(512)
+  sortOrder   Int      @default(0) @map("sort_order")
+  isActive    Boolean  @default(true) @map("is_active")
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+
+  orgUsers ProjectOrgUser[]
+
+  @@index([isActive, sortOrder])
+  @@map("project_org_role")
+}
+
+/// Department or subunit inside a student project organisation.
+model ProjectOrgDepartment {
+  id          String   @id @default(uuid())
+  projectId   String   @map("project_id")
+  project     Project  @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  /// Null = top-level department; set = subunit under that department.
+  parentId    String?  @map("parent_id")
+  parent      ProjectOrgDepartment?  @relation("ProjectOrgDepartmentTree", fields: [parentId], references: [id], onDelete: Cascade)
+  subunits    ProjectOrgDepartment[] @relation("ProjectOrgDepartmentTree")
+  name        String   @db.VarChar(128)
+  description String?  @db.VarChar(512)
+  isActive    Boolean  @default(true) @map("is_active")
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+
+  orgUsersAsDepartment ProjectOrgUser[] @relation("OrgUserDepartment")
+  orgUsersAsSubunit    ProjectOrgUser[] @relation("OrgUserSubunit")
+
+  @@index([projectId, parentId, isActive])
+  @@map("project_org_department")
+}
+
+/// Organisation user account inside a student project workspace (simulated, not a platform login).
+model ProjectOrgUser {
+  id               String         @id @default(uuid())
+  projectId        String         @map("project_id")
+  project          Project        @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  projectOrgRoleId String         @map("project_org_role_id")
+  projectOrgRole   ProjectOrgRole @relation(fields: [projectOrgRoleId], references: [id], onDelete: Restrict)
+  /// True for the project owner's immutable Admin row (synced from their student account).
+  isProjectAdmin   Boolean        @default(false) @map("is_project_admin")
+  /// Platform user id when this row represents the project owner.
+  linkedUserId     String?        @map("linked_user_id") @db.VarChar(36)
+  /// Short immutable code that distinguishes duplicate emails within this project.
+  unitIdentifier   String?        @map("unit_identifier") @db.VarChar(16)
+  departmentId     String?        @map("department_id")
+  department       ProjectOrgDepartment? @relation("OrgUserDepartment", fields: [departmentId], references: [id], onDelete: SetNull)
+  subunitId        String?        @map("subunit_id")
+  subunit          ProjectOrgDepartment? @relation("OrgUserSubunit", fields: [subunitId], references: [id], onDelete: SetNull)
+  firstName        String         @map("first_name") @db.VarChar(100)
+  middleName       String?        @map("middle_name") @db.VarChar(100)
+  lastName         String         @map("last_name") @db.VarChar(100)
+  email            String         @db.VarChar(255)
+  createdAt        DateTime       @default(now()) @map("created_at")
+  updatedAt        DateTime       @updatedAt @map("updated_at")
+
+  @@unique([projectId, unitIdentifier])
+  @@unique([projectId, linkedUserId])
+  @@index([projectId, isProjectAdmin, createdAt])
+  @@index([projectId, departmentId])
+  @@map("project_org_user")
+}
+
+/// Financial year inside a student project organisation.
+model ProjectOrgFinancialYear {
+  id          String   @id @default(uuid())
+  projectId   String   @map("project_id")
+  project     Project  @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  /// Label such as "2023-2024" (start calendar year, then end calendar year).
+  label       String   @db.VarChar(9)
+  description String?  @db.VarChar(512)
+  startDate   DateTime @map("start_date") @db.Date
+  endDate     DateTime @map("end_date") @db.Date
+  isActive    Boolean  @default(true) @map("is_active")
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+
+  planningPeriods ProjectOrgPlanningPeriod[]
+
+  @@unique([projectId, label])
+  @@index([projectId, isActive, startDate])
+  @@map("project_org_financial_year")
+}
+
+/// Planning period inside a student project organisation.
+model ProjectOrgPlanningPeriod {
+  id              String                @id @default(uuid())
+  projectId       String                @map("project_id")
+  project         Project               @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  financialYearId String                @map("financial_year_id")
+  financialYear   ProjectOrgFinancialYear @relation(fields: [financialYearId], references: [id], onDelete: Restrict)
+  startDate       DateTime              @map("start_date") @db.Date
+  endDate         DateTime              @map("end_date") @db.Date
+  createdAt       DateTime              @default(now()) @map("created_at")
+  updatedAt       DateTime              @updatedAt @map("updated_at")
+
+  @@index([projectId, financialYearId, startDate])
+  @@map("project_org_planning_period")
 }

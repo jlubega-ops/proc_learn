@@ -4,7 +4,8 @@ import { prisma } from "@/lib/prisma";
 import { AuditEvent, writeAuditLog } from "@/lib/audit-log";
 import { getSessionUser, sessionActiveRole } from "@/lib/api/get-session-user";
 import { validateProjectCreateInput } from "@/lib/validation/project";
-import { canViewProjectByRole } from "@/lib/projects/access";
+import { canManageStudentProjectSettings } from "@/lib/projects/access";
+import { fetchAuthorizedProjectWorkspace } from "@/lib/projects/workspace-access";
 
 export const runtime = "nodejs";
 
@@ -17,6 +18,15 @@ export async function GET(_request, context) {
   const id = String(params?.id || "").trim();
   if (!id) return NextResponse.json({ error: "Invalid project id." }, { status: 400 });
 
+  const access = await fetchAuthorizedProjectWorkspace(prisma, {
+    projectId: id,
+    userId: user.id,
+    activeRole,
+  });
+  if (!access) {
+    return NextResponse.json({ error: "Not found." }, { status: 404 });
+  }
+
   const include =
     activeRole === Role.STUDENT
       ? {
@@ -25,7 +35,7 @@ export async function GET(_request, context) {
         }
       : { owner: { select: { id: true, firstName: true, lastName: true, email: true } } };
   const project = await prisma.project.findUnique({ where: { id }, include });
-  if (!canViewProjectByRole({ userId: user.id, activeRole, project })) {
+  if (!project) {
     return NextResponse.json({ error: "Not found." }, { status: 404 });
   }
 
@@ -35,6 +45,7 @@ export async function GET(_request, context) {
         ...project,
         hasEnrollmentKey: Boolean(project?.enrollmentKey),
         enrollmentKey: null,
+        canManageOrgAdmin: access.canManageOrgAdmin,
       },
     });
   }
@@ -51,16 +62,24 @@ export async function PATCH(request, context) {
 
   const existing = await prisma.project.findUnique({ where: { id } });
   if (!existing) return NextResponse.json({ error: "Not found." }, { status: 404 });
-  if (existing.ownerUserId !== user.id) return NextResponse.json({ error: "Forbidden." }, { status: 403 });
+
+  const staffManagesStudent = canManageStudentProjectSettings({ activeRole, project: existing });
   const isStudentOwnerEdit =
     activeRole === Role.STUDENT && existing.creatorRole === Role.STUDENT;
   const isLecturerOwnerEdit =
     activeRole === Role.LECTURER &&
+    existing.ownerUserId === user.id &&
     (existing.creatorRole === Role.LECTURER ||
       (existing.creatorRole === Role.EXAMINER && existing.purpose === ProjectPurpose.PRACTICE));
   const isExaminerOwnerEdit =
-    activeRole === Role.EXAMINER && existing.creatorRole === Role.EXAMINER;
-  if (!isStudentOwnerEdit && !isLecturerOwnerEdit && !isExaminerOwnerEdit) {
+    activeRole === Role.EXAMINER &&
+    existing.ownerUserId === user.id &&
+    existing.creatorRole === Role.EXAMINER;
+
+  if (!staffManagesStudent && existing.ownerUserId !== user.id) {
+    return NextResponse.json({ error: "Forbidden." }, { status: 403 });
+  }
+  if (!isStudentOwnerEdit && !isLecturerOwnerEdit && !isExaminerOwnerEdit && !staffManagesStudent) {
     return NextResponse.json(
       { error: "You do not have permission to edit this project in the current role." },
       { status: 403 },
@@ -91,30 +110,42 @@ export async function PATCH(request, context) {
   }
   const row = await prisma.project.update({
     where: { id },
-    data: {
-      name: d.name,
-      description: d.description,
-      organizationName: activeRole === Role.STUDENT ? d.organizationName : null,
-      purpose: d.purpose,
-      visibility: d.visibility,
-      instructions: d.instructions,
-      questionText: d.questionText,
-      questionFileUrl: d.questionFileUrl,
-      enrollmentKey: [Role.LECTURER, Role.EXAMINER].includes(activeRole)
-        ? d.enrollmentAccessKey
-        : null,
-      isPublished: activeRole === Role.STUDENT ? true : d.isPublished,
-      openAt: d.openAt,
-      closeAt: d.closeAt,
-      durationSeconds: d.durationSeconds,
-      requiresEnrollment: [Role.EXAMINER, Role.LECTURER].includes(activeRole),
-    },
+    data: staffManagesStudent
+      ? {
+          name: d.name,
+          description: d.description,
+          instructions: d.instructions,
+          questionText: d.questionText,
+          questionFileUrl: d.questionFileUrl,
+          isPublished: d.isPublished,
+          openAt: d.openAt,
+          closeAt: d.closeAt,
+          durationSeconds: d.durationSeconds,
+        }
+      : {
+          name: d.name,
+          description: d.description,
+          organizationName: activeRole === Role.STUDENT ? d.organizationName : null,
+          purpose: d.purpose,
+          visibility: d.visibility,
+          instructions: d.instructions,
+          questionText: d.questionText,
+          questionFileUrl: d.questionFileUrl,
+          enrollmentKey: [Role.LECTURER, Role.EXAMINER].includes(activeRole)
+            ? d.enrollmentAccessKey
+            : null,
+          isPublished: activeRole === Role.STUDENT ? true : d.isPublished,
+          openAt: d.openAt,
+          closeAt: d.closeAt,
+          durationSeconds: d.durationSeconds,
+          requiresEnrollment: [Role.EXAMINER, Role.LECTURER].includes(activeRole),
+        },
   });
 
   await writeAuditLog({
     eventType: AuditEvent.PROJECT_UPDATED,
     actorUserId: user.id,
-    meta: { projectId: row.id },
+    meta: { projectId: row.id, managedStudentProject: staffManagesStudent },
   });
 
   return NextResponse.json({ project: row });
@@ -168,7 +199,16 @@ export async function DELETE(_request, context) {
     }),
   ]);
 
-  await prisma.project.delete({ where: { id } });
+  await prisma.$transaction(async (tx) => {
+    await tx.projectOrgUser.deleteMany({ where: { projectId: id } });
+    await tx.projectOrgPlanningPeriod.deleteMany({ where: { projectId: id } });
+    await tx.projectOrgFinancialYear.deleteMany({ where: { projectId: id } });
+    await tx.projectOrgDepartment.deleteMany({
+      where: { projectId: id, parentId: { not: null } },
+    });
+    await tx.projectOrgDepartment.deleteMany({ where: { projectId: id } });
+    await tx.project.delete({ where: { id } });
+  });
   await writeAuditLog({
     eventType: AuditEvent.PROJECT_DELETED,
     actorUserId: user.id,

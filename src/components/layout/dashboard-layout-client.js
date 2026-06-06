@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { Fragment, Suspense, useEffect, useState } from "react";
+import { Fragment, Suspense, useCallback, useEffect, useState } from "react";
 import { usePathname, useSearchParams } from "next/navigation";
 import Image from "next/image";
 import IconButton from "@mui/material/IconButton";
@@ -27,6 +27,7 @@ import { NotificationBellMenu } from "@/components/layout/notification-bell-menu
 import { RoleSwitchOverlay } from "@/components/layout/role-switch-overlay";
 import { getDashboardPageMeta } from "@/lib/dashboard-page-meta";
 import { DASHBOARD_MAIN_INNER_CLASS } from "@/lib/dashboard-content-width";
+import { PROJECT_ORG_ENTRY_ROLE_NAME } from "@/lib/project-org-role";
 
 const primaryIconSx = { fontSize: 22, color: "#008bd0" };
 
@@ -65,108 +66,210 @@ function navItemIsActive(navPathname, searchParams, href) {
 }
 
 /**
- * @param {{ onNavigate: () => void; activeRole: string; searchParams: URLSearchParams }} p
+ * @param {string} activeRole
+ * @param {string} sectionId
  */
-function NavLinks({ onNavigate, activeRole, searchParams }) {
+function sectionStorageKey(activeRole, sectionId) {
+  return `pl-sidebar-${activeRole}-${sectionId}`;
+}
+
+/**
+ * @param {{
+ *   sectionId: string;
+ *   label: string;
+ *   activeRole: string;
+ *   defaultOpen: boolean;
+ *   children: import("react").ReactNode;
+ * }} p
+ */
+function CollapsibleNavSection({ sectionId, label, activeRole, defaultOpen, children }) {
+  const key = sectionStorageKey(activeRole, sectionId);
+  const [open, setOpen] = useState(defaultOpen);
+
+  useEffect(() => {
+    try {
+      const stored = localStorage.getItem(key);
+      if (stored === "0") setOpen(false);
+      else if (stored === "1") setOpen(true);
+      else setOpen(defaultOpen);
+    } catch {
+      setOpen(defaultOpen);
+    }
+  }, [key, defaultOpen]);
+
+  useEffect(() => {
+    if (defaultOpen) setOpen(true);
+  }, [defaultOpen]);
+
+  const toggle = useCallback(() => {
+    setOpen((prev) => {
+      const next = !prev;
+      try {
+        localStorage.setItem(key, next ? "1" : "0");
+      } catch {
+        /* ignore */
+      }
+      return next;
+    });
+  }, [key]);
+
+  return (
+    <li className="list-none">
+      <details open={open} className="group rounded-lg">
+        <summary
+          onClick={(e) => {
+            e.preventDefault();
+            toggle();
+          }}
+          title={`${open ? "Collapse" : "Expand"} ${label}`}
+          className="flex cursor-pointer list-none items-center gap-2 rounded-lg px-3 py-2 text-[11px] font-bold uppercase tracking-wide text-zinc-500 transition-colors hover:bg-zinc-100 dark:text-zinc-400 dark:hover:bg-zinc-800"
+        >
+          <span className="flex-1">{label}</span>
+          <ExpandMoreRounded
+            aria-hidden
+            sx={{ fontSize: 18 }}
+            className="transition-transform group-open:rotate-180"
+          />
+        </summary>
+        <ul className="mt-1 flex flex-col gap-1">{children}</ul>
+      </details>
+    </li>
+  );
+}
+
+/**
+ * @param {{ onNavigate: () => void; activeRole: string; searchParams: URLSearchParams; canManageOrgAdmin?: boolean }} p
+ */
+function NavLinks({ onNavigate, activeRole, searchParams, canManageOrgAdmin = false }) {
   const navPathname = usePathname();
-  const sections = sidebarNavForContext(activeRole, navPathname || "/");
+  const sections = sidebarNavForContext(activeRole, navPathname || "/", {
+    canManageOrgAdmin,
+  });
 
   const childActive = (children) =>
     Array.isArray(children) &&
     children.some((child) => navItemIsActive(navPathname || "/", searchParams, child.href));
 
-  return (
-    <ul className="flex flex-col gap-1 p-3">
-      {sections.map((section, sectionIndex) => (
-        <Fragment key={section.id}>
-          {sectionIndex > 0 ? (
-            <li aria-hidden className="mx-2 my-2 list-none border-t border-zinc-200 dark:border-zinc-700" />
-          ) : null}
-          {section.label ? (
-            <li className="list-none px-3 pb-1 pt-2">
-              <span className="text-[11px] font-bold uppercase tracking-wide text-zinc-500 dark:text-zinc-400">
-                {section.label}
-              </span>
-            </li>
-          ) : null}
-          {section.links.map(({ href, label, title, Icon, children }) => {
-            if (Array.isArray(children) && children.length > 0) {
-              const hasActiveChild = childActive(children);
-              return (
-                <li key={`${section.id}::${label}`} className="list-none">
-                  <details open={hasActiveChild} className="group rounded-lg">
-                    <summary
-                      title={title}
-                      className={`flex cursor-pointer list-none items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium transition-colors ${
-                        hasActiveChild
-                          ? "bg-[#008bd0]/12 text-[#008bd0] dark:bg-[#008bd0]/22"
+  const sectionHasActiveLink = (links) =>
+    links.some((item) => {
+      if (Array.isArray(item.children) && item.children.length > 0) {
+        return childActive(item.children);
+      }
+      return navItemIsActive(navPathname || "/", searchParams, item.href);
+    });
+
+  const renderLink = (section, { href, label, title, Icon, children }) => {
+    if (Array.isArray(children) && children.length > 0) {
+      const hasActiveChild = childActive(children);
+      return (
+        <li key={`${section.id}::${label}`} className="list-none">
+          <details open={hasActiveChild} className="group rounded-lg">
+            <summary
+              title={title}
+              className={`flex cursor-pointer list-none items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium transition-colors ${
+                hasActiveChild
+                  ? "bg-[#008bd0]/12 text-[#008bd0] dark:bg-[#008bd0]/22"
+                  : "text-zinc-700 hover:bg-zinc-100 dark:text-zinc-200 dark:hover:bg-zinc-800"
+              }`}
+            >
+              <Icon aria-hidden sx={primaryIconSx} />
+              <span className="flex-1">{label}</span>
+              <ExpandMoreRounded
+                aria-hidden
+                sx={{ fontSize: 20 }}
+                className="transition-transform group-open:rotate-180"
+              />
+            </summary>
+            <ul className="ml-6 mt-1 flex flex-col gap-1">
+              {children.map(({ href: childHref, label: childLabel, title: childTitle, Icon: ChildIcon }) => {
+                const active = navItemIsActive(navPathname || "/", searchParams, childHref);
+                return (
+                  <li key={`${childHref}::${childLabel}`} className="list-none">
+                    <Link
+                      href={childHref}
+                      title={childTitle}
+                      aria-current={active ? "page" : undefined}
+                      onClick={onNavigate}
+                      className={`flex items-center gap-2 rounded-lg px-3 py-2 text-sm transition-colors ${
+                        active
+                          ? "bg-[#008bd0]/15 text-[#008bd0] dark:bg-[#008bd0]/25"
                           : "text-zinc-700 hover:bg-zinc-100 dark:text-zinc-200 dark:hover:bg-zinc-800"
                       }`}
                     >
-                      <Icon aria-hidden sx={primaryIconSx} />
-                      <span className="flex-1">{label}</span>
-                      <ExpandMoreRounded
-                        aria-hidden
-                        sx={{ fontSize: 20 }}
-                        className="transition-transform group-open:rotate-180"
-                      />
-                    </summary>
-                    <ul className="ml-6 mt-1 flex flex-col gap-1">
-                      {children.map(({ href: childHref, label: childLabel, title: childTitle, Icon: ChildIcon }) => {
-                        const active = navItemIsActive(navPathname || "/", searchParams, childHref);
-                        return (
-                          <li key={`${childHref}::${childLabel}`} className="list-none">
-                            <Link
-                              href={childHref}
-                              title={childTitle}
-                              aria-current={active ? "page" : undefined}
-                              onClick={onNavigate}
-                              className={`flex items-center gap-2 rounded-lg px-3 py-2 text-sm transition-colors ${
-                                active
-                                  ? "bg-[#008bd0]/15 text-[#008bd0] dark:bg-[#008bd0]/25"
-                                  : "text-zinc-700 hover:bg-zinc-100 dark:text-zinc-200 dark:hover:bg-zinc-800"
-                              }`}
-                            >
-                              <ChildIcon aria-hidden sx={{ fontSize: 20, color: "#008bd0" }} />
-                              {childLabel}
-                            </Link>
-                          </li>
-                        );
-                      })}
-                    </ul>
-                  </details>
-                </li>
-              );
-            }
-            const active = navItemIsActive(navPathname || "/", searchParams, href);
-            return (
-              <li key={`${href}::${label}`} className="list-none">
-                <Link
-                  href={href}
-                  title={title}
-                  aria-current={active ? "page" : undefined}
-                  onClick={onNavigate}
-                  className={`flex items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#008bd0] ${
-                    active
-                      ? "bg-[#008bd0]/15 text-[#008bd0] dark:bg-[#008bd0]/25"
-                      : "text-zinc-700 hover:bg-zinc-100 dark:text-zinc-200 dark:hover:bg-zinc-800"
-                  }`}
-                >
-                  <Icon aria-hidden sx={primaryIconSx} />
-                  {label}
-                </Link>
-              </li>
-            );
-          })}
-        </Fragment>
-      ))}
+                      <ChildIcon aria-hidden sx={{ fontSize: 20, color: "#008bd0" }} />
+                      {childLabel}
+                    </Link>
+                  </li>
+                );
+              })}
+            </ul>
+          </details>
+        </li>
+      );
+    }
+    const active = navItemIsActive(navPathname || "/", searchParams, href);
+    return (
+      <li key={`${href}::${label}`} className="list-none">
+        <Link
+          href={href}
+          title={title}
+          aria-current={active ? "page" : undefined}
+          onClick={onNavigate}
+          className={`flex items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#008bd0] ${
+            active
+              ? "bg-[#008bd0]/15 text-[#008bd0] dark:bg-[#008bd0]/25"
+              : "text-zinc-700 hover:bg-zinc-100 dark:text-zinc-200 dark:hover:bg-zinc-800"
+          }`}
+        >
+          <Icon aria-hidden sx={primaryIconSx} />
+          {label}
+        </Link>
+      </li>
+    );
+  };
+
+  return (
+    <ul className="flex flex-col gap-1 p-3">
+      {sections.map((section, sectionIndex) => {
+        const sectionLinks = section.links.map((link) => renderLink(section, link));
+        const hasActiveInSection = sectionHasActiveLink(section.links);
+
+        return (
+          <Fragment key={section.id}>
+            {sectionIndex > 0 ? (
+              <li aria-hidden className="mx-2 my-2 list-none border-t border-zinc-200 dark:border-zinc-700" />
+            ) : null}
+            {section.label && section.collapsible ? (
+              <CollapsibleNavSection
+                sectionId={section.id}
+                label={section.label}
+                activeRole={activeRole}
+                defaultOpen={hasActiveInSection}
+              >
+                {sectionLinks}
+              </CollapsibleNavSection>
+            ) : (
+              <>
+                {section.label ? (
+                  <li className="list-none px-3 pb-1 pt-2">
+                    <span className="text-[11px] font-bold uppercase tracking-wide text-zinc-500 dark:text-zinc-400">
+                      {section.label}
+                    </span>
+                  </li>
+                ) : null}
+                {sectionLinks}
+              </>
+            )}
+          </Fragment>
+        );
+      })}
     </ul>
   );
 }
 
-function NavLinksWithSearch(props) {
+function NavLinksWithSearch({ canManageOrgAdmin, ...props }) {
   const searchParams = useSearchParams();
-  return <NavLinks {...props} searchParams={searchParams} />;
+  return <NavLinks {...props} searchParams={searchParams} canManageOrgAdmin={canManageOrgAdmin} />;
 }
 
 export default function DashboardLayoutClient({ children }) {
@@ -179,6 +282,7 @@ export default function DashboardLayoutClient({ children }) {
   const projectId = projectIdFromPath(pathname || "/");
   const isStudentProjectWorld = activeRole === "STUDENT" && Boolean(projectId);
   const [projectOrgLabel, setProjectOrgLabel] = useState("");
+  const [canManageOrgAdmin, setCanManageOrgAdmin] = useState(false);
   const [projectOrgLoading, setProjectOrgLoading] = useState(false);
 
   const authed = Boolean(session?.authenticated);
@@ -187,6 +291,7 @@ export default function DashboardLayoutClient({ children }) {
   useEffect(() => {
     if (!isStudentProjectWorld || !projectId) {
       setProjectOrgLabel("");
+      setCanManageOrgAdmin(false);
       setProjectOrgLoading(false);
       return;
     }
@@ -200,6 +305,7 @@ export default function DashboardLayoutClient({ children }) {
         const project = data?.project || null;
         const label = String(project?.organizationName || project?.name || "").trim();
         setProjectOrgLabel(label);
+        setCanManageOrgAdmin(Boolean(project?.canManageOrgAdmin));
       })
       .finally(() => {
         if (!cancelled) setProjectOrgLoading(false);
@@ -282,6 +388,7 @@ export default function DashboardLayoutClient({ children }) {
             <NavLinksWithSearch
               onNavigate={() => setDrawerOpen(false)}
               activeRole={activeRole}
+              canManageOrgAdmin={canManageOrgAdmin}
             />
           </Suspense>
         </nav>
@@ -349,7 +456,7 @@ export default function DashboardLayoutClient({ children }) {
                     Organization: {projectOrgLoading ? "Loading…" : projectOrgLabel || "Current organization"}
                   </p>
                   <p className="truncate text-[11px] font-bold uppercase tracking-wide text-primary">
-                    Role: System admin
+                    Role: {PROJECT_ORG_ENTRY_ROLE_NAME}
                   </p>
                 </div>
               </div>

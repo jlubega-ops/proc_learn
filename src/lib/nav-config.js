@@ -8,6 +8,10 @@ import AccountTreeRounded from "@mui/icons-material/AccountTreeRounded";
 import ApartmentRounded from "@mui/icons-material/ApartmentRounded";
 import BadgeRounded from "@mui/icons-material/BadgeRounded";
 import AdminPanelSettingsRounded from "@mui/icons-material/AdminPanelSettingsRounded";
+import BusinessRounded from "@mui/icons-material/BusinessRounded";
+import CalendarMonthRounded from "@mui/icons-material/CalendarMonthRounded";
+import DateRangeRounded from "@mui/icons-material/DateRangeRounded";
+import SettingsRounded from "@mui/icons-material/SettingsRounded";
 import { ROLE } from "@/lib/roles";
 
 /**
@@ -23,7 +27,7 @@ import { ROLE } from "@/lib/roles";
 
 /**
  * Sidebar section. `label` empty = no heading (typically the first block).
- * @typedef {{ id: string; label: string; links: NavLinkItem[] }} NavSection
+ * @typedef {{ id: string; label: string; collapsible?: boolean; links: NavLinkItem[] }} NavSection
  */
 
 /** @type {NavSection[]} */
@@ -58,6 +62,7 @@ export const SIDEBAR_SECTIONS = [
   {
     id: "users",
     label: "Users",
+    collapsible: true,
     links: [
       {
         href: "/students/manage",
@@ -76,8 +81,30 @@ export const SIDEBAR_SECTIONS = [
     ],
   },
   {
+    id: "project-settings",
+    label: "Project settings",
+    collapsible: true,
+    links: [
+      {
+        href: "/project-settings",
+        label: "Overview",
+        title: "Project configuration overview",
+        Icon: SettingsRounded,
+        anyOf: [ROLE.SYSTEM_ADMIN, ROLE.EXAMINER],
+      },
+      {
+        href: "/project-settings/roles",
+        label: "Project roles",
+        title: "Organisation roles for student project workspaces",
+        Icon: BadgeRounded,
+        anyOf: [ROLE.SYSTEM_ADMIN, ROLE.EXAMINER],
+      },
+    ],
+  },
+  {
     id: "administration",
     label: "Administration",
+    collapsible: true,
     links: [
       {
         href: "/admin/activity",
@@ -138,30 +165,51 @@ function projectWorkspaceSections(projectId) {
           anyOf: [ROLE.STUDENT],
           children: [
             {
-              href: `${base}/org-admin/users`,
-              label: "Users",
-              title: "Manage organization users",
-              Icon: GroupsRounded,
+              href: `${base}/org-admin/organisation-structure`,
+              label: "Organisation structure",
+              title: "Define organisation structure",
+              Icon: BusinessRounded,
               anyOf: [ROLE.STUDENT],
             },
             {
               href: `${base}/org-admin/departments`,
-              label: "Departments",
-              title: "Manage organization departments",
+              label: "Departments / units",
+              title: "Manage departments and units",
               Icon: ApartmentRounded,
               anyOf: [ROLE.STUDENT],
             },
             {
+              href: `${base}/org-admin/users`,
+              label: "User accounts",
+              title: "Manage organisation user accounts",
+              Icon: GroupsRounded,
+              anyOf: [ROLE.STUDENT],
+            },
+            {
               href: `${base}/org-admin/roles`,
-              label: "Roles",
-              title: "Manage organization roles",
+              label: "Roles & Permissions",
+              title: "Manage roles and permissions",
               Icon: BadgeRounded,
               anyOf: [ROLE.STUDENT],
             },
             {
-              href: `${base}/workflow`,
-              label: "Process workflows",
-              title: "Project workflow and actions",
+              href: `${base}/org-admin/financial-years`,
+              label: "Financial years",
+              title: "Manage financial years",
+              Icon: CalendarMonthRounded,
+              anyOf: [ROLE.STUDENT],
+            },
+            {
+              href: `${base}/org-admin/planning-period`,
+              label: "Planning period",
+              title: "Manage planning periods",
+              Icon: DateRangeRounded,
+              anyOf: [ROLE.STUDENT],
+            },
+            {
+              href: `${base}/org-admin/process-workflow`,
+              label: "Process workflow",
+              title: "Configure process workflows",
               Icon: AccountTreeRounded,
               anyOf: [ROLE.STUDENT],
             },
@@ -175,12 +223,21 @@ function projectWorkspaceSections(projectId) {
 /**
  * Sections with only links visible for the active role (empty sections removed).
  * @param {string} activeRole
- * @returns {{ id: string; label: string; links: NavLinkItem[] }[]}
+ * @returns {{ id: string; label: string; collapsible?: boolean; links: NavLinkItem[] }[]}
  */
 export function sidebarNavForActiveRole(activeRole) {
   return SIDEBAR_SECTIONS.map((section) => ({
     id: section.id,
-    label: section.label,
+    label:
+      section.id === "main" &&
+      [ROLE.LECTURER, ROLE.EXAMINER, ROLE.SYSTEM_ADMIN].includes(activeRole)
+        ? "General"
+        : section.label,
+    collapsible:
+      section.id === "main" &&
+      [ROLE.LECTURER, ROLE.EXAMINER, ROLE.SYSTEM_ADMIN].includes(activeRole)
+        ? true
+        : Boolean(section.collapsible),
     links: section.links.filter((item) => {
       if (!item.anyOf) return true;
       return item.anyOf.includes(activeRole);
@@ -189,13 +246,26 @@ export function sidebarNavForActiveRole(activeRole) {
 }
 
 /**
+ * @param {string} projectId
+ * @param {{ canManageOrgAdmin?: boolean }} [options]
+ * @returns {NavSection[]}
+ */
+export function sidebarNavForProjectWorkspace(projectId, options = {}) {
+  const canManageOrgAdmin = options.canManageOrgAdmin !== false;
+  const sections = projectWorkspaceSections(projectId);
+  if (canManageOrgAdmin) return sections;
+  return sections.filter((section) => section.id !== "project-admin");
+}
+
+/**
  * @param {string} activeRole
  * @param {string} pathname
+ * @param {{ canManageOrgAdmin?: boolean }} [options]
  */
-export function sidebarNavForContext(activeRole, pathname) {
+export function sidebarNavForContext(activeRole, pathname, options = {}) {
   const projectId = projectIdFromPathname(pathname);
   if (activeRole === ROLE.STUDENT && projectId) {
-    return projectWorkspaceSections(projectId);
+    return sidebarNavForProjectWorkspace(projectId, options);
   }
   return sidebarNavForActiveRole(activeRole);
 }

@@ -111,6 +111,27 @@ async function main() {
 
   // eslint-disable-next-line no-console
   console.log("Seed OK:", { studentEmail, staffEmail, adminEmail, programme: programme.shortName });
+
+  const defaultProjectRoles = [
+    { name: "Admin", description: "Organisation administrator with full workspace access.", sortOrder: 10 },
+    { name: "User Department", description: "Standard user department member.", sortOrder: 20 },
+    { name: "Head of User Department", description: "Leads the user department unit.", sortOrder: 30 },
+    { name: "Head PDU", description: "Head of the procurement and disposal unit.", sortOrder: 40 },
+    { name: "Accounting Officer", description: "Handles financial approvals and accounting.", sortOrder: 50 },
+    { name: "Procurement Officer", description: "Manages procurement processes and records.", sortOrder: 60 },
+  ];
+
+  for (const role of defaultProjectRoles) {
+    await prisma.projectOrgRole.upsert({
+      where: { name: role.name },
+      create: { ...role, isActive: true },
+      update: {
+        description: role.description,
+        sortOrder: role.sortOrder,
+        isActive: true,
+      },
+    });
+  }
 }
 
 main()

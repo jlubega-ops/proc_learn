@@ -2,7 +2,8 @@ import { notFound, redirect } from "next/navigation";
 import { Role } from "@prisma/client";
 import { getSessionUser, sessionActiveRole } from "@/lib/api/get-session-user";
 import { prisma } from "@/lib/prisma";
-import { canViewProjectByRole } from "@/lib/projects/access";
+import { ensureProjectCode } from "@/lib/projects/project-identity";
+import { ProjectOrgUsersPanel } from "@/components/projects/project-org-users-panel";
 
 export default async function ProjectOrgUsersPage({ params }) {
   const user = await getSessionUser();
@@ -16,26 +17,29 @@ export default async function ProjectOrgUsersPage({ params }) {
 
   const project = await prisma.project.findUnique({
     where: { id },
-    select: {
-      id: true,
-      name: true,
-      ownerUserId: true,
-      creatorRole: true,
-      purpose: true,
-      visibility: true,
-      isPublished: true,
-      closeAt: true,
-    },
+    select: { id: true, name: true },
   });
-  if (!canViewProjectByRole({ userId: user.id, activeRole, project })) notFound();
+  if (!project) notFound();
+
+  const projectCode = await ensureProjectCode(prisma, project.id);
 
   return (
-    <div className="w-full rounded-xl border border-zinc-200 bg-white p-4 dark:border-zinc-800 dark:bg-zinc-900">
-      <h1 className="text-lg font-semibold text-zinc-900 dark:text-white">Organization users</h1>
-      <p className="mt-2 text-sm text-zinc-600 dark:text-zinc-300">
-        You are in the project world for <span className="font-semibold">{project.name}</span>. This isolated
-        organization will manage users here.
-      </p>
+    <div className="w-full space-y-4">
+      <div className="rounded-xl border border-zinc-200 bg-white p-4 dark:border-zinc-800 dark:bg-zinc-900">
+        <h1 className="text-lg font-semibold text-zinc-900 dark:text-white">User accounts</h1>
+        <p className="mt-2 text-sm text-zinc-600 dark:text-zinc-300">
+          Manage organisation user accounts for{" "}
+          <span className="font-semibold">{project.name}</span>
+          {projectCode ? (
+            <>
+              {" "}
+              (project code <span className="font-semibold">{projectCode}</span>)
+            </>
+          ) : null}
+          . All users are scoped to this project only.
+        </p>
+      </div>
+      <ProjectOrgUsersPanel projectId={project.id} />
     </div>
   );
 }

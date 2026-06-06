@@ -4,6 +4,7 @@ import { prisma } from "@/lib/prisma";
 import { getSessionUser, sessionActiveRole } from "@/lib/api/get-session-user";
 import { AuditEvent, writeAuditLog } from "@/lib/audit-log";
 import { validateProjectCreateInput } from "@/lib/validation/project";
+import { generateUniqueProjectCode } from "@/lib/projects/project-identity";
 
 export const runtime = "nodejs";
 
@@ -166,6 +167,29 @@ export async function GET(request) {
                 : {},
       ],
     };
+  } else if (activeRole === Role.SYSTEM_ADMIN) {
+    where = {
+      AND: [
+        purpose === "practice"
+          ? { purpose: "PRACTICE" }
+          : purpose === "assignments"
+            ? { purpose: "ASSIGNMENT" }
+            : {},
+        status === "not_started"
+          ? { status: "NOT_STARTED" }
+          : status === "in_progress"
+            ? { status: "IN_PROGRESS" }
+            : status === "completed"
+              ? { status: "COMPLETED" }
+              : {},
+        scope === "student" || scope === "student_public"
+          ? { creatorRole: Role.STUDENT }
+          : scope === "lecturer"
+            ? { creatorRole: { in: [Role.LECTURER, Role.EXAMINER] } }
+            : {},
+        openStatusWhere(openStatus),
+      ],
+    };
   } else {
     where = { ownerUserId: user.id };
   }
@@ -173,7 +197,7 @@ export async function GET(request) {
   const include =
     activeRole === Role.STUDENT
       ? { owner: { select: { id: true, firstName: true, lastName: true, email: true } }, enrollments: { where: { studentUserId: user.id }, take: 1 } }
-      : activeRole === Role.EXAMINER
+      : activeRole === Role.EXAMINER || activeRole === Role.SYSTEM_ADMIN
         ? { owner: { select: { id: true, firstName: true, lastName: true, email: true } }, enrollments: true }
         : { owner: { select: { id: true, firstName: true, lastName: true, email: true } } };
 
@@ -240,10 +264,13 @@ export async function POST(request) {
     );
   }
 
+  const projectCode = await generateUniqueProjectCode(prisma);
+
   const row = await prisma.project.create({
     data: {
       ownerUserId: user.id,
       creatorRole: activeRole,
+      projectCode,
       name: data.name,
       description: data.description,
       organizationName: activeRole === Role.STUDENT ? data.organizationName : null,
@@ -269,6 +296,7 @@ export async function POST(request) {
     actorUserId: user.id,
     meta: {
       projectId: row.id,
+      projectCode: row.projectCode,
       creatorRole: activeRole,
       purpose: row.purpose,
       visibility: row.visibility,

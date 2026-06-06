@@ -2,7 +2,7 @@ import { notFound, redirect } from "next/navigation";
 import { Role } from "@prisma/client";
 import { getSessionUser, sessionActiveRole } from "@/lib/api/get-session-user";
 import { prisma } from "@/lib/prisma";
-import { canViewProjectByRole } from "@/lib/projects/access";
+import { fetchAuthorizedProjectWorkspace } from "@/lib/projects/workspace-access";
 import { ProjectTabs } from "@/components/projects/project-tabs";
 
 export default async function ProjectDetailLayout({ children, params }) {
@@ -14,19 +14,14 @@ export default async function ProjectDetailLayout({ children, params }) {
   const id = String(p?.id || "").trim();
   if (!id) notFound();
 
-  const project = await prisma.project.findUnique({
-    where: { id },
-    select: {
-      id: true,
-      ownerUserId: true,
-      creatorRole: true,
-      purpose: true,
-      visibility: true,
-      isPublished: true,
-      closeAt: true,
-    },
+  const access = await fetchAuthorizedProjectWorkspace(prisma, {
+    projectId: id,
+    userId: user.id,
+    activeRole,
   });
-  if (!canViewProjectByRole({ userId: user.id, activeRole, project })) notFound();
+  if (!access) notFound();
+
+  const { project } = access;
 
   const canSeeSubmissionsTab =
     activeRole === Role.EXAMINER &&
@@ -40,4 +35,3 @@ export default async function ProjectDetailLayout({ children, params }) {
     </div>
   );
 }
-
