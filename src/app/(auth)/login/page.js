@@ -2,7 +2,7 @@ import { redirect } from "next/navigation";
 import { LoginPageShell } from "@/components/auth/login-page-shell";
 import { APP_NAME } from "@/lib/appConfig";
 import { safeNextPath } from "@/lib/auth/safe-next-path";
-import { getAppSession } from "@/lib/auth/session";
+import { getReadableAppSession } from "@/lib/auth/session";
 import { buildSessionPayloadForUserId } from "@/lib/auth/session-payload";
 import { buildIronSessionOptions } from "@/lib/auth/session-options";
 
@@ -18,7 +18,7 @@ export default async function LoginPage({ searchParams }) {
   );
 
   if (buildIronSessionOptions()) {
-    const session = await getAppSession();
+    const session = await getReadableAppSession();
     if (session?.userId) {
       const payload = await buildSessionPayloadForUserId(session.userId);
       if (payload.authenticated) {
@@ -29,8 +29,13 @@ export default async function LoginPage({ searchParams }) {
 
   const oauthError =
     typeof sp?.error === "string" && sp.error ? sp.error : "";
+  const idleLogout = sp?.reason === "idle";
 
   return (
-    <LoginPageShell initialNext={nextDest} oauthError={oauthError} />
+    <LoginPageShell
+      initialNext={nextDest}
+      oauthError={oauthError}
+      idleLogout={idleLogout}
+    />
   );
 }

@@ -44,7 +44,10 @@ function ResetInner() {
         });
         return;
       }
-      showToast({ message: "Password updated. You can sign in.", severity: "success" });
+      showToast({
+        message: "Password updated. Sign in again with your new password.",
+        severity: "success",
+      });
       router.replace("/login");
     } finally {
       setBusy(false);

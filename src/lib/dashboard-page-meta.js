@@ -19,6 +19,8 @@ export function getDashboardPageMeta(pathname, activeRole) {
     return { title: "Departments / units", subtitle: "Project system administration" };
   if (pathname.includes("/org-admin/roles"))
     return { title: "Roles & Permissions", subtitle: "Project system administration" };
+  if (pathname.includes("/my-account"))
+    return { title: "My account", subtitle: "Organisation user account" };
   if (pathname === "/" || pathname === "")
     return { title: "Home", subtitle: "Dashboard overview" };
   if (pathname.startsWith("/projects") || pathname.startsWith("/cases")) {

@@ -13,6 +13,7 @@ import CalendarMonthRounded from "@mui/icons-material/CalendarMonthRounded";
 import DateRangeRounded from "@mui/icons-material/DateRangeRounded";
 import SettingsRounded from "@mui/icons-material/SettingsRounded";
 import { ROLE } from "@/lib/roles";
+import { ORG_PERMISSION } from "@/lib/projects/org-role-permissions";
 
 /**
  * @typedef {{
@@ -258,11 +259,124 @@ export function sidebarNavForProjectWorkspace(projectId, options = {}) {
 }
 
 /**
+ * @param {string} projectId
+ * @param {string[]} [permissions]
+ * @returns {NavSection[]}
+ */
+export function sidebarNavForOrgMember(projectId, permissions = []) {
+  const base = `/projects/${projectId}`;
+  const permSet = new Set(permissions);
+
+  /** @type {NavLinkItem[]} */
+  const accessChildren = [];
+  if (permSet.has(ORG_PERMISSION.VIEW_ORG_STRUCTURE)) {
+    accessChildren.push({
+      href: `${base}/org-admin/organisation-structure`,
+      label: "Organisation structure",
+      title: "View organisation structure",
+      Icon: BusinessRounded,
+      anyOf: null,
+    });
+  }
+  if (permSet.has(ORG_PERMISSION.VIEW_DEPARTMENTS)) {
+    accessChildren.push({
+      href: `${base}/org-admin/departments`,
+      label: "Departments / units",
+      title: "View departments and units",
+      Icon: ApartmentRounded,
+      anyOf: null,
+    });
+  }
+  if (permSet.has(ORG_PERMISSION.VIEW_ROLES)) {
+    accessChildren.push({
+      href: `${base}/org-admin/roles`,
+      label: "Roles & Permissions",
+      title: "View roles and permissions",
+      Icon: BadgeRounded,
+      anyOf: null,
+    });
+  }
+  if (permSet.has(ORG_PERMISSION.VIEW_FINANCIAL_YEARS)) {
+    accessChildren.push({
+      href: `${base}/org-admin/financial-years`,
+      label: "Financial years",
+      title: "View financial years",
+      Icon: CalendarMonthRounded,
+      anyOf: null,
+    });
+  }
+  if (permSet.has(ORG_PERMISSION.VIEW_PLANNING_PERIODS)) {
+    accessChildren.push({
+      href: `${base}/org-admin/planning-period`,
+      label: "Planning period",
+      title: "View planning periods",
+      Icon: DateRangeRounded,
+      anyOf: null,
+    });
+  }
+  if (permSet.has(ORG_PERMISSION.VIEW_PROCESS_WORKFLOW)) {
+    accessChildren.push({
+      href: `${base}/org-admin/process-workflow`,
+      label: "Process workflow",
+      title: "View process workflow",
+      Icon: AccountTreeRounded,
+      anyOf: null,
+    });
+  }
+
+  /** @type {NavSection[]} */
+  const sections = [
+    {
+      id: "project-main",
+      label: "",
+      links: [
+        {
+          href: base,
+          label: "Project overview",
+          title: "Open project overview",
+          Icon: WorkOutlineRounded,
+          anyOf: null,
+        },
+        {
+          href: `${base}/my-account`,
+          label: "My account",
+          title: "Your organisation account details",
+          Icon: BadgeRounded,
+          anyOf: null,
+        },
+      ],
+    },
+  ];
+
+  if (accessChildren.length > 0) {
+    sections.push({
+      id: "project-access",
+      label: "Your workspace",
+      links: [
+        {
+          href: "",
+          label: "Workspace",
+          title: "Pages available for your role",
+          Icon: AdminPanelSettingsRounded,
+          anyOf: null,
+          children: accessChildren,
+        },
+      ],
+    });
+  }
+
+  return sections;
+}
+
+/**
  * @param {string} activeRole
  * @param {string} pathname
- * @param {{ canManageOrgAdmin?: boolean }} [options]
+ * @param {{ canManageOrgAdmin?: boolean; sessionType?: string; projectId?: string; permissions?: string[] }} [options]
  */
 export function sidebarNavForContext(activeRole, pathname, options = {}) {
+  if (options.sessionType === "org" && options.projectId) {
+    return sidebarNavForOrgMember(options.projectId, options.permissions);
+  }
   const projectId = projectIdFromPathname(pathname);
   if (activeRole === ROLE.STUDENT && projectId) {
     return sidebarNavForProjectWorkspace(projectId, options);

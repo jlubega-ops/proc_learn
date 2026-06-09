@@ -21,7 +21,7 @@ function serializeStudent(u) {
     lastName: u.lastName,
     sex: u.sex,
     accountStatus: u.accountStatus,
-    lastLoginAt: u.lastLoginAt,
+    lastLoginAt: u.lastLoginAt?.toISOString() ?? null,
     studentNumber: sp?.studentNumber ?? null,
     registrationNumber: sp?.registrationNumber ?? null,
     programmeId: sp?.programmeId ?? null,

@@ -44,6 +44,7 @@ export async function buildSessionPayloadForUserId(userId) {
       grantedRoles: g,
       switchableRoles: switchableRoles(g),
       activeRole: active,
+      mustChangePassword: Boolean(user.mustChangePassword),
     };
   }
 
@@ -70,5 +71,6 @@ export async function buildSessionPayloadForUserId(userId) {
     grantedRoles: g,
     switchableRoles: switchableRoles(g),
     activeRole: active,
+    mustChangePassword: Boolean(user.mustChangePassword),
   };
 }

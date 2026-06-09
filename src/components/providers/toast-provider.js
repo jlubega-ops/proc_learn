@@ -9,6 +9,7 @@ import {
 } from "react";
 import Snackbar from "@mui/material/Snackbar";
 import Alert from "@mui/material/Alert";
+import { isClientSigningOut } from "@/lib/auth/client-sign-out";
 
 /**
  * Toasts use only MUI **success** (green) and **error** (red). Do not pass `info` or `warning`.
@@ -40,6 +41,16 @@ export function ToastProvider({ children }) {
   const [duration, setDuration] = useState(6000);
 
   const showToast = useCallback((input) => {
+    if (typeof window !== "undefined" && isClientSigningOut()) {
+      const severity =
+        typeof input === "string"
+          ? "error"
+          : input?.severity === "success"
+            ? "success"
+            : "error";
+      if (severity === "error") return;
+    }
+
     const payload =
       typeof input === "string"
         ? {

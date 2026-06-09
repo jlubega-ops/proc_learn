@@ -66,6 +66,7 @@ export async function POST(request) {
         where: { id: row.userId },
         data: {
           passwordHash,
+          mustChangePassword: false,
           ...(activateViaReset
             ? {
                 accountStatus: UserAccountStatus.ACTIVE,

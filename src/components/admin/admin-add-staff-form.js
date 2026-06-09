@@ -94,7 +94,10 @@ export function AdminAddStaffForm() {
         });
         return;
       }
-      showToast({ message: "Staff user created. Activation email sent.", severity: "success" });
+      showToast({
+        message: "Staff user created. Welcome email with sign-in details sent.",
+        severity: "success",
+      });
       router.push("/admin/staff");
     } finally {
       setBusy(false);
@@ -111,6 +114,8 @@ export function AdminAddStaffForm() {
     >
       <Typography variant="body2" sx={{ color: "color-mix(in oklab, var(--foreground) 72%, transparent)" }}>
         Staff email must be a valid <strong>@mubs.ac.ug</strong> address (not the numeric student format).
+        A welcome email with a temporary password is sent automatically. The user signs in with that
+        password or Google, then chooses a personal password on first access.
       </Typography>
 
       <Typography variant="subtitle2" sx={sectionSx}>

@@ -22,6 +22,10 @@ import {
 } from "@/lib/appConfig";
 import { safeNextPath } from "@/lib/auth/safe-next-path";
 import { useAuthSession } from "@/components/providers/auth-session-provider";
+import {
+  consumePostAuthToast,
+  setClientSigningOutFlag,
+} from "@/lib/auth/client-sign-out";
 import { useToast } from "@/components/providers/toast-provider";
 import { validateLoginFields } from "@/lib/validation/login";
 
@@ -64,6 +68,7 @@ const OAUTH_ERROR_HINTS = {
 export function LoginForm({
   initialNext = DEFAULT_POST_AUTH_PATH,
   oauthError = "",
+  idleLogout = false,
 }) {
   const router = useRouter();
   const { refresh } = useAuthSession();
@@ -85,6 +90,34 @@ export function LoginForm({
     const id = requestAnimationFrame(() => setFieldsUnlocked(true));
     return () => cancelAnimationFrame(id);
   }, []);
+
+  useEffect(() => {
+    setClientSigningOutFlag(false);
+    const queued = consumePostAuthToast();
+    if (queued?.message) {
+      showToast({
+        message: queued.message,
+        severity: queued.severity === "success" ? "success" : "error",
+        duration:
+          typeof queued.duration === "number" && queued.duration > 0
+            ? queued.duration
+            : 6000,
+      });
+    }
+  }, [showToast]);
+
+  useEffect(() => {
+    if (!idleLogout) return;
+    if (typeof window === "undefined") return;
+    const dedupeKey = "pl_idle_logout_toast";
+    if (window.sessionStorage.getItem(dedupeKey)) return;
+    window.sessionStorage.setItem(dedupeKey, "1");
+    showToast({
+      message: "You were signed out after a period of inactivity. Please sign in again.",
+      severity: "error",
+      duration: 8000,
+    });
+  }, [idleLogout, showToast]);
 
   useEffect(() => {
     if (!oauthError) return;
@@ -146,7 +179,13 @@ export function LoginForm({
         duration: 2800,
       });
       await new Promise((r) => setTimeout(r, 450));
-      router.push(afterLoginPath);
+      const dest =
+        data.mustChangePassword || data.redirectTo === "/setup-password"
+          ? "/setup-password"
+          : typeof data.redirectTo === "string" && data.redirectTo.startsWith("/")
+            ? data.redirectTo
+            : afterLoginPath;
+      router.push(dest);
     } finally {
       setSubmitting(false);
     }
@@ -209,7 +248,7 @@ export function LoginForm({
                 Sign in to continue
               </h1>
               <p className="mt-1 text-center text-xs leading-snug text-zinc-600 sm:text-[13px]">
-                Use your MUBS email and password, or{" "}
+                Use your MUBS school email, organisation username, or{" "}
                 <a
                   href={googleStartHref}
                   className="cursor-pointer font-semibold text-[#008bd0] underline decoration-[#008bd0]/40 underline-offset-2 hover:decoration-[#008bd0]"
@@ -229,9 +268,9 @@ export function LoginForm({
               <TextField
                 id="login-identifier"
                 name="pl_login_identifier"
-                label="School email"
-                type="email"
-                inputMode="email"
+                label="School email or organisation username"
+                type="text"
+                inputMode="text"
                 autoComplete="off"
                 fullWidth
                 value={identifier}

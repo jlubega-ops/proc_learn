@@ -35,7 +35,7 @@ export default function RootLayout({ children }) {
       <body className="min-h-dvh bg-background font-sans text-foreground">
         <script
           dangerouslySetInnerHTML={{
-            __html: `try{var p=(typeof location!=="undefined"&&location.pathname)||"";function authLight(x){return x==="/login"||x.indexOf("/login/")===0||x==="/forgot-password"||x.indexOf("/forgot-password/")===0||x==="/reset-password"||x.indexOf("/reset-password/")===0||x==="/activate"||x.indexOf("/activate/")===0;}if(authLight(p)){document.documentElement.classList.remove("dark");}else{var t=localStorage.getItem(${JSON.stringify(THEME_STORAGE_KEY)});if(t==="dark"){document.documentElement.classList.add("dark");}else if(t==="light"){document.documentElement.classList.remove("dark");}}}catch(e){}`,
+            __html: `try{var p=(typeof location!=="undefined"&&location.pathname)||"";function authLight(x){return x==="/login"||x.indexOf("/login/")===0||x==="/forgot-password"||x.indexOf("/forgot-password/")===0||x==="/reset-password"||x.indexOf("/reset-password/")===0||x==="/activate"||x.indexOf("/activate/")===0||x==="/setup-password"||x.indexOf("/setup-password/")===0;}if(authLight(p)){document.documentElement.classList.remove("dark");}else{var t=localStorage.getItem(${JSON.stringify(THEME_STORAGE_KEY)});if(t==="dark"){document.documentElement.classList.add("dark");}else if(t==="light"){document.documentElement.classList.remove("dark");}}}catch(e){}`,
           }}
         />
         <AuthSessionProvider>

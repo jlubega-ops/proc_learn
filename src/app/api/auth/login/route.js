@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import bcrypt from "bcryptjs";
 import { UserAccountStatus } from "@prisma/client";
-import { getAppSession } from "@/lib/auth/session";
+import { getAppSession, initSessionActivity } from "@/lib/auth/session";
 import { buildIronSessionOptions } from "@/lib/auth/session-options";
 import { buildSessionPayloadForUserId } from "@/lib/auth/session-payload";
 import { prisma } from "@/lib/prisma";
@@ -12,6 +12,9 @@ import {
 } from "@/lib/validation/login";
 import { writeAuditLog, AuditEvent } from "@/lib/audit-log";
 import { getRequestIp, getRequestUserAgent } from "@/lib/request-meta";
+import { isOrgLoginIdentifier } from "@/lib/projects/org-login-identity";
+import { authenticateProjectOrgUserLogin } from "@/lib/projects/org-login-auth";
+import { buildSessionPayloadForOrgUserId } from "@/lib/auth/org-session-payload";
 
 export const runtime = "nodejs";
 
@@ -54,6 +57,59 @@ export async function POST(request) {
     );
   }
 
+  if (isOrgLoginIdentifier(rawId)) {
+    const orgAuth = await authenticateProjectOrgUserLogin({
+      identifier: String(rawId),
+      password,
+    });
+
+    if (!orgAuth.ok) {
+      const messages = {
+        invalid_credentials: "Invalid username or password.",
+        project_unavailable:
+          "This project is not available. Sign in is only allowed when the project is published.",
+        ambiguous_account:
+          "Multiple accounts match this username. Contact your project administrator.",
+        invalid_format: "Enter a valid organisation username.",
+      };
+      await writeAuditLog({
+        eventType: AuditEvent.PROJECT_ORG_USER_LOGIN_FAILURE,
+        ip,
+        userAgent,
+        meta: {
+          identifier: String(rawId).trim().toLowerCase(),
+          code: orgAuth.code,
+          method: "org_password",
+        },
+      });
+      return NextResponse.json(
+        { error: messages[orgAuth.code] || "Invalid username or password." },
+        { status: orgAuth.code === "project_unavailable" ? 403 : 401 },
+      );
+    }
+
+    delete session.userId;
+    session.orgUserId = orgAuth.orgUser.id;
+    initSessionActivity(session);
+    await session.save();
+
+    await writeAuditLog({
+      eventType: AuditEvent.PROJECT_ORG_USER_LOGIN_SUCCESS,
+      meta: {
+        projectId: orgAuth.project.id,
+        projectOrgUserId: orgAuth.orgUser.id,
+        roleName: orgAuth.orgUser.projectOrgRole?.name,
+        identifier: String(rawId).trim().toLowerCase(),
+        method: "org_password",
+      },
+      ip,
+      userAgent,
+    });
+
+    const payload = await buildSessionPayloadForOrgUserId(orgAuth.orgUser.id);
+    return NextResponse.json({ ok: true, ...payload });
+  }
+
   const email = normalizeLoginEmail(rawId);
   const user = await prisma.user.findUnique({
     where: { email },
@@ -65,7 +121,7 @@ export async function POST(request) {
       eventType: AuditEvent.LOGIN_FAILURE,
       ip,
       userAgent,
-      meta: { email },
+      meta: { email, method: "password" },
     });
     return NextResponse.json(
       { error: "Invalid email or password." },
@@ -80,7 +136,7 @@ export async function POST(request) {
       targetUserId: user.id,
       ip,
       userAgent,
-      meta: { email, reason: "suspended" },
+      meta: { email, reason: "suspended", method: "password" },
     });
     return NextResponse.json(
       { error: "Your account has been suspended. Contact support." },
@@ -95,7 +151,7 @@ export async function POST(request) {
       targetUserId: user.id,
       ip,
       userAgent,
-      meta: { email, reason: "pending_activation" },
+      meta: { email, reason: "pending_activation", method: "password" },
     });
     return NextResponse.json(
       {
@@ -113,7 +169,7 @@ export async function POST(request) {
       targetUserId: user.id,
       ip,
       userAgent,
-      meta: { email },
+      meta: { email, method: "password" },
     });
     return NextResponse.json(
       { error: "Invalid email or password." },
@@ -121,7 +177,9 @@ export async function POST(request) {
     );
   }
 
+  delete session.orgUserId;
   session.userId = user.id;
+  initSessionActivity(session);
   await session.save();
 
   const granted = grantedRoles(user.userRoles);
@@ -147,9 +205,10 @@ export async function POST(request) {
     targetUserId: user.id,
     ip,
     userAgent,
-    meta: { email },
+    meta: { email, method: "password" },
   });
 
   const payload = await buildSessionPayloadForUserId(user.id);
-  return NextResponse.json({ ok: true, ...payload });
+  const redirectTo = payload.mustChangePassword ? "/setup-password" : undefined;
+  return NextResponse.json({ ok: true, ...payload, redirectTo });
 }

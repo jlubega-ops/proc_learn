@@ -12,7 +12,11 @@ import {
   orgUserInclude,
   serializeProjectOrgUser,
 } from "@/lib/projects/org-users";
-import { generateUniqueOrgUnitIdentifier } from "@/lib/projects/org-user-identity";
+import {
+  generateUniqueOrgUnitIdentifier,
+  PROJECT_ORG_LEARN_PASSWORD,
+} from "@/lib/projects/org-user-identity";
+import { hashOrgUserPassword } from "@/lib/projects/org-user-password";
 import { ensureProjectCode } from "@/lib/projects/project-identity";
 import { resolveOrgUserDepartmentAssignment } from "@/lib/projects/org-departments";
 import { validateProjectOrgUserInput } from "@/lib/validation/project-org-user";
@@ -151,6 +155,7 @@ export async function POST(request, context) {
   }
 
   const unitIdentifier = await generateUniqueOrgUnitIdentifier(prisma, projectId);
+  const passwordHash = await hashOrgUserPassword(PROJECT_ORG_LEARN_PASSWORD);
 
   const row = await prisma.projectOrgUser.create({
     data: {
@@ -165,6 +170,7 @@ export async function POST(request, context) {
       unitIdentifier,
       isProjectAdmin: false,
       linkedUserId: null,
+      passwordHash,
     },
     include: orgUserInclude,
   });

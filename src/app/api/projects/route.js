@@ -237,9 +237,11 @@ export async function POST(request) {
   }
 
   const activeRole = sessionActiveRole(user) || Role.STUDENT;
-  if (![Role.STUDENT, Role.LECTURER, Role.EXAMINER].includes(activeRole)) {
+  if (![Role.STUDENT, Role.LECTURER, Role.EXAMINER, Role.SYSTEM_ADMIN].includes(activeRole)) {
     return NextResponse.json({ error: "Forbidden." }, { status: 403 });
   }
+
+  const creatorRole = activeRole === Role.SYSTEM_ADMIN ? Role.EXAMINER : activeRole;
 
   let body;
   try {
@@ -269,7 +271,7 @@ export async function POST(request) {
   const row = await prisma.project.create({
     data: {
       ownerUserId: user.id,
-      creatorRole: activeRole,
+      creatorRole,
       projectCode,
       name: data.name,
       description: data.description,
@@ -280,14 +282,14 @@ export async function POST(request) {
       instructions: data.instructions,
       questionText: data.questionText,
       questionFileUrl: data.questionFileUrl,
-      enrollmentKey: [Role.LECTURER, Role.EXAMINER].includes(activeRole)
+      enrollmentKey: [Role.LECTURER, Role.EXAMINER, Role.SYSTEM_ADMIN].includes(activeRole)
         ? data.enrollmentAccessKey
         : null,
       isPublished: activeRole === Role.STUDENT ? true : data.isPublished,
       openAt: data.openAt,
       closeAt: data.closeAt,
       durationSeconds: data.durationSeconds,
-      requiresEnrollment: [Role.EXAMINER, Role.LECTURER].includes(activeRole),
+      requiresEnrollment: [Role.EXAMINER, Role.LECTURER, Role.SYSTEM_ADMIN].includes(activeRole),
     },
   });
 
@@ -297,7 +299,7 @@ export async function POST(request) {
     meta: {
       projectId: row.id,
       projectCode: row.projectCode,
-      creatorRole: activeRole,
+      creatorRole,
       purpose: row.purpose,
       visibility: row.visibility,
       isPublished: row.isPublished,

@@ -25,6 +25,9 @@ import EditRounded from "@mui/icons-material/EditRounded";
 import ForwardToInboxRounded from "@mui/icons-material/ForwardToInboxRounded";
 import InfoOutlined from "@mui/icons-material/InfoOutlined";
 import LockOpenRounded from "@mui/icons-material/LockOpenRounded";
+import PersonAddAlt1Rounded from "@mui/icons-material/PersonAddAlt1Rounded";
+import RefreshRounded from "@mui/icons-material/RefreshRounded";
+import Link from "next/link";
 import FormControlLabel from "@mui/material/FormControlLabel";
 import Checkbox from "@mui/material/Checkbox";
 import FormGroup from "@mui/material/FormGroup";
@@ -53,6 +56,8 @@ import { ROLE, formatRoleLabel } from "@/lib/roles";
  *   lastLoginAt: string | null;
  *   roles: string[];
  *   canResendActivation: boolean;
+ *   canResendWelcome: boolean;
+ *   mustChangePassword: boolean;
  * }} StaffRow
  */
 
@@ -70,6 +75,7 @@ function formatWhen(iso) {
 function statusLabel(row) {
   if (row.accountStatus === "SUSPENDED") return "Suspended";
   if (row.accountStatus === "PENDING_ACTIVATION") return "Pending activation";
+  if (row.mustChangePassword && !row.lastLoginAt) return "Pending password setup";
   return "Active";
 }
 
@@ -217,7 +223,11 @@ export function AdminStaffPanel() {
         });
         return;
       }
-      showToast({ message: "Activation email sent.", severity: "success" });
+      showToast({
+        message:
+          typeof data.message === "string" ? data.message : "Invitation email sent.",
+        severity: "success",
+      });
     } finally {
       setResendingId(null);
     }
@@ -289,6 +299,28 @@ export function AdminStaffPanel() {
 
   return (
     <>
+      <div className="mb-4 flex flex-wrap items-center gap-2">
+        <Button
+          type="button"
+          variant="outlined"
+          startIcon={refetching ? <CircularProgress size={16} /> : <RefreshRounded />}
+          onClick={() => void load({ silent: true })}
+          disabled={refetching}
+          className="w-full sm:w-auto"
+          title="Refresh staff list"
+        >
+          Refresh
+        </Button>
+        <Link
+          href="/admin/staff/new"
+          className="inline-flex h-9 min-h-9 w-full items-center justify-center gap-1.5 rounded-md bg-primary px-3 text-sm font-semibold text-white hover:opacity-90 sm:w-auto sm:px-4"
+          title="Add a new staff user"
+        >
+          <PersonAddAlt1Rounded sx={{ fontSize: 20 }} aria-hidden />
+          <span>Add staff</span>
+        </Link>
+      </div>
+
       <Box sx={{ position: "relative" }}>
         <TableContainer
           component={Paper}
@@ -355,12 +387,22 @@ export function AdminStaffPanel() {
                         <DeleteOutlineRounded fontSize="small" />
                       </IconButton>
                     </Tooltip>
-                    {row.canResendActivation ? (
-                      <Tooltip title="Resend activation email">
+                    {row.canResendWelcome || row.canResendActivation ? (
+                      <Tooltip
+                        title={
+                          row.canResendWelcome
+                            ? "Resend welcome email with new temporary password"
+                            : "Resend activation email"
+                        }
+                      >
                         <span>
                           <IconButton
                             size="small"
-                            aria-label="Resend activation email"
+                            aria-label={
+                              row.canResendWelcome
+                                ? "Resend welcome email"
+                                : "Resend activation email"
+                            }
                             disabled={resendingId === row.id}
                             onClick={() => void resendActivation(row.id)}
                           >

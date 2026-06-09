@@ -92,7 +92,7 @@ function applyStartDateDefaults(form, patch) {
 /**
  * @param {{ projectId: string }} p
  */
-export function ProjectOrgFinancialYearsPanel({ projectId }) {
+export function ProjectOrgFinancialYearsPanel({ projectId, readOnly = false }) {
   const { showToast } = useToast();
   const [rows, setRows] = useState(/** @type {any[]} */ ([]));
   const [loading, setLoading] = useState(true);
@@ -310,20 +310,22 @@ export function ProjectOrgFinancialYearsPanel({ projectId }) {
   return (
     <>
       <div className="mb-3 flex flex-wrap gap-2">
-        <Button
-          variant="contained"
-          startIcon={<AddRounded />}
-          disabled={refetching}
-          onClick={() => {
-            setCreateErrors({});
-            setCreateForm(emptyForm());
-            setOpenCreate(true);
-          }}
-          className="w-full sm:w-auto"
-          title="Add financial year"
-        >
-          Add financial year
-        </Button>
+        {!readOnly ? (
+          <Button
+            variant="contained"
+            startIcon={<AddRounded />}
+            disabled={refetching}
+            onClick={() => {
+              setCreateErrors({});
+              setCreateForm(emptyForm());
+              setOpenCreate(true);
+            }}
+            className="w-full sm:w-auto"
+            title="Add financial year"
+          >
+            Add financial year
+          </Button>
+        ) : null}
         <Button
           variant="outlined"
           startIcon={refetching ? <CircularProgress size={16} /> : <RefreshRounded />}
@@ -352,13 +354,13 @@ export function ProjectOrgFinancialYearsPanel({ projectId }) {
                 <TableCell>Start</TableCell>
                 <TableCell>End</TableCell>
                 <TableCell>Status</TableCell>
-                <TableCell align="right">Actions</TableCell>
+                {!readOnly ? <TableCell align="right">Actions</TableCell> : null}
               </TableRow>
             </TableHead>
             <TableBody>
               {rows.length === 0 ? (
                 <TableRow>
-                  <TableCell colSpan={6} align="center" sx={{ py: 5 }}>
+                  <TableCell colSpan={readOnly ? 5 : 6} align="center" sx={{ py: 5 }}>
                     <Typography variant="body2" sx={adminMutedTextSx}>
                       No financial years yet. Add one to define the organisation&apos;s active
                       period.
@@ -380,53 +382,55 @@ export function ProjectOrgFinancialYearsPanel({ projectId }) {
                         sx={{ height: 22 }}
                       />
                     </TableCell>
-                    <TableCell align="right">
-                      <Box sx={{ display: "inline-flex", alignItems: "center", gap: 0.25 }}>
-                        <Tooltip
-                          title={
-                            row.isActive
-                              ? "Deactivate financial year"
-                              : "Set as active financial year"
-                          }
-                        >
-                          <Switch
-                            size="small"
-                            checked={Boolean(row.isActive)}
-                            disabled={refetching || patchingId === row.id}
-                            onChange={() => void toggleActive(row)}
-                            slotProps={{
-                              input: {
-                                "aria-label": row.isActive
-                                  ? "Deactivate financial year"
-                                  : "Set as active financial year",
-                              },
-                            }}
-                          />
-                        </Tooltip>
-                        <Tooltip title="Edit financial year">
-                          <IconButton
-                            size="small"
-                            aria-label="Edit financial year"
-                            color="primary"
-                            disabled={refetching}
-                            onClick={() => openEdit(row)}
+                    {!readOnly ? (
+                      <TableCell align="right">
+                        <Box sx={{ display: "inline-flex", alignItems: "center", gap: 0.25 }}>
+                          <Tooltip
+                            title={
+                              row.isActive
+                                ? "Deactivate financial year"
+                                : "Set as active financial year"
+                            }
                           >
-                            <EditRounded fontSize="small" />
-                          </IconButton>
-                        </Tooltip>
-                        <Tooltip title="Delete financial year">
-                          <IconButton
-                            size="small"
-                            aria-label="Delete financial year"
-                            color="error"
-                            disabled={refetching}
-                            onClick={() => setDelRow(row)}
-                          >
-                            <DeleteOutlineRounded fontSize="small" />
-                          </IconButton>
-                        </Tooltip>
-                      </Box>
-                    </TableCell>
+                            <Switch
+                              size="small"
+                              checked={Boolean(row.isActive)}
+                              disabled={refetching || patchingId === row.id}
+                              onChange={() => void toggleActive(row)}
+                              slotProps={{
+                                input: {
+                                  "aria-label": row.isActive
+                                    ? "Deactivate financial year"
+                                    : "Set as active financial year",
+                                },
+                              }}
+                            />
+                          </Tooltip>
+                          <Tooltip title="Edit financial year">
+                            <IconButton
+                              size="small"
+                              aria-label="Edit financial year"
+                              color="primary"
+                              disabled={refetching}
+                              onClick={() => openEdit(row)}
+                            >
+                              <EditRounded fontSize="small" />
+                            </IconButton>
+                          </Tooltip>
+                          <Tooltip title="Delete financial year">
+                            <IconButton
+                              size="small"
+                              aria-label="Delete financial year"
+                              color="error"
+                              disabled={refetching}
+                              onClick={() => setDelRow(row)}
+                            >
+                              <DeleteOutlineRounded fontSize="small" />
+                            </IconButton>
+                          </Tooltip>
+                        </Box>
+                      </TableCell>
+                    ) : null}
                   </TableRow>
                 ))
               )}

@@ -6,8 +6,14 @@ import {
   useContext,
   useEffect,
   useMemo,
+  useRef,
   useState,
 } from "react";
+import { SessionIdleGuard } from "@/components/providers/session-idle-guard";
+import {
+  queuePostAuthToast,
+  setClientSigningOutFlag,
+} from "@/lib/auth/client-sign-out";
 
 /**
  * @typedef {Object} SessionPayload
@@ -20,6 +26,8 @@ import {
  * @property {string[]} [grantedRoles]
  * @property {string[]} [switchableRoles]
  * @property {string} [activeRole]
+ * @property {number} [sessionIdleMinutes]
+ * @property {string} [reason]
  */
 
 const AuthSessionContext = createContext({
@@ -27,6 +35,8 @@ const AuthSessionContext = createContext({
   /** @type {SessionPayload | null} */
   session: null,
   refresh: async () => {},
+  signOut: async () => {},
+  isSigningOut: false,
   /** Full-screen blocking overlay (logout, role switch, etc.) */
   isRoleSwitching: false,
   /** Message shown on the blocking overlay while `isRoleSwitching` is true */
@@ -66,6 +76,8 @@ export function AuthSessionProvider({ children, initialSession = null }) {
     hasInitial ? initialSession : null,
   );
   const [blocking, setBlocking] = useState({ active: false, message: "" });
+  const [isSigningOut, setIsSigningOut] = useState(false);
+  const signingOutRef = useRef(false);
 
   const setSessionBlocking = useCallback((active, message) => {
     if (!active) {
@@ -91,14 +103,57 @@ export function AuthSessionProvider({ children, initialSession = null }) {
   );
 
   const refresh = useCallback(async () => {
+    if (signingOutRef.current) return;
     try {
       const data = await fetchSessionPayload();
+      if (signingOutRef.current) return;
       setSession(data);
     } catch {
-      setSession({ authenticated: false });
+      if (!signingOutRef.current) {
+        setSession({ authenticated: false });
+      }
     } finally {
-      setLoading(false);
+      if (!signingOutRef.current) {
+        setLoading(false);
+      }
     }
+  }, []);
+
+  /**
+   * @param {{ redirectTo?: string; message?: string; toast?: { message: string; severity?: 'success' | 'error'; duration?: number } }} [opts]
+   */
+  const signOut = useCallback(async (opts = {}) => {
+    if (signingOutRef.current) return;
+    signingOutRef.current = true;
+    setIsSigningOut(true);
+    setClientSigningOutFlag(true);
+
+    const redirectTo =
+      typeof opts.redirectTo === "string" && opts.redirectTo.trim()
+        ? opts.redirectTo
+        : "/login";
+    const message =
+      typeof opts.message === "string" && opts.message.trim()
+        ? opts.message.trim()
+        : "Signing you out…";
+
+    setBlocking({ active: true, message });
+
+    if (opts.toast?.message) {
+      queuePostAuthToast(opts.toast);
+    }
+
+    try {
+      await fetch("/api/auth/logout", {
+        method: "POST",
+        credentials: "include",
+        keepalive: true,
+      });
+    } catch {
+      /* still leave the signed-in shell */
+    }
+
+    window.location.replace(redirectTo);
   }, []);
 
   useEffect(() => {
@@ -110,16 +165,29 @@ export function AuthSessionProvider({ children, initialSession = null }) {
       loading,
       session,
       refresh,
+      signOut,
+      isSigningOut,
       isRoleSwitching: blocking.active,
       blockingMessage: blocking.active ? blocking.message : "",
       setRoleSwitching,
       setSessionBlocking,
     }),
-    [loading, session, refresh, blocking.active, blocking.message, setRoleSwitching, setSessionBlocking],
+    [
+      loading,
+      session,
+      refresh,
+      signOut,
+      isSigningOut,
+      blocking.active,
+      blocking.message,
+      setRoleSwitching,
+      setSessionBlocking,
+    ],
   );
 
   return (
     <AuthSessionContext.Provider value={value}>
+      <SessionIdleGuard />
       {children}
     </AuthSessionContext.Provider>
   );

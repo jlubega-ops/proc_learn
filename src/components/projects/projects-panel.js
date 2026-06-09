@@ -255,8 +255,9 @@ export function ProjectsPanel() {
   const isLecturer = activeRole === "LECTURER";
   const isExaminer = activeRole === "EXAMINER";
   const isSystemAdmin = activeRole === "SYSTEM_ADMIN";
-  const isStaffViewer = isLecturer || isExaminer || isSystemAdmin;
-  const canCreate = isStudent || isLecturer || isExaminer;
+  const isExaminerLike = isExaminer || isSystemAdmin;
+  const isStaffViewer = isLecturer || isExaminerLike;
+  const canCreate = isStudent || isLecturer || isExaminerLike;
   const filterOptions = STUDENT_FILTERS;
   const staffPurposeFilters = isLecturer ? LECTURER_PURPOSE_FILTERS : STAFF_PURPOSE_FILTERS;
   const searchParams = useSearchParams();
@@ -401,7 +402,7 @@ export function ProjectsPanel() {
       name: row.name || "",
       description: row.description || "",
       organizationName: row.organizationName || "",
-      purpose: row.purpose || (isExaminer ? "ASSIGNMENT" : "PRACTICE"),
+      purpose: row.purpose || (isExaminerLike ? "ASSIGNMENT" : "PRACTICE"),
       visibility: row.visibility || "PRIVATE",
       openAt: row.openAt ? new Date(row.openAt).toISOString().slice(0, 16) : "",
       closeAt: row.closeAt ? new Date(row.closeAt).toISOString().slice(0, 16) : "",
@@ -715,15 +716,23 @@ export function ProjectsPanel() {
 
   const canEditOrDelete = useMemo(
     () => (row) => {
-      if (row.ownerUserId !== session?.userId) return false;
-      if (isStudent) return row.creatorRole === "STUDENT";
-      if (isLecturer) {
-        return row.creatorRole === "LECTURER" || (row.creatorRole === "EXAMINER" && row.purpose === "PRACTICE");
+      if (isStudent) {
+        return row.ownerUserId === session?.userId && row.creatorRole === "STUDENT";
       }
-      if (isExaminer) return row.creatorRole === "EXAMINER";
+      if (isLecturer) {
+        return (
+          row.ownerUserId === session?.userId &&
+          (row.creatorRole === "LECTURER" ||
+            (row.creatorRole === "EXAMINER" && row.purpose === "PRACTICE"))
+        );
+      }
+      if (isSystemAdmin) return row.creatorRole === "EXAMINER";
+      if (isExaminer) {
+        return row.ownerUserId === session?.userId && row.creatorRole === "EXAMINER";
+      }
       return false;
     },
-    [isStudent, isLecturer, isExaminer, session?.userId],
+    [isStudent, isLecturer, isExaminer, isSystemAdmin, session?.userId],
   );
 
   if (sessionLoading || loading) {
@@ -957,9 +966,7 @@ export function ProjectsPanel() {
                             </IconButton>
                           </Tooltip>
                         ) : null}
-                        {isExaminer &&
-                        row.ownerUserId === session?.userId &&
-                        row.creatorRole === "EXAMINER" ? (
+                        {isExaminerLike && row.creatorRole === "EXAMINER" ? (
                           <Tooltip title="View submissions">
                             <IconButton
                               size="small"
@@ -1072,7 +1079,7 @@ export function ProjectsPanel() {
                 disabled={isStudent || isLecturer}
               >
                 <MenuItem value="PRACTICE">Practice</MenuItem>
-                {isExaminer ? <MenuItem value="ASSIGNMENT">Assignment</MenuItem> : null}
+                {isExaminerLike ? <MenuItem value="ASSIGNMENT">Assignment</MenuItem> : null}
               </Select>
             </FormControl>
             {isStudent ? (

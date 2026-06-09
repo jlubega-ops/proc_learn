@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { getAppSession } from "@/lib/auth/session";
+import { mutateActiveAppSession } from "@/lib/auth/session";
 import { buildIronSessionOptions } from "@/lib/auth/session-options";
 import { buildSessionPayloadForUserId } from "@/lib/auth/session-payload";
 import { prisma } from "@/lib/prisma";
@@ -15,7 +15,7 @@ export async function POST(request) {
     );
   }
 
-  const session = await getAppSession();
+  const session = await mutateActiveAppSession();
   if (!session?.userId) {
     return NextResponse.json({ error: "Unauthorized." }, { status: 401 });
   }

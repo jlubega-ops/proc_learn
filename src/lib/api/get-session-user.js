@@ -1,4 +1,4 @@
-import { getAppSession } from "@/lib/auth/session";
+import { getReadableAppSession } from "@/lib/auth/session";
 import { prisma } from "@/lib/prisma";
 import { grantedRoles, sanitizeActiveRole } from "@/lib/roles";
 
@@ -14,11 +14,15 @@ import { grantedRoles, sanitizeActiveRole } from "@/lib/roles";
  * @returns {Promise<SessionUser | null>}
  */
 export async function getSessionUser() {
-  const session = await getAppSession();
+  const session = await getReadableAppSession();
   if (!session?.userId) return null;
   const user = await prisma.user.findUnique({
     where: { id: session.userId },
-    include: { settings: true, userRoles: true },
+    include: {
+      settings: true,
+      userRoles: true,
+      studentProfile: { select: { studentNumber: true } },
+    },
   });
   if (!user?.settings) return user;
 

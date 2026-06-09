@@ -1,23 +1,20 @@
-import crypto from "node:crypto";
 import { NextResponse } from "next/server";
-import bcrypt from "bcryptjs";
-import { AuthTokenType, Role, UserAccountStatus } from "@prisma/client";
+import { Role, UserAccountStatus } from "@prisma/client";
 import { getSessionUser, sessionActiveRole } from "@/lib/api/get-session-user";
 import { canManageStaffUsers } from "@/lib/api/student-scope";
+import { generateInitialPassword } from "@/lib/auth/generate-initial-password";
 import { isStaffMubsEmail } from "@/lib/mubs-email";
 import { normalizeProfilePhotoInput } from "@/lib/profile-photo-url";
-import { sendAccountActivationEmail } from "@/lib/invite-mail";
+import { sendStaffWelcomeEmail } from "@/lib/invite-mail";
 import { formatUserDisplayName } from "@/lib/user-display";
 import { pickHighestGrantedRole, validateGrantedRolesForSave } from "@/lib/roles";
-import { createAuthTokenRecord } from "@/lib/auth-token";
 import { writeAuditLog, AuditEvent } from "@/lib/audit-log";
 import { notifyAllSystemAdmins } from "@/lib/notify-system-admins";
+import { insertStaffUserWithPassword } from "@/lib/staff-insert";
 import { prisma } from "@/lib/prisma";
 import { parseOptionalMaleFemaleSex } from "@/lib/validation/sex-male-female";
 
 export const runtime = "nodejs";
-
-const ACTIVATION_MS = 7 * 24 * 60 * 60 * 1000;
 
 /**
  * @param {import("@prisma/client").User & { userRoles: import("@prisma/client").UserRole[] }} u
@@ -26,6 +23,8 @@ function serializeStaff(u) {
   const roles = u.userRoles.map((r) => r.role);
   const canResendActivation =
     !u.activatedAt && u.accountStatus !== UserAccountStatus.SUSPENDED;
+  const canResendWelcome =
+    Boolean(u.mustChangePassword) && u.accountStatus !== UserAccountStatus.SUSPENDED;
   return {
     id: u.id,
     email: u.email,
@@ -37,8 +36,10 @@ function serializeStaff(u) {
     suspendedReason: u.suspendedReason,
     activatedAt: u.activatedAt,
     lastLoginAt: u.lastLoginAt,
+    mustChangePassword: Boolean(u.mustChangePassword),
     roles,
     canResendActivation,
+    canResendWelcome,
   };
 }
 
@@ -110,57 +111,46 @@ export async function POST(request) {
   }
 
   const activeRole = pickHighestGrantedRole(roles);
+  const plainPassword = generateInitialPassword();
 
-  const passwordHash = await bcrypt.hash(crypto.randomBytes(48).toString("hex"), 12);
+  const created = await insertStaffUserWithPassword(prisma, {
+    email,
+    firstName,
+    lastName,
+    middleName,
+    sex: sex ?? null,
+    profilePhotoUrl,
+    roles: /** @type {Role[]} */ (roles),
+    activeRole: /** @type {Role} */ (activeRole),
+    plainPassword,
+  });
 
-  let created;
-  try {
-    created = await prisma.user.create({
-      data: {
-        email,
-        firstName: firstName.slice(0, 100),
-        middleName: middleName ? middleName.slice(0, 100) : null,
-        lastName: lastName.slice(0, 100),
-        sex: sex ?? null,
-        profilePhotoUrl,
-        passwordHash,
-        accountStatus: UserAccountStatus.PENDING_ACTIVATION,
-        activatedAt: null,
-        userRoles: {
-          create: roles.map((role) => ({ role: /** @type {Role} */ (role) })),
-        },
-        settings: {
-          create: {
-            theme: "light",
-            activeRole: /** @type {Role} */ (activeRole),
-          },
-        },
-      },
-    });
-  } catch {
+  if (!created) {
     return NextResponse.json(
       { error: "Could not create user (email may already exist)." },
       { status: 400 },
     );
   }
 
-  const { rawToken } = await createAuthTokenRecord(
-    created.id,
-    AuthTokenType.ACCOUNT_ACTIVATION,
-    ACTIVATION_MS,
-  );
+  if (process.env.NODE_ENV !== "production") {
+    console.log(
+      "[staff-create] Welcome email temp password (non-production only):",
+      plainPassword,
+    );
+  }
 
-  await sendAccountActivationEmail({
+  await sendStaffWelcomeEmail({
     email: created.email,
-    rawToken,
     displayName: formatUserDisplayName(created),
+    temporaryPassword: plainPassword,
+    roles,
   });
 
   await writeAuditLog({
     eventType: AuditEvent.STAFF_USER_CREATED,
     actorUserId: actor.id,
     targetUserId: created.id,
-    meta: { email: created.email, roles },
+    meta: { email: created.email, roles, delivery: "welcome_email" },
   });
 
   const actorLabel = formatUserDisplayName(actor);
@@ -173,6 +163,6 @@ export async function POST(request) {
   return NextResponse.json({
     ok: true,
     userId: created.id,
-    message: "User created. Activation email sent.",
+    message: "Staff user created. Welcome email with sign-in details sent.",
   });
 }

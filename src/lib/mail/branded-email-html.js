@@ -1,8 +1,9 @@
 import { APP_BASE_URL, APP_NAME, ORG_NAME, ORG_SHORT } from "@/lib/appConfig";
 
-/** MUBS brand — align with app shell and sign-in card */
+/** MUBS / Proc Learn brand — align with app shell and sign-in card */
 export const BRAND_PRIMARY = "#008bd0";
 export const BRAND_ACCENT = "#ed1c24";
+export const BRAND_HIGHLIGHT = "#fff200";
 export const BRAND_TEXT = "#18181b";
 export const BRAND_MUTED = "#52525b";
 
@@ -32,6 +33,9 @@ export function publicAssetUrl(path) {
  *   preheader?: string;
  *   headline: string;
  *   bodyLines: string[];
+ *   bulletLines?: string[];
+ *   credentialLabel?: string;
+ *   credentialValue?: string;
  *   ctaLabel?: string;
  *   ctaUrl?: string;
  *   finePrintLines?: string[];
@@ -46,12 +50,45 @@ export function buildBrandedTransactionalEmail(p) {
   const app = escapeHtml(APP_NAME);
 
   const bodyParagraphs = p.bodyLines
-    .map((line) => `<p style="margin:0 0 14px 0;font-size:15px;line-height:1.55;color:${BRAND_TEXT};">${escapeHtml(line)}</p>`)
+    .map(
+      (line) =>
+        `<p style="margin:0 0 14px 0;font-size:15px;line-height:1.55;color:${BRAND_TEXT};">${escapeHtml(line)}</p>`,
+    )
     .join("");
+
+  const bulletBlock =
+    p.bulletLines && p.bulletLines.length > 0
+      ? `<table role="presentation" cellpadding="0" cellspacing="0" border="0" width="100%" style="margin:0 0 18px 0;">
+  <tr>
+    <td style="padding:14px 16px;background:#f8fafc;border-radius:8px;border-left:4px solid ${BRAND_PRIMARY};">
+      <p style="margin:0 0 8px 0;font-size:13px;font-weight:600;color:${BRAND_TEXT};">How to sign in</p>
+      <ul style="margin:0;padding:0 0 0 18px;font-size:14px;line-height:1.55;color:${BRAND_MUTED};">
+        ${p.bulletLines.map((line) => `<li style="margin:0 0 6px 0;">${escapeHtml(line)}</li>`).join("")}
+      </ul>
+    </td>
+  </tr>
+</table>`
+      : "";
+
+  const credentialBlock =
+    p.credentialLabel && p.credentialValue
+      ? `<table role="presentation" cellpadding="0" cellspacing="0" border="0" width="100%" style="margin:0 0 20px 0;">
+  <tr>
+    <td style="padding:16px 18px;background:#fffef5;border-radius:10px;border:1px solid #e4e4e7;border-top:3px solid ${BRAND_HIGHLIGHT};">
+      <p style="margin:0 0 6px 0;font-size:11px;font-weight:700;letter-spacing:0.08em;text-transform:uppercase;color:${BRAND_MUTED};">
+        ${escapeHtml(p.credentialLabel)}
+      </p>
+      <p style="margin:0;font-family:Consolas,Monaco,'Courier New',monospace;font-size:20px;font-weight:700;letter-spacing:0.06em;color:${BRAND_TEXT};">
+        ${escapeHtml(p.credentialValue)}
+      </p>
+    </td>
+  </tr>
+</table>`
+      : "";
 
   const ctaBlock =
     p.ctaLabel && p.ctaUrl
-      ? `<table role="presentation" cellpadding="0" cellspacing="0" border="0" style="margin:24px 0 8px 0;">
+      ? `<table role="presentation" cellpadding="0" cellspacing="0" border="0" style="margin:8px 0 8px 0;">
   <tr>
     <td style="border-radius:8px;background:${BRAND_PRIMARY};">
       <a href="${escapeHtml(p.ctaUrl)}" style="display:inline-block;padding:14px 28px;font-size:15px;font-weight:600;color:#ffffff;text-decoration:none;border-radius:8px;">
@@ -96,7 +133,7 @@ export function buildBrandedTransactionalEmail(p) {
             <td style="height:4px;background:${BRAND_ACCENT};font-size:0;line-height:0;">&nbsp;</td>
           </tr>
           <tr>
-            <td style="padding:28px 28px 8px 28px;">
+            <td style="padding:24px 28px 20px 28px;background:linear-gradient(180deg,#f0f9ff 0%,#ffffff 100%);">
               <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0">
                 <tr>
                   <td width="56" valign="top" style="padding-right:12px;">
@@ -104,9 +141,12 @@ export function buildBrandedTransactionalEmail(p) {
                   </td>
                   <td valign="top" style="padding-top:2px;">
                     <p style="margin:0;font-size:10px;font-weight:700;letter-spacing:0.12em;text-transform:uppercase;color:${BRAND_MUTED};">
-                      ${short} · ${app}
+                      ${short}
                     </p>
-                    <h1 style="margin:8px 0 0 0;font-size:20px;font-weight:700;line-height:1.25;color:${BRAND_TEXT};">
+                    <p style="margin:4px 0 0 0;font-size:22px;font-weight:800;line-height:1.2;color:${BRAND_PRIMARY};">
+                      ${app}
+                    </p>
+                    <h1 style="margin:10px 0 0 0;font-size:18px;font-weight:700;line-height:1.3;color:${BRAND_TEXT};">
                       ${headline}
                     </h1>
                   </td>
@@ -115,8 +155,10 @@ export function buildBrandedTransactionalEmail(p) {
             </td>
           </tr>
           <tr>
-            <td style="padding:8px 28px 32px 28px;">
+            <td style="padding:4px 28px 32px 28px;">
               ${bodyParagraphs}
+              ${credentialBlock}
+              ${bulletBlock}
               ${ctaBlock}
               ${finePrint}
             </td>
@@ -135,6 +177,10 @@ export function buildBrandedTransactionalEmail(p) {
     "",
     ...p.bodyLines,
     "",
+    ...(p.credentialLabel && p.credentialValue
+      ? [`${p.credentialLabel}:`, p.credentialValue, ""]
+      : []),
+    ...(p.bulletLines && p.bulletLines.length > 0 ? ["How to sign in:", ...p.bulletLines.map((b) => `• ${b}`), ""] : []),
     ...(p.ctaLabel && p.ctaUrl ? [`${p.ctaLabel}:`, p.ctaUrl, ""] : []),
     ...(p.finePrintLines || []),
   ];

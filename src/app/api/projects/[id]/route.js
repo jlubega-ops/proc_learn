@@ -3,20 +3,65 @@ import { ProjectPurpose, Role } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { AuditEvent, writeAuditLog } from "@/lib/audit-log";
 import { getSessionUser, sessionActiveRole } from "@/lib/api/get-session-user";
+import { mutateActiveAppSession } from "@/lib/auth/session";
 import { validateProjectCreateInput } from "@/lib/validation/project";
-import { canManageStudentProjectSettings } from "@/lib/projects/access";
+import {
+  canManageExaminerProject,
+  canManageStudentProjectSettings,
+} from "@/lib/projects/access";
 import { fetchAuthorizedProjectWorkspace } from "@/lib/projects/workspace-access";
+import { authorizeProjectOrgMember } from "@/lib/projects/workspace-access";
+import { ORG_PERMISSION } from "@/lib/projects/org-role-permissions";
 
 export const runtime = "nodejs";
 
 export async function GET(_request, context) {
-  const user = await getSessionUser();
-  if (!user) return NextResponse.json({ error: "Unauthorized." }, { status: 401 });
-  const activeRole = sessionActiveRole(user) || Role.STUDENT;
-
   const params = await context.params;
   const id = String(params?.id || "").trim();
   if (!id) return NextResponse.json({ error: "Invalid project id." }, { status: 400 });
+
+  const session = await mutateActiveAppSession();
+  if (!session) return NextResponse.json({ error: "Unauthorized." }, { status: 401 });
+
+  if (session.orgUserId) {
+    const auth = await authorizeProjectOrgMember(prisma, {
+      projectId: id,
+      orgUserId: session.orgUserId,
+      requiredPermission: ORG_PERMISSION.VIEW_OVERVIEW,
+    });
+    if (!auth.ok) {
+      return NextResponse.json({ error: "Not found." }, { status: auth.status });
+    }
+
+    const project = await prisma.project.findUnique({
+      where: { id },
+      select: {
+        id: true,
+        name: true,
+        description: true,
+        organizationName: true,
+        purpose: true,
+        status: true,
+        visibility: true,
+        isPublished: true,
+        projectCode: true,
+      },
+    });
+    if (!project) return NextResponse.json({ error: "Not found." }, { status: 404 });
+
+    return NextResponse.json({
+      project: {
+        ...project,
+        canManageOrgAdmin: false,
+        sessionType: "org",
+        orgRoleName: auth.orgUser.projectOrgRole?.name,
+      },
+    });
+  }
+
+  const user = await getSessionUser();
+  if (!user) return NextResponse.json({ error: "Unauthorized." }, { status: 401 });
+  const activeRole = sessionActiveRole(user) || Role.STUDENT;
 
   const access = await fetchAuthorizedProjectWorkspace(prisma, {
     projectId: id,
@@ -71,15 +116,21 @@ export async function PATCH(request, context) {
     existing.ownerUserId === user.id &&
     (existing.creatorRole === Role.LECTURER ||
       (existing.creatorRole === Role.EXAMINER && existing.purpose === ProjectPurpose.PRACTICE));
-  const isExaminerOwnerEdit =
-    activeRole === Role.EXAMINER &&
-    existing.ownerUserId === user.id &&
-    existing.creatorRole === Role.EXAMINER;
+  const managesExaminerProject = canManageExaminerProject({
+    activeRole,
+    project: existing,
+    userId: user.id,
+  });
 
-  if (!staffManagesStudent && existing.ownerUserId !== user.id) {
+  if (!staffManagesStudent && !managesExaminerProject && existing.ownerUserId !== user.id) {
     return NextResponse.json({ error: "Forbidden." }, { status: 403 });
   }
-  if (!isStudentOwnerEdit && !isLecturerOwnerEdit && !isExaminerOwnerEdit && !staffManagesStudent) {
+  if (
+    !isStudentOwnerEdit &&
+    !isLecturerOwnerEdit &&
+    !staffManagesStudent &&
+    !managesExaminerProject
+  ) {
     return NextResponse.json(
       { error: "You do not have permission to edit this project in the current role." },
       { status: 403 },
@@ -131,14 +182,14 @@ export async function PATCH(request, context) {
           instructions: d.instructions,
           questionText: d.questionText,
           questionFileUrl: d.questionFileUrl,
-          enrollmentKey: [Role.LECTURER, Role.EXAMINER].includes(activeRole)
+          enrollmentKey: [Role.LECTURER, Role.EXAMINER, Role.SYSTEM_ADMIN].includes(activeRole)
             ? d.enrollmentAccessKey
             : null,
           isPublished: activeRole === Role.STUDENT ? true : d.isPublished,
           openAt: d.openAt,
           closeAt: d.closeAt,
           durationSeconds: d.durationSeconds,
-          requiresEnrollment: [Role.EXAMINER, Role.LECTURER].includes(activeRole),
+          requiresEnrollment: [Role.EXAMINER, Role.LECTURER, Role.SYSTEM_ADMIN].includes(activeRole),
         },
   });
 
@@ -161,16 +212,21 @@ export async function DELETE(_request, context) {
 
   const existing = await prisma.project.findUnique({ where: { id } });
   if (!existing) return NextResponse.json({ error: "Not found." }, { status: 404 });
-  if (existing.ownerUserId !== user.id) return NextResponse.json({ error: "Forbidden." }, { status: 403 });
   const isStudentOwnerDelete =
-    activeRole === Role.STUDENT && existing.creatorRole === Role.STUDENT;
+    activeRole === Role.STUDENT &&
+    existing.creatorRole === Role.STUDENT &&
+    existing.ownerUserId === user.id;
   const isLecturerOwnerDelete =
     activeRole === Role.LECTURER &&
+    existing.ownerUserId === user.id &&
     (existing.creatorRole === Role.LECTURER ||
       (existing.creatorRole === Role.EXAMINER && existing.purpose === ProjectPurpose.PRACTICE));
-  const isExaminerOwnerDelete =
-    activeRole === Role.EXAMINER && existing.creatorRole === Role.EXAMINER;
-  if (!isStudentOwnerDelete && !isLecturerOwnerDelete && !isExaminerOwnerDelete) {
+  const managesExaminerProject = canManageExaminerProject({
+    activeRole,
+    project: existing,
+    userId: user.id,
+  });
+  if (!isStudentOwnerDelete && !isLecturerOwnerDelete && !managesExaminerProject) {
     return NextResponse.json(
       { error: "You do not have permission to delete this project in the current role." },
       { status: 403 },

@@ -53,7 +53,7 @@ function navbarUserInitials(displayName, email) {
 
 export function NavbarUserMenu() {
   const router = useRouter();
-  const { session, refresh, setSessionBlocking } = useAuthSession();
+  const { session, refresh, setSessionBlocking, signOut } = useAuthSession();
   const [anchor, setAnchor] = useState(null);
   const [roleDialogOpen, setRoleDialogOpen] = useState(false);
   const [picked, setPicked] = useState(session?.activeRole ?? "STUDENT");
@@ -81,25 +81,18 @@ export function NavbarUserMenu() {
 
   if (!session?.authenticated) return null;
 
+  const isOrgSession = session.sessionType === "org";
+
   const canSwitch =
+    !isOrgSession &&
     Array.isArray(session.switchableRoles) &&
     session.switchableRoles.length > 1;
 
   const closeMenu = () => setAnchor(null);
 
-  async function logout() {
+  function logout() {
     closeMenu();
-    setSessionBlocking(true, "Signing you out…");
-    try {
-      await fetch("/api/auth/logout", {
-        method: "POST",
-        credentials: "include",
-      });
-      await refresh();
-      router.replace("/login");
-    } finally {
-      setSessionBlocking(false);
-    }
+    void signOut({ message: "Signing you out…" });
   }
 
   async function confirmRoleSwitch() {
@@ -186,28 +179,45 @@ export function NavbarUserMenu() {
           />
         </MenuItem>
         <Divider />
-        <MenuItem
-          onClick={() => {
-            closeMenu();
-            router.push("/notifications");
-          }}
-        >
-          <ListItemIcon>
-            <NotificationsRounded fontSize="small" />
-          </ListItemIcon>
-          Notifications
-        </MenuItem>
-        <MenuItem
-          onClick={() => {
-            closeMenu();
-            router.push("/profile?tab=details");
-          }}
-        >
-          <ListItemIcon>
-            <AccountCircleRounded fontSize="small" />
-          </ListItemIcon>
-          Profile
-        </MenuItem>
+        {!isOrgSession ? (
+          <MenuItem
+            onClick={() => {
+              closeMenu();
+              router.push("/notifications");
+            }}
+          >
+            <ListItemIcon>
+              <NotificationsRounded fontSize="small" />
+            </ListItemIcon>
+            Notifications
+          </MenuItem>
+        ) : null}
+        {!isOrgSession ? (
+          <MenuItem
+            onClick={() => {
+              closeMenu();
+              router.push("/profile?tab=details");
+            }}
+          >
+            <ListItemIcon>
+              <AccountCircleRounded fontSize="small" />
+            </ListItemIcon>
+            Profile
+          </MenuItem>
+        ) : null}
+        {isOrgSession && session.projectId ? (
+          <MenuItem
+            onClick={() => {
+              closeMenu();
+              router.push(`/projects/${session.projectId}/my-account`);
+            }}
+          >
+            <ListItemIcon>
+              <AccountCircleRounded fontSize="small" />
+            </ListItemIcon>
+            My account
+          </MenuItem>
+        ) : null}
         {canSwitch ? (
           <MenuItem
             onClick={() => {

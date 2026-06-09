@@ -1,10 +1,13 @@
 import { NextResponse } from "next/server";
+import bcrypt from "bcryptjs";
 import { AuthTokenType, Role, UserAccountStatus } from "@prisma/client";
 import { getSessionUser, sessionActiveRole } from "@/lib/api/get-session-user";
 import { canManageStudents } from "@/lib/api/student-scope";
+import { generateInitialPassword } from "@/lib/auth/generate-initial-password";
 import { createAuthTokenRecord } from "@/lib/auth-token";
-import { sendAccountActivationEmail } from "@/lib/invite-mail";
+import { sendAccountActivationEmail, sendStaffWelcomeEmail } from "@/lib/invite-mail";
 import { formatUserDisplayName } from "@/lib/user-display";
+import { grantedRoles } from "@/lib/roles";
 import { prisma } from "@/lib/prisma";
 
 export const runtime = "nodejs";
@@ -27,7 +30,7 @@ export async function POST(_request, ctx) {
 
   const user = await prisma.user.findUnique({
     where: { id },
-    include: { studentProfile: true },
+    include: { studentProfile: true, userRoles: true },
   });
   if (!user) {
     return NextResponse.json({ error: "User not found." }, { status: 404 });
@@ -45,9 +48,33 @@ export async function POST(_request, ctx) {
 
   if (user.accountStatus === UserAccountStatus.SUSPENDED) {
     return NextResponse.json(
-      { error: "Suspended users cannot receive activation mail." },
+      { error: "Suspended users cannot receive invitation mail." },
       { status: 400 },
     );
+  }
+
+  if (!isStudent && user.mustChangePassword) {
+    const plainPassword = generateInitialPassword();
+    await prisma.user.update({
+      where: { id: user.id },
+      data: { passwordHash: await bcrypt.hash(plainPassword, 12) },
+    });
+
+    if (process.env.NODE_ENV !== "production") {
+      console.log(
+        "[staff-resend] Welcome email temp password (non-production only):",
+        plainPassword,
+      );
+    }
+
+    await sendStaffWelcomeEmail({
+      email: user.email,
+      displayName: formatUserDisplayName(user),
+      temporaryPassword: plainPassword,
+      roles: grantedRoles(user.userRoles),
+    });
+
+    return NextResponse.json({ ok: true, message: "Welcome email sent." });
   }
 
   if (user.activatedAt) {
@@ -69,5 +96,5 @@ export async function POST(_request, ctx) {
     displayName: formatUserDisplayName(user),
   });
 
-  return NextResponse.json({ ok: true });
+  return NextResponse.json({ ok: true, message: "Activation email sent." });
 }

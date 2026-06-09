@@ -4,6 +4,8 @@ import { getSessionUser, sessionActiveRole } from "@/lib/api/get-session-user";
 import { writeAuditLog, AuditEvent } from "@/lib/audit-log";
 import { prisma } from "@/lib/prisma";
 import { authorizeProjectOrgAdmin } from "@/lib/projects/workspace-access";
+import { authorizeProjectOrgRead } from "@/lib/projects/project-api-auth";
+import { ORG_PERMISSION } from "@/lib/projects/org-role-permissions";
 import {
   listActiveProjectFinancialYears,
   planningPeriodSelect,
@@ -15,18 +17,13 @@ import { validateProjectOrgPlanningPeriodInput } from "@/lib/validation/project-
 export const runtime = "nodejs";
 
 export async function GET(request, context) {
-  const user = await getSessionUser();
-  if (!user) return NextResponse.json({ error: "Unauthorized." }, { status: 401 });
-
-  const activeRole = sessionActiveRole(user) || Role.STUDENT;
   const params = await context.params;
   const projectId = String(params?.id || "").trim();
   if (!projectId) return NextResponse.json({ error: "Invalid project id." }, { status: 400 });
 
-  const auth = await authorizeProjectOrgAdmin(prisma, {
+  const auth = await authorizeProjectOrgRead(prisma, {
     projectId,
-    userId: user.id,
-    activeRole,
+    orgPermission: ORG_PERMISSION.VIEW_PLANNING_PERIODS,
   });
   if (!auth.ok) {
     return NextResponse.json(

@@ -1,30 +1,17 @@
-import { redirect, notFound } from "next/navigation";
-import { Role } from "@prisma/client";
-import { getSessionUser, sessionActiveRole } from "@/lib/api/get-session-user";
-import { prisma } from "@/lib/prisma";
-import { fetchAuthorizedProjectWorkspace } from "@/lib/projects/workspace-access";
+import { headers } from "next/headers";
+import { getProjectWorkspacePageContext } from "@/lib/projects/project-page-context";
+import { safeNextPath } from "@/lib/auth/safe-next-path";
 
 export default async function ProjectOrgAdminLayout({ children, params }) {
-  const user = await getSessionUser();
-  if (!user) redirect("/login?next=/projects");
-
-  const activeRole = sessionActiveRole(user) || Role.STUDENT;
-  if (activeRole !== Role.STUDENT) notFound();
-
   const p = await params;
   const id = String(p?.id || "").trim();
-  if (!id) notFound();
+  const h = await headers();
+  const pathname = safeNextPath(h.get("x-pl-pathname") || `/projects/${id}`);
 
-  const access = await fetchAuthorizedProjectWorkspace(prisma, {
-    projectId: id,
-    userId: user.id,
-    activeRole,
+  await getProjectWorkspacePageContext(id, {
+    pathname,
+    requirePlatformOrgAdmin: true,
   });
-  if (!access) notFound();
-
-  if (!access.canManageOrgAdmin) {
-    redirect(`/projects/${id}`);
-  }
 
   return children;
 }

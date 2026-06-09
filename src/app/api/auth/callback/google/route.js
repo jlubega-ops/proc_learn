@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { cookies } from "next/headers";
 import { UserAccountStatus } from "@prisma/client";
-import { getAppSession } from "@/lib/auth/session";
+import { getAppSession, initSessionActivity } from "@/lib/auth/session";
 import { buildIronSessionOptions } from "@/lib/auth/session-options";
 import { safeNextPath } from "@/lib/auth/safe-next-path";
 import { getGoogleOAuthRedirectUri } from "@/lib/oauth/google-config";
@@ -91,7 +91,7 @@ export async function GET(request) {
 
   const user = await prisma.user.findUnique({
     where: { email },
-    include: { userRoles: true },
+    include: { userRoles: true, settings: true },
   });
 
   if (!user) {
@@ -155,6 +155,7 @@ export async function GET(request) {
   }
 
   session.userId = user.id;
+  initSessionActivity(session);
   await session.save();
 
   const roleRows = await prisma.userRole.findMany({
@@ -173,7 +174,8 @@ export async function GET(request) {
     update: { activeRole: loginActiveRole },
   });
 
-  const dest = safeNextPath(nextRaw);
+  const mustChangePassword = Boolean(user.mustChangePassword);
+  const dest = mustChangePassword ? "/setup-password" : safeNextPath(nextRaw);
   const res = NextResponse.redirect(new URL(dest, request.url));
   res.cookies.delete("pl_google_oauth_state");
   res.cookies.delete("pl_google_oauth_next");

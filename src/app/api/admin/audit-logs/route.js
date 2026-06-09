@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { Role } from "@prisma/client";
 import { getSessionUser, sessionActiveRole } from "@/lib/api/get-session-user";
 import { formatUserDisplayName } from "@/lib/user-display";
+import { auditLoginMethodLabel } from "@/lib/audit-log-display";
 import { prisma } from "@/lib/prisma";
 
 export const runtime = "nodejs";
@@ -141,6 +142,7 @@ export async function GET(request) {
         })()
       : null,
     targetEmail: r.targetUserId ? byId[r.targetUserId]?.email ?? null : null,
+    loginMethod: auditLoginMethodLabel(r.eventType, r.meta),
   }));
 
   return NextResponse.json({ items, total, page, pageSize });

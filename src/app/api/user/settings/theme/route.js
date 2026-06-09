@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { getAppSession } from "@/lib/auth/session";
+import { mutateActiveAppSession } from "@/lib/auth/session";
 import { buildIronSessionOptions } from "@/lib/auth/session-options";
 import { prisma } from "@/lib/prisma";
 import { grantedRoles, pickHighestGrantedRole } from "@/lib/roles";
@@ -14,16 +14,8 @@ export async function PATCH(request) {
     );
   }
 
-  const session = await getAppSession();
+  const session = await mutateActiveAppSession();
   if (!session) {
-    return NextResponse.json(
-      { error: "Server auth is not configured (SESSION_SECRET)." },
-      { status: 503 },
-    );
-  }
-
-  const userId = session.userId;
-  if (!userId) {
     return NextResponse.json({ error: "Unauthorized." }, { status: 401 });
   }
 
@@ -37,6 +29,19 @@ export async function PATCH(request) {
   const theme = body?.theme;
   if (theme !== "light" && theme !== "dark") {
     return NextResponse.json({ error: "Invalid theme value." }, { status: 400 });
+  }
+
+  if (session.orgUserId) {
+    await prisma.projectOrgUser.update({
+      where: { id: session.orgUserId },
+      data: { theme },
+    });
+    return NextResponse.json({ ok: true, theme });
+  }
+
+  const userId = session.userId;
+  if (!userId) {
+    return NextResponse.json({ error: "Unauthorized." }, { status: 401 });
   }
 
   const u = await prisma.user.findUnique({

@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { readFile } from "fs/promises";
-import { getAppSession } from "@/lib/auth/session";
+import { mutateActiveAppSession } from "@/lib/auth/session";
 import { buildIronSessionOptions } from "@/lib/auth/session-options";
 import { prisma } from "@/lib/prisma";
 import { resolveStoredFilePath } from "@/lib/upload-path";
@@ -15,7 +15,7 @@ export async function GET(_request, context) {
     return NextResponse.json({ error: "Not configured." }, { status: 503 });
   }
 
-  const session = await getAppSession();
+  const session = await mutateActiveAppSession();
   if (!session?.userId) {
     return NextResponse.json({ error: "Unauthorized." }, { status: 401 });
   }

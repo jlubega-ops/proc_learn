@@ -1,5 +1,6 @@
 import { normalizeEmail } from "@/lib/validation/email";
 import { schoolEmailFieldError } from "@/lib/validation/school-email";
+import { isOrgLoginIdentifier } from "@/lib/projects/org-login-identity";
 
 /**
  * Canonical login email (trim + lower case). Empty if input is blank.
@@ -18,10 +19,17 @@ export function normalizeLoginEmail(raw) {
 export function validateLoginFields(values) {
   const password = values.password ?? "";
   const errors = {};
+  const identifier = values.identifier ?? values.email ?? "";
 
-  const schoolErr = schoolEmailFieldError(values.identifier ?? values.email);
-  if (schoolErr) {
-    errors.identifier = schoolErr;
+  if (isOrgLoginIdentifier(identifier)) {
+    if (!String(identifier).trim()) {
+      errors.identifier = "organisation username is required.";
+    }
+  } else {
+    const schoolErr = schoolEmailFieldError(identifier);
+    if (schoolErr) {
+      errors.identifier = schoolErr;
+    }
   }
 
   if (!password) {

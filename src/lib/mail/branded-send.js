@@ -1,6 +1,7 @@
 import { sendTransactionalMail } from "@/lib/mail";
 import { buildActivationUrl } from "@/lib/auth-links";
-import { APP_NAME } from "@/lib/appConfig";
+import { APP_BASE_URL, APP_NAME } from "@/lib/appConfig";
+import { formatRoleLabel } from "@/lib/roles";
 import { buildBrandedTransactionalEmail } from "@/lib/mail/branded-email-html";
 
 /**
@@ -11,6 +12,39 @@ import { buildBrandedTransactionalEmail } from "@/lib/mail/branded-email-html";
 export async function sendBrandedTransactional(to, subject, payload) {
   const { html, text } = buildBrandedTransactionalEmail(payload);
   return sendTransactionalMail({ to, subject, text, html });
+}
+
+/**
+ * Staff welcome — temporary password, Google sign-in, first-login password setup.
+ * @param {{ email: string; displayName: string; temporaryPassword: string; roles: string[] }} p
+ */
+export async function sendStaffWelcomeEmail(p) {
+  const name = p.displayName?.trim() || "there";
+  const loginUrl = `${APP_BASE_URL.replace(/\/$/, "")}/login`;
+  const roleLabels = (p.roles || []).map((r) => formatRoleLabel(r)).join(", ") || "Staff";
+  return sendBrandedTransactional(p.email, `Your ${APP_NAME} staff account is ready`, {
+    preheader: `Temporary password and sign-in steps for ${APP_NAME}.`,
+    headline: "Welcome to Proc Learn",
+    bodyLines: [
+      `Hello ${name},`,
+      `A staff account has been created for your MUBS email on ${APP_NAME}.`,
+      `Assigned role(s): ${roleLabels}.`,
+      "Use the temporary password below on your first sign-in, or choose Sign in with Google using the same @mubs.ac.ug address.",
+      "You will be prompted to choose a personal password before you can continue using the platform.",
+    ],
+    credentialLabel: "Temporary password",
+    credentialValue: p.temporaryPassword,
+    bulletLines: [
+      `Open the login page and sign in with ${p.email} and the temporary password.`,
+      "Or use Sign in with Google with your institutional @mubs.ac.ug email.",
+      "Choose a new password when prompted — this replaces the temporary password.",
+    ],
+    ctaLabel: "Open Proc Learn",
+    ctaUrl: loginUrl,
+    finePrintLines: [
+      "Keep this password private. If you did not expect this invitation, contact your system administrator.",
+    ],
+  });
 }
 
 /**

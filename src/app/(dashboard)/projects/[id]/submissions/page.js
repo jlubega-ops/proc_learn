@@ -3,6 +3,7 @@ import { Role } from "@prisma/client";
 import Chip from "@mui/material/Chip";
 import { format, isValid, parseISO } from "date-fns";
 import { getSessionUser, sessionActiveRole } from "@/lib/api/get-session-user";
+import { actsAsExaminerRole } from "@/lib/projects/access";
 import { prisma } from "@/lib/prisma";
 
 export const metadata = {
@@ -20,14 +21,17 @@ export default async function ProjectSubmissionsPage({ params }) {
   const user = await getSessionUser();
   if (!user) redirect("/login?next=/projects");
   const activeRole = sessionActiveRole(user) || Role.STUDENT;
-  if (activeRole !== Role.EXAMINER) redirect("/projects");
+  if (!actsAsExaminerRole(activeRole)) redirect("/projects");
 
   const p = await params;
   const id = String(p?.id || "").trim();
   if (!id) notFound();
 
   const project = await prisma.project.findUnique({ where: { id } });
-  if (!project || project.ownerUserId !== user.id || project.creatorRole !== Role.EXAMINER) {
+  if (!project || project.creatorRole !== Role.EXAMINER) {
+    notFound();
+  }
+  if (activeRole === Role.EXAMINER && project.ownerUserId !== user.id) {
     notFound();
   }
 

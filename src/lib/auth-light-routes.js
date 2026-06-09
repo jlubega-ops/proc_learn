@@ -2,7 +2,7 @@
  * Pre-auth pages that always use light UI (`html` without `.dark`).
  * Keep in sync with the inline script in `app/layout.js`.
  */
-const PREFIXES = ["/login", "/forgot-password", "/reset-password", "/activate"];
+const PREFIXES = ["/login", "/forgot-password", "/reset-password", "/activate", "/setup-password"];
 
 /** @param {string | null | undefined} pathname */
 export function isAuthLightRoutePath(pathname) {

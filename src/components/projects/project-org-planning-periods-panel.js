@@ -74,7 +74,7 @@ function computePeriodLabel(form) {
 /**
  * @param {{ projectId: string }} p
  */
-export function ProjectOrgPlanningPeriodsPanel({ projectId }) {
+export function ProjectOrgPlanningPeriodsPanel({ projectId, readOnly = false }) {
   const { showToast } = useToast();
   const [rows, setRows] = useState(/** @type {any[]} */ ([]));
   const [activeFinancialYears, setActiveFinancialYears] = useState(
@@ -269,23 +269,25 @@ export function ProjectOrgPlanningPeriodsPanel({ projectId }) {
   return (
     <>
       <div className="mb-3 flex flex-wrap gap-2">
-        <Button
-          variant="contained"
-          startIcon={<AddRounded />}
-          disabled={refetching || !canAdd}
-          onClick={() => {
-            setCreateErrors({});
-            setCreateForm({
-              ...emptyForm(),
-              financialYearId: activeFinancialYears[0]?.id || "",
-            });
-            setOpenCreate(true);
-          }}
-          className="w-full sm:w-auto"
-          title="Add planning period"
-        >
-          Add planning period
-        </Button>
+        {!readOnly ? (
+          <Button
+            variant="contained"
+            startIcon={<AddRounded />}
+            disabled={refetching || !canAdd}
+            onClick={() => {
+              setCreateErrors({});
+              setCreateForm({
+                ...emptyForm(),
+                financialYearId: activeFinancialYears[0]?.id || "",
+              });
+              setOpenCreate(true);
+            }}
+            className="w-full sm:w-auto"
+            title="Add planning period"
+          >
+            Add planning period
+          </Button>
+        ) : null}
         <Button
           variant="outlined"
           startIcon={refetching ? <CircularProgress size={16} /> : <RefreshRounded />}
@@ -318,13 +320,13 @@ export function ProjectOrgPlanningPeriodsPanel({ projectId }) {
                 <TableCell>Planning period</TableCell>
                 <TableCell>Start</TableCell>
                 <TableCell>End</TableCell>
-                <TableCell align="right">Actions</TableCell>
+                {!readOnly ? <TableCell align="right">Actions</TableCell> : null}
               </TableRow>
             </TableHead>
             <TableBody>
               {rows.length === 0 ? (
                 <TableRow>
-                  <TableCell colSpan={5} align="center" sx={{ py: 5 }}>
+                  <TableCell colSpan={readOnly ? 4 : 5} align="center" sx={{ py: 5 }}>
                     <Typography variant="body2" sx={adminMutedTextSx}>
                       No planning periods yet.
                     </Typography>
@@ -337,32 +339,34 @@ export function ProjectOrgPlanningPeriodsPanel({ projectId }) {
                     <TableCell>{row.periodLabel || "—"}</TableCell>
                     <TableCell>{fmtTableDate(row.startDate)}</TableCell>
                     <TableCell>{fmtTableDate(row.endDate)}</TableCell>
-                    <TableCell align="right">
-                      <Box sx={{ display: "inline-flex", gap: 0.25 }}>
-                        <Tooltip title="Edit planning period">
-                          <IconButton
-                            size="small"
-                            aria-label="Edit planning period"
-                            color="primary"
-                            disabled={refetching}
-                            onClick={() => openEdit(row)}
-                          >
-                            <EditRounded fontSize="small" />
-                          </IconButton>
-                        </Tooltip>
-                        <Tooltip title="Delete planning period">
-                          <IconButton
-                            size="small"
-                            aria-label="Delete planning period"
-                            color="error"
-                            disabled={refetching}
-                            onClick={() => setDelRow(row)}
-                          >
-                            <DeleteOutlineRounded fontSize="small" />
-                          </IconButton>
-                        </Tooltip>
-                      </Box>
-                    </TableCell>
+                    {!readOnly ? (
+                      <TableCell align="right">
+                        <Box sx={{ display: "inline-flex", gap: 0.25 }}>
+                          <Tooltip title="Edit planning period">
+                            <IconButton
+                              size="small"
+                              aria-label="Edit planning period"
+                              color="primary"
+                              disabled={refetching}
+                              onClick={() => openEdit(row)}
+                            >
+                              <EditRounded fontSize="small" />
+                            </IconButton>
+                          </Tooltip>
+                          <Tooltip title="Delete planning period">
+                            <IconButton
+                              size="small"
+                              aria-label="Delete planning period"
+                              color="error"
+                              disabled={refetching}
+                              onClick={() => setDelRow(row)}
+                            >
+                              <DeleteOutlineRounded fontSize="small" />
+                            </IconButton>
+                          </Tooltip>
+                        </Box>
+                      </TableCell>
+                    ) : null}
                   </TableRow>
                 ))
               )}

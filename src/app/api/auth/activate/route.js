@@ -95,6 +95,7 @@ export async function POST(request) {
           passwordHash,
           accountStatus: UserAccountStatus.ACTIVE,
           activatedAt: new Date(),
+          mustChangePassword: false,
         },
       });
     });

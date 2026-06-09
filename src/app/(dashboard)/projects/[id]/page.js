@@ -1,22 +1,17 @@
-import { notFound, redirect } from "next/navigation";
-import { Role } from "@prisma/client";
 import Chip from "@mui/material/Chip";
 import { format, isValid, parseISO } from "date-fns";
-import { getSessionUser, sessionActiveRole } from "@/lib/api/get-session-user";
+import { getProjectWorkspacePageContext } from "@/lib/projects/project-page-context";
 import { prisma } from "@/lib/prisma";
+import { formatUserDisplayName } from "@/lib/user-display";
 
 export const metadata = {
   title: "Project details",
 };
 
 export default async function ProjectDetailsPage({ params }) {
-  const user = await getSessionUser();
-  if (!user) redirect("/login?next=/projects");
-  const activeRole = sessionActiveRole(user) || Role.STUDENT;
-
   const p = await params;
   const id = String(p?.id || "").trim();
-  if (!id) notFound();
+  const ctx = await getProjectWorkspacePageContext(id);
 
   const project = await prisma.project.findUnique({
     where: { id },
@@ -26,9 +21,55 @@ export default async function ProjectDetailsPage({ params }) {
       },
     },
   });
-  if (!project) notFound();
+  if (!project) {
+    const { notFound } = await import("next/navigation");
+    notFound();
+  }
 
-  const isStudentOwnedProject = project.creatorRole === Role.STUDENT && project.ownerUserId === user.id;
+  if (ctx.viewer === "org") {
+    return (
+      <div className="w-full space-y-4">
+        <div className="rounded-xl border border-zinc-200 bg-white p-4 dark:border-zinc-800 dark:bg-zinc-900">
+          <h1 className="text-xl font-semibold text-zinc-900 dark:text-white">
+            {project.organizationName || project.name}
+          </h1>
+          <p className="mt-1 text-sm text-zinc-600 dark:text-zinc-400">
+            Signed in as{" "}
+            <span className="font-semibold text-[#008bd0]">
+              {ctx.orgUser.projectOrgRole?.name}
+            </span>
+            {ctx.orgUser.department?.name
+              ? ` · ${ctx.orgUser.department.name}`
+              : ""}
+          </p>
+          <div className="mt-3 flex flex-wrap items-center gap-2">
+            <Chip size="small" label={project.purpose} color="primary" />
+            <Chip size="small" label={project.status} color={statusColor(project.status)} />
+            <Chip size="small" label="Published" color="success" />
+          </div>
+        </div>
+
+        <div className="rounded-xl border border-zinc-200 bg-white p-4 dark:border-zinc-800 dark:bg-zinc-900">
+          <h2 className="text-base font-semibold text-zinc-900 dark:text-white">About this project</h2>
+          <p className="mt-2 whitespace-pre-wrap text-sm text-zinc-700 dark:text-zinc-300">
+            {project.description || "—"}
+          </p>
+        </div>
+
+        <div className="rounded-xl border border-zinc-200 bg-white p-4 dark:border-zinc-800 dark:bg-zinc-900">
+          <h2 className="text-base font-semibold text-zinc-900 dark:text-white">Your account</h2>
+          <p className="mt-2 text-sm text-zinc-700 dark:text-zinc-300">
+            {formatUserDisplayName(ctx.orgUser)} — use{" "}
+            <span className="font-semibold">My account</span> in the sidebar for full details and the
+            pages your role can open.
+          </p>
+        </div>
+      </div>
+    );
+  }
+
+  const isStudentOwnedProject =
+    project.creatorRole === "STUDENT" && project.ownerUserId === ctx.user.id;
   const showStaffFields = !isStudentOwnedProject;
 
   return (
@@ -36,7 +77,8 @@ export default async function ProjectDetailsPage({ params }) {
       <div className="rounded-xl border border-zinc-200 bg-white p-4 dark:border-zinc-800 dark:bg-zinc-900">
         <h1 className="text-xl font-semibold text-zinc-900 dark:text-white">{project.name}</h1>
         <p className="mt-1 text-sm text-zinc-600 dark:text-zinc-400">
-          Owner: {project.owner?.firstName || ""} {project.owner?.lastName || ""} ({project.owner?.email || "—"})
+          Owner: {project.owner?.firstName || ""} {project.owner?.lastName || ""} (
+          {project.owner?.email || "—"})
         </p>
         <div className="mt-3 flex flex-wrap items-center gap-2">
           <Chip size="small" label={project.purpose} color={purposeColor(project.purpose)} />
@@ -57,7 +99,9 @@ export default async function ProjectDetailsPage({ params }) {
           <h2 className="text-base font-semibold text-zinc-900 dark:text-white">Schedule</h2>
           <p className="mt-2 text-sm text-zinc-700 dark:text-zinc-300">Open: {fmtDate(project.openAt)}</p>
           <p className="text-sm text-zinc-700 dark:text-zinc-300">Close: {fmtDate(project.closeAt)}</p>
-          <p className="text-sm text-zinc-700 dark:text-zinc-300">Duration: {fmtDuration(project.durationSeconds)}</p>
+          <p className="text-sm text-zinc-700 dark:text-zinc-300">
+            Duration: {fmtDuration(project.durationSeconds)}
+          </p>
         </div>
       ) : null}
 

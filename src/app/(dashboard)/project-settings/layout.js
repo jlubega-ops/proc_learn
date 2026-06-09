@@ -1,6 +1,6 @@
 import { redirect } from "next/navigation";
 import { Role } from "@prisma/client";
-import { getAppSession } from "@/lib/auth/session";
+import { getReadableAppSession } from "@/lib/auth/session";
 import { buildIronSessionOptions } from "@/lib/auth/session-options";
 import { prisma } from "@/lib/prisma";
 
@@ -10,9 +10,9 @@ export default async function ProjectSettingsLayout({ children }) {
     redirect("/login");
   }
 
-  const session = await getAppSession();
+  const session = await getReadableAppSession();
   if (!session?.userId) {
-    redirect("/login");
+    redirect("/login?reason=idle");
   }
 
   const user = await prisma.user.findUnique({

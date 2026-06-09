@@ -50,7 +50,7 @@ function emptyForm() {
 /**
  * @param {{ projectId: string }} p
  */
-export function ProjectOrgDepartmentsPanel({ projectId }) {
+export function ProjectOrgDepartmentsPanel({ projectId, readOnly = false }) {
   const { showToast } = useToast();
   const [rows, setRows] = useState(/** @type {any[]} */ ([]));
   const [loading, setLoading] = useState(true);
@@ -268,19 +268,21 @@ export function ProjectOrgDepartmentsPanel({ projectId }) {
   return (
     <>
       <div className="mb-3 flex flex-wrap gap-2">
-        <Button
-          variant="contained"
-          startIcon={<AddRounded />}
-          disabled={refetching}
-          onClick={() => {
-            setCreateDeptErrors({});
-            setCreateDeptForm(emptyForm());
-            setCreateDeptOpen(true);
-          }}
-          className="w-full sm:w-auto"
-        >
-          Add department
-        </Button>
+        {!readOnly ? (
+          <Button
+            variant="contained"
+            startIcon={<AddRounded />}
+            disabled={refetching}
+            onClick={() => {
+              setCreateDeptErrors({});
+              setCreateDeptForm(emptyForm());
+              setCreateDeptOpen(true);
+            }}
+            className="w-full sm:w-auto"
+          >
+            Add department
+          </Button>
+        ) : null}
         <Button
           variant="outlined"
           startIcon={refetching ? <CircularProgress size={16} /> : <RefreshRounded />}
@@ -300,13 +302,13 @@ export function ProjectOrgDepartmentsPanel({ projectId }) {
                 <TableCell>Name</TableCell>
                 <TableCell>Description</TableCell>
                 <TableCell>Active</TableCell>
-                <TableCell align="right">Actions</TableCell>
+                {!readOnly ? <TableCell align="right">Actions</TableCell> : null}
               </TableRow>
             </TableHead>
             <TableBody>
               {rows.length === 0 ? (
                 <TableRow>
-                  <TableCell colSpan={4} align="center" sx={{ py: 5 }}>
+                  <TableCell colSpan={readOnly ? 3 : 4} align="center" sx={{ py: 5 }}>
                     <Typography variant="body2" sx={adminMutedTextSx}>
                       No departments yet. Add a department, then create subunits inside it.
                     </Typography>
@@ -336,25 +338,31 @@ export function ProjectOrgDepartmentsPanel({ projectId }) {
                       </TableCell>
                       <TableCell>{dept.description || "—"}</TableCell>
                       <TableCell>
-                        <Switch
-                          checked={dept.isActive}
-                          onChange={() => void toggleActive(dept)}
-                          disabled={patchingId === dept.id || refetching}
-                        />
+                        {readOnly ? (
+                          <span className="text-sm">{dept.isActive ? "Yes" : "No"}</span>
+                        ) : (
+                          <Switch
+                            checked={dept.isActive}
+                            onChange={() => void toggleActive(dept)}
+                            disabled={patchingId === dept.id || refetching}
+                          />
+                        )}
                       </TableCell>
-                      <TableCell align="right">
-                        <RowActions
-                          refetching={refetching}
-                          onEdit={() => openEdit(dept)}
-                          onDelete={() => setDelRow(dept)}
-                          onAddSubunit={() => {
-                            setCreateSubErrors({});
-                            setCreateSubForm(emptyForm());
-                            setSubunitParent(dept);
-                          }}
-                          showAddSubunit
-                        />
-                      </TableCell>
+                      {!readOnly ? (
+                        <TableCell align="right">
+                          <RowActions
+                            refetching={refetching}
+                            onEdit={() => openEdit(dept)}
+                            onDelete={() => setDelRow(dept)}
+                            onAddSubunit={() => {
+                              setCreateSubErrors({});
+                              setCreateSubForm(emptyForm());
+                              setSubunitParent(dept);
+                            }}
+                            showAddSubunit
+                          />
+                        </TableCell>
+                      ) : null}
                     </TableRow>,
                     ...(isOpen
                       ? subunits.map((sub) => (
@@ -362,19 +370,25 @@ export function ProjectOrgDepartmentsPanel({ projectId }) {
                             <TableCell sx={{ pl: 6 }}>{sub.name}</TableCell>
                             <TableCell>{sub.description || "—"}</TableCell>
                             <TableCell>
-                              <Switch
-                                checked={sub.isActive}
-                                onChange={() => void toggleActive(sub)}
-                                disabled={patchingId === sub.id || refetching}
-                              />
+                              {readOnly ? (
+                                <span className="text-sm">{sub.isActive ? "Yes" : "No"}</span>
+                              ) : (
+                                <Switch
+                                  checked={sub.isActive}
+                                  onChange={() => void toggleActive(sub)}
+                                  disabled={patchingId === sub.id || refetching}
+                                />
+                              )}
                             </TableCell>
-                            <TableCell align="right">
-                              <RowActions
-                                refetching={refetching}
-                                onEdit={() => openEdit(sub)}
-                                onDelete={() => setDelRow(sub)}
-                              />
-                            </TableCell>
+                            {!readOnly ? (
+                              <TableCell align="right">
+                                <RowActions
+                                  refetching={refetching}
+                                  onEdit={() => openEdit(sub)}
+                                  onDelete={() => setDelRow(sub)}
+                                />
+                              </TableCell>
+                            ) : null}
                           </TableRow>
                         ))
                       : []),

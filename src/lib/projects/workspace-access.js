@@ -3,6 +3,7 @@ import {
   canAccessProjectWorkspace,
   canManageProjectOrgWorkspace,
 } from "@/lib/projects/access";
+import { orgUserHasPermission } from "@/lib/projects/org-role-permissions";
 
 /** Minimal project fields required for workspace authorization checks. */
 export const projectWorkspaceAuthSelect = {
@@ -63,4 +64,64 @@ export async function authorizeProjectOrgAdmin(prisma, { projectId, userId, acti
   if (!access) return { ok: false, status: 404 };
   if (!access.canManageOrgAdmin) return { ok: false, status: 403 };
   return { ok: true, project: access.project };
+}
+
+/**
+ * @param {import("@prisma/client").PrismaClient} prisma
+ * @param {{ projectId: string; orgUserId: string; requiredPermission?: string }} p
+ */
+export async function authorizeProjectOrgMember(prisma, { projectId, orgUserId, requiredPermission }) {
+  const orgUser = await prisma.projectOrgUser.findFirst({
+    where: {
+      id: orgUserId,
+      projectId,
+      isProjectAdmin: false,
+      linkedUserId: null,
+    },
+    include: {
+      projectOrgRole: { select: { id: true, name: true, isActive: true } },
+      project: { select: projectWorkspaceAuthSelect },
+    },
+  });
+
+  if (!orgUser?.project) return { ok: false, status: 404 };
+  if (!orgUser.project.isPublished) return { ok: false, status: 403 };
+  if (!orgUser.projectOrgRole?.isActive) return { ok: false, status: 403 };
+
+  if (
+    requiredPermission &&
+    !orgUserHasPermission(orgUser.projectOrgRole.name, requiredPermission)
+  ) {
+    return { ok: false, status: 403 };
+  }
+
+  return { ok: true, orgUser, project: orgUser.project };
+}
+
+/**
+ * @param {import("@prisma/client").PrismaClient} prisma
+ * @param {string} orgUserId
+ */
+export async function fetchAuthorizedOrgUserWorkspace(prisma, orgUserId) {
+  const orgUser = await prisma.projectOrgUser.findUnique({
+    where: { id: orgUserId },
+    include: {
+      projectOrgRole: { select: { id: true, name: true, isActive: true } },
+      project: { select: projectWorkspaceAuthSelect },
+      department: { select: { id: true, name: true } },
+      subunit: { select: { id: true, name: true } },
+    },
+  });
+
+  if (
+    !orgUser ||
+    orgUser.isProjectAdmin ||
+    !orgUser.project ||
+    !orgUser.project.isPublished ||
+    !orgUser.projectOrgRole?.isActive
+  ) {
+    return null;
+  }
+
+  return { orgUser, project: orgUser.project };
 }

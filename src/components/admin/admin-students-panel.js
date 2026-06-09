@@ -63,9 +63,19 @@ import { AdminStudentsBulkImportDialog } from "@/components/admin/admin-students
  *   accountStatus: string;
  *   suspendedReason: string | null;
  *   activatedAt: string | null;
+ *   lastLoginAt: string | null;
  *   canResendActivation: boolean;
  * }} StudentRow
  */
+
+function formatWhen(iso) {
+  if (!iso) return "Never";
+  try {
+    return new Date(iso).toLocaleString();
+  } catch {
+    return "—";
+  }
+}
 
 function studentStatusLabel(row) {
   if (row.accountStatus === "SUSPENDED") return "Suspended";
@@ -431,6 +441,7 @@ export function AdminStudentsPanel() {
                 <TableCell>Year</TableCell>
                 <TableCell>Academic year</TableCell>
                 <TableCell>Status</TableCell>
+                <TableCell>Last login</TableCell>
                 <TableCell align="right">Actions</TableCell>
               </TableRow>
             </TableHead>
@@ -462,6 +473,7 @@ export function AdminStudentsPanel() {
                       ) : null}
                     </span>
                   </TableCell>
+                  <TableCell>{formatWhen(row.lastLoginAt)}</TableCell>
                   <TableCell align="right" sx={{ whiteSpace: "nowrap" }}>
                     <Box sx={{ display: "inline-flex", gap: 0.25, justifyContent: "flex-end" }}>
                       <Tooltip title="Edit student">

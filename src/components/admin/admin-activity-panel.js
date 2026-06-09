@@ -2,7 +2,12 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import Button from "@mui/material/Button";
+import Dialog from "@mui/material/Dialog";
+import DialogActions from "@mui/material/DialogActions";
+import DialogContent from "@mui/material/DialogContent";
+import DialogTitle from "@mui/material/DialogTitle";
 import FormControl from "@mui/material/FormControl";
+import IconButton from "@mui/material/IconButton";
 import InputLabel from "@mui/material/InputLabel";
 import MenuItem from "@mui/material/MenuItem";
 import Select from "@mui/material/Select";
@@ -13,13 +18,22 @@ import TableContainer from "@mui/material/TableContainer";
 import TableHead from "@mui/material/TableHead";
 import TableRow from "@mui/material/TableRow";
 import TextField from "@mui/material/TextField";
+import Tooltip from "@mui/material/Tooltip";
 import Typography from "@mui/material/Typography";
 import Paper from "@mui/material/Paper";
 import Box from "@mui/material/Box";
 import CircularProgress from "@mui/material/CircularProgress";
+import VisibilityRounded from "@mui/icons-material/VisibilityRounded";
+import { format } from "date-fns";
 import { AuditEvent } from "@/lib/audit-events";
 import {
+  auditEventTypeLabel,
+  formatAuditMetaEntries,
+  LOGIN_AUDIT_EVENTS,
+} from "@/lib/audit-log-display";
+import {
   adminCenteredLoadingBoxSx,
+  adminDialogPaperSx,
   adminLoadingSpinnerSx,
   adminMutedTextSx,
   adminOutlinedTableContainerSx,
@@ -29,6 +43,18 @@ import {
 import { useToast } from "@/components/providers/toast-provider";
 
 const EVENT_OPTIONS = ["", ...[...Object.values(AuditEvent)].sort((a, b) => a.localeCompare(b))];
+
+/**
+ * @param {string | null | undefined} iso
+ */
+function formatWhen(iso) {
+  if (!iso) return "—";
+  try {
+    return format(new Date(iso), "MMM d, yyyy h:mm a");
+  } catch {
+    return "—";
+  }
+}
 
 export function AdminActivityPanel() {
   const { showToast } = useToast();
@@ -41,6 +67,7 @@ export function AdminActivityPanel() {
   const [total, setTotal] = useState(0);
   const [items, setItems] = useState(/** @type {any[]} */ ([]));
   const [loading, setLoading] = useState(true);
+  const [detailRow, setDetailRow] = useState(/** @type {any | null} */ (null));
 
   const queryString = useMemo(() => {
     const p = new URLSearchParams();
@@ -81,6 +108,9 @@ export function AdminActivityPanel() {
   }, [load]);
 
   const totalPages = Math.max(1, Math.ceil(total / pageSize));
+  const detailMeta = detailRow
+    ? formatAuditMetaEntries(detailRow.meta, detailRow.eventType)
+    : [];
 
   return (
     <div className="space-y-4">
@@ -118,24 +148,24 @@ export function AdminActivityPanel() {
           label="From"
           type="date"
           size="small"
-          InputLabelProps={{ shrink: true }}
           value={from}
           onChange={(e) => {
             setPage(1);
             setFrom(e.target.value);
           }}
+          slotProps={{ inputLabel: { shrink: true } }}
           sx={themedTextFieldSx}
         />
         <TextField
           label="To"
           type="date"
           size="small"
-          InputLabelProps={{ shrink: true }}
           value={to}
           onChange={(e) => {
             setPage(1);
             setTo(e.target.value);
           }}
+          slotProps={{ inputLabel: { shrink: true } }}
           sx={themedTextFieldSx}
         />
         <Button variant="outlined" size="small" onClick={() => void load()}>
@@ -160,23 +190,22 @@ export function AdminActivityPanel() {
           <Table size="small" sx={adminTableSx}>
             <TableHead>
               <TableRow>
-                <TableCell>When (UTC)</TableCell>
+                <TableCell>When</TableCell>
                 <TableCell>Event</TableCell>
                 <TableCell>Actor</TableCell>
                 <TableCell>Target</TableCell>
+                <TableCell>Sign-in</TableCell>
                 <TableCell>IP</TableCell>
-                <TableCell>Meta</TableCell>
+                <TableCell align="right">Details</TableCell>
               </TableRow>
             </TableHead>
             <TableBody>
-              {items.map((row) => {
-                const metaStr = row.meta != null ? JSON.stringify(row.meta) : "";
-                return (
-                <TableRow key={row.id}>
+              {items.map((row) => (
+                <TableRow key={row.id} hover>
                   <TableCell sx={{ whiteSpace: "nowrap" }}>
-                    {new Date(row.createdAt).toISOString().replace("T", " ").slice(0, 19)}
+                    {formatWhen(row.createdAt)}
                   </TableCell>
-                  <TableCell>{row.eventType}</TableCell>
+                  <TableCell>{auditEventTypeLabel(row.eventType)}</TableCell>
                   <TableCell>
                     <Typography variant="body2" sx={{ color: "var(--foreground)" }}>
                       {row.actorLabel ?? "—"}
@@ -198,22 +227,33 @@ export function AdminActivityPanel() {
                     ) : null}
                   </TableCell>
                   <TableCell>
+                    {LOGIN_AUDIT_EVENTS.has(row.eventType) ? (
+                      <Typography variant="body2">{row.loginMethod || "—"}</Typography>
+                    ) : (
+                      <Typography variant="body2" sx={adminMutedTextSx}>
+                        —
+                      </Typography>
+                    )}
+                  </TableCell>
+                  <TableCell>
                     <Typography variant="caption" sx={adminMutedTextSx}>
                       {row.ip ?? "—"}
                     </Typography>
                   </TableCell>
-                  <TableCell sx={{ maxWidth: 220 }}>
-                    <Typography variant="caption" sx={{ ...adminMutedTextSx, wordBreak: "break-word" }}>
-                      {metaStr
-                        ? metaStr.length > 160
-                          ? `${metaStr.slice(0, 160)}…`
-                          : metaStr
-                        : "—"}
-                    </Typography>
+                  <TableCell align="right">
+                    <Tooltip title="View full log details">
+                      <IconButton
+                        size="small"
+                        aria-label="View full log details"
+                        color="primary"
+                        onClick={() => setDetailRow(row)}
+                      >
+                        <VisibilityRounded fontSize="small" />
+                      </IconButton>
+                    </Tooltip>
                   </TableCell>
                 </TableRow>
-              );
-              })}
+              ))}
             </TableBody>
           </Table>
         </TableContainer>
@@ -240,6 +280,103 @@ export function AdminActivityPanel() {
           </Button>
         </div>
       </div>
+
+      <Dialog
+        open={Boolean(detailRow)}
+        onClose={() => setDetailRow(null)}
+        fullWidth
+        maxWidth="sm"
+        slotProps={{ paper: { sx: adminDialogPaperSx } }}
+      >
+        <DialogTitle>Activity log details</DialogTitle>
+        <DialogContent dividers className="space-y-3">
+          {detailRow ? (
+            <>
+              <div>
+                <Typography variant="overline" sx={adminMutedTextSx}>
+                  Event
+                </Typography>
+                <Typography variant="body1" fontWeight={600}>
+                  {auditEventTypeLabel(detailRow.eventType)}
+                </Typography>
+                <Typography variant="caption" sx={adminMutedTextSx}>
+                  {detailRow.eventType}
+                </Typography>
+              </div>
+              <div>
+                <Typography variant="overline" sx={adminMutedTextSx}>
+                  When
+                </Typography>
+                <Typography variant="body2">{formatWhen(detailRow.createdAt)}</Typography>
+              </div>
+              <div className="grid gap-2 sm:grid-cols-2">
+                <div>
+                  <Typography variant="overline" sx={adminMutedTextSx}>
+                    Actor
+                  </Typography>
+                  <Typography variant="body2">{detailRow.actorLabel || "—"}</Typography>
+                  {detailRow.actorEmail ? (
+                    <Typography variant="caption" sx={adminMutedTextSx}>
+                      {detailRow.actorEmail}
+                    </Typography>
+                  ) : null}
+                </div>
+                <div>
+                  <Typography variant="overline" sx={adminMutedTextSx}>
+                    Target
+                  </Typography>
+                  <Typography variant="body2">{detailRow.targetLabel || "—"}</Typography>
+                  {detailRow.targetEmail ? (
+                    <Typography variant="caption" sx={adminMutedTextSx}>
+                      {detailRow.targetEmail}
+                    </Typography>
+                  ) : null}
+                </div>
+              </div>
+              <div>
+                <Typography variant="overline" sx={adminMutedTextSx}>
+                  IP address
+                </Typography>
+                <Typography variant="body2">{detailRow.ip || "—"}</Typography>
+              </div>
+              <div>
+                <Typography variant="overline" sx={adminMutedTextSx}>
+                  Browser / device
+                </Typography>
+                <Typography variant="body2" sx={{ wordBreak: "break-word" }}>
+                  {detailRow.userAgent || "—"}
+                </Typography>
+              </div>
+              {detailMeta.length > 0 ? (
+                <div>
+                  <Typography variant="overline" sx={adminMutedTextSx}>
+                    Additional details
+                  </Typography>
+                  <dl className="mt-1 space-y-2 rounded-lg border border-zinc-200 p-3 dark:border-zinc-700">
+                    {detailMeta.map(({ label, value }) => (
+                      <div key={label}>
+                        <dt className="text-xs font-semibold uppercase tracking-wide text-zinc-500 dark:text-zinc-400">
+                          {label}
+                        </dt>
+                        <dd className="mt-0.5 whitespace-pre-wrap break-words text-sm text-zinc-800 dark:text-zinc-100">
+                          {value}
+                        </dd>
+                      </div>
+                    ))}
+                  </dl>
+                </div>
+              ) : (
+                <Typography variant="body2" sx={adminMutedTextSx}>
+                  No extra metadata was recorded for this event.
+                </Typography>
+              )}
+            </>
+          ) : null}
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setDetailRow(null)}>Close</Button>
+        </DialogActions>
+      </Dialog>
     </div>
   );
 }

@@ -1,10 +1,9 @@
-import crypto from "node:crypto";
 import bcrypt from "bcryptjs";
 import { Role, UserAccountStatus } from "@prisma/client";
 import { normalizeProfilePhotoInput } from "@/lib/profile-photo-url";
 
 /**
- * Create a pending-activation student user (password users).
+ * Create a student user with default password = student number (must change on first sign-in).
  * @param {import("@prisma/client").PrismaClient | import("@prisma/client").Prisma.TransactionClient} db
  * @param {{
  *   email: string;
@@ -22,8 +21,9 @@ import { normalizeProfilePhotoInput } from "@/lib/profile-photo-url";
  * @returns {Promise<import("@prisma/client").User | null>}
  */
 export async function insertPendingStudentUser(db, normalized) {
-  const passwordHash = await bcrypt.hash(crypto.randomBytes(48).toString("hex"), 12);
+  const passwordHash = await bcrypt.hash(normalized.studentNumber, 12);
   const profilePhotoUrl = normalizeProfilePhotoInput(normalized.profilePhotoUrl);
+  const now = new Date();
   try {
     return await db.user.create({
       data: {
@@ -34,8 +34,9 @@ export async function insertPendingStudentUser(db, normalized) {
         sex: normalized.sex ?? null,
         profilePhotoUrl,
         passwordHash,
-        accountStatus: UserAccountStatus.PENDING_ACTIVATION,
-        activatedAt: null,
+        accountStatus: UserAccountStatus.ACTIVE,
+        activatedAt: now,
+        mustChangePassword: true,
         userRoles: {
           create: [{ role: Role.STUDENT }],
         },

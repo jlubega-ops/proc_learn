@@ -140,10 +140,21 @@ function CollapsibleNavSection({ sectionId, label, activeRole, defaultOpen, chil
 /**
  * @param {{ onNavigate: () => void; activeRole: string; searchParams: URLSearchParams; canManageOrgAdmin?: boolean }} p
  */
-function NavLinks({ onNavigate, activeRole, searchParams, canManageOrgAdmin = false }) {
+function NavLinks({
+  onNavigate,
+  activeRole,
+  searchParams,
+  canManageOrgAdmin = false,
+  sessionType = "platform",
+  orgProjectId = "",
+  orgPermissions = [],
+}) {
   const navPathname = usePathname();
   const sections = sidebarNavForContext(activeRole, navPathname || "/", {
     canManageOrgAdmin,
+    sessionType,
+    projectId: orgProjectId,
+    permissions: orgPermissions,
   });
 
   const childActive = (children) =>
@@ -267,9 +278,18 @@ function NavLinks({ onNavigate, activeRole, searchParams, canManageOrgAdmin = fa
   );
 }
 
-function NavLinksWithSearch({ canManageOrgAdmin, ...props }) {
+function NavLinksWithSearch({ canManageOrgAdmin, sessionType, orgProjectId, orgPermissions, ...props }) {
   const searchParams = useSearchParams();
-  return <NavLinks {...props} searchParams={searchParams} canManageOrgAdmin={canManageOrgAdmin} />;
+  return (
+    <NavLinks
+      {...props}
+      searchParams={searchParams}
+      canManageOrgAdmin={canManageOrgAdmin}
+      sessionType={sessionType}
+      orgProjectId={orgProjectId}
+      orgPermissions={orgPermissions}
+    />
+  );
 }
 
 export default function DashboardLayoutClient({ children }) {
@@ -279,18 +299,33 @@ export default function DashboardLayoutClient({ children }) {
   const { mode, toggleMode } = useAppTheme();
   const { session, loading: authLoading } = useAuthSession();
   const activeRole = session?.activeRole ?? "STUDENT";
-  const projectId = projectIdFromPath(pathname || "/");
-  const isStudentProjectWorld = activeRole === "STUDENT" && Boolean(projectId);
+  const isOrgSession = session?.sessionType === "org";
+  const orgProjectId = isOrgSession ? String(session?.projectId || "") : "";
+  const orgPermissions = Array.isArray(session?.permissions) ? session.permissions : [];
+  const orgRoleName = isOrgSession ? String(session?.orgRoleName || "") : "";
+  const projectId = isOrgSession ? orgProjectId : projectIdFromPath(pathname || "/");
+  const isStudentProjectWorld =
+    (activeRole === "STUDENT" && Boolean(projectId)) || isOrgSession;
   const [projectOrgLabel, setProjectOrgLabel] = useState("");
   const [canManageOrgAdmin, setCanManageOrgAdmin] = useState(false);
   const [projectOrgLoading, setProjectOrgLoading] = useState(false);
 
   const authed = Boolean(session?.authenticated);
-  const pageMeta = getDashboardPageMeta(pathname || "/", activeRole);
+  const pageMeta = getDashboardPageMeta(
+    pathname || "/",
+    isOrgSession ? "ORG_MEMBER" : activeRole,
+  );
 
   useEffect(() => {
     if (!isStudentProjectWorld || !projectId) {
       setProjectOrgLabel("");
+      setCanManageOrgAdmin(false);
+      setProjectOrgLoading(false);
+      return;
+    }
+
+    if (isOrgSession) {
+      setProjectOrgLabel(String(session?.projectName || "").trim());
       setCanManageOrgAdmin(false);
       setProjectOrgLoading(false);
       return;
@@ -314,7 +349,7 @@ export default function DashboardLayoutClient({ children }) {
     return () => {
       cancelled = true;
     };
-  }, [isStudentProjectWorld, projectId]);
+  }, [isStudentProjectWorld, projectId, isOrgSession, session?.projectName]);
 
   useEffect(() => {
     if (!isStudentProjectWorld || !projectId) return;
@@ -389,12 +424,15 @@ export default function DashboardLayoutClient({ children }) {
               onNavigate={() => setDrawerOpen(false)}
               activeRole={activeRole}
               canManageOrgAdmin={canManageOrgAdmin}
+              sessionType={isOrgSession ? "org" : "platform"}
+              orgProjectId={orgProjectId}
+              orgPermissions={orgPermissions}
             />
           </Suspense>
         </nav>
 
         <div className="shrink-0 border-t border-zinc-200 p-3 dark:border-zinc-800">
-          {authed && isStudentProjectWorld ? (
+          {authed && isStudentProjectWorld && !isOrgSession ? (
             <button
               type="button"
               title="Leave this organization workspace"
@@ -456,7 +494,7 @@ export default function DashboardLayoutClient({ children }) {
                     Organization: {projectOrgLoading ? "Loading…" : projectOrgLabel || "Current organization"}
                   </p>
                   <p className="truncate text-[11px] font-bold uppercase tracking-wide text-primary">
-                    Role: {PROJECT_ORG_ENTRY_ROLE_NAME}
+                    Role: {isOrgSession ? orgRoleName || "Organisation user" : PROJECT_ORG_ENTRY_ROLE_NAME}
                   </p>
                 </div>
               </div>
@@ -473,7 +511,7 @@ export default function DashboardLayoutClient({ children }) {
               </>
             )}
           </div>
-          {authed ? <NotificationBellMenu /> : null}
+          {authed && !isOrgSession ? <NotificationBellMenu /> : null}
           <button
             type="button"
             title={

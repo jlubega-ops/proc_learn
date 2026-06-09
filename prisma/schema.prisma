@@ -69,6 +69,8 @@ model User {
   activatedAt     DateTime?         @default(now()) @map("activated_at")
   suspendedReason String?           @map("suspended_reason") @db.VarChar(1024)
   lastLoginAt     DateTime?         @map("last_login_at")
+  /// Students must set a personal password after first sign-in (default password is student number).
+  mustChangePassword Boolean        @default(false) @map("must_change_password")
 
   createdAt DateTime @default(now()) @map("created_at")
   updatedAt DateTime @updatedAt @map("updated_at")
@@ -314,6 +316,10 @@ model ProjectOrgUser {
   middleName       String?        @map("middle_name") @db.VarChar(100)
   lastName         String         @map("last_name") @db.VarChar(100)
   email            String         @db.VarChar(255)
+  /// Bcrypt hash for simulated org logins (null for project-owner Admin row).
+  passwordHash     String?        @map("password_hash") @db.VarChar(255)
+  lastLoginAt      DateTime?      @map("last_login_at")
+  theme            String         @default("light") @db.VarChar(16)
   createdAt        DateTime       @default(now()) @map("created_at")
   updatedAt        DateTime       @updatedAt @map("updated_at")
 
