@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { BrandedAuthCard, BrandedPublicShell } from "@/components/auth/branded-public-shell";
 import { APP_NAME } from "@/lib/appConfig";
+import { BRAND_BTN_PRIMARY_CLASS } from "@/lib/brand-ui";
 
 export default function NotFound() {
   return (
@@ -11,18 +12,15 @@ export default function NotFound() {
         maxWidthClass="max-w-lg"
       >
         <p className="text-sm text-zinc-600 dark:text-zinc-300">
-          Error code: <span className="font-mono font-semibold text-[#008bd0]">404</span>
+          Error code: <span className="font-mono font-semibold text-primary">404</span>
         </p>
         <div className="mt-6 flex flex-col gap-3 sm:flex-row sm:items-center">
-          <Link
-            href="/"
-            className="inline-flex h-11 items-center justify-center rounded-lg bg-[#008bd0] px-5 text-sm font-semibold text-white shadow hover:bg-[#0076b0] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#008bd0]"
-          >
+          <Link href="/" className={`${BRAND_BTN_PRIMARY_CLASS} h-11 px-5`}>
             Back to home
           </Link>
           <Link
             href="/login"
-            className="inline-flex h-11 items-center justify-center rounded-lg border border-zinc-200 bg-white px-5 text-sm font-semibold text-zinc-800 shadow-sm hover:bg-zinc-50 dark:border-zinc-600 dark:bg-zinc-800 dark:text-zinc-100 dark:hover:bg-zinc-700"
+            className="inline-flex h-11 items-center justify-center rounded-lg border border-zinc-200 bg-white px-5 text-sm font-semibold text-zinc-800 shadow-sm hover:border-primary/40 hover:bg-[color:var(--nav-active-bg)] dark:border-zinc-600 dark:bg-zinc-800 dark:text-zinc-100"
           >
             Sign in
           </Link>

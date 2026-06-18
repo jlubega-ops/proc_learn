@@ -5,6 +5,7 @@ import {
   useCallback,
   useContext,
   useEffect,
+  useLayoutEffect,
   useMemo,
   useRef,
   useState,
@@ -63,6 +64,18 @@ export function ThemeProvider({ children }) {
   }, [auth.session]);
 
   const isAuthLight = isAuthLightRoutePath(pathname);
+
+  useLayoutEffect(() => {
+    if (isAuthLight) {
+      applyThemeClassToDocument("light");
+      return;
+    }
+    const stored = readStoredTheme();
+    if (stored) {
+      writeStoredTheme(stored);
+      applyThemeClassToDocument(stored);
+    }
+  }, [isAuthLight]);
 
   useEffect(() => {
     if (isAuthLight) {

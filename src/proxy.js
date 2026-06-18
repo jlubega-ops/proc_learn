@@ -17,12 +17,12 @@ function isPublicPath(pathname) {
 export function proxy(request) {
   const { pathname } = request.nextUrl;
 
-  if (isPublicPath(pathname)) {
-    return NextResponse.next();
-  }
-
   const requestHeaders = new Headers(request.headers);
   requestHeaders.set("x-pl-pathname", pathname);
+
+  if (isPublicPath(pathname)) {
+    return NextResponse.next({ request: { headers: requestHeaders } });
+  }
 
   const hasSession = Boolean(request.cookies.get(SESSION_COOKIE_NAME)?.value);
   if (!hasSession) {

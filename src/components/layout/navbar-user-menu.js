@@ -151,7 +151,7 @@ export function NavbarUserMenu() {
                 referrerPolicy: "no-referrer",
               },
             }}
-            sx={{ width: 36, height: 36, bgcolor: "#008bd0", fontSize: 16 }}
+            sx={{ width: 36, height: 36, bgcolor: "var(--brand-blue)", fontSize: 16 }}
           >
             {initial}
           </Avatar>
@@ -237,7 +237,7 @@ export function NavbarUserMenu() {
           onClick={logout}
           sx={{
             color: "#f87171",
-            "&:hover": { bgcolor: "color-mix(in oklab, #f87171 14%, transparent)" },
+            "&:hover": { bgcolor: "color-mix(in oklab, var(--brand-red) 14%, transparent)" },
           }}
         >
           <ListItemIcon sx={{ color: "#f87171" }}>

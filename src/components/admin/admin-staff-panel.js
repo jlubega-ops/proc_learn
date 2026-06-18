@@ -42,6 +42,7 @@ import {
 } from "@/lib/admin-mui-surfaces";
 import { useToast } from "@/components/providers/toast-provider";
 import { ROLE, formatRoleLabel } from "@/lib/roles";
+import { BRAND_BTN_PRIMARY_CLASS } from "@/lib/brand-ui";
 
 /**
  * @typedef {{
@@ -313,7 +314,7 @@ export function AdminStaffPanel() {
         </Button>
         <Link
           href="/admin/staff/new"
-          className="inline-flex h-9 min-h-9 w-full items-center justify-center gap-1.5 rounded-md bg-primary px-3 text-sm font-semibold text-white hover:opacity-90 sm:w-auto sm:px-4"
+          className={`${BRAND_BTN_PRIMARY_CLASS} h-9 min-h-9 w-full gap-1.5 sm:w-auto sm:px-4`}
           title="Add a new staff user"
         >
           <PersonAddAlt1Rounded sx={{ fontSize: 20 }} aria-hidden />

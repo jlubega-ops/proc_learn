@@ -1,6 +1,6 @@
 /**
  * Pre-auth pages that always use light UI (`html` without `.dark`).
- * Keep in sync with the inline script in `app/layout.js`.
+ * Used by SSR theme class resolution and `ThemeProvider`.
  */
 const PREFIXES = ["/login", "/forgot-password", "/reset-password", "/activate", "/setup-password"];
 

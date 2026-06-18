@@ -54,7 +54,7 @@ export const themedTextFieldSx = {
     borderColor: "color-mix(in oklab, var(--foreground) 28%, transparent)",
   },
   "& .MuiOutlinedInput-root.Mui-focused .MuiOutlinedInput-notchedOutline": {
-    borderColor: "color-mix(in oklab, var(--foreground) 45%, transparent)",
+    borderColor: "var(--brand-blue)",
   },
   "& .MuiFormHelperText-root": {
     color: "color-mix(in oklab, var(--foreground) 55%, transparent)",
@@ -69,8 +69,8 @@ export const adminTableSx = {
   },
   "& .MuiTableCell-head": {
     fontWeight: 600,
-    borderBottomColor: "color-mix(in oklab, var(--foreground) 22%, transparent)",
-    bgcolor: "color-mix(in oklab, var(--foreground) 8%, transparent)",
+    borderBottomColor: "color-mix(in oklab, var(--brand-blue) 35%, transparent)",
+    bgcolor: "color-mix(in oklab, var(--brand-blue) 8%, var(--background))",
     color: "var(--foreground)",
   },
   "& .MuiTableCell-body": {
@@ -98,7 +98,7 @@ export const adminCenteredLoadingBoxSx = {
 
 /** Spinner tint: readable on light/dark backgrounds using app tokens + brand accent. */
 export const adminLoadingSpinnerSx = {
-  color: "color-mix(in oklab, var(--foreground) 32%, #008bd0)",
+  color: "var(--brand-blue)",
 };
 
 /** Semi-opaque overlay centered over a table during silent refetch. Parent needs `position: "relative"`. */

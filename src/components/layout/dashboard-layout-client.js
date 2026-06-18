@@ -28,8 +28,17 @@ import { RoleSwitchOverlay } from "@/components/layout/role-switch-overlay";
 import { getDashboardPageMeta } from "@/lib/dashboard-page-meta";
 import { DASHBOARD_MAIN_INNER_CLASS } from "@/lib/dashboard-content-width";
 import { PROJECT_ORG_ENTRY_ROLE_NAME } from "@/lib/project-org-role";
+import {
+  BRAND_NAV_ACTIVE_CLASS,
+  BRAND_NAV_INACTIVE_CLASS,
+  BRAND_TRICOLOR_STRIPE_CLASS,
+  brandIconSx,
+} from "@/lib/brand-ui";
 
-const primaryIconSx = { fontSize: 22, color: "#008bd0" };
+const primaryIconSx = brandIconSx;
+const childNavIconSx = { fontSize: 20, color: "var(--brand-blue)" };
+const navFocusClass =
+  "focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary";
 
 /**
  * @param {string} pathname
@@ -122,7 +131,7 @@ function CollapsibleNavSection({ sectionId, label, activeRole, defaultOpen, chil
             toggle();
           }}
           title={`${open ? "Collapse" : "Expand"} ${label}`}
-          className="flex cursor-pointer list-none items-center gap-2 rounded-lg px-3 py-2 text-[11px] font-bold uppercase tracking-wide text-zinc-500 transition-colors hover:bg-zinc-100 dark:text-zinc-400 dark:hover:bg-zinc-800"
+          className="flex cursor-pointer list-none items-center gap-2 rounded-lg px-3 py-2 text-[11px] font-bold uppercase tracking-wide text-zinc-500 transition-colors hover:bg-zinc-100 dark:text-zinc-400 dark:hover:bg-zinc-800/80"
         >
           <span className="flex-1">{label}</span>
           <ExpandMoreRounded
@@ -178,9 +187,7 @@ function NavLinks({
             <summary
               title={title}
               className={`flex cursor-pointer list-none items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium transition-colors ${
-                hasActiveChild
-                  ? "bg-[#008bd0]/12 text-[#008bd0] dark:bg-[#008bd0]/22"
-                  : "text-zinc-700 hover:bg-zinc-100 dark:text-zinc-200 dark:hover:bg-zinc-800"
+                hasActiveChild ? BRAND_NAV_ACTIVE_CLASS : BRAND_NAV_INACTIVE_CLASS
               }`}
             >
               <Icon aria-hidden sx={primaryIconSx} />
@@ -202,12 +209,10 @@ function NavLinks({
                       aria-current={active ? "page" : undefined}
                       onClick={onNavigate}
                       className={`flex items-center gap-2 rounded-lg px-3 py-2 text-sm transition-colors ${
-                        active
-                          ? "bg-[#008bd0]/15 text-[#008bd0] dark:bg-[#008bd0]/25"
-                          : "text-zinc-700 hover:bg-zinc-100 dark:text-zinc-200 dark:hover:bg-zinc-800"
+                        active ? BRAND_NAV_ACTIVE_CLASS : BRAND_NAV_INACTIVE_CLASS
                       }`}
                     >
-                      <ChildIcon aria-hidden sx={{ fontSize: 20, color: "#008bd0" }} />
+                      <ChildIcon aria-hidden sx={childNavIconSx} />
                       {childLabel}
                     </Link>
                   </li>
@@ -226,10 +231,8 @@ function NavLinks({
           title={title}
           aria-current={active ? "page" : undefined}
           onClick={onNavigate}
-          className={`flex items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#008bd0] ${
-            active
-              ? "bg-[#008bd0]/15 text-[#008bd0] dark:bg-[#008bd0]/25"
-              : "text-zinc-700 hover:bg-zinc-100 dark:text-zinc-200 dark:hover:bg-zinc-800"
+          className={`flex items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium transition-colors ${navFocusClass} ${
+            active ? BRAND_NAV_ACTIVE_CLASS : BRAND_NAV_INACTIVE_CLASS
           }`}
         >
           <Icon aria-hidden sx={primaryIconSx} />
@@ -367,7 +370,7 @@ export default function DashboardLayoutClient({ children }) {
   }, [isStudentProjectWorld, projectId]);
 
   return (
-    <div className="flex min-h-dvh bg-zinc-50 text-zinc-900 dark:bg-zinc-950 dark:text-zinc-50">
+    <div className="flex min-h-dvh bg-[color:var(--surface-muted)] text-zinc-900 dark:bg-zinc-950 dark:text-zinc-50">
       <RoleSwitchOverlay />
       <a
         href="#main-content"
@@ -385,12 +388,13 @@ export default function DashboardLayoutClient({ children }) {
       />
       <aside
         id="app-sidebar"
-        className={`fixed inset-y-0 left-0 z-50 flex h-dvh w-64 max-w-[85vw] flex-col border-r border-zinc-200 bg-white shadow-xl transition-transform dark:border-zinc-800 dark:bg-zinc-900 md:sticky md:top-0 md:h-screen md:translate-x-0 md:shadow-none ${
+        className={`fixed inset-y-0 left-0 z-50 flex h-dvh w-64 max-w-[85vw] flex-col border-r border-[color:var(--border-subtle)] bg-[color:var(--surface-sidebar)] shadow-xl transition-transform dark:shadow-none md:sticky md:top-0 md:h-screen md:translate-x-0 md:shadow-none ${
           drawerOpen ? "translate-x-0" : "-translate-x-full md:translate-x-0"
         }`}
         aria-label="Main navigation"
       >
-        <div className="flex shrink-0 items-center gap-3 border-b border-zinc-200 px-4 py-4 dark:border-zinc-800">
+        <div className={BRAND_TRICOLOR_STRIPE_CLASS} aria-hidden />
+        <div className="flex shrink-0 items-center gap-3 border-b border-[color:var(--border-subtle)] bg-gradient-to-r from-[color-mix(in_oklab,var(--brand-blue)_6%,var(--surface-sidebar))] to-[color:var(--surface-sidebar)] px-4 py-4">
           <div className="relative h-10 w-10 shrink-0 overflow-hidden rounded-md bg-white">
             <Image
               src="/assets/mubs.png"
@@ -402,7 +406,7 @@ export default function DashboardLayoutClient({ children }) {
             />
           </div>
           <div className="min-w-0">
-            <p className="truncate text-base font-extrabold tracking-tight text-[#008bd0]">
+            <p className="truncate text-base font-extrabold tracking-tight text-primary">
               {APP_NAME}
             </p>
             <p className="truncate text-xs text-zinc-500 dark:text-zinc-400">
@@ -431,13 +435,13 @@ export default function DashboardLayoutClient({ children }) {
           </Suspense>
         </nav>
 
-        <div className="shrink-0 border-t border-zinc-200 p-3 dark:border-zinc-800">
+        <div className="shrink-0 border-t border-[color:var(--border-subtle)] p-3">
           {authed && isStudentProjectWorld && !isOrgSession ? (
             <button
               type="button"
               title="Leave this organization workspace"
               onClick={() => setLeaveOrgOpen(true)}
-              className="flex items-center justify-center gap-2 rounded-lg border border-zinc-200 px-3 py-2 text-sm font-semibold text-zinc-800 hover:bg-zinc-50 dark:border-zinc-700 dark:text-zinc-100 dark:hover:bg-zinc-800"
+              className="flex items-center justify-center gap-2 rounded-lg border border-[color:var(--border-subtle)] px-3 py-2 text-sm font-semibold text-zinc-800 transition hover:border-primary/40 hover:bg-[color:var(--nav-active-bg)] dark:text-zinc-100"
             >
               <WestRounded aria-hidden sx={primaryIconSx} />
               Leave organization
@@ -447,7 +451,7 @@ export default function DashboardLayoutClient({ children }) {
               href="/profile?tab=details"
               title="Open your profile"
               onClick={() => setDrawerOpen(false)}
-              className="flex items-center justify-center gap-2 rounded-lg border border-zinc-200 px-3 py-2 text-sm font-medium text-zinc-800 hover:bg-zinc-50 dark:border-zinc-700 dark:text-zinc-100 dark:hover:bg-zinc-800"
+              className="flex items-center justify-center gap-2 rounded-lg border border-[color:var(--border-subtle)] px-3 py-2 text-sm font-medium text-zinc-800 transition hover:border-primary/40 hover:bg-[color:var(--nav-active-bg)] dark:text-zinc-100"
             >
               <AccountCircleRounded aria-hidden sx={primaryIconSx} />
               Profile
@@ -457,7 +461,7 @@ export default function DashboardLayoutClient({ children }) {
               href="/login"
               title="Open the sign-in page"
               onClick={() => setDrawerOpen(false)}
-              className="flex items-center justify-center gap-2 rounded-lg border border-zinc-200 px-3 py-2 text-sm font-medium text-zinc-800 hover:bg-zinc-50 dark:border-zinc-700 dark:text-zinc-100 dark:hover:bg-zinc-800"
+              className="flex items-center justify-center gap-2 rounded-lg border border-[color:var(--border-subtle)] px-3 py-2 text-sm font-medium text-zinc-800 transition hover:border-primary/40 hover:bg-[color:var(--nav-active-bg)] dark:text-zinc-100"
             >
               <LoginRounded aria-hidden sx={primaryIconSx} />
               Sign in
@@ -467,16 +471,18 @@ export default function DashboardLayoutClient({ children }) {
       </aside>
 
       <div className="flex min-w-0 flex-1 flex-col">
-        <header className="sticky top-0 z-30 flex h-14 items-center gap-3 border-b border-zinc-200 bg-white/90 px-3 backdrop-blur-md dark:border-zinc-800 dark:bg-zinc-950/90 md:px-6">
+        <header className="sticky top-0 z-30 border-b border-[color:var(--border-subtle)] bg-[color:var(--surface-elevated)]/90 backdrop-blur-md">
+          <div className={BRAND_TRICOLOR_STRIPE_CLASS} aria-hidden />
+          <div className="flex h-14 items-center gap-3 px-3 md:px-6">
           <button
             type="button"
-            className="inline-flex h-10 w-10 items-center justify-center rounded-lg text-zinc-700 hover:bg-zinc-100 dark:text-zinc-200 dark:hover:bg-zinc-800 md:hidden"
+            className="inline-flex h-10 w-10 items-center justify-center rounded-lg text-primary transition hover:bg-[color:var(--nav-active-bg)] md:hidden"
             title="Open navigation menu"
             aria-controls="app-sidebar"
             aria-expanded={drawerOpen}
             onClick={() => setDrawerOpen((o) => !o)}
           >
-            <MenuRounded aria-hidden sx={{ fontSize: 24, color: "#008bd0" }} />
+            <MenuRounded aria-hidden sx={brandIconSx} />
           </button>
           <div className="min-w-0 flex-1">
             {isStudentProjectWorld ? (
@@ -523,7 +529,7 @@ export default function DashboardLayoutClient({ children }) {
               mode === "dark" ? "Switch to light mode" : "Switch to dark mode"
             }
             onClick={toggleMode}
-            className="inline-flex h-10 w-10 items-center justify-center rounded-lg text-zinc-700 hover:bg-zinc-100 dark:text-zinc-200 dark:hover:bg-zinc-800"
+            className="inline-flex h-10 w-10 items-center justify-center rounded-lg text-zinc-700 transition hover:bg-[color:var(--nav-active-bg)] hover:text-primary dark:text-zinc-200"
           >
             {mode === "dark" ? (
               <LightModeRounded aria-hidden sx={{ fontSize: 22 }} />
@@ -536,16 +542,14 @@ export default function DashboardLayoutClient({ children }) {
           ) : (
             <Link
               href="/login"
-              className="inline-flex shrink-0 items-center gap-1.5 rounded-lg border border-zinc-200 px-3 py-2 text-sm font-medium text-zinc-800 hover:bg-zinc-50 dark:border-zinc-700 dark:text-zinc-100 dark:hover:bg-zinc-800"
+              className="inline-flex shrink-0 items-center gap-1.5 rounded-lg border border-[color:var(--border-subtle)] px-3 py-2 text-sm font-medium text-zinc-800 transition hover:border-primary/40 hover:bg-[color:var(--nav-active-bg)] dark:text-zinc-100"
               title="Open sign-in page"
             >
-              <LoginRounded
-                aria-hidden
-                sx={{ fontSize: 20, color: "#008bd0" }}
-              />
+              <LoginRounded aria-hidden sx={{ fontSize: 20, color: "var(--brand-blue)" }} />
               <span className="hidden sm:inline">Sign in</span>
             </Link>
           )}
+          </div>
         </header>
 
         <main
@@ -556,7 +560,7 @@ export default function DashboardLayoutClient({ children }) {
           <div className={DASHBOARD_MAIN_INNER_CLASS}>{children}</div>
         </main>
 
-        <footer className="border-t border-zinc-200 bg-white px-3 py-3 text-xs text-zinc-500 dark:border-zinc-800 dark:bg-zinc-950 dark:text-zinc-400 md:px-6">
+        <footer className="border-t border-[color:var(--border-subtle)] bg-[color:var(--surface-elevated)] px-3 py-3 text-xs text-zinc-500 dark:text-zinc-400 md:px-6">
           <div className={DASHBOARD_MAIN_INNER_CLASS}>
             <p className="text-center">
               © {COPYRIGHT_YEAR} {ORG_NAME}. {APP_NAME}.

@@ -5,12 +5,27 @@
 :root {
   --background: #fafafa;
   --foreground: #18181b;
+  --brand-blue: #008bd0;
+  --brand-blue-dark: #0076b0;
+  --brand-red: #ed1c24;
+  --brand-yellow: #fff200;
+  --surface-elevated: #ffffff;
+  --surface-sidebar: #ffffff;
+  --surface-muted: #f4f4f5;
+  --border-subtle: color-mix(in oklab, #18181b 12%, transparent);
+  --nav-active-bg: color-mix(in oklab, var(--brand-blue) 14%, transparent);
+  --nav-active-text: var(--brand-blue);
 }
 
 html.dark {
   --background: #09090b;
   --foreground: #fafafa;
-  /* Native date/time/color inputs + scrollbars use a dark control chrome. */
+  --surface-elevated: #18181b;
+  --surface-sidebar: #0c0c0e;
+  --surface-muted: #111113;
+  --border-subtle: color-mix(in oklab, var(--foreground) 16%, transparent);
+  --nav-active-bg: color-mix(in oklab, var(--brand-blue) 24%, transparent);
+  --nav-active-text: #38bdf8;
   color-scheme: dark;
 }
 
@@ -18,14 +33,19 @@ html.dark input[type="date"],
 html.dark input[type="time"],
 html.dark input[type="datetime-local"] {
   color-scheme: dark;
-  accent-color: #008bd0;
+  accent-color: var(--brand-blue);
   color: var(--foreground);
 }
 
 @theme inline {
   --color-background: var(--background);
   --color-foreground: var(--foreground);
-  --color-primary: #008bd0;
+  --color-primary: var(--brand-blue);
+  --color-brand-blue: var(--brand-blue);
+  --color-brand-red: var(--brand-red);
+  --color-brand-yellow: var(--brand-yellow);
+  --color-surface-card: var(--surface-elevated);
+  --color-surface-muted: var(--surface-muted);
   --font-sans: var(--font-geist-sans);
   --font-mono: var(--font-geist-mono);
 }
@@ -33,6 +53,20 @@ html.dark input[type="datetime-local"] {
 body {
   background: var(--background);
   color: var(--foreground);
+}
+
+/* Organisation tricolor stripe (blue · yellow · red) */
+.brand-tricolor-stripe {
+  height: 3px;
+  background: linear-gradient(
+    90deg,
+    var(--brand-blue) 0%,
+    var(--brand-blue) 42%,
+    var(--brand-yellow) 42%,
+    var(--brand-yellow) 72%,
+    var(--brand-red) 72%,
+    var(--brand-red) 100%
+  );
 }
 
 /* MUI defaults use the light palette; align portaled surfaces + tables with `html.dark` tokens. */
@@ -61,10 +95,13 @@ html.dark .MuiInputLabel-root {
   color: color-mix(in oklab, var(--foreground) 65%, transparent);
 }
 html.dark .MuiInputLabel-root.Mui-focused {
-  color: color-mix(in oklab, var(--foreground) 80%, transparent);
+  color: var(--brand-blue);
 }
 html.dark .MuiOutlinedInput-notchedOutline {
   border-color: color-mix(in oklab, var(--foreground) 22%, transparent);
+}
+html.dark .MuiOutlinedInput-root.Mui-focused .MuiOutlinedInput-notchedOutline {
+  border-color: var(--brand-blue);
 }
 html.dark .MuiSelect-icon {
   color: var(--foreground);
@@ -77,11 +114,10 @@ html.dark .MuiButton-outlined {
   border-color: color-mix(in oklab, var(--foreground) 35%, transparent);
 }
 html.dark .MuiButton-outlined:hover {
-  border-color: color-mix(in oklab, var(--foreground) 50%, transparent);
-  background-color: color-mix(in oklab, var(--foreground) 8%, transparent);
+  border-color: color-mix(in oklab, var(--brand-blue) 55%, transparent);
+  background-color: color-mix(in oklab, var(--brand-blue) 10%, transparent);
 }
 
-/* Tabs (e.g. profile) — MUI keeps light grey tab labels otherwise. */
 html.dark .MuiTab-root {
   color: color-mix(in oklab, var(--foreground) 52%, transparent);
 }
@@ -89,28 +125,27 @@ html.dark .MuiTab-root.Mui-selected {
   color: var(--foreground);
 }
 html.dark .MuiTabs-indicator {
-  background-color: #008bd0;
+  background-color: var(--brand-blue);
 }
 html.dark .MuiTabScrollButton-root {
   color: color-mix(in oklab, var(--foreground) 70%, transparent);
 }
 
-/* Select / menu lists (portaled) */
 html.dark .MuiMenuItem-root {
   color: var(--foreground);
 }
 html.dark .MuiMenuItem-root:hover,
 html.dark .MuiMenuItem-root.Mui-focusVisible {
-  background-color: color-mix(in oklab, var(--foreground) 9%, transparent);
+  background-color: color-mix(in oklab, var(--brand-blue) 12%, transparent);
 }
 html.dark .MuiMenuItem-root.Mui-selected {
-  background-color: color-mix(in oklab, var(--foreground) 15%, transparent);
+  background-color: color-mix(in oklab, var(--brand-blue) 18%, transparent);
 }
 html.dark .MuiMenuItem-root.Mui-selected:hover {
-  background-color: color-mix(in oklab, var(--foreground) 20%, transparent);
+  background-color: color-mix(in oklab, var(--brand-blue) 24%, transparent);
 }
 html.dark .MuiListItemIcon-root {
-  color: color-mix(in oklab, var(--foreground) 72%, transparent);
+  color: var(--brand-blue);
 }
 html.dark .MuiListItemText-primary {
   color: var(--foreground);
@@ -122,13 +157,12 @@ html.dark .MuiListItemButton-root {
   color: var(--foreground);
 }
 html.dark .MuiListItemButton-root:hover {
-  background-color: color-mix(in oklab, var(--foreground) 9%, transparent);
+  background-color: color-mix(in oklab, var(--brand-blue) 10%, transparent);
 }
 html.dark .MuiButton-text {
   color: var(--foreground);
 }
 
-/* Outlined Paper (e.g. MUI tables) — default Paper stays light grey/white otherwise. */
 html.dark .MuiPaper-root.MuiPaper-outlined {
   background-color: var(--background);
   color: var(--foreground);
@@ -136,18 +170,14 @@ html.dark .MuiPaper-root.MuiPaper-outlined {
   background-image: none;
 }
 
-/* Table row selection (notifications, etc.) */
 html.dark .MuiTableRow-root.Mui-selected,
 html.dark .MuiTableRow-root.Mui-selected .MuiTableCell-root {
-  background-color: color-mix(in oklab, var(--foreground) 9%, transparent);
+  background-color: color-mix(in oklab, var(--brand-blue) 12%, transparent);
 }
 html.dark .MuiTableRow-root.Mui-selected:hover {
-  background-color: color-mix(in oklab, var(--foreground) 12%, transparent);
+  background-color: color-mix(in oklab, var(--brand-blue) 16%, transparent);
 }
 
-/*
- * Disabled MUI buttons: default opacity ~0.38 makes labels/spinners vanish on dark surfaces.
- */
 html.dark .MuiButton-contained.Mui-disabled {
   opacity: 1;
   background-color: color-mix(in oklab, var(--foreground) 14%, transparent);
@@ -163,7 +193,6 @@ html.dark .MuiButton-text.Mui-disabled {
   color: color-mix(in oklab, var(--foreground) 40%, transparent);
 }
 
-/* Spinners inside buttons (loading / disabled+progress) stay visible */
 html.dark .MuiButton-root .MuiCircularProgress-root {
   color: currentColor;
 }
@@ -171,53 +200,55 @@ html.dark .MuiCheckbox-root {
   color: color-mix(in oklab, var(--foreground) 52%, transparent);
 }
 html.dark .MuiCheckbox-root.Mui-checked {
-  color: #008bd0;
+  color: var(--brand-blue);
 }
 html.dark .MuiListSubheader-root {
   background-color: var(--background);
   color: color-mix(in oklab, var(--foreground) 68%, transparent);
 }
 
-/* Icon buttons (default grey icons); keep semantic colors readable */
 html.dark .MuiIconButton-root {
   color: color-mix(in oklab, var(--foreground) 78%, transparent);
 }
 html.dark .MuiIconButton-root:hover {
-  background-color: color-mix(in oklab, var(--foreground) 8%, transparent);
+  background-color: color-mix(in oklab, var(--brand-blue) 10%, transparent);
 }
 html.dark .MuiIconButton-colorError {
-  color: #f87171;
+  color: var(--brand-red);
 }
 html.dark .MuiIconButton-colorWarning {
-  color: #fbbf24;
+  color: #f5e642;
 }
 html.dark .MuiIconButton-colorSuccess {
   color: #4ade80;
 }
 html.dark .MuiIconButton-colorPrimary {
-  color: #008bd0;
+  color: var(--brand-blue);
 }
 
-/* Dividers / subtle borders using theme tokens */
 html.dark .MuiDivider-root {
   border-color: color-mix(in oklab, var(--foreground) 14%, transparent);
 }
 
-/* Radios (settings) */
 html.dark .MuiRadio-root {
   color: color-mix(in oklab, var(--foreground) 50%, transparent);
 }
 html.dark .MuiRadio-root.Mui-checked {
-  color: #008bd0;
+  color: var(--brand-blue);
 }
 
-/* Alerts on dark cards */
 html.dark .MuiAlert-root.MuiAlert-colorInfo {
-  background-color: color-mix(in oklab, #008bd0 22%, var(--background));
+  background-color: color-mix(in oklab, var(--brand-blue) 22%, var(--background));
   color: var(--foreground);
 }
 html.dark .MuiAlert-root.MuiAlert-colorInfo .MuiAlert-icon {
   color: #38bdf8;
+}
+html.dark .MuiAlert-root.MuiAlert-colorError {
+  background-color: color-mix(in oklab, var(--brand-red) 22%, var(--background));
+}
+html.dark .MuiAlert-root.MuiAlert-colorError .MuiAlert-icon {
+  color: #f87171;
 }
 
 html.dark .MuiDialogContent-dividers {

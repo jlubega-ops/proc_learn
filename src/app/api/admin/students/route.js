@@ -26,6 +26,7 @@ function serializeStudent(u) {
     registrationNumber: sp?.registrationNumber ?? null,
     programmeId: sp?.programmeId ?? null,
     programmeName: sp?.programme?.name ?? null,
+    programmeShortName: sp?.programme?.shortName ?? null,
     academicYearLabel: sp?.academicYearLabel ?? null,
     yearOfStudy: sp?.yearOfStudy ?? null,
     suspendedReason: u.suspendedReason,

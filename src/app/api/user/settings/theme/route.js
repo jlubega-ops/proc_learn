@@ -3,6 +3,7 @@ import { mutateActiveAppSession } from "@/lib/auth/session";
 import { buildIronSessionOptions } from "@/lib/auth/session-options";
 import { prisma } from "@/lib/prisma";
 import { grantedRoles, pickHighestGrantedRole } from "@/lib/roles";
+import { THEME_COOKIE_MAX_AGE, THEME_STORAGE_KEY } from "@/lib/theme-storage";
 
 export const runtime = "nodejs";
 
@@ -36,7 +37,13 @@ export async function PATCH(request) {
       where: { id: session.orgUserId },
       data: { theme },
     });
-    return NextResponse.json({ ok: true, theme });
+    const res = NextResponse.json({ ok: true, theme });
+    res.cookies.set(THEME_STORAGE_KEY, theme, {
+      path: "/",
+      maxAge: THEME_COOKIE_MAX_AGE,
+      sameSite: "lax",
+    });
+    return res;
   }
 
   const userId = session.userId;
@@ -56,5 +63,11 @@ export async function PATCH(request) {
     update: { theme },
   });
 
-  return NextResponse.json({ ok: true, theme });
+  const res = NextResponse.json({ ok: true, theme });
+  res.cookies.set(THEME_STORAGE_KEY, theme, {
+    path: "/",
+    maxAge: THEME_COOKIE_MAX_AGE,
+    sameSite: "lax",
+  });
+  return res;
 }

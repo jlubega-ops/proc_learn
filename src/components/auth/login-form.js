@@ -113,7 +113,8 @@ export function LoginForm({
     if (window.sessionStorage.getItem(dedupeKey)) return;
     window.sessionStorage.setItem(dedupeKey, "1");
     showToast({
-      message: "You were signed out after a period of inactivity. Please sign in again.",
+      message:
+        "You were signed out after a period of inactivity. Please sign in again.",
       severity: "error",
       duration: 8000,
     });
@@ -126,8 +127,9 @@ export function LoginForm({
     if (window.sessionStorage.getItem(dedupeKey)) return;
     window.sessionStorage.setItem(dedupeKey, "1");
     const hint =
-      OAUTH_ERROR_HINTS[/** @type {keyof typeof OAUTH_ERROR_HINTS} */ (oauthError)] ||
-      "Sign-in with Google did not complete.";
+      OAUTH_ERROR_HINTS[
+        /** @type {keyof typeof OAUTH_ERROR_HINTS} */ (oauthError)
+      ] || "Sign-in with Google did not complete.";
     showToast({ message: hint, severity: "error", duration: 8000 });
     router.replace(`/login?next=${encodeURIComponent(afterLoginPath)}`, {
       scroll: false,
@@ -182,7 +184,8 @@ export function LoginForm({
       const dest =
         data.mustChangePassword || data.redirectTo === "/setup-password"
           ? "/setup-password"
-          : typeof data.redirectTo === "string" && data.redirectTo.startsWith("/")
+          : typeof data.redirectTo === "string" &&
+              data.redirectTo.startsWith("/")
             ? data.redirectTo
             : afterLoginPath;
       router.push(dest);

@@ -1,11 +1,13 @@
+import { cookies, headers } from "next/headers";
 import { Geist, Geist_Mono } from "next/font/google";
 import "./globals.css";
 import { AuthSessionProvider } from "@/components/providers/auth-session-provider";
 import { ThemeProvider } from "@/components/providers/theme-provider";
+import { MuiAppThemeProvider } from "@/components/providers/mui-app-theme-provider";
 import { ConnectionBanner } from "@/components/connection/connection-banner";
 import { ToastProvider } from "@/components/providers/toast-provider";
 import { APP_NAME, ORG_SHORT } from "@/lib/appConfig";
-import { THEME_STORAGE_KEY } from "@/lib/theme-storage";
+import { resolveHtmlThemeClass } from "@/lib/resolve-html-theme-class";
 
 const geistSans = Geist({
   variable: "--font-geist-sans",
@@ -25,25 +27,26 @@ export const metadata = {
   description: `${APP_NAME} — learning platform for students at Makerere University Business School.`,
 };
 
-export default function RootLayout({ children }) {
+export default async function RootLayout({ children }) {
+  const [cookieStore, headerStore] = await Promise.all([cookies(), headers()]);
+  const pathname = headerStore.get("x-pl-pathname") || "/";
+  const themeClass = resolveHtmlThemeClass(pathname, cookieStore);
+
   return (
     <html
       lang="en"
-      className={`${geistSans.variable} ${geistMono.variable} h-full antialiased`}
+      className={`${geistSans.variable} ${geistMono.variable} h-full antialiased${themeClass ? ` ${themeClass}` : ""}`}
       suppressHydrationWarning
     >
       <body className="min-h-dvh bg-background font-sans text-foreground">
-        <script
-          dangerouslySetInnerHTML={{
-            __html: `try{var p=(typeof location!=="undefined"&&location.pathname)||"";function authLight(x){return x==="/login"||x.indexOf("/login/")===0||x==="/forgot-password"||x.indexOf("/forgot-password/")===0||x==="/reset-password"||x.indexOf("/reset-password/")===0||x==="/activate"||x.indexOf("/activate/")===0||x==="/setup-password"||x.indexOf("/setup-password/")===0;}if(authLight(p)){document.documentElement.classList.remove("dark");}else{var t=localStorage.getItem(${JSON.stringify(THEME_STORAGE_KEY)});if(t==="dark"){document.documentElement.classList.add("dark");}else if(t==="light"){document.documentElement.classList.remove("dark");}}}catch(e){}`,
-          }}
-        />
         <AuthSessionProvider>
           <ThemeProvider>
-            <ToastProvider>
-              <ConnectionBanner />
-              {children}
-            </ToastProvider>
+            <MuiAppThemeProvider>
+              <ToastProvider>
+                <ConnectionBanner />
+                {children}
+              </ToastProvider>
+            </MuiAppThemeProvider>
           </ThemeProvider>
         </AuthSessionProvider>
       </body>

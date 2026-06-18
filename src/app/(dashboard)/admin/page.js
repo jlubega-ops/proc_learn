@@ -1,4 +1,9 @@
 import Link from "next/link";
+import { BRAND_CARD_CLASS } from "@/lib/brand-ui";
+import {
+  DashboardPageIntro,
+  BRAND_PAGE_SHELL_CLASS,
+} from "@/components/layout/dashboard-page-intro";
 
 export const metadata = {
   title: "Admin",
@@ -20,24 +25,20 @@ export default function AdminPage() {
     { href: "/students/new", title: "Add student", desc: "MUBS student email and programme." },
   ];
   return (
-    <div className="w-full space-y-6">
-      <div className="rounded-2xl border border-dashed border-amber-300/80 bg-amber-50/80 p-6 dark:border-amber-700/60 dark:bg-amber-950/30">
-        <h1 className="text-lg font-semibold text-zinc-900 dark:text-white">
-          Administration
-        </h1>
-        <p className="mt-2 text-sm text-zinc-700 dark:text-zinc-300">
-          Your active role is system admin. Use the shortcuts below to manage users and
-          programmes.
-        </p>
-      </div>
+    <div className={BRAND_PAGE_SHELL_CLASS}>
+      <DashboardPageIntro
+        hero
+        title="Administration"
+        description="Your active role is system admin. Use the shortcuts below to manage users and programmes."
+      />
       <ul className="grid gap-4 sm:grid-cols-2">
         {cards.map((c) => (
           <li key={c.href}>
             <Link
               href={c.href}
-              className="block rounded-xl border border-zinc-200 bg-white p-4 shadow-sm transition hover:border-[#008bd0]/40 dark:border-zinc-800 dark:bg-zinc-900"
+              className={`block ${BRAND_CARD_CLASS} border-t-brand-blue p-4 transition hover:border-primary/40 hover:shadow-md`}
             >
-              <h2 className="font-semibold text-zinc-900 dark:text-white">{c.title}</h2>
+              <h2 className="font-semibold text-foreground">{c.title}</h2>
               <p className="mt-1 text-sm text-zinc-600 dark:text-zinc-400">{c.desc}</p>
             </Link>
           </li>

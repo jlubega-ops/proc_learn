@@ -13,7 +13,7 @@ function bannerStyles(online) {
   return {
     text: "You are not connected to the internet. Please connect and try again.",
     className:
-      "border border-red-600/50 bg-red-950/90 text-red-50 dark:bg-red-950/80",
+      "border border-brand-red/50 bg-[color-mix(in_oklab,var(--brand-red)_88%,#18181b)] text-white",
   };
 }
 

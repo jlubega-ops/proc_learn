@@ -42,8 +42,9 @@ import {
   themedTextFieldSx,
 } from "@/lib/admin-mui-surfaces";
 import { validateStudentAccountForm } from "@/lib/validation/student-form";
-import { useToast } from "@/components/providers/toast-provider";
+import { BRAND_BTN_PRIMARY_CLASS } from "@/lib/brand-ui";
 import { AdminStudentsBulkImportDialog } from "@/components/admin/admin-students-bulk-import-dialog";
+import { useToast } from "@/components/providers/toast-provider";
 
 /**
  * @typedef {{
@@ -57,6 +58,7 @@ import { AdminStudentsBulkImportDialog } from "@/components/admin/admin-students
  *   registrationNumber: string | null;
  *   programmeId: string | null;
  *   programmeName: string | null;
+ *   programmeShortName: string | null;
  *   academicYearLabel: string | null;
  *   yearOfStudy: number | null;
  *   sex: string | null;
@@ -413,7 +415,7 @@ export function AdminStudentsPanel() {
         </Button>
         <Link
           href="/students/new"
-          className="inline-flex h-9 min-h-9 w-full items-center justify-center gap-1.5 rounded-md bg-primary px-3 text-sm font-semibold text-white hover:opacity-90 sm:w-auto sm:px-4"
+          className={`${BRAND_BTN_PRIMARY_CLASS} h-9 min-h-9 w-full gap-1.5 sm:w-auto sm:px-4`}
         >
           <PersonAddAlt1Rounded sx={{ fontSize: 20 }} aria-hidden />
           <span>Add student</span>
@@ -451,7 +453,21 @@ export function AdminStudentsPanel() {
                   <TableCell>{row.displayName}</TableCell>
                   <TableCell>{row.email}</TableCell>
                   <TableCell>{row.studentNumber}</TableCell>
-                  <TableCell>{row.programmeName}</TableCell>
+                  <TableCell>
+                    {row.programmeShortName || row.programmeName ? (
+                      <Tooltip
+                        title={row.programmeName || row.programmeShortName || ""}
+                        disableHoverListener={
+                          !row.programmeName ||
+                          row.programmeName === row.programmeShortName
+                        }
+                      >
+                        <span>{row.programmeShortName || row.programmeName}</span>
+                      </Tooltip>
+                    ) : (
+                      "—"
+                    )}
+                  </TableCell>
                   <TableCell>{row.yearOfStudy}</TableCell>
                   <TableCell>{row.academicYearLabel}</TableCell>
                   <TableCell>

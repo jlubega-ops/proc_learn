@@ -22,10 +22,10 @@ export function BrandedPublicShell({ children, className = "" }) {
         </div>
         <div className="absolute inset-0 bg-gradient-to-b from-black/40 via-black/28 to-black/50" />
         <div
-          className="absolute inset-0 opacity-30 mix-blend-overlay"
+          className="absolute inset-0 opacity-35 mix-blend-overlay"
           style={{
             background:
-              "linear-gradient(135deg, rgba(0,139,208,0.25) 0%, transparent 45%, rgba(237,28,36,0.15) 100%)",
+              "linear-gradient(135deg, rgba(0,139,208,0.28) 0%, transparent 40%, rgba(255,242,0,0.12) 55%, transparent 70%, rgba(237,28,36,0.18) 100%)",
           }}
           aria-hidden
         />
@@ -50,7 +50,8 @@ export function BrandedPublicShell({ children, className = "" }) {
 export function BrandedAuthCard({ title, subtitle, children, maxWidthClass = "max-w-md" }) {
   return (
     <div className={`w-full ${maxWidthClass} shrink-0`}>
-      <div className="flex max-h-full w-full flex-col overflow-hidden rounded-2xl border border-white/65 border-t-4 border-t-[#ed1c24] bg-white/95 shadow-2xl backdrop-blur-md dark:border-zinc-600/80 dark:border-t-[#ed1c24] dark:bg-zinc-900/95">
+      <div className="flex max-h-full w-full flex-col overflow-hidden rounded-2xl border border-white/65 bg-white/95 shadow-2xl backdrop-blur-md dark:border-zinc-600/80 dark:bg-zinc-900/95">
+        <div className="brand-tricolor-stripe" aria-hidden />
         <div className="px-5 py-5 sm:px-6 sm:py-6">
           <div className="mb-1 flex items-center gap-3">
             <div className="relative h-11 w-11 shrink-0 sm:h-12 sm:w-12">

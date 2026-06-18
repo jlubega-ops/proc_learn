@@ -3,6 +3,11 @@ import { Role } from "@prisma/client";
 import { getSessionUser, sessionActiveRole } from "@/lib/api/get-session-user";
 import { canManageStudents } from "@/lib/api/student-scope";
 import { AdminStudentsPanel } from "@/components/admin/admin-students-panel";
+import {
+  BRAND_PAGE_LEAD_CLASS,
+  BRAND_PAGE_SHELL_CLASS,
+  DashboardPageIntro,
+} from "@/components/layout/dashboard-page-intro";
 
 export const metadata = {
   title: "Students",
@@ -19,19 +24,20 @@ export default async function StudentsManagePage() {
   }
 
   return (
-    <div className="w-full space-y-4">
-      <h1 className="text-lg font-semibold text-zinc-900 dark:text-white">Students</h1>
-      <p className="text-sm text-zinc-600 dark:text-zinc-400">
-        Search and filter by programme or academic year. Changes are logged and system administrators
-        are notified.
-        {r === Role.EXAMINER ? (
-          <>
-            {" "}
-            As an examiner you can add and maintain student records, and suspend or reactivate student
-            accounts. Programme and staff settings stay with system administrators.
-          </>
-        ) : null}
-      </p>
+    <div className={BRAND_PAGE_SHELL_CLASS}>
+      <DashboardPageIntro title="Students">
+        <p className={`mt-2 ${BRAND_PAGE_LEAD_CLASS}`}>
+          Search and filter by programme or academic year. Changes are logged and system administrators
+          are notified.
+          {r === Role.EXAMINER ? (
+            <>
+              {" "}
+              As an examiner you can add and maintain student records, and suspend or reactivate student
+              accounts. Programme and staff settings stay with system administrators.
+            </>
+          ) : null}
+        </p>
+      </DashboardPageIntro>
       <AdminStudentsPanel />
     </div>
   );

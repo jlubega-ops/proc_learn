@@ -2,21 +2,23 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
+import {
+  BRAND_CARD_CLASS,
+  BRAND_NAV_ACTIVE_CLASS,
+  BRAND_NAV_INACTIVE_CLASS,
+} from "@/lib/brand-ui";
 
 export function ProjectTabs({ projectId, canSeeSubmissionsTab }) {
   const pathname = usePathname() || `/projects/${projectId}`;
   const isSubmissions = pathname.endsWith("/submissions");
+  const tabBase = "rounded-md px-3 py-1.5 text-sm font-medium transition";
 
   return (
-    <div className="rounded-xl border border-zinc-200 bg-white p-3 dark:border-zinc-800 dark:bg-zinc-900">
+    <div className={`${BRAND_CARD_CLASS} p-3`}>
       <div className="flex flex-wrap items-center gap-2">
         <Link
           href={`/projects/${projectId}`}
-          className={`rounded-md px-3 py-1.5 text-sm font-medium transition ${
-            !isSubmissions
-              ? "bg-[#008bd0]/15 text-[#008bd0] dark:bg-[#008bd0]/25"
-              : "text-zinc-700 hover:bg-zinc-100 dark:text-zinc-200 dark:hover:bg-zinc-800"
-          }`}
+          className={`${tabBase} ${!isSubmissions ? BRAND_NAV_ACTIVE_CLASS : BRAND_NAV_INACTIVE_CLASS}`}
           title="View project details"
           aria-current={!isSubmissions ? "page" : undefined}
         >
@@ -25,11 +27,7 @@ export function ProjectTabs({ projectId, canSeeSubmissionsTab }) {
         {canSeeSubmissionsTab ? (
           <Link
             href={`/projects/${projectId}/submissions`}
-            className={`rounded-md px-3 py-1.5 text-sm font-medium transition ${
-              isSubmissions
-                ? "bg-[#008bd0]/15 text-[#008bd0] dark:bg-[#008bd0]/25"
-                : "text-zinc-700 hover:bg-zinc-100 dark:text-zinc-200 dark:hover:bg-zinc-800"
-            }`}
+            className={`${tabBase} ${isSubmissions ? BRAND_NAV_ACTIVE_CLASS : BRAND_NAV_INACTIVE_CLASS}`}
             title="View project submissions"
             aria-current={isSubmissions ? "page" : undefined}
           >
@@ -40,4 +38,3 @@ export function ProjectTabs({ projectId, canSeeSubmissionsTab }) {
     </div>
   );
 }
-
