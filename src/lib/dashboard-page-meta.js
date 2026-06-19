@@ -33,6 +33,8 @@ export function getDashboardPageMeta(pathname, activeRole) {
     return { title: "Settings", subtitle: "Preferences and account" };
   if (pathname.startsWith("/profile"))
     return { title: "Profile", subtitle: "Your account" };
+  if (pathname.startsWith("/project-settings/process-flow"))
+    return { title: "Process flow", subtitle: "Organisation process flows for student workspaces" };
   if (pathname.startsWith("/project-settings/roles"))
     return { title: "Project roles", subtitle: "Organisation roles for student workspaces" };
   if (pathname.startsWith("/project-settings"))

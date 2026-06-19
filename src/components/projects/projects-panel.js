@@ -52,6 +52,10 @@ import {
   adminTableSx,
   themedTextFieldSx,
 } from "@/lib/admin-mui-surfaces";
+import {
+  dateTimeInputConstraints,
+  validateDateTimeRange,
+} from "@/lib/validation/date-range";
 
 const STUDENT_FILTERS = [
   { value: "all", label: "All" },
@@ -198,13 +202,8 @@ function validateClientForm(activeRole, form) {
   if (activeRole === "STUDENT" && !String(form.organizationName || "").trim()) {
     errors.organizationName = "Organisation name is required.";
   }
-  if (String(form.closeAt || "").trim() && String(form.openAt || "").trim()) {
-    const openAt = new Date(form.openAt);
-    const closeAt = new Date(form.closeAt);
-    if (!Number.isNaN(openAt.getTime()) && !Number.isNaN(closeAt.getTime()) && closeAt <= openAt) {
-      errors.closeAt = "Close date must be after open date.";
-    }
-  }
+  const dateRange = validateDateTimeRange(form.openAt, form.closeAt);
+  Object.assign(errors, dateRange.errors);
   if (activeRole !== "STUDENT") {
     const hRaw = String(form.durationHours ?? "").trim();
     const mRaw = String(form.durationMinutes ?? "").trim();
@@ -249,7 +248,7 @@ function validateClientForm(activeRole, form) {
 
 export function ProjectsPanel() {
   const { showToast } = useToast();
-  const { session, loading: sessionLoading } = useAuthSession();
+  const { session, loading: sessionLoading, setSessionBlocking } = useAuthSession();
   const activeRole = session?.activeRole || "STUDENT";
   const isStudent = activeRole === "STUDENT";
   const isLecturer = activeRole === "LECTURER";
@@ -272,7 +271,7 @@ export function ProjectsPanel() {
   const [staffScope, setStaffScope] = useState("all");
   const [staffPurpose, setStaffPurpose] = useState("all");
   const [staffStatus, setStaffStatus] = useState("all");
-  const [openStatus, setOpenStatus] = useState("all");
+  const [openStatus, setOpenStatus] = useState("open");
 
   const [openEditor, setOpenEditor] = useState(false);
   const [busyEditor, setBusyEditor] = useState(false);
@@ -299,6 +298,25 @@ export function ProjectsPanel() {
   const router = useRouter();
 
   const tinyApiKey = process.env.NEXT_PUBLIC_TINYMCE_API_KEY || "";
+  const projectDateConstraints = useMemo(
+    () => dateTimeInputConstraints(form.openAt, form.closeAt),
+    [form.openAt, form.closeAt],
+  );
+
+  const patchProjectDateField = (patch) => {
+    setForm((prev) => {
+      const next = { ...prev, ...patch };
+      if (patch.openAt !== undefined || patch.closeAt !== undefined) {
+        setFieldErrors((errs) => {
+          const cleared = { ...errs };
+          delete cleared.openAt;
+          delete cleared.closeAt;
+          return { ...cleared, ...validateDateTimeRange(next.openAt, next.closeAt).errors };
+        });
+      }
+      return next;
+    });
+  };
 
   const load = useCallback(
     async (opts = { silent: false }) => {
@@ -362,7 +380,7 @@ export function ProjectsPanel() {
     setStaffScope("all");
     setStaffPurpose("all");
     setStaffStatus("all");
-    setOpenStatus("all");
+    setOpenStatus("open");
   }, [activeRole]);
 
   useEffect(() => {
@@ -535,9 +553,21 @@ export function ProjectsPanel() {
     }
   };
 
+  const enterProjectWorkspace = useCallback(
+    (projectId, opts = /** @type {{ organization?: boolean }} */ ({})) => {
+      const asOrg = opts.organization !== false && isStudent;
+      setSessionBlocking(
+        true,
+        asOrg ? "Entering organization…" : "Opening project…",
+      );
+      router.push(`/projects/${projectId}`);
+    },
+    [isStudent, router, setSessionBlocking],
+  );
+
   const handleProjectOpen = (row) => {
     if (!isStudent) {
-      router.push(`/projects/${row.id}`);
+      enterProjectWorkspace(row.id, { organization: false });
       return;
     }
 
@@ -550,7 +580,7 @@ export function ProjectsPanel() {
 
     if (isStaffProject) {
       if (["IN_PROGRESS", "SUBMITTED"].includes(enrollmentStatus)) {
-        router.push(`/projects/${row.id}`);
+        enterProjectWorkspace(row.id);
         return;
       }
       setStudentProjectDialog(row);
@@ -565,7 +595,7 @@ export function ProjectsPanel() {
         setStudentDialogEnrolled(true);
         return;
       }
-      router.push(`/projects/${row.id}`);
+      enterProjectWorkspace(row.id);
       return;
     }
 
@@ -629,7 +659,7 @@ export function ProjectsPanel() {
       if (ok) {
         const projectId = studentProjectDialog.id;
         setStudentProjectDialog(null);
-        router.push(`/projects/${projectId}`);
+        enterProjectWorkspace(projectId);
       }
     } finally {
       setStudentDialogBusy(false);
@@ -1114,8 +1144,11 @@ export function ProjectsPanel() {
                   label="Open date (optional)"
                   type="datetime-local"
                   value={form.openAt}
-                  onChange={(e) => setForm((prev) => ({ ...prev, openAt: e.target.value }))}
-                  slotProps={{ inputLabel: { shrink: true } }}
+                  onChange={(e) => patchProjectDateField({ openAt: e.target.value })}
+                  slotProps={{
+                    inputLabel: { shrink: true },
+                    input: { max: projectDateConstraints.startMax },
+                  }}
                   error={Boolean(fieldErrors.openAt)}
                   helperText={fieldErrors.openAt || " "}
                   fullWidth
@@ -1126,8 +1159,11 @@ export function ProjectsPanel() {
                   label="Close date (optional)"
                   type="datetime-local"
                   value={form.closeAt}
-                  onChange={(e) => setForm((prev) => ({ ...prev, closeAt: e.target.value }))}
-                  slotProps={{ inputLabel: { shrink: true } }}
+                  onChange={(e) => patchProjectDateField({ closeAt: e.target.value })}
+                  slotProps={{
+                    inputLabel: { shrink: true },
+                    input: { min: projectDateConstraints.endMin },
+                  }}
                   error={Boolean(fieldErrors.closeAt)}
                   helperText={fieldErrors.closeAt || " "}
                   fullWidth

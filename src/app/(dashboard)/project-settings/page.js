@@ -1,4 +1,5 @@
 import Link from "next/link";
+import AccountTreeRounded from "@mui/icons-material/AccountTreeRounded";
 import BadgeRounded from "@mui/icons-material/BadgeRounded";
 import SettingsRounded from "@mui/icons-material/SettingsRounded";
 import { BRAND_CARD_CLASS, brandIconSx } from "@/lib/brand-ui";
@@ -20,6 +21,12 @@ export default function ProjectSettingsPage() {
       Icon: BadgeRounded,
     },
     {
+      href: "/project-settings/process-flow",
+      title: "Process flow",
+      desc: "Organisation process flows and ordered steps (system admin manages; all student workspaces use the same catalogue).",
+      Icon: AccountTreeRounded,
+    },
+    {
       href: "/projects?scope=student",
       title: "Student projects",
       desc: "Open the projects list to configure settings on student-owned projects.",
@@ -31,7 +38,7 @@ export default function ProjectSettingsPage() {
     <div className={BRAND_PAGE_SHELL_CLASS}>
       <DashboardPageIntro
         title="Project settings"
-        description="Configure organisation roles and student project behaviour. Changes to project roles apply to all student workspaces; project-level settings apply to individual student projects."
+        description="Configure organisation roles, process flows, and student project behaviour. Changes apply to all student workspaces."
       />
       <ul className="grid gap-4 sm:grid-cols-2">
         {cards.map((c) => (

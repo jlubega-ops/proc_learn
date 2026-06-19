@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { Fragment, Suspense, useCallback, useEffect, useState } from "react";
+import { Fragment, Suspense, useEffect, useMemo, useRef, useState } from "react";
 import { usePathname, useSearchParams } from "next/navigation";
 import Image from "next/image";
 import IconButton from "@mui/material/IconButton";
@@ -15,7 +15,6 @@ import DarkModeRounded from "@mui/icons-material/DarkModeRounded";
 import LightModeRounded from "@mui/icons-material/LightModeRounded";
 import LoginRounded from "@mui/icons-material/LoginRounded";
 import MenuRounded from "@mui/icons-material/MenuRounded";
-import AccountCircleRounded from "@mui/icons-material/AccountCircleRounded";
 import WestRounded from "@mui/icons-material/WestRounded";
 import { APP_NAME, COPYRIGHT_YEAR, ORG_NAME } from "@/lib/appConfig";
 import { useAppTheme } from "@/components/providers/theme-provider";
@@ -75,73 +74,35 @@ function navItemIsActive(navPathname, searchParams, href) {
 }
 
 /**
- * @param {string} activeRole
- * @param {string} sectionId
- */
-function sectionStorageKey(activeRole, sectionId) {
-  return `pl-sidebar-${activeRole}-${sectionId}`;
-}
-
-/**
  * @param {{
- *   sectionId: string;
  *   label: string;
- *   activeRole: string;
- *   defaultOpen: boolean;
+ *   open: boolean;
+ *   onToggle: () => void;
  *   children: import("react").ReactNode;
  * }} p
  */
-function CollapsibleNavSection({ sectionId, label, activeRole, defaultOpen, children }) {
-  const key = sectionStorageKey(activeRole, sectionId);
-  const [open, setOpen] = useState(defaultOpen);
-
-  useEffect(() => {
-    try {
-      const stored = localStorage.getItem(key);
-      if (stored === "0") setOpen(false);
-      else if (stored === "1") setOpen(true);
-      else setOpen(defaultOpen);
-    } catch {
-      setOpen(defaultOpen);
-    }
-  }, [key, defaultOpen]);
-
-  useEffect(() => {
-    if (defaultOpen) setOpen(true);
-  }, [defaultOpen]);
-
-  const toggle = useCallback(() => {
-    setOpen((prev) => {
-      const next = !prev;
-      try {
-        localStorage.setItem(key, next ? "1" : "0");
-      } catch {
-        /* ignore */
-      }
-      return next;
-    });
-  }, [key]);
-
+function CollapsibleNavSection({ label, open, onToggle, children }) {
   return (
     <li className="list-none">
-      <details open={open} className="group rounded-lg">
-        <summary
-          onClick={(e) => {
-            e.preventDefault();
-            toggle();
-          }}
-          title={`${open ? "Collapse" : "Expand"} ${label}`}
-          className="flex cursor-pointer list-none items-center gap-2 rounded-lg px-3 py-2 text-[11px] font-bold uppercase tracking-wide text-zinc-500 transition-colors hover:bg-zinc-100 dark:text-zinc-400 dark:hover:bg-zinc-800/80"
-        >
-          <span className="flex-1">{label}</span>
-          <ExpandMoreRounded
-            aria-hidden
-            sx={{ fontSize: 18 }}
-            className="transition-transform group-open:rotate-180"
-          />
-        </summary>
-        <ul className="mt-1 flex flex-col gap-1">{children}</ul>
-      </details>
+      <button
+        type="button"
+        onClick={onToggle}
+        aria-expanded={open}
+        title={`${open ? "Collapse" : "Expand"} ${label}`}
+        className="flex w-full cursor-pointer items-center gap-2 rounded-lg px-3 py-2 text-left text-[11px] font-bold uppercase tracking-wide text-zinc-500 transition-colors hover:bg-zinc-100 dark:text-zinc-400 dark:hover:bg-zinc-800/80"
+      >
+        <span className="flex-1">{label}</span>
+        <ExpandMoreRounded
+          aria-hidden
+          sx={{ fontSize: 18 }}
+          className={`transition-transform ${open ? "rotate-180" : ""}`}
+        />
+      </button>
+      {open ? (
+        <ul className="mt-0.5 flex flex-col gap-0.5 border-l-2 border-primary/25 pl-2 ml-2">
+          {children}
+        </ul>
+      ) : null}
     </li>
   );
 }
@@ -177,6 +138,36 @@ function NavLinks({
       }
       return navItemIsActive(navPathname || "/", searchParams, item.href);
     });
+
+  const defaultSectionId = sections[0]?.id ?? null;
+
+  const activeSectionId = useMemo(
+    () => sections.find((section) => sectionHasActiveLink(section.links))?.id ?? null,
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- pathname/searchParams drive active section
+    [navPathname, searchParams, activeRole, canManageOrgAdmin, sessionType, orgProjectId],
+  );
+
+  const contextKey = `${activeRole}|${sessionType}|${orgProjectId}|${canManageOrgAdmin}`;
+  const lastContextKey = useRef("");
+
+  /** One collapsible section open at a time; stays open when navigating links inside it. */
+  const [openSectionId, setOpenSectionId] = useState(/** @type {string | null} */ (null));
+
+  useEffect(() => {
+    const contextChanged = lastContextKey.current !== contextKey;
+    lastContextKey.current = contextKey;
+
+    setOpenSectionId((prev) => {
+      if (contextChanged || prev === null) {
+        return activeSectionId ?? defaultSectionId;
+      }
+      return prev;
+    });
+  }, [contextKey, activeSectionId, defaultSectionId]);
+
+  const toggleSection = (sectionId) => {
+    setOpenSectionId((prev) => (prev === sectionId ? null : sectionId));
+  };
 
   const renderLink = (section, { href, label, title, Icon, children }) => {
     if (Array.isArray(children) && children.length > 0) {
@@ -246,7 +237,6 @@ function NavLinks({
     <ul className="flex flex-col gap-1 p-3">
       {sections.map((section, sectionIndex) => {
         const sectionLinks = section.links.map((link) => renderLink(section, link));
-        const hasActiveInSection = sectionHasActiveLink(section.links);
 
         return (
           <Fragment key={section.id}>
@@ -255,10 +245,9 @@ function NavLinks({
             ) : null}
             {section.label && section.collapsible ? (
               <CollapsibleNavSection
-                sectionId={section.id}
                 label={section.label}
-                activeRole={activeRole}
-                defaultOpen={hasActiveInSection}
+                open={openSectionId === section.id}
+                onToggle={() => toggleSection(section.id)}
               >
                 {sectionLinks}
               </CollapsibleNavSection>
@@ -300,7 +289,7 @@ export default function DashboardLayoutClient({ children }) {
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [leaveOrgOpen, setLeaveOrgOpen] = useState(false);
   const { mode, toggleMode } = useAppTheme();
-  const { session, loading: authLoading } = useAuthSession();
+  const { session, loading: authLoading, setSessionBlocking } = useAuthSession();
   const activeRole = session?.activeRole ?? "STUDENT";
   const isOrgSession = session?.sessionType === "org";
   const orgProjectId = isOrgSession ? String(session?.projectId || "") : "";
@@ -314,6 +303,8 @@ export default function DashboardLayoutClient({ children }) {
   const [projectOrgLoading, setProjectOrgLoading] = useState(false);
 
   const authed = Boolean(session?.authenticated);
+  const showSidebarLeaveOrg = authed && isStudentProjectWorld && !isOrgSession;
+  const showSidebarSignIn = !authed;
   const pageMeta = getDashboardPageMeta(
     pathname || "/",
     isOrgSession ? "ORG_MEMBER" : activeRole,
@@ -353,6 +344,13 @@ export default function DashboardLayoutClient({ children }) {
       cancelled = true;
     };
   }, [isStudentProjectWorld, projectId, isOrgSession, session?.projectName]);
+
+  useEffect(() => {
+    const onProjectRoute = /^\/projects\/[^/]+/.test(pathname || "");
+    if (!onProjectRoute) return;
+    if (isStudentProjectWorld && projectOrgLoading) return;
+    setSessionBlocking(false);
+  }, [pathname, isStudentProjectWorld, projectOrgLoading, setSessionBlocking]);
 
   useEffect(() => {
     if (!isStudentProjectWorld || !projectId) return;
@@ -435,39 +433,31 @@ export default function DashboardLayoutClient({ children }) {
           </Suspense>
         </nav>
 
-        <div className="shrink-0 border-t border-[color:var(--border-subtle)] p-3">
-          {authed && isStudentProjectWorld && !isOrgSession ? (
-            <button
-              type="button"
-              title="Leave this organization workspace"
-              onClick={() => setLeaveOrgOpen(true)}
-              className="flex items-center justify-center gap-2 rounded-lg border border-[color:var(--border-subtle)] px-3 py-2 text-sm font-semibold text-zinc-800 transition hover:border-primary/40 hover:bg-[color:var(--nav-active-bg)] dark:text-zinc-100"
-            >
-              <WestRounded aria-hidden sx={primaryIconSx} />
-              Leave organization
-            </button>
-          ) : authed ? (
-            <Link
-              href="/profile?tab=details"
-              title="Open your profile"
-              onClick={() => setDrawerOpen(false)}
-              className="flex items-center justify-center gap-2 rounded-lg border border-[color:var(--border-subtle)] px-3 py-2 text-sm font-medium text-zinc-800 transition hover:border-primary/40 hover:bg-[color:var(--nav-active-bg)] dark:text-zinc-100"
-            >
-              <AccountCircleRounded aria-hidden sx={primaryIconSx} />
-              Profile
-            </Link>
-          ) : !authed ? (
-            <Link
-              href="/login"
-              title="Open the sign-in page"
-              onClick={() => setDrawerOpen(false)}
-              className="flex items-center justify-center gap-2 rounded-lg border border-[color:var(--border-subtle)] px-3 py-2 text-sm font-medium text-zinc-800 transition hover:border-primary/40 hover:bg-[color:var(--nav-active-bg)] dark:text-zinc-100"
-            >
-              <LoginRounded aria-hidden sx={primaryIconSx} />
-              Sign in
-            </Link>
-          ) : null}
-        </div>
+        {showSidebarLeaveOrg || showSidebarSignIn ? (
+          <div className="shrink-0 border-t border-[color:var(--border-subtle)] p-3">
+            {showSidebarLeaveOrg ? (
+              <button
+                type="button"
+                title="Leave this organization workspace"
+                onClick={() => setLeaveOrgOpen(true)}
+                className="flex w-full cursor-pointer items-center justify-center gap-2 rounded-lg border-2 border-brand-red bg-brand-red px-3 py-2.5 text-sm font-semibold text-white shadow-sm transition hover:bg-[color:var(--brand-red)]/90 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand-red"
+              >
+                <WestRounded aria-hidden sx={{ fontSize: 20, color: "inherit" }} />
+                Leave organization
+              </button>
+            ) : (
+              <Link
+                href="/login"
+                title="Open the sign-in page"
+                onClick={() => setDrawerOpen(false)}
+                className="flex items-center justify-center gap-2 rounded-lg border border-[color:var(--border-subtle)] px-3 py-2 text-sm font-medium text-zinc-800 transition hover:border-primary/40 hover:bg-[color:var(--nav-active-bg)] dark:text-zinc-100"
+              >
+                <LoginRounded aria-hidden sx={primaryIconSx} />
+                Sign in
+              </Link>
+            )}
+          </div>
+        ) : null}
       </aside>
 
       <div className="flex min-w-0 flex-1 flex-col">
@@ -587,6 +577,7 @@ export default function DashboardLayoutClient({ children }) {
             onClick={() => {
               setLeaveOrgOpen(false);
               setDrawerOpen(false);
+              setSessionBlocking(true, "Leaving organization…");
               window.location.assign("/projects");
             }}
           >

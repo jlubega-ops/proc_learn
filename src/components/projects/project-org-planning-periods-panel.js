@@ -43,6 +43,10 @@ import {
 import { formatPlanningPeriodDuration } from "@/lib/planning-period-duration";
 import { parseDateInputValue } from "@/lib/financial-year-dates";
 import {
+  calendarDateInputConstraints,
+  mergeCalendarDateRangeErrors,
+} from "@/lib/validation/date-range";
+import {
   validateProjectOrgPlanningPeriodInput,
   validateProjectOrgPlanningPeriodPatch,
 } from "@/lib/validation/project-org-planning-period";
@@ -408,7 +412,17 @@ export function ProjectOrgPlanningPeriodsPanel({ projectId, readOnly = false }) 
           setOpenCreate(false);
           setCreateErrors({});
         }}
-        onChange={(patch) => setCreateForm((prev) => ({ ...prev, ...patch }))}
+        onChange={(patch) => {
+          setCreateForm((prev) => {
+            const next = { ...prev, ...patch };
+            if (patch.startDate !== undefined || patch.endDate !== undefined) {
+              setCreateErrors((errs) =>
+                mergeCalendarDateRangeErrors(errs, next.startDate, next.endDate),
+              );
+            }
+            return next;
+          });
+        }}
         onClearError={(key) =>
           setCreateErrors((prev) => {
             const next = { ...prev };
@@ -431,7 +445,17 @@ export function ProjectOrgPlanningPeriodsPanel({ projectId, readOnly = false }) 
           setEditRow(null);
           setEditErrors({});
         }}
-        onChange={(patch) => setEditForm((prev) => ({ ...prev, ...patch }))}
+        onChange={(patch) => {
+          setEditForm((prev) => {
+            const next = { ...prev, ...patch };
+            if (patch.startDate !== undefined || patch.endDate !== undefined) {
+              setEditErrors((errs) =>
+                mergeCalendarDateRangeErrors(errs, next.startDate, next.endDate),
+              );
+            }
+            return next;
+          });
+        }}
         onClearError={(key) =>
           setEditErrors((prev) => {
             const next = { ...prev };
@@ -502,6 +526,7 @@ function PlanningPeriodFormDialog({
   onSubmit,
 }) {
   const periodLabel = useMemo(() => computePeriodLabel(form), [form]);
+  const dateConstraints = calendarDateInputConstraints(form.startDate, form.endDate);
 
   return (
     <Dialog
@@ -559,14 +584,17 @@ function PlanningPeriodFormDialog({
             type="date"
             value={form.startDate}
             onChange={(e) => {
-              onChange({ startDate: e.target.value });
-              onClearError("startDate");
-              onClearError("endDate");
+              const startDate = e.target.value;
+              onChange({ startDate });
+              onClearError("financialYearId");
             }}
             error={Boolean(errors.startDate)}
             helperText={errors.startDate || " "}
             fullWidth
-            slotProps={{ inputLabel: { shrink: true } }}
+            slotProps={{
+              inputLabel: { shrink: true },
+              input: { max: dateConstraints.startMax },
+            }}
             sx={themedTextFieldSx}
           />
           <TextField
@@ -574,14 +602,16 @@ function PlanningPeriodFormDialog({
             type="date"
             value={form.endDate}
             onChange={(e) => {
-              onChange({ endDate: e.target.value });
-              onClearError("startDate");
-              onClearError("endDate");
+              const endDate = e.target.value;
+              onChange({ endDate });
             }}
             error={Boolean(errors.endDate)}
-            helperText={errors.endDate || "End date cannot be before the start date."}
+            helperText={errors.endDate || " "}
             fullWidth
-            slotProps={{ inputLabel: { shrink: true } }}
+            slotProps={{
+              inputLabel: { shrink: true },
+              input: { min: dateConstraints.endMin },
+            }}
             sx={themedTextFieldSx}
           />
           <TextField

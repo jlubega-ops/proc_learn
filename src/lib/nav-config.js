@@ -7,7 +7,6 @@ import HistoryRounded from "@mui/icons-material/HistoryRounded";
 import AccountTreeRounded from "@mui/icons-material/AccountTreeRounded";
 import ApartmentRounded from "@mui/icons-material/ApartmentRounded";
 import BadgeRounded from "@mui/icons-material/BadgeRounded";
-import AdminPanelSettingsRounded from "@mui/icons-material/AdminPanelSettingsRounded";
 import BusinessRounded from "@mui/icons-material/BusinessRounded";
 import CalendarMonthRounded from "@mui/icons-material/CalendarMonthRounded";
 import DateRangeRounded from "@mui/icons-material/DateRangeRounded";
@@ -100,6 +99,13 @@ export const SIDEBAR_SECTIONS = [
         Icon: BadgeRounded,
         anyOf: [ROLE.SYSTEM_ADMIN, ROLE.EXAMINER],
       },
+      {
+        href: "/project-settings/process-flow",
+        label: "Process flow",
+        title: "Organisation process flows for student project workspaces",
+        Icon: AccountTreeRounded,
+        anyOf: [ROLE.SYSTEM_ADMIN, ROLE.EXAMINER],
+      },
     ],
   },
   {
@@ -157,64 +163,56 @@ function projectWorkspaceSections(projectId) {
     {
       id: "project-admin",
       label: "System Administration",
+      collapsible: true,
       links: [
         {
-          href: "",
-          label: "Administration",
-          title: "Project organization administration",
-          Icon: AdminPanelSettingsRounded,
+          href: `${base}/org-admin/organisation-structure`,
+          label: "Organisation structure",
+          title: "Define organisation structure",
+          Icon: BusinessRounded,
           anyOf: [ROLE.STUDENT],
-          children: [
-            {
-              href: `${base}/org-admin/organisation-structure`,
-              label: "Organisation structure",
-              title: "Define organisation structure",
-              Icon: BusinessRounded,
-              anyOf: [ROLE.STUDENT],
-            },
-            {
-              href: `${base}/org-admin/departments`,
-              label: "Departments / units",
-              title: "Manage departments and units",
-              Icon: ApartmentRounded,
-              anyOf: [ROLE.STUDENT],
-            },
-            {
-              href: `${base}/org-admin/users`,
-              label: "User accounts",
-              title: "Manage organisation user accounts",
-              Icon: GroupsRounded,
-              anyOf: [ROLE.STUDENT],
-            },
-            {
-              href: `${base}/org-admin/roles`,
-              label: "Roles & Permissions",
-              title: "Manage roles and permissions",
-              Icon: BadgeRounded,
-              anyOf: [ROLE.STUDENT],
-            },
-            {
-              href: `${base}/org-admin/financial-years`,
-              label: "Financial years",
-              title: "Manage financial years",
-              Icon: CalendarMonthRounded,
-              anyOf: [ROLE.STUDENT],
-            },
-            {
-              href: `${base}/org-admin/planning-period`,
-              label: "Planning period",
-              title: "Manage planning periods",
-              Icon: DateRangeRounded,
-              anyOf: [ROLE.STUDENT],
-            },
-            {
-              href: `${base}/org-admin/process-workflow`,
-              label: "Process workflow",
-              title: "Configure process workflows",
-              Icon: AccountTreeRounded,
-              anyOf: [ROLE.STUDENT],
-            },
-          ],
+        },
+        {
+          href: `${base}/org-admin/departments`,
+          label: "Departments / units",
+          title: "Manage departments and units",
+          Icon: ApartmentRounded,
+          anyOf: [ROLE.STUDENT],
+        },
+        {
+          href: `${base}/org-admin/users`,
+          label: "User accounts",
+          title: "Manage organisation user accounts",
+          Icon: GroupsRounded,
+          anyOf: [ROLE.STUDENT],
+        },
+        {
+          href: `${base}/org-admin/roles`,
+          label: "Roles & Permissions",
+          title: "Manage roles and permissions",
+          Icon: BadgeRounded,
+          anyOf: [ROLE.STUDENT],
+        },
+        {
+          href: `${base}/org-admin/financial-years`,
+          label: "Financial years",
+          title: "Manage financial years",
+          Icon: CalendarMonthRounded,
+          anyOf: [ROLE.STUDENT],
+        },
+        {
+          href: `${base}/org-admin/planning-period`,
+          label: "Planning period",
+          title: "Manage planning periods",
+          Icon: DateRangeRounded,
+          anyOf: [ROLE.STUDENT],
+        },
+        {
+          href: `${base}/org-admin/process-workflow`,
+          label: "Process workflow",
+          title: "Add organisation process workflows",
+          Icon: AccountTreeRounded,
+          anyOf: [ROLE.STUDENT],
         },
       ],
     },
@@ -318,7 +316,7 @@ export function sidebarNavForOrgMember(projectId, permissions = []) {
     accessChildren.push({
       href: `${base}/org-admin/process-workflow`,
       label: "Process workflow",
-      title: "View process workflow",
+      title: "View organisation process workflows",
       Icon: AccountTreeRounded,
       anyOf: null,
     });
@@ -352,16 +350,8 @@ export function sidebarNavForOrgMember(projectId, permissions = []) {
     sections.push({
       id: "project-access",
       label: "Your workspace",
-      links: [
-        {
-          href: "",
-          label: "Workspace",
-          title: "Pages available for your role",
-          Icon: AdminPanelSettingsRounded,
-          anyOf: null,
-          children: accessChildren,
-        },
-      ],
+      collapsible: true,
+      links: accessChildren,
     });
   }
 

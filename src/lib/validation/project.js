@@ -1,4 +1,5 @@
 import { ProjectPurpose, ProjectVisibility, Role } from "@prisma/client";
+import { validateDateTimeRange } from "@/lib/validation/date-range";
 
 const PURPOSE_VALUES = new Set(Object.values(ProjectPurpose));
 const VISIBILITY_VALUES = new Set(Object.values(ProjectVisibility));
@@ -106,10 +107,13 @@ export function validateProjectCreateInput({ body, activeRole }) {
 
   const openAt = parseDate(body?.openAt);
   const closeAt = parseDate(body?.closeAt);
-  if (cleanText(body?.openAt) && !openAt) errors.openAt = "Open date is invalid.";
-  if (cleanText(body?.closeAt) && !closeAt) errors.closeAt = "Close date is invalid.";
-  if (openAt && closeAt && closeAt <= openAt) {
-    errors.closeAt = "Close date must be after open date.";
+  const dateRange = validateDateTimeRange(body?.openAt, body?.closeAt);
+  Object.assign(errors, dateRange.errors);
+  if (!dateRange.errors.openAt && cleanText(body?.openAt) && !openAt) {
+    errors.openAt = "Open date is invalid.";
+  }
+  if (!dateRange.errors.closeAt && cleanText(body?.closeAt) && !closeAt) {
+    errors.closeAt = "Close date is invalid.";
   }
 
   const durationSeconds = parseDurationToSeconds(body?.duration);

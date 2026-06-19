@@ -5,7 +5,7 @@ import {
   parseFinancialYearLabel,
   suggestFinancialYearLabel,
 } from "@/lib/financial-year-dates";
-import { isEndBeforeStart } from "@/lib/validation/date-range";
+import { END_BEFORE_START_MESSAGE, isEndBeforeStart, START_AFTER_END_MESSAGE } from "@/lib/validation/date-range";
 
 /**
  * @param {unknown} value
@@ -43,7 +43,8 @@ export function validateProjectOrgFinancialYearInput(body) {
 
   if (startDate && endDate) {
     if (isEndBeforeStart(startDate, endDate)) {
-      errors.endDate = "End date cannot be before the start date.";
+      errors.endDate = END_BEFORE_START_MESSAGE;
+      errors.startDate = START_AFTER_END_MESSAGE;
     }
     const expectedEnd = fiscalYearEndFromStart(startDate);
     if (!isSameCalendarDate(endDate, expectedEnd)) {
@@ -134,6 +135,10 @@ export function validateProjectOrgFinancialYearPatch(body, opts = {}) {
     if (endProvided && !endDate) errors.endDate = "End date is required.";
 
     if (startDate && endDate) {
+      if (isEndBeforeStart(startDate, endDate)) {
+        errors.endDate = END_BEFORE_START_MESSAGE;
+        errors.startDate = START_AFTER_END_MESSAGE;
+      }
       const expectedEnd = fiscalYearEndFromStart(startDate);
       if (!isSameCalendarDate(endDate, expectedEnd)) {
         errors.endDate =
