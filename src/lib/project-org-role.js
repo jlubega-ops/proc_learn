@@ -1,31 +1,139 @@
-/** Default organisation role assigned when a student enters their project workspace. */
-export const PROJECT_ORG_ENTRY_ROLE_NAME = "Admin";
+/** Default organisation role for student Organization Administrator entry. */
+export const PROJECT_ORG_ENTRY_ROLE_NAME = "Organization Administrator";
+
+/** Legacy name used before Organization Administrator rename. */
+export const PROJECT_ORG_ENTRY_ROLE_LEGACY_NAME = "Admin";
+
+/**
+ * Core organisation roles exposed in the simulation (configurable catalogue).
+ * Future roles may be seeded inactive / omitted from create-user UI until needed.
+ */
+export const CORE_ORG_ROLE_DEFINITIONS = [
+  {
+    name: PROJECT_ORG_ENTRY_ROLE_NAME,
+    description:
+      "Simulated ICT/system administrator. Configures organisation structure, users, and workflows — no procurement approval authority by default.",
+    sortOrder: 0,
+  },
+  {
+    name: "User Department Officer",
+    description: "Prepares departmental procurement plans and requisitions.",
+    sortOrder: 10,
+  },
+  {
+    name: "Head User Department",
+    description: "Reviews and endorses departmental plans and requisitions.",
+    sortOrder: 20,
+  },
+  {
+    name: "Procurement Officer",
+    description: "Manages procurement processes and verifies plan availability.",
+    sortOrder: 30,
+  },
+  {
+    name: "Head PDU",
+    description: "Heads the Procurement and Disposal Unit; verifies funding and consolidates plans.",
+    sortOrder: 40,
+  },
+  {
+    name: "Contracts Officer",
+    description: "Reviews consolidated procurement plans and contract documentation.",
+    sortOrder: 50,
+  },
+  {
+    name: "Finance/Budget Officer",
+    description:
+      "Reviews and consolidates department budget requirements before Accounting Officer approval.",
+    sortOrder: 55,
+  },
+  {
+    name: "Accounting Officer",
+    description: "Final organisational approval authority for budgets, plans and requisitions.",
+    sortOrder: 60,
+  },
+];
 
 /**
  * @param {unknown} name
  */
 export function isProjectOrgAdminRole(name) {
-  return String(name || "").trim().toLowerCase() === PROJECT_ORG_ENTRY_ROLE_NAME.toLowerCase();
+  const n = String(name || "").trim().toLowerCase();
+  return (
+    n === PROJECT_ORG_ENTRY_ROLE_NAME.toLowerCase() ||
+    n === PROJECT_ORG_ENTRY_ROLE_LEGACY_NAME.toLowerCase()
+  );
 }
 
 /**
- * Guarantees the required Admin project role exists and stays active.
+ * Guarantees the Organization Administrator role exists (migrates legacy "Admin" if needed).
  * @param {import("@prisma/client").PrismaClient} prisma
  */
 export async function ensureProjectOrgAdminRole(prisma) {
+  const legacy = await prisma.projectOrgRole.findUnique({
+    where: { name: PROJECT_ORG_ENTRY_ROLE_LEGACY_NAME },
+  });
+  if (legacy) {
+    const clash = await prisma.projectOrgRole.findUnique({
+      where: { name: PROJECT_ORG_ENTRY_ROLE_NAME },
+    });
+    if (!clash) {
+      return prisma.projectOrgRole.update({
+        where: { id: legacy.id },
+        data: {
+          name: PROJECT_ORG_ENTRY_ROLE_NAME,
+          description:
+            "Simulated ICT/system administrator. Configures organisation structure, users, and workflows — no procurement approval authority by default.",
+          sortOrder: 0,
+          isActive: true,
+        },
+      });
+    }
+    // Both exist — keep new name, retire legacy by renaming user FKs would break; leave legacy inactive.
+    await prisma.projectOrgRole.update({
+      where: { id: legacy.id },
+      data: { isActive: false },
+    });
+  }
+
   return prisma.projectOrgRole.upsert({
     where: { name: PROJECT_ORG_ENTRY_ROLE_NAME },
     create: {
       name: PROJECT_ORG_ENTRY_ROLE_NAME,
       description:
-        "Organisation administrator. Students enter the project workspace with this role.",
+        "Simulated ICT/system administrator. Configures organisation structure, users, and workflows — no procurement approval authority by default.",
       sortOrder: 0,
       isActive: true,
     },
     update: {
       isActive: true,
+      sortOrder: 0,
     },
   });
+}
+
+/**
+ * Seeds/updates the core organisation role catalogue used by the simulation.
+ * @param {import("@prisma/client").PrismaClient} prisma
+ */
+export async function ensureCoreProjectOrgRoles(prisma) {
+  await ensureProjectOrgAdminRole(prisma);
+  for (const def of CORE_ORG_ROLE_DEFINITIONS) {
+    if (isProjectOrgAdminRole(def.name)) continue;
+    await prisma.projectOrgRole.upsert({
+      where: { name: def.name },
+      create: {
+        name: def.name,
+        description: def.description,
+        sortOrder: def.sortOrder,
+        isActive: true,
+      },
+      update: {
+        description: def.description,
+        sortOrder: def.sortOrder,
+        isActive: true,
+      },
+    });
+  }
 }
 
 /**
@@ -46,13 +154,17 @@ export function projectOrgAdminRoleGuardError({ name, isActive, fieldErrors = {}
 
   if (isActive === false) {
     return {
-      error: "The Admin role is required. Students enter every project with this role, so it cannot be deactivated.",
-      fieldErrors: { ...fieldErrors, isActive: "Admin must stay active." },
+      error:
+        "The Organization Administrator role is required. Students enter every organisation with this role, so it cannot be deactivated.",
+      fieldErrors: {
+        ...fieldErrors,
+        isActive: "Organization Administrator must stay active.",
+      },
     };
   }
 
   return {
-    error: "The Admin role is required and cannot be removed or renamed.",
+    error: "The Organization Administrator role is required and cannot be removed or renamed.",
     fieldErrors,
   };
 }

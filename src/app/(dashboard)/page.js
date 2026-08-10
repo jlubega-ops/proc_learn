@@ -1,4 +1,9 @@
+import { redirect } from "next/navigation";
+import { Role } from "@prisma/client";
 import { APP_NAME, ORG_NAME } from "@/lib/appConfig";
+import { getReadableAppSession } from "@/lib/auth/session";
+import { buildIronSessionOptions } from "@/lib/auth/session-options";
+import { buildSessionPayloadForUserId } from "@/lib/auth/session-payload";
 import {
   BRAND_CARD_CLASS,
   BRAND_HERO_CARD_CLASS,
@@ -11,7 +16,24 @@ export const metadata = {
   description: `Dashboard home for ${APP_NAME}.`,
 };
 
-export default function DashboardHomePage() {
+export default async function DashboardHomePage() {
+  if (buildIronSessionOptions()) {
+    const session = await getReadableAppSession();
+    if (session?.userId) {
+      const payload = await buildSessionPayloadForUserId(session.userId);
+      if (
+        payload?.authenticated &&
+        payload.activeRole === Role.STUDENT &&
+        typeof payload.personalOrgProjectId === "string" &&
+        payload.personalOrgProjectId &&
+        typeof payload.defaultPath === "string" &&
+        payload.defaultPath.startsWith("/organisation")
+      ) {
+        redirect(payload.defaultPath);
+      }
+    }
+  }
+
   return (
     <div className="w-full space-y-6">
       <section className={BRAND_HERO_CARD_CLASS}>

@@ -209,6 +209,10 @@ export async function POST(request) {
   });
 
   const payload = await buildSessionPayloadForUserId(user.id);
-  const redirectTo = payload.mustChangePassword ? "/setup-password" : undefined;
+  const redirectTo = payload.mustChangePassword
+    ? "/setup-password"
+    : typeof payload.defaultPath === "string" && payload.defaultPath.startsWith("/")
+      ? payload.defaultPath
+      : undefined;
   return NextResponse.json({ ok: true, ...payload, redirectTo });
 }

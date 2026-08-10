@@ -11,6 +11,9 @@ export async function buildSessionPayloadForOrgUserId(orgUserId) {
     where: { id: orgUserId },
     include: {
       projectOrgRole: { select: { id: true, name: true, isActive: true } },
+      activeCommittee: {
+        select: { id: true, name: true, committeeType: true, isActive: true },
+      },
       project: {
         select: {
           id: true,
@@ -38,6 +41,15 @@ export async function buildSessionPayloadForOrgUserId(orgUserId) {
   const theme = orgUser.theme === "dark" ? "dark" : "light";
   const permissions = orgUserPermissions(orgUser.projectOrgRole.name);
 
+  const activeCommittee =
+    orgUser.activeCommittee && orgUser.activeCommittee.isActive !== false
+      ? {
+          id: orgUser.activeCommittee.id,
+          name: orgUser.activeCommittee.name,
+          committeeType: orgUser.activeCommittee.committeeType,
+        }
+      : null;
+
   return {
     authenticated: true,
     sessionType: "org",
@@ -50,6 +62,8 @@ export async function buildSessionPayloadForOrgUserId(orgUserId) {
     orgRoleName: orgUser.projectOrgRole.name,
     permissions,
     projectName: orgUser.project.organizationName || orgUser.project.name,
+    activeCommitteeId: activeCommittee?.id || null,
+    activeCommittee,
     redirectTo: `/projects/${orgUser.projectId}`,
   };
 }

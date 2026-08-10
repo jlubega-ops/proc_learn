@@ -1,3 +1,4 @@
+import { Role } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import {
   grantedRoles,
@@ -6,6 +7,10 @@ import {
   switchableRoles,
 } from "@/lib/roles";
 import { formatUserDisplayName } from "@/lib/user-display";
+import { DEFAULT_POST_AUTH_PATH } from "@/lib/appConfig";
+import { ensureStudentPersonalOrg } from "@/lib/projects/student-personal-org";
+import { ensureCoreProjectOrgRoles } from "@/lib/project-org-role";
+import { ensureBaselineProcessTemplates } from "@/lib/projects/process-catalogue";
 
 /**
  * Build client session payload from DB (single source for active role + theme).
@@ -23,10 +28,13 @@ export async function buildSessionPayloadForUserId(userId) {
 
   const displayName = formatUserDisplayName(user);
   const imageUrl = user.profilePhotoUrl?.trim() || "";
+  const g = grantedRoles(user.userRoles);
+
+  let active;
+  let theme = "light";
 
   if (!user.settings) {
-    const g = grantedRoles(user.userRoles);
-    const active = pickHighestGrantedRole(g);
+    active = pickHighestGrantedRole(g);
     await prisma.userSettings.create({
       data: {
         userId: user.id,
@@ -34,32 +42,41 @@ export async function buildSessionPayloadForUserId(userId) {
         activeRole: active,
       },
     });
-    return {
-      authenticated: true,
-      userId: user.id,
-      email: user.email,
-      displayName,
-      imageUrl,
-      theme: "light",
-      grantedRoles: g,
-      switchableRoles: switchableRoles(g),
-      activeRole: active,
-      mustChangePassword: Boolean(user.mustChangePassword),
-    };
+  } else {
+    const storedActive = String(user.settings.activeRole);
+    active = sanitizeActiveRole(g, storedActive);
+    if (active !== storedActive) {
+      await prisma.userSettings.update({
+        where: { userId: user.id },
+        data: { activeRole: active },
+      });
+    }
+    theme = user.settings.theme === "dark" ? "dark" : "light";
   }
 
-  const g = grantedRoles(user.userRoles);
-  const storedActive = String(user.settings.activeRole);
-  const active = sanitizeActiveRole(g, storedActive);
+  /** @type {string | null} */
+  let personalOrgProjectId = null;
+  /** @type {string | null} */
+  let personalOrgName = null;
+  /** @type {string | null} */
+  let personalOrgCode = null;
+  let defaultPath = DEFAULT_POST_AUTH_PATH;
 
-  if (active !== storedActive) {
-    await prisma.userSettings.update({
-      where: { userId: user.id },
-      data: { activeRole: active },
-    });
+  if (active === Role.STUDENT) {
+    try {
+      await ensureCoreProjectOrgRoles(prisma);
+      await ensureBaselineProcessTemplates(prisma);
+      const org = await ensureStudentPersonalOrg(prisma, user.id);
+      if (org?.id) {
+        personalOrgProjectId = org.id;
+        personalOrgName = org.organizationName || org.name || null;
+        personalOrgCode = org.projectCode || null;
+        defaultPath = `/organisation`;
+      }
+    } catch {
+      /* keep default path if provisioning fails */
+    }
   }
-
-  const theme = user.settings.theme === "dark" ? "dark" : "light";
 
   return {
     authenticated: true,
@@ -72,5 +89,9 @@ export async function buildSessionPayloadForUserId(userId) {
     switchableRoles: switchableRoles(g),
     activeRole: active,
     mustChangePassword: Boolean(user.mustChangePassword),
+    personalOrgProjectId,
+    personalOrgName,
+    personalOrgCode,
+    defaultPath,
   };
 }

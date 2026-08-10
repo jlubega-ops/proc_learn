@@ -1,0 +1,218 @@
+"use client";
+
+import { useCallback, useEffect, useState } from "react";
+import Box from "@mui/material/Box";
+import Button from "@mui/material/Button";
+import Chip from "@mui/material/Chip";
+import CircularProgress from "@mui/material/CircularProgress";
+import IconButton from "@mui/material/IconButton";
+import Paper from "@mui/material/Paper";
+import Table from "@mui/material/Table";
+import TableBody from "@mui/material/TableBody";
+import TableCell from "@mui/material/TableCell";
+import TableContainer from "@mui/material/TableContainer";
+import TableHead from "@mui/material/TableHead";
+import TableRow from "@mui/material/TableRow";
+import Tooltip from "@mui/material/Tooltip";
+import Typography from "@mui/material/Typography";
+import AddRounded from "@mui/icons-material/AddRounded";
+import RefreshRounded from "@mui/icons-material/RefreshRounded";
+import SendRounded from "@mui/icons-material/SendRounded";
+import VisibilityRounded from "@mui/icons-material/VisibilityRounded";
+import Link from "next/link";
+import { useToast } from "@/components/providers/toast-provider";
+import {
+  adminCenteredLoadingBoxSx,
+  adminLoadingSpinnerSx,
+  adminMutedTextSx,
+  adminOutlinedTableContainerSx,
+  adminTableSx,
+} from "@/lib/admin-mui-surfaces";
+import { formatMoneyAmount } from "@/lib/money";
+
+/**
+ * Operational department budget list (create on /budgets/new).
+ * @param {{ projectId: string }} p
+ */
+export function OrgDepartmentBudgetsPanel({ projectId }) {
+  const { showToast } = useToast();
+  const [loading, setLoading] = useState(true);
+  const [busy, setBusy] = useState(false);
+  const [budgets, setBudgets] = useState(/** @type {any[]} */ ([]));
+  const [canCreate, setCanCreate] = useState(false);
+
+  const load = useCallback(async () => {
+    setLoading(true);
+    try {
+      const bRes = await fetch(`/api/projects/${projectId}/budgets`, { credentials: "include" });
+      const bData = await bRes.json().catch(() => ({}));
+      if (!bRes.ok) {
+        showToast({
+          message: typeof bData.error === "string" ? bData.error : "Could not load budgets.",
+          severity: "error",
+        });
+        return;
+      }
+      setBudgets(Array.isArray(bData.budgets) ? bData.budgets : []);
+      setCanCreate(Boolean(bData.canCreate));
+    } finally {
+      setLoading(false);
+    }
+  }, [projectId, showToast]);
+
+  useEffect(() => {
+    void load();
+  }, [load]);
+
+  async function submitBudget(budgetId) {
+    setBusy(true);
+    try {
+      const res = await fetch(`/api/projects/${projectId}/budgets`, {
+        method: "POST",
+        credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "submit", budgetId }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        showToast({
+          message: typeof data.error === "string" ? data.error : "Could not submit budget.",
+          severity: "error",
+        });
+        return;
+      }
+      showToast({ message: "Budget submitted for review.", severity: "success" });
+      await load();
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  const statusColor = (s) => {
+    if (s === "APPROVED") return "success";
+    if (s === "REJECTED" || s === "CLOSED") return "error";
+    if (s === "RETURNED" || s === "SUBMITTED" || s === "UNDER_REVIEW") return "warning";
+    return "info";
+  };
+
+  if (loading) {
+    return (
+      <Box sx={adminCenteredLoadingBoxSx} aria-busy>
+        <CircularProgress sx={adminLoadingSpinnerSx} />
+      </Box>
+    );
+  }
+
+  return (
+    <div className="space-y-3">
+      <div className="flex flex-wrap items-center justify-end gap-2">
+        <Button
+          startIcon={<RefreshRounded />}
+          variant="outlined"
+          onClick={() => load()}
+          className="w-full sm:w-auto"
+          title="Refresh budgets"
+        >
+          Refresh
+        </Button>
+        {canCreate ? (
+          <Button
+            component={Link}
+            href={`/projects/${projectId}/budgets/new`}
+            variant="contained"
+            startIcon={<AddRounded />}
+            className="w-full sm:w-auto"
+            title="Create a new department budget"
+          >
+            Create new
+          </Button>
+        ) : null}
+      </div>
+
+      {budgets.length === 0 ? (
+        <Typography sx={adminMutedTextSx}>
+          No department budgets yet. After the Organization Administrator opens a financial year and
+          activates the Budgeting Process, prepare a department budget requirement here.
+        </Typography>
+      ) : (
+        <TableContainer component={Paper} variant="outlined" sx={adminOutlinedTableContainerSx}>
+          <Table size="small" sx={adminTableSx}>
+            <TableHead>
+              <TableRow>
+                <TableCell>Title</TableCell>
+                <TableCell>Reference</TableCell>
+                <TableCell>Financial year</TableCell>
+                <TableCell>Department</TableCell>
+                <TableCell>Total (UGX)</TableCell>
+                <TableCell>Created by</TableCell>
+                <TableCell>Status</TableCell>
+                <TableCell align="right">Actions</TableCell>
+              </TableRow>
+            </TableHead>
+            <TableBody>
+              {budgets.map((b) => (
+                <TableRow key={b.id} hover>
+                  <TableCell>
+                    <span className="font-medium">{b.title}</span>
+                    <div className="text-xs opacity-70">
+                      {b.totals?.lineCount || 0} line{(b.totals?.lineCount || 0) === 1 ? "" : "s"}
+                    </div>
+                  </TableCell>
+                  <TableCell>{b.budgetReference || "—"}</TableCell>
+                  <TableCell>{b.financialYear?.label || "—"}</TableCell>
+                  <TableCell>{b.department?.name || "Organisation"}</TableCell>
+                  <TableCell>{formatMoneyAmount(b.totals?.approvedAmount) || "—"}</TableCell>
+                  <TableCell>
+                    {b.createdBy?.displayName || "—"}
+                    {b.approvedBy?.displayName ? (
+                      <div className="text-xs opacity-70">
+                        Approved by {b.approvedBy.displayName}
+                      </div>
+                    ) : null}
+                  </TableCell>
+                  <TableCell>
+                    <Chip size="small" color={statusColor(b.status)} label={b.status} />
+                  </TableCell>
+                  <TableCell align="right" sx={{ whiteSpace: "nowrap" }}>
+                    <Box sx={{ display: "inline-flex", gap: 0.25, justifyContent: "flex-end" }}>
+                      <Tooltip title="Open budget details">
+                        <IconButton
+                          component={Link}
+                          href={`/projects/${projectId}/budgets/${b.id}`}
+                          size="small"
+                          color="primary"
+                          aria-label={`Open budget ${b.title}`}
+                        >
+                          <VisibilityRounded fontSize="small" />
+                        </IconButton>
+                      </Tooltip>
+                      {canCreate && (b.status === "DRAFT" || b.status === "RETURNED") ? (
+                        <Tooltip title="Submit for review">
+                          <span>
+                            <IconButton
+                              size="small"
+                              color="info"
+                              aria-label={`Submit budget ${b.title}`}
+                              disabled={busy}
+                              onClick={() => submitBudget(b.id)}
+                            >
+                              {busy ? (
+                                <CircularProgress size={16} />
+                              ) : (
+                                <SendRounded fontSize="small" />
+                              )}
+                            </IconButton>
+                          </span>
+                        </Tooltip>
+                      ) : null}
+                    </Box>
+                  </TableCell>
+                </TableRow>
+              ))}
+            </TableBody>
+          </Table>
+        </TableContainer>
+      )}
+    </div>
+  );
+}

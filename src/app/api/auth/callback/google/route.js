@@ -4,6 +4,7 @@ import { UserAccountStatus } from "@prisma/client";
 import { getAppSession, initSessionActivity } from "@/lib/auth/session";
 import { buildIronSessionOptions } from "@/lib/auth/session-options";
 import { safeNextPath } from "@/lib/auth/safe-next-path";
+import { DEFAULT_POST_AUTH_PATH } from "@/lib/appConfig";
 import { getGoogleOAuthRedirectUri } from "@/lib/oauth/google-config";
 import {
   fetchGoogleProfileFromTokens,
@@ -175,7 +176,18 @@ export async function GET(request) {
   });
 
   const mustChangePassword = Boolean(user.mustChangePassword);
-  const dest = mustChangePassword ? "/setup-password" : safeNextPath(nextRaw);
+  let dest = mustChangePassword ? "/setup-password" : safeNextPath(nextRaw);
+  if (!mustChangePassword) {
+    const { buildSessionPayloadForUserId } = await import("@/lib/auth/session-payload");
+    const payload = await buildSessionPayloadForUserId(user.id);
+    if (
+      typeof payload.defaultPath === "string" &&
+      payload.defaultPath.startsWith("/") &&
+      (!nextRaw || safeNextPath(nextRaw) === "/" || safeNextPath(nextRaw) === DEFAULT_POST_AUTH_PATH)
+    ) {
+      dest = payload.defaultPath;
+    }
+  }
   const res = NextResponse.redirect(new URL(dest, request.url));
   res.cookies.delete("pl_google_oauth_state");
   res.cookies.delete("pl_google_oauth_next");

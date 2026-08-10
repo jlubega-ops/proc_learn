@@ -1,10 +1,25 @@
-import { ROLE } from "@/lib/roles";
-
 /**
  * @param {string} pathname
- * @param {string} [activeRole]
+ * @param {string} [_activeRole]
  */
-export function getDashboardPageMeta(pathname, activeRole) {
+export function getDashboardPageMeta(pathname, _activeRole) {
+  if (pathname.startsWith("/organisation")) {
+    if (pathname.includes("/org-admin/organisation-structure"))
+      return { title: "Organisation structure", subtitle: "System administration" };
+    if (pathname.includes("/org-admin/financial-years"))
+      return { title: "Financial years", subtitle: "System administration" };
+    if (pathname.includes("/org-admin/planning-period"))
+      return { title: "Planning period", subtitle: "System administration" };
+    if (pathname.includes("/org-admin/process-workflow"))
+      return { title: "Process workflow", subtitle: "System administration" };
+    if (pathname.includes("/org-admin/users"))
+      return { title: "User accounts", subtitle: "System administration" };
+    if (pathname.includes("/org-admin/departments"))
+      return { title: "Departments / units", subtitle: "System administration" };
+    if (pathname.includes("/org-admin/roles"))
+      return { title: "Roles & Permissions", subtitle: "System administration" };
+    return { title: "Organisation", subtitle: "Your organisation workspace" };
+  }
   if (pathname.includes("/org-admin/organisation-structure"))
     return { title: "Organisation structure", subtitle: "Project system administration" };
   if (pathname.includes("/org-admin/financial-years"))
@@ -23,11 +38,11 @@ export function getDashboardPageMeta(pathname, activeRole) {
     return { title: "My account", subtitle: "Organisation user account" };
   if (pathname === "/" || pathname === "")
     return { title: "Home", subtitle: "Dashboard overview" };
-  if (pathname.startsWith("/projects") || pathname.startsWith("/cases")) {
-    const isStudent = (activeRole || ROLE.STUDENT) === ROLE.STUDENT;
-    return isStudent
-      ? { title: "My Projects", subtitle: "Your learning projects" }
-      : { title: "Projects", subtitle: "Project workspace" };
+  if (pathname === "/projects" || pathname === "/projects/") {
+    return { title: "Projects", subtitle: "Project workspace" };
+  }
+  if (pathname.startsWith("/projects/") || pathname.startsWith("/cases")) {
+    return { title: "Projects", subtitle: "Project workspace" };
   }
   if (pathname.startsWith("/settings"))
     return { title: "Settings", subtitle: "Preferences and account" };

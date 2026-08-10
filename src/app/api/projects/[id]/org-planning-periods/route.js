@@ -4,7 +4,10 @@ import { getSessionUser, sessionActiveRole } from "@/lib/api/get-session-user";
 import { writeAuditLog, AuditEvent } from "@/lib/audit-log";
 import { prisma } from "@/lib/prisma";
 import { authorizeProjectOrgAdmin } from "@/lib/projects/workspace-access";
-import { authorizeProjectOrgRead } from "@/lib/projects/project-api-auth";
+import {
+  authorizeProjectApiAccess,
+  authorizeProjectOrgRead,
+} from "@/lib/projects/project-api-auth";
 import { ORG_PERMISSION } from "@/lib/projects/org-role-permissions";
 import {
   listActiveProjectFinancialYears,
@@ -16,10 +19,64 @@ import { validateProjectOrgPlanningPeriodInput } from "@/lib/validation/project-
 
 export const runtime = "nodejs";
 
+const SELECTABLE_PERIOD_PERMISSIONS = [
+  ORG_PERMISSION.VIEW_PLANNING_PERIODS,
+  ORG_PERMISSION.VIEW_PROCUREMENT_PLANS,
+  ORG_PERMISSION.CREATE_REQUISITION,
+];
+
+/**
+ * @param {string} projectId
+ */
+async function authorizeSelectablePlanningPeriods(projectId) {
+  for (const orgPermission of SELECTABLE_PERIOD_PERMISSIONS) {
+    const auth = await authorizeProjectApiAccess(prisma, { projectId, orgPermission });
+    if (auth.ok) return auth;
+  }
+  return authorizeProjectApiAccess(prisma, { projectId, requireOrgAdmin: true });
+}
+
 export async function GET(request, context) {
   const params = await context.params;
   const projectId = String(params?.id || "").trim();
   if (!projectId) return NextResponse.json({ error: "Invalid project id." }, { status: 400 });
+
+  const { searchParams } = new URL(request.url);
+  const selectableOnly = searchParams.get("selectable") === "1";
+  const financialYearId = searchParams.get("financialYearId") || "";
+
+  if (selectableOnly) {
+    const auth = await authorizeSelectablePlanningPeriods(projectId);
+    if (!auth.ok) {
+      return NextResponse.json(
+        { error: auth.status === 403 ? "Forbidden." : "Not found." },
+        { status: auth.status },
+      );
+    }
+
+    /** @type {any} */
+    const where = { projectId };
+    if (financialYearId) where.financialYearId = financialYearId;
+
+    const rows = await prisma.projectOrgPlanningPeriod.findMany({
+      where,
+      orderBy: [{ startDate: "desc" }, { createdAt: "desc" }],
+      take: 50,
+      select: planningPeriodSelect,
+    });
+    const open = rows
+      .map((row) => serializeProjectOrgPlanningPeriod(row))
+      .filter((p) => p.status === "OPEN");
+
+    return NextResponse.json({
+      planningPeriods: open,
+      total: open.length,
+      message:
+        open.length > 0
+          ? null
+          : "No OPEN planning period is available. Ask the Organization Administrator to configure a planning period that covers today.",
+    });
+  }
 
   const auth = await authorizeProjectOrgRead(prisma, {
     projectId,
@@ -32,7 +89,6 @@ export async function GET(request, context) {
     );
   }
 
-  const { searchParams } = new URL(request.url);
   const page = Math.max(1, Number(searchParams.get("page") || 1));
   const pageSizeRaw = Number(searchParams.get("pageSize") || 10);
   const pageSize = Math.min(50, Math.max(1, Number.isFinite(pageSizeRaw) ? pageSizeRaw : 10));

@@ -19,10 +19,12 @@ import Radio from "@mui/material/Radio";
 import RadioGroup from "@mui/material/RadioGroup";
 import Typography from "@mui/material/Typography";
 import AccountCircleRounded from "@mui/icons-material/AccountCircleRounded";
+import GroupsRounded from "@mui/icons-material/GroupsRounded";
 import LogoutRounded from "@mui/icons-material/LogoutRounded";
 import NotificationsRounded from "@mui/icons-material/NotificationsRounded";
 import SwapHorizRounded from "@mui/icons-material/SwapHorizRounded";
 import { useAuthSession } from "@/components/providers/auth-session-provider";
+import { useToast } from "@/components/providers/toast-provider";
 import { DEFAULT_POST_AUTH_PATH } from "@/lib/appConfig";
 import { ROLE_LABELS } from "@/lib/roles";
 import { adminDialogPaperSx, adminMutedTextSx } from "@/lib/admin-mui-surfaces";
@@ -54,12 +56,19 @@ function navbarUserInitials(displayName, email) {
 export function NavbarUserMenu() {
   const router = useRouter();
   const { session, refresh, setSessionBlocking, signOut } = useAuthSession();
+  const { showToast } = useToast();
   const [anchor, setAnchor] = useState(null);
   const [roleDialogOpen, setRoleDialogOpen] = useState(false);
   const [picked, setPicked] = useState(session?.activeRole ?? "STUDENT");
   const [switchError, setSwitchError] = useState("");
   const [busy, setBusy] = useState(false);
   const [avatarImgBroken, setAvatarImgBroken] = useState(false);
+  const [committeeDialogOpen, setCommitteeDialogOpen] = useState(false);
+  const [committeeList, setCommitteeList] = useState(/** @type {any[]} */ ([]));
+  const [pickedCommittee, setPickedCommittee] = useState("");
+  const [committeeLoading, setCommitteeLoading] = useState(false);
+  const [committeeBusy, setCommitteeBusy] = useState(false);
+  const [committeeError, setCommitteeError] = useState("");
 
   const email = session?.email || "";
   const displayName =
@@ -99,6 +108,7 @@ export function NavbarUserMenu() {
     setSwitchError("");
     setBusy(true);
     setSessionBlocking(true, "Switching your role…");
+    let keepOrganisationBlocking = false;
     try {
       const res = await fetch("/api/user/active-role", {
         method: "POST",
@@ -118,10 +128,89 @@ export function NavbarUserMenu() {
       setRoleDialogOpen(false);
       closeMenu();
       await refresh();
-      router.replace(DEFAULT_POST_AUTH_PATH);
+      const nextPath =
+        typeof data.defaultPath === "string" && data.defaultPath.startsWith("/")
+          ? data.defaultPath
+          : DEFAULT_POST_AUTH_PATH;
+      const openingOrganisation =
+        nextPath === "/organisation" || nextPath.startsWith("/organisation/");
+      if (openingOrganisation) {
+        keepOrganisationBlocking = true;
+        setSessionBlocking(true, "Opening your organisation…");
+      }
+      router.replace(nextPath);
     } finally {
       setBusy(false);
-      setSessionBlocking(false);
+      if (!keepOrganisationBlocking) {
+        setSessionBlocking(false);
+      }
+    }
+  }
+
+  async function openCommitteeDialog() {
+    closeMenu();
+    if (!session?.projectId) return;
+    setCommitteeError("");
+    setCommitteeDialogOpen(true);
+    setCommitteeLoading(true);
+    try {
+      const res = await fetch(`/api/projects/${session.projectId}/my-committee-context`, {
+        credentials: "include",
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        setCommitteeError(
+          typeof data.error === "string" ? data.error : "Could not load committee memberships.",
+        );
+        setCommitteeList([]);
+        setPickedCommittee("");
+        return;
+      }
+      const list = Array.isArray(data.committees) ? data.committees : [];
+      setCommitteeList(list);
+      setPickedCommittee(
+        data.activeCommittee?.id && list.some((c) => c.id === data.activeCommittee.id)
+          ? data.activeCommittee.id
+          : "",
+      );
+    } finally {
+      setCommitteeLoading(false);
+    }
+  }
+
+  async function confirmCommitteeSwitch() {
+    if (!session?.projectId) return;
+    setCommitteeError("");
+    setCommitteeBusy(true);
+    try {
+      const res = await fetch(`/api/projects/${session.projectId}/my-committee-context`, {
+        method: "PATCH",
+        credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ committeeId: pickedCommittee || null }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        setCommitteeError(
+          typeof data.error === "string" ? data.error : "Could not update committee context.",
+        );
+        showToast({
+          message:
+            typeof data.error === "string" ? data.error : "Could not update committee context.",
+          severity: "error",
+        });
+        return;
+      }
+      await refresh();
+      setCommitteeDialogOpen(false);
+      showToast({
+        message: data.activeCommittee
+          ? `Committee context set to ${data.activeCommittee.name}.`
+          : "Committee context cleared. Your organisational role is unchanged.",
+        severity: "success",
+      });
+    } finally {
+      setCommitteeBusy(false);
     }
   }
 
@@ -218,6 +307,29 @@ export function NavbarUserMenu() {
             My account
           </MenuItem>
         ) : null}
+        {isOrgSession && session.projectId ? (
+          <MenuItem
+            onClick={() => {
+              void openCommitteeDialog();
+            }}
+          >
+            <ListItemIcon>
+              <GroupsRounded fontSize="small" />
+            </ListItemIcon>
+            <ListItemText
+              primary="Committee context"
+              secondary={
+                session.activeCommittee?.name
+                  ? String(session.activeCommittee.name)
+                  : "None selected"
+              }
+              slotProps={{
+                primary: { variant: "body2" },
+                secondary: { variant: "caption", noWrap: true },
+              }}
+            />
+          </MenuItem>
+        ) : null}
         {canSwitch ? (
           <MenuItem
             onClick={() => {
@@ -297,6 +409,79 @@ export function NavbarUserMenu() {
               : {})}
           >
             {busy ? "Switching…" : "Switch"}
+          </Button>
+        </DialogActions>
+      </Dialog>
+
+      <Dialog
+        open={committeeDialogOpen}
+        onClose={() => !committeeBusy && setCommitteeDialogOpen(false)}
+        fullWidth
+        maxWidth="xs"
+        aria-labelledby="committee-context-title"
+        slotProps={{ paper: { sx: adminDialogPaperSx } }}
+      >
+        <DialogTitle id="committee-context-title">Committee context</DialogTitle>
+        <DialogContent>
+          <Typography variant="body2" sx={{ ...adminMutedTextSx, mb: 2 }}>
+            Your organisational role stays {session.orgRoleName || "unchanged"}. Committee
+            context only records which committee hat you are using for evaluation and similar
+            work — it does not grant extra permissions.
+          </Typography>
+          {committeeLoading ? (
+            <div className="flex justify-center py-4" aria-busy="true">
+              <CircularProgress size={28} />
+            </div>
+          ) : committeeList.length === 0 ? (
+            <Typography variant="body2" sx={adminMutedTextSx}>
+              You are not an active member of any committee in this organisation.
+            </Typography>
+          ) : (
+            <RadioGroup
+              value={pickedCommittee}
+              onChange={(e) => setPickedCommittee(e.target.value)}
+            >
+              <FormControlLabel
+                value=""
+                control={<Radio size="small" />}
+                label="None (organisational role only)"
+              />
+              {committeeList.map((c) => (
+                <FormControlLabel
+                  key={c.id}
+                  value={c.id}
+                  control={<Radio size="small" />}
+                  label={`${c.name} — ${String(c.committeeRole || "Member").replace(/_/g, " ")}`}
+                />
+              ))}
+            </RadioGroup>
+          )}
+          {committeeError ? (
+            <Typography variant="caption" color="error" sx={{ display: "block", mt: 1 }}>
+              {committeeError}
+            </Typography>
+          ) : null}
+        </DialogContent>
+        <DialogActions>
+          <Button
+            onClick={() => !committeeBusy && setCommitteeDialogOpen(false)}
+            disabled={committeeBusy}
+          >
+            Cancel
+          </Button>
+          <Button
+            variant="contained"
+            onClick={() => void confirmCommitteeSwitch()}
+            disabled={committeeBusy || committeeLoading}
+            {...(committeeBusy
+              ? {
+                  startIcon: (
+                    <CircularProgress size={20} color="inherit" aria-hidden />
+                  ),
+                }
+              : {})}
+          >
+            {committeeBusy ? "Saving…" : "Apply"}
           </Button>
         </DialogActions>
       </Dialog>

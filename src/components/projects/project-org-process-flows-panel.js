@@ -43,6 +43,7 @@ import {
 import {
   validateProjectOrgProcessFlowInput,
   validateProjectOrgProcessFlowPatch,
+  ENGINE_PROCESS_BINDINGS,
 } from "@/lib/validation/project-org-process-flow";
 import {
   validateProjectOrgProcessFlowItemInput,
@@ -50,7 +51,7 @@ import {
 } from "@/lib/validation/project-org-process-flow-item";
 
 function emptyProcessForm() {
-  return { name: "", description: "" };
+  return { name: "", description: "", engineEvent: "" };
 }
 
 function emptyItemForm() {
@@ -115,6 +116,7 @@ export function ProjectProcessFlowsPanel({ apiBase }) {
 
   const [delItemRow, setDelItemRow] = useState(/** @type {any} */ (null));
   const [deleteItemBusy, setDeleteItemBusy] = useState(false);
+  const [engineBindings, setEngineBindings] = useState(ENGINE_PROCESS_BINDINGS);
 
   const loadProcesses = useCallback(
     async (opts = /** @type {{ silent?: boolean }} */ ({})) => {
@@ -139,6 +141,9 @@ export function ProjectProcessFlowsPanel({ apiBase }) {
         setProcessRows(flows);
         setProcessTotal(Number(data.total) || 0);
         if (typeof data.canManage === "boolean") setCanManage(data.canManage);
+        if (Array.isArray(data.engineBindings) && data.engineBindings.length) {
+          setEngineBindings(data.engineBindings);
+        }
         setSelectedProcess((prev) => {
           if (!prev) return null;
           const match = flows.find((row) => row.id === prev.id);
@@ -245,6 +250,7 @@ export function ProjectProcessFlowsPanel({ apiBase }) {
     setEditProcessForm({
       name: row.name || "",
       description: row.description || "",
+      engineEvent: row.triggerKey || "",
     });
     setEditProcessErrors({});
   }
@@ -505,6 +511,7 @@ export function ProjectProcessFlowsPanel({ apiBase }) {
               <TableHead>
                 <TableRow>
                   <TableCell>Process name</TableCell>
+                  <TableCell>Engine event</TableCell>
                   <TableCell>Description</TableCell>
                   <TableCell align="right">Steps</TableCell>
                   <TableCell align="right">Actions</TableCell>
@@ -513,7 +520,7 @@ export function ProjectProcessFlowsPanel({ apiBase }) {
               <TableBody>
                 {processRows.length === 0 ? (
                   <TableRow>
-                    <TableCell colSpan={4} align="center" sx={{ py: 5 }}>
+                    <TableCell colSpan={5} align="center" sx={{ py: 5 }}>
                       <Typography variant="body2" sx={adminMutedTextSx}>
                         No processes yet. Add a process to get started.
                       </Typography>
@@ -522,6 +529,7 @@ export function ProjectProcessFlowsPanel({ apiBase }) {
                 ) : (
                   processRows.map((row) => {
                     const selected = selectedProcess?.id === row.id;
+                    const binding = engineBindings.find((b) => b.triggerKey === row.triggerKey);
                     return (
                       <TableRow
                         key={row.id}
@@ -531,6 +539,16 @@ export function ProjectProcessFlowsPanel({ apiBase }) {
                         sx={{ cursor: "pointer" }}
                       >
                         <TableCell sx={{ fontWeight: selected ? 600 : 400 }}>{row.name}</TableCell>
+                        <TableCell>
+                          {binding ? (
+                            <span title={row.triggerKey || undefined}>
+                              {binding.label}
+                              {row.code ? ` · ${row.code}` : ""}
+                            </span>
+                          ) : (
+                            <span style={{ opacity: 0.7 }}>Not wired</span>
+                          )}
+                        </TableCell>
                         <TableCell>{row.description || "—"}</TableCell>
                         <TableCell align="right">{row.itemCount ?? 0}</TableCell>
                         <TableCell align="right" onClick={(e) => e.stopPropagation()}>
@@ -768,6 +786,39 @@ export function ProjectProcessFlowsPanel({ apiBase }) {
               sx={themedTextFieldSx}
             />
             <TextField
+              select
+              label="Engine event (optional)"
+              value={createProcessForm.engineEvent}
+              onChange={(e) =>
+                setCreateProcessForm((f) => ({ ...f, engineEvent: e.target.value }))
+              }
+              error={Boolean(createProcessErrors.engineEvent)}
+              helperText={
+                createProcessErrors.engineEvent ||
+                "Binds this process to a submit action. Code and trigger are filled automatically. Leave unbound for educational processes not yet wired in the app."
+              }
+              fullWidth
+              sx={themedTextFieldSx}
+            >
+              <MenuItem value="">Not wired (educational)</MenuItem>
+              {engineBindings.map((b) => (
+                <MenuItem key={b.triggerKey} value={b.triggerKey}>
+                  {b.label} — {b.triggerKey}
+                </MenuItem>
+              ))}
+            </TextField>
+            {createProcessForm.engineEvent ? (
+              <Typography variant="body2" sx={adminMutedTextSx}>
+                Auto: code{" "}
+                <strong>
+                  {engineBindings.find((b) => b.triggerKey === createProcessForm.engineEvent)
+                    ?.code || "—"}
+                </strong>
+                , trigger <strong>{createProcessForm.engineEvent}</strong>. Renaming later will not
+                change this binding.
+              </Typography>
+            ) : null}
+            <TextField
               label="Description (optional)"
               value={createProcessForm.description}
               onChange={(e) =>
@@ -812,10 +863,40 @@ export function ProjectProcessFlowsPanel({ apiBase }) {
               value={editProcessForm.name}
               onChange={(e) => setEditProcessForm((f) => ({ ...f, name: e.target.value }))}
               error={Boolean(editProcessErrors.name)}
-              helperText={editProcessErrors.name || ""}
+              helperText={editProcessErrors.name || "Display label only — does not change the engine binding."}
               fullWidth
               sx={themedTextFieldSx}
             />
+            <TextField
+              select
+              label="Engine event (optional)"
+              value={editProcessForm.engineEvent}
+              onChange={(e) => setEditProcessForm((f) => ({ ...f, engineEvent: e.target.value }))}
+              error={Boolean(editProcessErrors.engineEvent)}
+              helperText={
+                editProcessErrors.engineEvent ||
+                "Change or clear the submit trigger this process handles. Only one process may use each event."
+              }
+              fullWidth
+              sx={themedTextFieldSx}
+            >
+              <MenuItem value="">Not wired (educational)</MenuItem>
+              {engineBindings.map((b) => (
+                <MenuItem key={b.triggerKey} value={b.triggerKey}>
+                  {b.label} — {b.triggerKey}
+                </MenuItem>
+              ))}
+            </TextField>
+            {editProcessForm.engineEvent ? (
+              <Typography variant="body2" sx={adminMutedTextSx}>
+                Auto: code{" "}
+                <strong>
+                  {engineBindings.find((b) => b.triggerKey === editProcessForm.engineEvent)?.code ||
+                    "—"}
+                </strong>
+                , trigger <strong>{editProcessForm.engineEvent}</strong>.
+              </Typography>
+            ) : null}
             <TextField
               label="Description (optional)"
               value={editProcessForm.description}
@@ -854,6 +935,9 @@ export function ProjectProcessFlowsPanel({ apiBase }) {
           <Typography variant="body2">
             Delete <strong>{delProcessRow?.name}</strong> and all of its steps? This cannot be
             undone.
+            {delProcessRow?.triggerKey
+              ? ` Bound to ${delProcessRow.triggerKey} — organisations using it will need another process wired to that event.`
+              : ""}
           </Typography>
         </DialogContent>
         <DialogActions sx={{ px: 3, pb: 2 }}>

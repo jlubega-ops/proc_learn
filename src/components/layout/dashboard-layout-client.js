@@ -4,18 +4,11 @@ import Link from "next/link";
 import { Fragment, Suspense, useEffect, useMemo, useRef, useState } from "react";
 import { usePathname, useSearchParams } from "next/navigation";
 import Image from "next/image";
-import IconButton from "@mui/material/IconButton";
-import Button from "@mui/material/Button";
-import Dialog from "@mui/material/Dialog";
-import DialogTitle from "@mui/material/DialogTitle";
-import DialogContent from "@mui/material/DialogContent";
-import DialogActions from "@mui/material/DialogActions";
 import ExpandMoreRounded from "@mui/icons-material/ExpandMoreRounded";
 import DarkModeRounded from "@mui/icons-material/DarkModeRounded";
 import LightModeRounded from "@mui/icons-material/LightModeRounded";
 import LoginRounded from "@mui/icons-material/LoginRounded";
 import MenuRounded from "@mui/icons-material/MenuRounded";
-import WestRounded from "@mui/icons-material/WestRounded";
 import { APP_NAME, COPYRIGHT_YEAR, ORG_NAME } from "@/lib/appConfig";
 import { useAppTheme } from "@/components/providers/theme-provider";
 import { useAuthSession } from "@/components/providers/auth-session-provider";
@@ -47,6 +40,10 @@ function projectIdFromPath(pathname) {
   return m?.[1] ? decodeURIComponent(m[1]) : "";
 }
 
+function isOrganisationPath(pathname) {
+  return String(pathname || "").startsWith("/organisation");
+}
+
 /**
  * @param {string} navPathname
  * @param {URLSearchParams} searchParams
@@ -66,6 +63,11 @@ function navItemIsActive(navPathname, searchParams, href) {
 
   if (href === "/admin") {
     return navPathname === "/admin";
+  }
+
+  // Organisation home must not stay active under /organisation/org-admin/*
+  if (base === "/organisation" || base === "/organisation/") {
+    return navPathname === "/organisation" || navPathname === "/organisation/";
   }
 
   if (navPathname === base) return true;
@@ -118,6 +120,8 @@ function NavLinks({
   sessionType = "platform",
   orgProjectId = "",
   orgPermissions = [],
+  orgRoleName = "",
+  personalOrgProjectId = "",
 }) {
   const navPathname = usePathname();
   const sections = sidebarNavForContext(activeRole, navPathname || "/", {
@@ -125,6 +129,8 @@ function NavLinks({
     sessionType,
     projectId: orgProjectId,
     permissions: orgPermissions,
+    roleName: orgRoleName || null,
+    personalOrgProjectId,
   });
 
   const childActive = (children) =>
@@ -144,10 +150,10 @@ function NavLinks({
   const activeSectionId = useMemo(
     () => sections.find((section) => sectionHasActiveLink(section.links))?.id ?? null,
     // eslint-disable-next-line react-hooks/exhaustive-deps -- pathname/searchParams drive active section
-    [navPathname, searchParams, activeRole, canManageOrgAdmin, sessionType, orgProjectId],
+    [navPathname, searchParams, activeRole, canManageOrgAdmin, sessionType, orgProjectId, personalOrgProjectId],
   );
 
-  const contextKey = `${activeRole}|${sessionType}|${orgProjectId}|${canManageOrgAdmin}`;
+  const contextKey = `${activeRole}|${sessionType}|${orgProjectId}|${canManageOrgAdmin}|${personalOrgProjectId}`;
   const lastContextKey = useRef("");
 
   /** One collapsible section open at a time; stays open when navigating links inside it. */
@@ -270,7 +276,15 @@ function NavLinks({
   );
 }
 
-function NavLinksWithSearch({ canManageOrgAdmin, sessionType, orgProjectId, orgPermissions, ...props }) {
+function NavLinksWithSearch({
+  canManageOrgAdmin,
+  sessionType,
+  orgProjectId,
+  orgPermissions,
+  orgRoleName,
+  personalOrgProjectId,
+  ...props
+}) {
   const searchParams = useSearchParams();
   return (
     <NavLinks
@@ -280,6 +294,8 @@ function NavLinksWithSearch({ canManageOrgAdmin, sessionType, orgProjectId, orgP
       sessionType={sessionType}
       orgProjectId={orgProjectId}
       orgPermissions={orgPermissions}
+      orgRoleName={orgRoleName}
+      personalOrgProjectId={personalOrgProjectId}
     />
   );
 }
@@ -287,7 +303,7 @@ function NavLinksWithSearch({ canManageOrgAdmin, sessionType, orgProjectId, orgP
 export default function DashboardLayoutClient({ children }) {
   const pathname = usePathname();
   const [drawerOpen, setDrawerOpen] = useState(false);
-  const [leaveOrgOpen, setLeaveOrgOpen] = useState(false);
+  // Layout shell: sidebar + header + main + footer (single root).
   const { mode, toggleMode } = useAppTheme();
   const { session, loading: authLoading, setSessionBlocking } = useAuthSession();
   const activeRole = session?.activeRole ?? "STUDENT";
@@ -295,15 +311,18 @@ export default function DashboardLayoutClient({ children }) {
   const orgProjectId = isOrgSession ? String(session?.projectId || "") : "";
   const orgPermissions = Array.isArray(session?.permissions) ? session.permissions : [];
   const orgRoleName = isOrgSession ? String(session?.orgRoleName || "") : "";
-  const projectId = isOrgSession ? orgProjectId : projectIdFromPath(pathname || "/");
-  const isStudentProjectWorld =
-    (activeRole === "STUDENT" && Boolean(projectId)) || isOrgSession;
+  const personalOrgProjectId = !isOrgSession
+    ? String(session?.personalOrgProjectId || "")
+    : "";
+  const pathProjectId = isOrgSession ? orgProjectId : projectIdFromPath(pathname || "/");
+  const onOrganisation = !isOrgSession && activeRole === "STUDENT" && isOrganisationPath(pathname || "/");
+  const projectId = onOrganisation ? personalOrgProjectId : pathProjectId;
+  const isStudentOrgWorld = isOrgSession || onOrganisation;
   const [projectOrgLabel, setProjectOrgLabel] = useState("");
   const [canManageOrgAdmin, setCanManageOrgAdmin] = useState(false);
   const [projectOrgLoading, setProjectOrgLoading] = useState(false);
 
   const authed = Boolean(session?.authenticated);
-  const showSidebarLeaveOrg = authed && isStudentProjectWorld && !isOrgSession;
   const showSidebarSignIn = !authed;
   const pageMeta = getDashboardPageMeta(
     pathname || "/",
@@ -311,7 +330,7 @@ export default function DashboardLayoutClient({ children }) {
   );
 
   useEffect(() => {
-    if (!isStudentProjectWorld || !projectId) {
+    if (!isStudentOrgWorld || !projectId) {
       setProjectOrgLabel("");
       setCanManageOrgAdmin(false);
       setProjectOrgLoading(false);
@@ -321,6 +340,13 @@ export default function DashboardLayoutClient({ children }) {
     if (isOrgSession) {
       setProjectOrgLabel(String(session?.projectName || "").trim());
       setCanManageOrgAdmin(false);
+      setProjectOrgLoading(false);
+      return;
+    }
+
+    if (onOrganisation && session?.personalOrgName) {
+      setProjectOrgLabel(String(session.personalOrgName).trim());
+      setCanManageOrgAdmin(true);
       setProjectOrgLoading(false);
       return;
     }
@@ -343,29 +369,21 @@ export default function DashboardLayoutClient({ children }) {
     return () => {
       cancelled = true;
     };
-  }, [isStudentProjectWorld, projectId, isOrgSession, session?.projectName]);
+  }, [
+    isStudentOrgWorld,
+    projectId,
+    isOrgSession,
+    onOrganisation,
+    session?.projectName,
+    session?.personalOrgName,
+  ]);
 
   useEffect(() => {
-    const onProjectRoute = /^\/projects\/[^/]+/.test(pathname || "");
-    if (!onProjectRoute) return;
-    if (isStudentProjectWorld && projectOrgLoading) return;
+    const onOrgRoute = isOrganisationPath(pathname || "");
+    if (!onOrgRoute) return;
+    if (isStudentOrgWorld && projectOrgLoading) return;
     setSessionBlocking(false);
-  }, [pathname, isStudentProjectWorld, projectOrgLoading, setSessionBlocking]);
-
-  useEffect(() => {
-    if (!isStudentProjectWorld || !projectId) return;
-    const currentPath = window.location.pathname + window.location.search;
-    window.history.pushState({ projectWorld: true, projectId }, "", currentPath);
-
-    const onPopState = () => {
-      const nextPath = window.location.pathname;
-      if (!nextPath.startsWith(`/projects/${projectId}`)) {
-        window.history.pushState({ projectWorld: true, projectId }, "", currentPath);
-      }
-    };
-    window.addEventListener("popstate", onPopState);
-    return () => window.removeEventListener("popstate", onPopState);
-  }, [isStudentProjectWorld, projectId]);
+  }, [pathname, isStudentOrgWorld, projectOrgLoading, setSessionBlocking]);
 
   return (
     <div className="flex min-h-dvh bg-[color:var(--surface-muted)] text-zinc-900 dark:bg-zinc-950 dark:text-zinc-50">
@@ -429,33 +447,23 @@ export default function DashboardLayoutClient({ children }) {
               sessionType={isOrgSession ? "org" : "platform"}
               orgProjectId={orgProjectId}
               orgPermissions={orgPermissions}
+              orgRoleName={orgRoleName}
+              personalOrgProjectId={personalOrgProjectId}
             />
           </Suspense>
         </nav>
 
-        {showSidebarLeaveOrg || showSidebarSignIn ? (
+        {showSidebarSignIn ? (
           <div className="shrink-0 border-t border-[color:var(--border-subtle)] p-3">
-            {showSidebarLeaveOrg ? (
-              <button
-                type="button"
-                title="Leave this organization workspace"
-                onClick={() => setLeaveOrgOpen(true)}
-                className="flex w-full cursor-pointer items-center justify-center gap-2 rounded-lg border-2 border-brand-red bg-brand-red px-3 py-2.5 text-sm font-semibold text-white shadow-sm transition hover:bg-[color:var(--brand-red)]/90 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand-red"
-              >
-                <WestRounded aria-hidden sx={{ fontSize: 20, color: "inherit" }} />
-                Leave organization
-              </button>
-            ) : (
-              <Link
-                href="/login"
-                title="Open the sign-in page"
-                onClick={() => setDrawerOpen(false)}
-                className="flex items-center justify-center gap-2 rounded-lg border border-[color:var(--border-subtle)] px-3 py-2 text-sm font-medium text-zinc-800 transition hover:border-primary/40 hover:bg-[color:var(--nav-active-bg)] dark:text-zinc-100"
-              >
-                <LoginRounded aria-hidden sx={primaryIconSx} />
-                Sign in
-              </Link>
-            )}
+            <Link
+              href="/login"
+              title="Open the sign-in page"
+              onClick={() => setDrawerOpen(false)}
+              className="flex items-center justify-center gap-2 rounded-lg border border-[color:var(--border-subtle)] px-3 py-2 text-sm font-medium text-zinc-800 transition hover:border-primary/40 hover:bg-[color:var(--nav-active-bg)] dark:text-zinc-100"
+            >
+              <LoginRounded aria-hidden sx={primaryIconSx} />
+              Sign in
+            </Link>
           </div>
         ) : null}
       </aside>
@@ -475,7 +483,7 @@ export default function DashboardLayoutClient({ children }) {
             <MenuRounded aria-hidden sx={brandIconSx} />
           </button>
           <div className="min-w-0 flex-1">
-            {isStudentProjectWorld ? (
+            {isStudentOrgWorld ? (
               <div className="flex min-w-0 items-center gap-3">
                 <div className="min-w-0">
                   <p className="truncate text-sm font-semibold md:text-base">{pageMeta.title}</p>
@@ -507,7 +515,20 @@ export default function DashboardLayoutClient({ children }) {
               </>
             )}
           </div>
-          {authed && !isOrgSession ? <NotificationBellMenu /> : null}
+          {authed ? (
+            <NotificationBellMenu
+              apiBase={
+                isOrgSession
+                  ? "/api/projects/org-notifications"
+                  : "/api/user/notifications"
+              }
+              viewAllHref={
+                isOrgSession && orgProjectId
+                  ? `/projects/${orgProjectId}/notifications`
+                  : "/notifications"
+              }
+            />
+          ) : null}
           <button
             type="button"
             title={
@@ -558,33 +579,6 @@ export default function DashboardLayoutClient({ children }) {
           </div>
         </footer>
       </div>
-
-      <Dialog
-        open={leaveOrgOpen}
-        onClose={() => setLeaveOrgOpen(false)}
-        fullWidth
-        maxWidth="xs"
-      >
-        <DialogTitle>Leave organization?</DialogTitle>
-        <DialogContent dividers>
-          You are about to leave this organization workspace. Continue working here or close and return to My
-          Projects.
-        </DialogContent>
-        <DialogActions>
-          <Button onClick={() => setLeaveOrgOpen(false)}>Continue working</Button>
-          <Button
-            variant="contained"
-            onClick={() => {
-              setLeaveOrgOpen(false);
-              setDrawerOpen(false);
-              setSessionBlocking(true, "Leaving organization…");
-              window.location.assign("/projects");
-            }}
-          >
-            Close and leave
-          </Button>
-        </DialogActions>
-      </Dialog>
     </div>
   );
 }

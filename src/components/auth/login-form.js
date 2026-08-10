@@ -188,7 +188,8 @@ export function LoginForm({
               data.redirectTo.startsWith("/")
             ? data.redirectTo
             : afterLoginPath;
-      router.push(dest);
+      // Replace so /login is not left in history (prevents back ↔ organisation loops).
+      router.replace(dest);
     } finally {
       setSubmitting(false);
     }

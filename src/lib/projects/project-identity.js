@@ -13,18 +13,19 @@ export function generateShortAlphanumericCode(length = 5) {
 }
 
 /**
+ * Organisation codes: ORG-XXXXXX (unique).
  * @param {import("@prisma/client").PrismaClient} prisma
  */
 export async function generateUniqueProjectCode(prisma) {
-  for (let attempt = 0; attempt < 12; attempt += 1) {
-    const projectCode = generateShortAlphanumericCode(5);
+  for (let attempt = 0; attempt < 16; attempt += 1) {
+    const projectCode = `ORG-${generateShortAlphanumericCode(6)}`;
     const clash = await prisma.project.findFirst({
       where: { projectCode },
       select: { id: true },
     });
     if (!clash) return projectCode;
   }
-  throw new Error("Could not generate a unique project code.");
+  throw new Error("Could not generate a unique organisation code.");
 }
 
 /**

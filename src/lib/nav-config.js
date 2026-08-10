@@ -11,6 +11,11 @@ import BusinessRounded from "@mui/icons-material/BusinessRounded";
 import CalendarMonthRounded from "@mui/icons-material/CalendarMonthRounded";
 import DateRangeRounded from "@mui/icons-material/DateRangeRounded";
 import SettingsRounded from "@mui/icons-material/SettingsRounded";
+import AssignmentRounded from "@mui/icons-material/AssignmentRounded";
+import TaskAltRounded from "@mui/icons-material/TaskAltRounded";
+import Groups2Rounded from "@mui/icons-material/Groups2Rounded";
+import ShoppingCartRounded from "@mui/icons-material/ShoppingCartRounded";
+import StorefrontRounded from "@mui/icons-material/StorefrontRounded";
 import { ROLE } from "@/lib/roles";
 import { ORG_PERMISSION } from "@/lib/projects/org-role-permissions";
 
@@ -41,14 +46,7 @@ export const SIDEBAR_SECTIONS = [
         label: "Home",
         title: "Dashboard home",
         Icon: HomeRounded,
-        anyOf: null,
-      },
-      {
-        href: "/projects",
-        label: "My Projects",
-        title: "Projects assigned to you",
-        Icon: WorkOutlineRounded,
-        anyOf: [ROLE.STUDENT],
+        anyOf: [ROLE.SYSTEM_ADMIN, ROLE.EXAMINER, ROLE.LECTURER],
       },
       {
         href: "/projects",
@@ -132,30 +130,21 @@ export const SIDEBAR_SECTIONS = [
 ];
 
 /**
- * @param {string} pathname
- * @returns {string | null}
- */
-function projectIdFromPathname(pathname) {
-  const m = String(pathname || "").match(/^\/projects\/([^/]+)/);
-  return m?.[1] ? decodeURIComponent(m[1]) : null;
-}
-
-/**
- * @param {string} projectId
+ * Student organisation workspace nav (company unit — not projects).
  * @returns {NavSection[]}
  */
-function projectWorkspaceSections(projectId) {
-  const base = `/projects/${projectId}`;
+function studentOrganisationSections() {
+  const base = "/organisation";
   return [
     {
-      id: "project-main",
+      id: "org-main",
       label: "",
       links: [
         {
           href: base,
-          label: "Project overview",
-          title: "Open project overview",
-          Icon: WorkOutlineRounded,
+          label: "Organisation home",
+          title: "Open your organisation overview",
+          Icon: HomeRounded,
           anyOf: [ROLE.STUDENT],
         },
       ],
@@ -167,21 +156,21 @@ function projectWorkspaceSections(projectId) {
       links: [
         {
           href: `${base}/org-admin/organisation-structure`,
-          label: "Organisation structure",
+          label: "Organisation Structure",
           title: "Define organisation structure",
           Icon: BusinessRounded,
           anyOf: [ROLE.STUDENT],
         },
         {
           href: `${base}/org-admin/departments`,
-          label: "Departments / units",
+          label: "Departments/Units",
           title: "Manage departments and units",
           Icon: ApartmentRounded,
           anyOf: [ROLE.STUDENT],
         },
         {
           href: `${base}/org-admin/users`,
-          label: "User accounts",
+          label: "Users",
           title: "Manage organisation user accounts",
           Icon: GroupsRounded,
           anyOf: [ROLE.STUDENT],
@@ -195,23 +184,44 @@ function projectWorkspaceSections(projectId) {
         },
         {
           href: `${base}/org-admin/financial-years`,
-          label: "Financial years",
+          label: "Financial Years",
           title: "Manage financial years",
           Icon: CalendarMonthRounded,
           anyOf: [ROLE.STUDENT],
         },
         {
+          href: `${base}/org-admin/budgets`,
+          label: "Budgets (read-only)",
+          title: "View organisation budgets — operational preparation is done by department users",
+          Icon: CalendarMonthRounded,
+          anyOf: [ROLE.STUDENT],
+        },
+        {
           href: `${base}/org-admin/planning-period`,
-          label: "Planning period",
+          label: "Planning Periods",
           title: "Manage planning periods",
           Icon: DateRangeRounded,
           anyOf: [ROLE.STUDENT],
         },
         {
           href: `${base}/org-admin/process-workflow`,
-          label: "Process workflow",
+          label: "Process Workflows",
           title: "Add organisation process workflows",
           Icon: AccountTreeRounded,
+          anyOf: [ROLE.STUDENT],
+        },
+        {
+          href: `${base}/org-admin/committees`,
+          label: "Committees",
+          title: "Manage organisation committees and memberships",
+          Icon: Groups2Rounded,
+          anyOf: [ROLE.STUDENT],
+        },
+        {
+          href: `${base}/org-admin/audit-logs`,
+          label: "Activity logs",
+          title: "View organisation activity and audit history",
+          Icon: HistoryRounded,
           anyOf: [ROLE.STUDENT],
         },
       ],
@@ -245,15 +255,43 @@ export function sidebarNavForActiveRole(activeRole) {
 }
 
 /**
+ * Staff / non-student project workspace nav (kept for lecturer/examiner project pages).
  * @param {string} projectId
  * @param {{ canManageOrgAdmin?: boolean }} [options]
  * @returns {NavSection[]}
  */
 export function sidebarNavForProjectWorkspace(projectId, options = {}) {
-  const canManageOrgAdmin = options.canManageOrgAdmin !== false;
-  const sections = projectWorkspaceSections(projectId);
-  if (canManageOrgAdmin) return sections;
-  return sections.filter((section) => section.id !== "project-admin");
+  const base = `/projects/${projectId}`;
+  /** @type {NavSection[]} */
+  const sections = [
+    {
+      id: "project-main",
+      label: "",
+      links: [
+        {
+          href: base,
+          label: "Project overview",
+          title: "Open project overview",
+          Icon: WorkOutlineRounded,
+          anyOf: null,
+        },
+      ],
+    },
+  ];
+  if (options.canManageOrgAdmin === true) {
+    const admin = studentOrganisationSections().find((s) => s.id === "project-admin");
+    if (admin) {
+      sections.push({
+        ...admin,
+        links: admin.links.map((link) => ({
+          ...link,
+          href: link.href.replace("/organisation", base),
+          anyOf: null,
+        })),
+      });
+    }
+  }
+  return sections;
 }
 
 /**
@@ -261,16 +299,31 @@ export function sidebarNavForProjectWorkspace(projectId, options = {}) {
  * @param {string[]} [permissions]
  * @returns {NavSection[]}
  */
-export function sidebarNavForOrgMember(projectId, permissions = []) {
+/**
+ * Role-aware sidebar for simulated organisation users (permission-gated; no disabled stubs).
+ * @param {string} projectId
+ * @param {string[]} [permissions]
+ * @param {{ roleName?: string | null }} [options]
+ */
+export function sidebarNavForOrgMember(projectId, permissions = [], options = {}) {
   const base = `/projects/${projectId}`;
   const permSet = new Set(permissions);
+  const roleName = String(options.roleName || "").trim();
+
+  const isUdo =
+    roleName === "User Department Officer" || roleName === "User Department";
+  const isHod =
+    roleName === "Head User Department" || roleName === "Head of User Department";
+  const isPo = roleName === "Procurement Officer";
+  const isHeadPdu = roleName === "Head PDU";
+  const isAo = roleName === "Accounting Officer";
 
   /** @type {NavLinkItem[]} */
   const accessChildren = [];
   if (permSet.has(ORG_PERMISSION.VIEW_ORG_STRUCTURE)) {
     accessChildren.push({
       href: `${base}/org-admin/organisation-structure`,
-      label: "Organisation structure",
+      label: "Organisation Structure",
       title: "View organisation structure",
       Icon: BusinessRounded,
       anyOf: null,
@@ -279,7 +332,7 @@ export function sidebarNavForOrgMember(projectId, permissions = []) {
   if (permSet.has(ORG_PERMISSION.VIEW_DEPARTMENTS)) {
     accessChildren.push({
       href: `${base}/org-admin/departments`,
-      label: "Departments / units",
+      label: "Departments/Units",
       title: "View departments and units",
       Icon: ApartmentRounded,
       anyOf: null,
@@ -297,7 +350,7 @@ export function sidebarNavForOrgMember(projectId, permissions = []) {
   if (permSet.has(ORG_PERMISSION.VIEW_FINANCIAL_YEARS)) {
     accessChildren.push({
       href: `${base}/org-admin/financial-years`,
-      label: "Financial years",
+      label: "Financial Years",
       title: "View financial years",
       Icon: CalendarMonthRounded,
       anyOf: null,
@@ -306,7 +359,7 @@ export function sidebarNavForOrgMember(projectId, permissions = []) {
   if (permSet.has(ORG_PERMISSION.VIEW_PLANNING_PERIODS)) {
     accessChildren.push({
       href: `${base}/org-admin/planning-period`,
-      label: "Planning period",
+      label: "Planning Periods",
       title: "View planning periods",
       Icon: DateRangeRounded,
       anyOf: null,
@@ -315,9 +368,106 @@ export function sidebarNavForOrgMember(projectId, permissions = []) {
   if (permSet.has(ORG_PERMISSION.VIEW_PROCESS_WORKFLOW)) {
     accessChildren.push({
       href: `${base}/org-admin/process-workflow`,
-      label: "Process workflow",
+      label: "Process Workflows",
       title: "View organisation process workflows",
       Icon: AccountTreeRounded,
+      anyOf: null,
+    });
+  }
+  if (permSet.has(ORG_PERMISSION.VIEW_COMMITTEES)) {
+    accessChildren.push({
+      href: `${base}/org-admin/committees`,
+      label: "Committees",
+      title: "View organisation committees",
+      Icon: Groups2Rounded,
+      anyOf: null,
+    });
+  }
+
+  /** Operational links stay top-level (not nested under a Procurement parent). */
+  /** @type {NavLinkItem[]} */
+  const opsLinks = [];
+  if (permSet.has(ORG_PERMISSION.VIEW_TASKS)) {
+    opsLinks.push({
+      href: `${base}/tasks`,
+      label: isHeadPdu ? "Pending Tasks" : isAo ? "Approvals" : "My Tasks",
+      title: "Open your pending organisation tasks",
+      Icon: TaskAltRounded,
+      anyOf: null,
+    });
+  }
+  if (permSet.has(ORG_PERMISSION.VIEW_BUDGETS)) {
+    opsLinks.push({
+      href: `${base}/budgets`,
+      label: isUdo ? "Department Budgets" : "Budgets",
+      title: "Department budgets and budget lines",
+      Icon: CalendarMonthRounded,
+      anyOf: null,
+    });
+  }
+  if (permSet.has(ORG_PERMISSION.VIEW_PROCUREMENT_PLANS)) {
+    opsLinks.push({
+      href: `${base}/procurement-plans`,
+      label: isHeadPdu ? "Plans" : "Procurement Plans",
+      title: "View procurement plans",
+      Icon: AccountTreeRounded,
+      anyOf: null,
+    });
+  }
+  if (permSet.has(ORG_PERMISSION.VIEW_REQUISITIONS)) {
+    opsLinks.push({
+      href: `${base}/requisitions`,
+      label: isUdo
+        ? "My Requisitions"
+        : isAo
+          ? "Procurement Overview"
+          : "Requisitions",
+      title: "View procurement requisitions",
+      Icon: AssignmentRounded,
+      anyOf: null,
+    });
+  } else if (permSet.has(ORG_PERMISSION.CREATE_REQUISITION)) {
+    opsLinks.push({
+      href: `${base}/requisitions`,
+      label: "New Requisition",
+      title: "Create a procurement requisition",
+      Icon: AssignmentRounded,
+      anyOf: null,
+    });
+  }
+  if (permSet.has(ORG_PERMISSION.VIEW_PROCUREMENTS)) {
+    opsLinks.push({
+      href: `${base}/procurements`,
+      label: "Procurements",
+      title: "View procurements after method selection",
+      Icon: ShoppingCartRounded,
+      anyOf: null,
+    });
+  }
+  if (permSet.has(ORG_PERMISSION.VIEW_SUPPLIERS)) {
+    opsLinks.push({
+      href: `${base}/suppliers`,
+      label: "Suppliers",
+      title: "View and manage organisation suppliers/providers",
+      Icon: StorefrontRounded,
+      anyOf: null,
+    });
+  }
+  if (isPo) {
+    opsLinks.push({
+      href: `${base}/procurement-processes`,
+      label: "Procurement Processes",
+      title: "Open selected procurement method processes",
+      Icon: AccountTreeRounded,
+      anyOf: null,
+    });
+  }
+  if (isAo && permSet.has(ORG_PERMISSION.VIEW_TASKS)) {
+    opsLinks.push({
+      href: `${base}/tasks?view=history`,
+      label: "Approval History",
+      title: "Review previous approval actions",
+      Icon: TaskAltRounded,
       anyOf: null,
     });
   }
@@ -330,9 +480,9 @@ export function sidebarNavForOrgMember(projectId, permissions = []) {
       links: [
         {
           href: base,
-          label: "Project overview",
-          title: "Open project overview",
-          Icon: WorkOutlineRounded,
+          label: "Dashboard",
+          title: "Organisation dashboard",
+          Icon: HomeRounded,
           anyOf: null,
         },
         {
@@ -342,6 +492,7 @@ export function sidebarNavForOrgMember(projectId, permissions = []) {
           Icon: BadgeRounded,
           anyOf: null,
         },
+        ...opsLinks,
       ],
     },
   ];
@@ -355,21 +506,33 @@ export function sidebarNavForOrgMember(projectId, permissions = []) {
     });
   }
 
+  void isHod;
+
   return sections;
 }
 
 /**
  * @param {string} activeRole
  * @param {string} pathname
- * @param {{ canManageOrgAdmin?: boolean; sessionType?: string; projectId?: string; permissions?: string[] }} [options]
+ * @param {{
+ *   canManageOrgAdmin?: boolean;
+ *   sessionType?: string;
+ *   projectId?: string;
+ *   permissions?: string[];
+ *   roleName?: string | null;
+ *   personalOrgProjectId?: string | null;
+ * }} [options]
  */
 export function sidebarNavForContext(activeRole, pathname, options = {}) {
   if (options.sessionType === "org" && options.projectId) {
-    return sidebarNavForOrgMember(options.projectId, options.permissions);
+    return sidebarNavForOrgMember(options.projectId, options.permissions, {
+      roleName: options.roleName || null,
+    });
   }
-  const projectId = projectIdFromPathname(pathname);
-  if (activeRole === ROLE.STUDENT && projectId) {
-    return sidebarNavForProjectWorkspace(projectId, options);
+
+  if (activeRole === ROLE.STUDENT) {
+    return studentOrganisationSections();
   }
+
   return sidebarNavForActiveRole(activeRole);
 }

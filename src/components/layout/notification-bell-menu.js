@@ -21,7 +21,13 @@ import NotificationsRounded from "@mui/icons-material/NotificationsRounded";
 import { usePathname } from "next/navigation";
 import { adminDialogPaperSx, adminMutedTextSx } from "@/lib/admin-mui-surfaces";
 
-export function NotificationBellMenu() {
+/**
+ * @param {{ apiBase?: string; viewAllHref?: string }} [props]
+ */
+export function NotificationBellMenu({
+  apiBase = "/api/user/notifications",
+  viewAllHref = "/notifications",
+}) {
   const pathname = usePathname();
   const [anchor, setAnchor] = useState(null);
   const [unreadCount, setUnreadCount] = useState(0);
@@ -32,7 +38,7 @@ export function NotificationBellMenu() {
   const loadSummary = useCallback(async () => {
     setLoading(true);
     try {
-      const res = await fetch("/api/user/notifications?summary=1", {
+      const res = await fetch(`${apiBase}?summary=1`, {
         credentials: "include",
       });
       const data = await res.json().catch(() => ({}));
@@ -46,7 +52,7 @@ export function NotificationBellMenu() {
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [apiBase]);
 
   useEffect(() => {
     void loadSummary();
@@ -62,7 +68,7 @@ export function NotificationBellMenu() {
   function openDetail(n) {
     closeMenu();
     setDialogItem(n);
-    void fetch("/api/user/notifications", {
+    void fetch(apiBase, {
       method: "PATCH",
       credentials: "include",
       headers: { "Content-Type": "application/json" },
@@ -109,7 +115,7 @@ export function NotificationBellMenu() {
             Unread
           </Typography>
           <Typography variant="caption" sx={adminMutedTextSx}>
-            Showing up to 5. Role-specific alerts only appear for your active role.
+            Showing up to 5 unread alerts.
           </Typography>
         </Box>
         <Divider />
@@ -141,7 +147,7 @@ export function NotificationBellMenu() {
         <Box sx={{ px: 1, py: 1, display: "flex", justifyContent: "flex-end" }}>
           <Button
             component={Link}
-            href="/notifications"
+            href={viewAllHref}
             size="small"
             onClick={closeMenu}
           >

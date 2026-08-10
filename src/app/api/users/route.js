@@ -143,6 +143,13 @@ async function createStudentUser(actor, body) {
     );
   }
 
+  try {
+    const { ensureStudentPersonalOrg } = await import("@/lib/projects/student-personal-org");
+    await ensureStudentPersonalOrg(prisma, created.id);
+  } catch {
+    /* personal org is also ensured on first student login */
+  }
+
   const { rawToken } = await createAuthTokenRecord(
     created.id,
     AuthTokenType.ACCOUNT_ACTIVATION,

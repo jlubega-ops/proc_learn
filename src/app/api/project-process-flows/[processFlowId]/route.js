@@ -44,6 +44,44 @@ export async function PATCH(request, context) {
     );
   }
 
+  if (validated.data.triggerKey) {
+    const clash = await prisma.projectOrgProcessFlow.findFirst({
+      where: {
+        triggerKey: String(validated.data.triggerKey),
+        NOT: { id: processFlowId },
+      },
+      select: { id: true, name: true },
+    });
+    if (clash) {
+      return NextResponse.json(
+        {
+          error: `Engine event already used by “${clash.name}”.`,
+          fieldErrors: { engineEvent: `Already bound to “${clash.name}”.` },
+        },
+        { status: 400 },
+      );
+    }
+  }
+
+  if (validated.data.code) {
+    const codeClash = await prisma.projectOrgProcessFlow.findFirst({
+      where: {
+        code: String(validated.data.code),
+        NOT: { id: processFlowId },
+      },
+      select: { id: true, name: true },
+    });
+    if (codeClash) {
+      return NextResponse.json(
+        {
+          error: `Process code already used by “${codeClash.name}”.`,
+          fieldErrors: { engineEvent: `Code already used by “${codeClash.name}”.` },
+        },
+        { status: 400 },
+      );
+    }
+  }
+
   const row = await prisma.projectOrgProcessFlow.update({
     where: { id: processFlowId },
     data: validated.data,
@@ -53,7 +91,12 @@ export async function PATCH(request, context) {
   await writeAuditLog({
     eventType: AuditEvent.PROJECT_ORG_PROCESS_FLOW_UPDATED,
     actorUserId: user.id,
-    meta: { processFlowId: row.id, name: row.name },
+    meta: {
+      processFlowId: row.id,
+      name: row.name,
+      code: row.code,
+      triggerKey: row.triggerKey,
+    },
   });
 
   return NextResponse.json({ processFlow: serializeProjectOrgProcessFlow(row) });

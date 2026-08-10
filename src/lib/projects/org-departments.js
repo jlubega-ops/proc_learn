@@ -5,6 +5,8 @@ export { canManageProjectOrgUsers as canManageProjectOrgDepartments };
 const deptSelect = {
   id: true,
   name: true,
+  code: true,
+  unitType: true,
   description: true,
   isActive: true,
   parentId: true,
@@ -19,6 +21,8 @@ export function serializeProjectOrgDepartment(row) {
   return {
     id: row.id,
     name: row.name,
+    code: row.code || null,
+    unitType: row.unitType || "DEPARTMENT",
     description: row.description,
     isActive: row.isActive,
     parentId: row.parentId,

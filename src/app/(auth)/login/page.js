@@ -22,7 +22,24 @@ export default async function LoginPage({ searchParams }) {
     if (session?.userId) {
       const payload = await buildSessionPayloadForUserId(session.userId);
       if (payload.authenticated) {
-        redirect(nextDest);
+        // Prefer session defaultPath for students (/organisation) when next is home or unset.
+        // Always honour an explicit safe next path otherwise.
+        const dest =
+          typeof payload.defaultPath === "string" &&
+          payload.defaultPath.startsWith("/") &&
+          (nextDest === "/" || !sp?.next)
+            ? payload.defaultPath
+            : nextDest;
+        // Avoid login ↔ organisation bounce if next points at organisation but
+        // provisioning failed (defaultPath stays "/").
+        if (
+          dest.startsWith("/organisation") &&
+          typeof payload.defaultPath === "string" &&
+          payload.defaultPath === "/"
+        ) {
+          redirect("/");
+        }
+        redirect(dest);
       }
     }
   }

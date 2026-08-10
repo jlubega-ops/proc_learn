@@ -1,4 +1,4 @@
-/** View permissions for organisation user accounts inside a project workspace. */
+/** View / action permissions for organisation user accounts inside a project workspace. */
 export const ORG_PERMISSION = {
   VIEW_OVERVIEW: "view_overview",
   VIEW_ORG_STRUCTURE: "view_org_structure",
@@ -7,36 +7,139 @@ export const ORG_PERMISSION = {
   VIEW_PLANNING_PERIODS: "view_planning_periods",
   VIEW_PROCESS_WORKFLOW: "view_process_workflow",
   VIEW_ROLES: "view_roles",
+  VIEW_COMMITTEES: "view_committees",
+  VIEW_REQUISITIONS: "view_requisitions",
+  CREATE_REQUISITION: "create_requisition",
+  VIEW_PROCUREMENT_PLANS: "view_procurement_plans",
+  VIEW_TASKS: "view_tasks",
+  VIEW_BUDGETS: "view_budgets",
+  CREATE_BUDGET: "create_budget",
+  CONSOLIDATE_PLANS: "consolidate_plans",
+  VIEW_PROCUREMENTS: "view_procurements",
+  VIEW_SUPPLIERS: "view_suppliers",
+  MANAGE_SUPPLIERS: "manage_suppliers",
 };
 
-/** @type {Record<string, string[]>} */
+/**
+ * Role → permission map. Keys match seeded ProjectOrgRole names.
+ * @type {Record<string, string[]>}
+ */
 const ROLE_PERMISSIONS = {
-  "User Department": [
-    ORG_PERMISSION.VIEW_OVERVIEW,
-    ORG_PERMISSION.VIEW_DEPARTMENTS,
-  ],
-  "Head of User Department": [
+  "Organization Administrator": [
     ORG_PERMISSION.VIEW_OVERVIEW,
     ORG_PERMISSION.VIEW_ORG_STRUCTURE,
     ORG_PERMISSION.VIEW_DEPARTMENTS,
+    ORG_PERMISSION.VIEW_FINANCIAL_YEARS,
+    ORG_PERMISSION.VIEW_PLANNING_PERIODS,
+    ORG_PERMISSION.VIEW_PROCESS_WORKFLOW,
     ORG_PERMISSION.VIEW_ROLES,
+    ORG_PERMISSION.VIEW_COMMITTEES,
+  ],
+  Admin: [
+    ORG_PERMISSION.VIEW_OVERVIEW,
+    ORG_PERMISSION.VIEW_ORG_STRUCTURE,
+    ORG_PERMISSION.VIEW_DEPARTMENTS,
+    ORG_PERMISSION.VIEW_FINANCIAL_YEARS,
+    ORG_PERMISSION.VIEW_PLANNING_PERIODS,
+    ORG_PERMISSION.VIEW_PROCESS_WORKFLOW,
+    ORG_PERMISSION.VIEW_ROLES,
+    ORG_PERMISSION.VIEW_COMMITTEES,
   ],
   "Head PDU": [
     ORG_PERMISSION.VIEW_OVERVIEW,
     ORG_PERMISSION.VIEW_ORG_STRUCTURE,
     ORG_PERMISSION.VIEW_PROCESS_WORKFLOW,
     ORG_PERMISSION.VIEW_PLANNING_PERIODS,
+    ORG_PERMISSION.VIEW_REQUISITIONS,
+    ORG_PERMISSION.VIEW_PROCUREMENT_PLANS,
+    ORG_PERMISSION.VIEW_BUDGETS,
+    ORG_PERMISSION.CONSOLIDATE_PLANS,
+    ORG_PERMISSION.VIEW_TASKS,
+    ORG_PERMISSION.VIEW_PROCUREMENTS,
+    ORG_PERMISSION.VIEW_SUPPLIERS,
+    ORG_PERMISSION.MANAGE_SUPPLIERS,
   ],
   "Accounting Officer": [
     ORG_PERMISSION.VIEW_OVERVIEW,
     ORG_PERMISSION.VIEW_FINANCIAL_YEARS,
     ORG_PERMISSION.VIEW_PLANNING_PERIODS,
+    ORG_PERMISSION.VIEW_REQUISITIONS,
+    ORG_PERMISSION.VIEW_PROCUREMENT_PLANS,
+    ORG_PERMISSION.VIEW_BUDGETS,
+    ORG_PERMISSION.VIEW_TASKS,
+    ORG_PERMISSION.VIEW_PROCUREMENTS,
   ],
   "Procurement Officer": [
     ORG_PERMISSION.VIEW_OVERVIEW,
     ORG_PERMISSION.VIEW_PROCESS_WORKFLOW,
     ORG_PERMISSION.VIEW_PLANNING_PERIODS,
     ORG_PERMISSION.VIEW_DEPARTMENTS,
+    ORG_PERMISSION.VIEW_REQUISITIONS,
+    ORG_PERMISSION.VIEW_PROCUREMENT_PLANS,
+    ORG_PERMISSION.VIEW_TASKS,
+    ORG_PERMISSION.VIEW_PROCUREMENTS,
+    ORG_PERMISSION.VIEW_SUPPLIERS,
+    ORG_PERMISSION.MANAGE_SUPPLIERS,
+  ],
+  "Contracts Officer": [
+    ORG_PERMISSION.VIEW_OVERVIEW,
+    ORG_PERMISSION.VIEW_PROCUREMENT_PLANS,
+    ORG_PERMISSION.VIEW_REQUISITIONS,
+    ORG_PERMISSION.VIEW_TASKS,
+    ORG_PERMISSION.VIEW_COMMITTEES,
+    ORG_PERMISSION.VIEW_PROCUREMENTS,
+    ORG_PERMISSION.VIEW_SUPPLIERS,
+    ORG_PERMISSION.MANAGE_SUPPLIERS,
+  ],
+  "User Department Officer": [
+    ORG_PERMISSION.VIEW_OVERVIEW,
+    ORG_PERMISSION.VIEW_DEPARTMENTS,
+    ORG_PERMISSION.VIEW_REQUISITIONS,
+    ORG_PERMISSION.CREATE_REQUISITION,
+    ORG_PERMISSION.VIEW_PROCUREMENT_PLANS,
+    ORG_PERMISSION.VIEW_BUDGETS,
+    ORG_PERMISSION.CREATE_BUDGET,
+    ORG_PERMISSION.VIEW_TASKS,
+    ORG_PERMISSION.VIEW_PROCUREMENTS,
+  ],
+  "User Department": [
+    ORG_PERMISSION.VIEW_OVERVIEW,
+    ORG_PERMISSION.VIEW_DEPARTMENTS,
+    ORG_PERMISSION.VIEW_REQUISITIONS,
+    ORG_PERMISSION.CREATE_REQUISITION,
+    ORG_PERMISSION.VIEW_PROCUREMENT_PLANS,
+    ORG_PERMISSION.VIEW_BUDGETS,
+    ORG_PERMISSION.CREATE_BUDGET,
+    ORG_PERMISSION.VIEW_TASKS,
+    ORG_PERMISSION.VIEW_PROCUREMENTS,
+  ],
+  "Head User Department": [
+    ORG_PERMISSION.VIEW_OVERVIEW,
+    ORG_PERMISSION.VIEW_ORG_STRUCTURE,
+    ORG_PERMISSION.VIEW_DEPARTMENTS,
+    ORG_PERMISSION.VIEW_ROLES,
+    ORG_PERMISSION.VIEW_REQUISITIONS,
+    ORG_PERMISSION.VIEW_PROCUREMENT_PLANS,
+    ORG_PERMISSION.VIEW_BUDGETS,
+    ORG_PERMISSION.VIEW_TASKS,
+    ORG_PERMISSION.VIEW_PROCUREMENTS,
+  ],
+  "Head of User Department": [
+    ORG_PERMISSION.VIEW_OVERVIEW,
+    ORG_PERMISSION.VIEW_ORG_STRUCTURE,
+    ORG_PERMISSION.VIEW_DEPARTMENTS,
+    ORG_PERMISSION.VIEW_ROLES,
+    ORG_PERMISSION.VIEW_REQUISITIONS,
+    ORG_PERMISSION.VIEW_PROCUREMENT_PLANS,
+    ORG_PERMISSION.VIEW_BUDGETS,
+    ORG_PERMISSION.VIEW_TASKS,
+    ORG_PERMISSION.VIEW_PROCUREMENTS,
+  ],
+  "Finance/Budget Officer": [
+    ORG_PERMISSION.VIEW_OVERVIEW,
+    ORG_PERMISSION.VIEW_FINANCIAL_YEARS,
+    ORG_PERMISSION.VIEW_BUDGETS,
+    ORG_PERMISSION.VIEW_TASKS,
   ],
 };
 
@@ -61,7 +164,7 @@ export function orgUserPermissions(roleName) {
 }
 
 /**
- * Maps org-admin route suffixes to required view permission.
+ * Maps org-admin / workspace route suffixes to required view permission.
  * @param {string} pathname
  * @returns {string | null}
  */
@@ -76,6 +179,9 @@ export function orgPermissionForPathname(pathname) {
   if (/\/org-admin\/financial-years(?:\/|$)/.test(p)) {
     return ORG_PERMISSION.VIEW_FINANCIAL_YEARS;
   }
+  if (/\/org-admin\/budgets(?:\/|$)/.test(p)) {
+    return ORG_PERMISSION.VIEW_BUDGETS;
+  }
   if (/\/org-admin\/planning-period(?:\/|$)/.test(p)) {
     return ORG_PERMISSION.VIEW_PLANNING_PERIODS;
   }
@@ -85,13 +191,37 @@ export function orgPermissionForPathname(pathname) {
   if (/\/org-admin\/roles(?:\/|$)/.test(p)) {
     return ORG_PERMISSION.VIEW_ROLES;
   }
+  if (/\/org-admin\/committees(?:\/|$)/.test(p)) {
+    return ORG_PERMISSION.VIEW_COMMITTEES;
+  }
   if (/\/org-admin\/users(?:\/|$)/.test(p)) {
     return null;
+  }
+  if (/\/(requisitions|my-requisitions)(?:\/|$)/.test(p)) {
+    return ORG_PERMISSION.VIEW_REQUISITIONS;
+  }
+  if (/\/procurements(?:\/|$)/.test(p)) {
+    return ORG_PERMISSION.VIEW_PROCUREMENTS;
+  }
+  if (/\/suppliers(?:\/|$)/.test(p)) {
+    return ORG_PERMISSION.VIEW_SUPPLIERS;
+  }
+  if (/\/tasks(?:\/|$)/.test(p)) {
+    return ORG_PERMISSION.VIEW_TASKS;
+  }
+  if (/\/procurement-plans(?:\/|$)/.test(p)) {
+    return ORG_PERMISSION.VIEW_PROCUREMENT_PLANS;
+  }
+  if (/\/procurement-processes(?:\/|$)/.test(p)) {
+    return ORG_PERMISSION.VIEW_REQUISITIONS;
+  }
+  if (/\/(budget-lines|budgets)(?:\/|$)/.test(p)) {
+    return ORG_PERMISSION.VIEW_BUDGETS;
   }
   if (/\/my-account(?:\/|$)/.test(p)) {
     return ORG_PERMISSION.VIEW_OVERVIEW;
   }
-  if (/^\/projects\/[^/]+\/?$/.test(p)) {
+  if (/^\/organisation\/?$/.test(p) || /^\/projects\/[^/]+\/?$/.test(p)) {
     return ORG_PERMISSION.VIEW_OVERVIEW;
   }
   return null;

@@ -34,8 +34,11 @@ export async function getProjectWorkspacePageContext(projectId, opts = {}) {
     };
   }
 
+  const onOrganisationRoute = String(opts.pathname || "").startsWith("/organisation");
+  const workspaceHome = onOrganisationRoute ? "/organisation" : `/projects/${projectId}`;
+
   const user = await getSessionUser();
-  if (!user) redirect(`/login?next=/projects/${projectId}`);
+  if (!user) redirect(`/login?next=${encodeURIComponent(workspaceHome)}`);
   const activeRole = sessionActiveRole(user) || Role.STUDENT;
 
   const access = await fetchAuthorizedProjectWorkspace(prisma, {
@@ -46,7 +49,7 @@ export async function getProjectWorkspacePageContext(projectId, opts = {}) {
   if (!access) notFound();
 
   if (opts.requirePlatformOrgAdmin && !access.canManageOrgAdmin) {
-    redirect(`/projects/${projectId}`);
+    redirect(workspaceHome);
   }
 
   return {

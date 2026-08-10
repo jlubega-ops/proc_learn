@@ -19,7 +19,10 @@ export default async function ProjectsPage() {
   }
 
   const activeRole = sessionActiveRole(user) || Role.STUDENT;
-  if (![Role.STUDENT, Role.LECTURER, Role.EXAMINER, Role.SYSTEM_ADMIN].includes(activeRole)) {
+  if (activeRole === Role.STUDENT) {
+    redirect("/organisation");
+  }
+  if (![Role.LECTURER, Role.EXAMINER, Role.SYSTEM_ADMIN].includes(activeRole)) {
     redirect("/");
   }
 

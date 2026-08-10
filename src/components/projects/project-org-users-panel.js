@@ -30,6 +30,7 @@ import DeleteOutlineRounded from "@mui/icons-material/DeleteOutlineRounded";
 import EditRounded from "@mui/icons-material/EditRounded";
 import RefreshRounded from "@mui/icons-material/RefreshRounded";
 import VisibilityRounded from "@mui/icons-material/VisibilityRounded";
+import ContentCopyRounded from "@mui/icons-material/ContentCopyRounded";
 import { format } from "date-fns";
 import { useToast } from "@/components/providers/toast-provider";
 import { formatUserDisplayName } from "@/lib/user-display";
@@ -598,7 +599,26 @@ export function ProjectOrgUsersPanel({ projectId }) {
  * @param {{ user: any; projectCode?: string; onClose: () => void; onEdit?: () => void }} p
  */
 function OrgUserDetailsDialog({ user, projectCode = "", onClose, onEdit }) {
+  const { showToast } = useToast();
   if (!user) return null;
+
+  /**
+   * @param {string} label
+   * @param {string} text
+   */
+  async function copyText(label, text) {
+    const value = String(text || "").trim();
+    if (!value || value === "—") {
+      showToast({ message: `No ${label.toLowerCase()} to copy.`, severity: "error" });
+      return;
+    }
+    try {
+      await navigator.clipboard.writeText(value);
+      showToast({ message: `${label} copied.`, severity: "success" });
+    } catch {
+      showToast({ message: `Could not copy ${label.toLowerCase()}.`, severity: "error" });
+    }
+  }
 
   const fields = [
     { label: "Full name", value: formatUserDisplayName(user) },
@@ -612,8 +632,16 @@ function OrgUserDetailsDialog({ user, projectCode = "", onClose, onEdit }) {
     { label: "Subunit", value: user.subunit?.name || "—" },
     ...(!user.isProjectAdmin
       ? [
-          { label: "Username", value: user.username || "—" },
-          { label: "Password", value: user.password || "—" },
+          {
+            label: "Username",
+            value: user.username || "—",
+            copyable: Boolean(user.username),
+          },
+          {
+            label: "Password",
+            value: user.password || "—",
+            copyable: Boolean(user.password),
+          },
         ]
       : []),
     { label: "Added", value: fmtDate(user.createdAt) },
@@ -632,10 +660,25 @@ function OrgUserDetailsDialog({ user, projectCode = "", onClose, onEdit }) {
       </DialogTitle>
       <DialogContent dividers>
         <dl className="grid gap-3 sm:grid-cols-[minmax(8rem,34%)_1fr]">
-          {fields.map(({ label, value }) => (
+          {fields.map(({ label, value, copyable }) => (
             <div key={label} className="contents">
               <dt className="text-sm font-medium text-zinc-600 dark:text-zinc-400">{label}</dt>
-              <dd className="text-sm text-zinc-900 dark:text-zinc-100 break-all">{value}</dd>
+              <dd className="flex items-start gap-1 text-sm text-zinc-900 dark:text-zinc-100 break-all">
+                <span className="min-w-0 flex-1">{value}</span>
+                {copyable ? (
+                  <Tooltip title={`Copy ${label.toLowerCase()}`}>
+                    <IconButton
+                      size="small"
+                      color="primary"
+                      aria-label={`Copy ${label.toLowerCase()}`}
+                      onClick={() => void copyText(label, value)}
+                      className="shrink-0"
+                    >
+                      <ContentCopyRounded fontSize="small" />
+                    </IconButton>
+                  </Tooltip>
+                ) : null}
+              </dd>
             </div>
           ))}
         </dl>

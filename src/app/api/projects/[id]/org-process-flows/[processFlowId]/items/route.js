@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
-import { authorizeProjectOrgRead } from "@/lib/projects/project-api-auth";
+import { authorizeProjectApiAccess, authorizeProjectOrgRead } from "@/lib/projects/project-api-auth";
 import { ORG_PERMISSION } from "@/lib/projects/org-role-permissions";
 import { listAssignableProjectOrgRoles } from "@/lib/projects/org-users";
 import {
@@ -9,6 +9,25 @@ import {
 } from "@/lib/projects/org-process-flows";
 
 export const runtime = "nodejs";
+
+/**
+ * Organisation Administrator (platform) or org member with workflow view may read steps.
+ */
+async function authorizeProcessStepsRead(prismaClient, projectId) {
+  const orgRead = await authorizeProjectOrgRead(prismaClient, {
+    projectId,
+    orgPermission: ORG_PERMISSION.VIEW_PROCESS_WORKFLOW,
+  });
+  if (orgRead.ok) return orgRead;
+
+  // Fallback: any authorised workspace viewer (catalogue steps are not secret).
+  const access = await authorizeProjectApiAccess(prismaClient, {
+    projectId,
+    orgPermission: ORG_PERMISSION.VIEW_PROCESS_WORKFLOW,
+  });
+  if (access.ok) return access;
+  return orgRead.ok === false ? orgRead : access;
+}
 
 /** Read-only process steps for org workspace viewers. */
 export async function GET(request, context) {
@@ -19,14 +38,11 @@ export async function GET(request, context) {
     return NextResponse.json({ error: "Invalid request." }, { status: 400 });
   }
 
-  const auth = await authorizeProjectOrgRead(prisma, {
-    projectId,
-    orgPermission: ORG_PERMISSION.VIEW_PROCESS_WORKFLOW,
-  });
+  const auth = await authorizeProcessStepsRead(prisma, projectId);
   if (!auth.ok) {
     return NextResponse.json(
       { error: auth.status === 403 ? "Forbidden." : "Not found." },
-      { status: auth.status },
+      { status: auth.status || 404 },
     );
   }
 
@@ -34,7 +50,9 @@ export async function GET(request, context) {
     where: { id: processFlowId },
     select: { id: true, name: true },
   });
-  if (!processFlow) return NextResponse.json({ error: "Not found." }, { status: 404 });
+  if (!processFlow) {
+    return NextResponse.json({ error: "Process not found." }, { status: 404 });
+  }
 
   const { searchParams } = new URL(request.url);
   const page = Math.max(1, Number(searchParams.get("page") || 1));

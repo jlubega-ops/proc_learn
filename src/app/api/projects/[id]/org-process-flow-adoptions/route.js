@@ -6,12 +6,17 @@ import { prisma } from "@/lib/prisma";
 import { authorizeProjectOrgAdmin } from "@/lib/projects/workspace-access";
 import { authorizeProjectOrgRead } from "@/lib/projects/project-api-auth";
 import { ORG_PERMISSION } from "@/lib/projects/org-role-permissions";
-import { processFlowSelect } from "@/lib/projects/org-process-flows";
+import {
+  processFlowItemSelect,
+  processFlowSelect,
+  serializeProjectOrgProcessFlowItem,
+} from "@/lib/projects/org-process-flows";
 import {
   processFlowAdoptionSelect,
   serializeCatalogueProcessFlow,
   serializeProjectOrgProcessFlowAdoption,
 } from "@/lib/projects/org-process-flow-adoptions";
+import { migrateLegacyProcessAdoptions } from "@/lib/projects/process-catalogue";
 
 export const runtime = "nodejs";
 
@@ -31,9 +36,15 @@ export async function GET(request, context) {
     );
   }
 
+  try {
+    await migrateLegacyProcessAdoptions(prisma, { projectId });
+  } catch {
+    // Non-fatal: still return catalogue as stored.
+  }
+
   const canAdopt = auth.type === "platform" && !auth.readOnly;
 
-  const [adoptedRows, catalogueRows] = await Promise.all([
+  const [adoptedRows, catalogueRows, allItems] = await Promise.all([
     prisma.projectOrgProcessFlowAdoption.findMany({
       where: { projectId },
       orderBy: [{ createdAt: "desc" }],
@@ -43,14 +54,35 @@ export async function GET(request, context) {
       orderBy: [{ name: "asc" }, { createdAt: "asc" }],
       select: processFlowSelect,
     }),
+    prisma.projectOrgProcessFlowItem.findMany({
+      orderBy: [{ processFlowId: "asc" }, { stepNumber: "asc" }, { createdAt: "asc" }],
+      select: {
+        ...processFlowItemSelect,
+        processFlowId: true,
+      },
+    }),
   ]);
 
-  const adoptedIds = new Set(adoptedRows.map((row) => row.processFlowId));
+  /** @type {Map<string, any[]>} */
+  const itemsByFlowId = new Map();
+  for (const item of allItems) {
+    const list = itemsByFlowId.get(item.processFlowId) || [];
+    list.push(serializeProjectOrgProcessFlowItem(item));
+    itemsByFlowId.set(item.processFlowId, list);
+  }
+
+  const adoptionByFlowId = new Map(adoptedRows.map((row) => [row.processFlowId, row]));
 
   return NextResponse.json({
-    adopted: adoptedRows.map((row) => serializeProjectOrgProcessFlowAdoption(row)),
+    adopted: adoptedRows.map((row) => ({
+      ...serializeProjectOrgProcessFlowAdoption(row),
+      items: itemsByFlowId.get(row.processFlowId) || [],
+    })),
     adoptedTotal: adoptedRows.length,
-    catalogue: catalogueRows.map((row) => serializeCatalogueProcessFlow(row, adoptedIds)),
+    catalogue: catalogueRows.map((row) => ({
+      ...serializeCatalogueProcessFlow(row, adoptionByFlowId),
+      items: itemsByFlowId.get(row.id) || [],
+    })),
     total: catalogueRows.length,
     canAdopt,
   });
@@ -110,15 +142,20 @@ export async function POST(request, context) {
   if (existing) {
     return NextResponse.json(
       {
-        error: "This process has already been added to your organisation.",
-        fieldErrors: { processFlowId: "Each process can only be added once." },
+        error: "This process is already activated for your organisation.",
+        fieldErrors: { processFlowId: "This process is already activated." },
       },
       { status: 400 },
     );
   }
 
   const row = await prisma.projectOrgProcessFlowAdoption.create({
-    data: { projectId, processFlowId },
+    data: {
+      projectId,
+      processFlowId,
+      isActive: true,
+      activatedAt: new Date(),
+    },
     select: processFlowAdoptionSelect,
   });
 

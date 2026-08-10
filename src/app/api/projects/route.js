@@ -79,7 +79,11 @@ export async function GET(request) {
       AND: [
         {
           OR: [
-            { ownerUserId: user.id, creatorRole: Role.STUDENT },
+            {
+              ownerUserId: user.id,
+              creatorRole: Role.STUDENT,
+              isPersonalOrg: false,
+            },
             {
               visibility: "PUBLIC",
               isPublished: true,
@@ -290,6 +294,7 @@ export async function POST(request) {
       closeAt: data.closeAt,
       durationSeconds: data.durationSeconds,
       requiresEnrollment: [Role.EXAMINER, Role.LECTURER, Role.SYSTEM_ADMIN].includes(activeRole),
+      isPersonalOrg: false,
     },
   });
 

@@ -138,6 +138,20 @@ export function ProjectOrgProcessWorkflowPanel({ projectId }) {
         setAdopted(Array.isArray(data.adopted) ? data.adopted : []);
         setCatalogue(Array.isArray(data.catalogue) ? data.catalogue : []);
         if (typeof data.canAdopt === "boolean") setCanAdopt(data.canAdopt);
+
+        // Prefill step cache from embedded items (avoids a fragile second fetch).
+        const nextCache = {};
+        for (const row of Array.isArray(data.catalogue) ? data.catalogue : []) {
+          if (row?.id && Array.isArray(row.items)) nextCache[row.id] = row.items;
+        }
+        for (const row of Array.isArray(data.adopted) ? data.adopted : []) {
+          if (row?.processFlowId && Array.isArray(row.items)) {
+            nextCache[row.processFlowId] = row.items;
+          }
+        }
+        if (Object.keys(nextCache).length > 0) {
+          setItemsCache((prev) => ({ ...prev, ...nextCache }));
+        }
       } finally {
         if (silent) setRefetching(false);
         else setLoading(false);
@@ -205,12 +219,40 @@ export function ProjectOrgProcessWorkflowPanel({ projectId }) {
       const data = await res.json().catch(() => ({}));
       if (!res.ok) {
         showToast({
-          message: typeof data.error === "string" ? data.error : "Could not add process.",
+          message: typeof data.error === "string" ? data.error : "Could not activate process.",
           severity: "error",
         });
         return;
       }
-      showToast({ message: "Process added to your organisation.", severity: "success" });
+      showToast({ message: "Process activated for your organisation.", severity: "success" });
+      await load({ silent: true });
+    } finally {
+      setAdoptBusyId(null);
+    }
+  }
+
+  async function setAdoptionActive(row, isActive) {
+    if (!row?.id) return;
+    setAdoptBusyId(row.id);
+    try {
+      const res = await fetch(`/api/projects/${projectId}/org-process-flow-adoptions/${row.id}`, {
+        method: "PATCH",
+        credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ isActive }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        showToast({
+          message: typeof data.error === "string" ? data.error : "Could not update process status.",
+          severity: "error",
+        });
+        return;
+      }
+      showToast({
+        message: isActive ? "Process activated." : "Process deactivated.",
+        severity: "success",
+      });
       await load({ silent: true });
     } finally {
       setAdoptBusyId(null);
@@ -242,12 +284,16 @@ export function ProjectOrgProcessWorkflowPanel({ projectId }) {
     }
   }
 
-  function statusChip(isAdopted) {
-    return isAdopted ? (
-      <Chip size="small" color="success" icon={<CheckCircleRounded />} label="Added" />
-    ) : (
-      <Chip size="small" color="warning" label="Not added" />
-    );
+  function statusChip(row) {
+    if (row?.isAdopted && row?.isActive !== false) {
+      return (
+        <Chip size="small" color="success" icon={<CheckCircleRounded />} label="Active" />
+      );
+    }
+    if (row?.isAdopted && row?.isActive === false) {
+      return <Chip size="small" color="warning" label="Inactive" />;
+    }
+    return <Chip size="small" color="default" label="Not activated" />;
   }
 
   if (loading) {
@@ -268,19 +314,19 @@ export function ProjectOrgProcessWorkflowPanel({ projectId }) {
           Organisation processes
         </Typography>
         <Typography variant="body2" sx={{ ...adminMutedTextSx, mb: 2 }}>
-          Processes added to this organisation. Expand a process to view its steps
-          {canAdopt ? " or remove it" : ""}.
+          Processes activated for this organisation. Expand a process to view its steps
+          {canAdopt ? ", activate/deactivate it, or remove it" : ""}.
         </Typography>
 
         {adopted.length === 0 ? (
           <Typography variant="body2" sx={adminMutedTextSx}>
-            No processes added yet. Choose one from the available list below.
+            No processes activated yet. Choose one from the available list below.
           </Typography>
         ) : (
           <Box sx={{ display: "flex", flexDirection: "column", gap: 1 }}>
             {adopted.map((row) => {
               const expanded = expandedAdoptedId === row.id;
-              const items = itemsCache[row.processFlowId] || [];
+              const items = itemsCache[row.processFlowId] || row.items || [];
               const stepsLoading = itemsLoadingId === row.processFlowId;
               return (
                 <Accordion
@@ -306,20 +352,74 @@ export function ProjectOrgProcessWorkflowPanel({ projectId }) {
                     <Typography component="span" sx={{ fontWeight: 600, flex: "1 1 auto", minWidth: 0 }}>
                       {row.name}
                     </Typography>
-                    <Typography component="span" variant="body2" sx={{ ...adminMutedTextSx, display: { xs: "none", sm: "inline" } }}>
-                      {row.itemCount ?? 0} steps · Added {fmtDate(row.createdAt)}
+                    <Typography
+                      component="span"
+                      variant="body2"
+                      sx={{ ...adminMutedTextSx, display: { xs: "none", md: "inline" } }}
+                    >
+                      {row.triggerKey
+                        ? `Engine: ${row.triggerKey}`
+                        : row.code
+                          ? `Code: ${row.code}`
+                          : "No engine event"}
+                      {` · ${row.itemCount ?? 0} steps`}
                     </Typography>
-                    <Chip size="small" color="success" icon={<CheckCircleRounded />} label="Added" />
+                    {row.triggerKey ? (
+                      <Chip size="small" color="info" label={row.triggerKey} />
+                    ) : (
+                      <Chip size="small" color="default" label="Not wired" />
+                    )}
+                    <Chip
+                      size="small"
+                      color={row.isActive === false ? "warning" : "success"}
+                      icon={row.isActive === false ? undefined : <CheckCircleRounded />}
+                      label={row.isActive === false ? "Inactive" : "Active"}
+                    />
                   </AccordionSummary>
                   <AccordionDetails id={`adopted-process-${row.id}`} sx={{ pt: 0 }}>
                     {row.description ? (
-                      <Typography variant="body2" sx={{ ...adminMutedTextSx, mb: 2 }}>
+                      <Typography variant="body2" sx={{ ...adminMutedTextSx, mb: 1 }}>
                         {row.description}
                       </Typography>
                     ) : null}
+                    <Typography variant="body2" sx={{ mb: 2 }}>
+                      <strong>Engine event:</strong> {row.triggerKey || "—"}
+                      {row.code ? (
+                        <>
+                          {" "}
+                          · <strong>Code:</strong> {row.code}
+                        </>
+                      ) : null}
+                    </Typography>
                     <ProcessStepsTable items={items} loading={stepsLoading && items.length === 0} />
                     {canAdopt ? (
-                      <Box sx={{ mt: 2, display: "flex", justifyContent: "flex-end" }}>
+                      <Box
+                        sx={{
+                          mt: 2,
+                          display: "flex",
+                          flexWrap: "wrap",
+                          gap: 1,
+                          justifyContent: "flex-end",
+                        }}
+                      >
+                        <Button
+                          variant="outlined"
+                          color={row.isActive === false ? "primary" : "warning"}
+                          disabled={adoptBusyId === row.id}
+                          onClick={() => setAdoptionActive(row, row.isActive === false)}
+                          className="w-full sm:w-auto"
+                          title={
+                            row.isActive === false
+                              ? `Activate ${row.name}`
+                              : `Deactivate ${row.name}`
+                          }
+                        >
+                          {adoptBusyId === row.id
+                            ? "Updating…"
+                            : row.isActive === false
+                              ? "Activate"
+                              : "Deactivate"}
+                        </Button>
                         <Button
                           variant="outlined"
                           color="error"
@@ -349,7 +449,7 @@ export function ProjectOrgProcessWorkflowPanel({ projectId }) {
         </Typography>
         <Typography variant="body2" sx={{ ...adminMutedTextSx, mb: 2 }}>
           {canAdopt
-            ? "Expand a process to review its steps and add it to your organisation."
+            ? "Expand a process to review its steps and activate it for your organisation."
             : "Expand a process to view its steps."}
         </Typography>
 
@@ -375,7 +475,7 @@ export function ProjectOrgProcessWorkflowPanel({ projectId }) {
           <Box sx={{ display: "flex", flexDirection: "column", gap: 1 }}>
             {catalogue.map((row) => {
               const expanded = expandedCatalogueId === row.id;
-              const items = itemsCache[row.id] || [];
+              const items = itemsCache[row.id] || row.items || [];
               const stepsLoading = itemsLoadingId === row.id;
               const adoptBusy = adoptBusyId === row.id;
               return (
@@ -404,8 +504,14 @@ export function ProjectOrgProcessWorkflowPanel({ projectId }) {
                     </Typography>
                     <Typography component="span" variant="body2" sx={{ ...adminMutedTextSx, display: { xs: "none", sm: "inline" } }}>
                       {row.itemCount ?? 0} steps
+                      {row.triggerKey ? ` · ${row.triggerKey}` : row.code ? ` · ${row.code}` : " · legacy"}
                     </Typography>
-                    {statusChip(row.isAdopted)}
+                    {row.triggerKey ? (
+                      <Chip size="small" color="info" label="Engine" />
+                    ) : (
+                      <Chip size="small" color="default" label="Not wired" />
+                    )}
+                    {statusChip(row)}
                   </AccordionSummary>
                   <AccordionDetails id={`catalogue-process-${row.id}`} sx={{ pt: 0 }}>
                     {row.description ? (
@@ -413,15 +519,42 @@ export function ProjectOrgProcessWorkflowPanel({ projectId }) {
                         {row.description}
                       </Typography>
                     ) : null}
+                    {row.triggerKey ? (
+                      <Typography variant="body2" sx={{ mb: 2 }}>
+                        Budget/plan/requisition submit uses this when trigger is{" "}
+                        <strong>{row.triggerKey}</strong>
+                        {row.code ? ` (code ${row.code})` : ""}.
+                      </Typography>
+                    ) : (
+                      <Typography variant="body2" sx={{ mb: 2, color: "error.main" }}>
+                        Legacy catalogue row — activating this will not drive budget/plan/requisition
+                        submit. Prefer the engine template with the same name that shows trigger{" "}
+                        <strong>BUDGET_SUBMITTED</strong> / <strong>PLANNING_SUBMITTED</strong> /{" "}
+                        <strong>REQUISITION_SUBMITTED</strong>.
+                      </Typography>
+                    )}
                     <ProcessStepsTable items={items} loading={stepsLoading && items.length === 0} />
                     {canAdopt ? (
                       <Box sx={{ mt: 2, display: "flex", justifyContent: "flex-end" }}>
-                        {row.isAdopted ? (
+                        {row.isAdopted && row.isActive !== false ? (
                           <Chip
                             color="success"
                             icon={<CheckCircleRounded />}
-                            label="Already added"
+                            label="Already activated"
                           />
+                        ) : row.isAdopted && row.isActive === false ? (
+                          <Button
+                            variant="contained"
+                            disabled={adoptBusy || refetching || !row.triggerKey}
+                            onClick={() => {
+                              const adoption = adopted.find((a) => a.processFlowId === row.id);
+                              if (adoption) void setAdoptionActive(adoption, true);
+                            }}
+                            className="w-full sm:w-auto"
+                            title={`Activate ${row.name}`}
+                          >
+                            {adoptBusy ? "Activating…" : "Activate process"}
+                          </Button>
                         ) : (
                           <Button
                             variant="contained"
@@ -432,12 +565,16 @@ export function ProjectOrgProcessWorkflowPanel({ projectId }) {
                                 <AddRounded />
                               )
                             }
-                            disabled={adoptBusy || refetching}
+                            disabled={adoptBusy || refetching || !row.triggerKey}
                             onClick={() => void adoptProcess(row)}
                             className="w-full sm:w-auto"
-                            title={`Add ${row.name} to organisation`}
+                            title={
+                              row.triggerKey
+                                ? `Activate ${row.name} for this organisation`
+                                : "Legacy process is not wired to submit triggers"
+                            }
                           >
-                            {adoptBusy ? "Adding…" : "Add process"}
+                            {adoptBusy ? "Activating…" : "Activate process"}
                           </Button>
                         )}
                       </Box>
@@ -459,8 +596,8 @@ export function ProjectOrgProcessWorkflowPanel({ projectId }) {
         <DialogTitle>Remove process?</DialogTitle>
         <DialogContent>
           <Typography variant="body2">
-            Remove <strong>{removeRow?.name}</strong> from your organisation? You can add it again
-            later from the available list.
+            Remove <strong>{removeRow?.name}</strong> from your organisation? You can activate it
+            again later from the available list.
           </Typography>
         </DialogContent>
         <DialogActions sx={{ px: 3, pb: 2 }}>

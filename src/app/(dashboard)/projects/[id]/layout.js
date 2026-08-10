@@ -30,6 +30,10 @@ export default async function ProjectDetailLayout({ children, params }) {
   if (!user) redirect(`/login?next=/projects/${id}`);
   const activeRole = sessionActiveRole(user) || Role.STUDENT;
 
+  if (activeRole === Role.STUDENT) {
+    redirect("/organisation");
+  }
+
   const access = await fetchAuthorizedProjectWorkspace(prisma, {
     projectId: id,
     userId: user.id,
