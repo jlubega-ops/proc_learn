@@ -82,10 +82,10 @@ async function main() {
       accountStatus: UserAccountStatus.ACTIVE,
       activatedAt: now,
       userRoles: {
-        create: [{ role: Role.LECTURER }, { role: Role.EXAMINER }],
+        create: [{ role: Role.EXAMINER }],
       },
       settings: {
-        create: { theme: "light", activeRole: Role.LECTURER },
+        create: { theme: "light", activeRole: Role.EXAMINER },
       },
     },
   });

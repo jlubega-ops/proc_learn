@@ -15,6 +15,11 @@ import {
   startWorkflowFromTrigger,
 } from "@/lib/projects/workflow-engine";
 import { ORG_REF_DOC, nextOrgDocumentReference } from "@/lib/projects/org-reference";
+import {
+  resolveCurrentOrgSlate,
+  resolveSlateIdForOrgCreate,
+  withAcademicAuditMeta,
+} from "@/lib/academic/org-academic-slate";
 
 /**
  * @param {unknown} value
@@ -408,24 +413,32 @@ export async function createOrUpdateProcurementPlanDraft(prisma, opts) {
         departmentId: opts.departmentId,
         createdByOrgUserId: opts.actorOrgUserId,
         status: OrgProcurementPlanStatus.DRAFT,
+        orgAcademicSlateId: await resolveSlateIdForOrgCreate(prisma, opts.projectId),
         items: { create: built.itemRows },
       },
       include: procurementPlanInclude,
     });
   }
 
+  const slate = row.orgAcademicSlateId
+    ? await resolveCurrentOrgSlate(prisma, opts.projectId)
+    : null;
+
   await writeAuditLog({
     eventType: opts.planId
       ? AuditEvent.PROJECT_ORG_PROCUREMENT_PLAN_UPDATED
       : AuditEvent.PROJECT_ORG_PROCUREMENT_PLAN_CREATED,
     actorUserId: null,
-    meta: {
-      projectId: opts.projectId,
-      planId: row.id,
-      actorOrgUserId: opts.actorOrgUserId,
-      departmentId: opts.departmentId,
-      status: row.status,
-    },
+    meta: withAcademicAuditMeta(
+      {
+        projectId: opts.projectId,
+        planId: row.id,
+        actorOrgUserId: opts.actorOrgUserId,
+        departmentId: opts.departmentId,
+        status: row.status,
+      },
+      slate,
+    ),
   });
 
   return { ok: true, plan: serializeProcurementPlan(row) };

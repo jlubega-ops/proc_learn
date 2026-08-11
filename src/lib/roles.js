@@ -1,8 +1,7 @@
-/** @typedef {'STUDENT'|'LECTURER'|'EXAMINER'|'SYSTEM_ADMIN'} RoleId */
+/** @typedef {'STUDENT'|'EXAMINER'|'SYSTEM_ADMIN'} RoleId */
 
 export const ROLE = {
   STUDENT: "STUDENT",
-  LECTURER: "LECTURER",
   EXAMINER: "EXAMINER",
   SYSTEM_ADMIN: "SYSTEM_ADMIN",
 };
@@ -11,7 +10,6 @@ export const ROLE = {
 export const ROLE_PRECEDENCE = [
   ROLE.SYSTEM_ADMIN,
   ROLE.EXAMINER,
-  ROLE.LECTURER,
   ROLE.STUDENT,
 ];
 
@@ -29,7 +27,6 @@ export function pickHighestGrantedRole(granted) {
 
 export const ROLE_LABELS = {
   STUDENT: "Student",
-  LECTURER: "Lecturer",
   EXAMINER: "Examiner",
   SYSTEM_ADMIN: "System admin",
 };
@@ -42,11 +39,7 @@ export function formatRoleLabel(role) {
 
 /** Staff roles stored in `user_role` (students never have these rows). */
 export function isStaffRole(role) {
-  return (
-    role === ROLE.LECTURER ||
-    role === ROLE.EXAMINER ||
-    role === ROLE.SYSTEM_ADMIN
-  );
+  return role === ROLE.EXAMINER || role === ROLE.SYSTEM_ADMIN;
 }
 
 /**

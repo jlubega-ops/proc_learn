@@ -16,7 +16,7 @@ import { themedTextFieldSx } from "@/lib/admin-mui-surfaces";
 import { useToast } from "@/components/providers/toast-provider";
 import { useRouter } from "next/navigation";
 
-const STAFF_ROLE_OPTIONS = [ROLE.SYSTEM_ADMIN, ROLE.EXAMINER, ROLE.LECTURER];
+const STAFF_ROLE_OPTIONS = [ROLE.SYSTEM_ADMIN, ROLE.EXAMINER];
 
 function copyForToast(raw) {
   const t = String(raw ?? "")

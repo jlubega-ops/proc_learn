@@ -21,6 +21,11 @@ import { serializeDelivery, deliveryInclude } from "@/lib/projects/deliveries";
 import { serializeInvoice, invoiceInclude } from "@/lib/projects/invoices";
 import { serializePayment, paymentInclude } from "@/lib/projects/payments";
 import { serializeContract, serializeLpo } from "@/lib/projects/contracts-lpo";
+import {
+  resolveCurrentOrgSlate,
+  resolveSlateIdForOrgCreate,
+  withAcademicAuditMeta,
+} from "@/lib/academic/org-academic-slate";
 
 export const procurementInclude = {
   financialYear: { select: { id: true, label: true } },
@@ -476,6 +481,9 @@ export async function createProcurementFromApprovedRequisition(prisma, opts) {
     req.financialYear.label,
   );
 
+  const orgAcademicSlateId =
+    req.orgAcademicSlateId || (await resolveSlateIdForOrgCreate(prisma, opts.projectId));
+
   try {
     const procurement = await prisma.$transaction(async (tx) => {
       const created = await tx.projectOrgProcurement.create({
@@ -492,6 +500,7 @@ export async function createProcurementFromApprovedRequisition(prisma, opts) {
           status: OrgProcurementStatus.IN_PROGRESS,
           officerOrgUserId: opts.actorOrgUserId,
           methodSelectedAt: new Date(),
+          orgAcademicSlateId,
         },
       });
 
@@ -537,30 +546,36 @@ export async function createProcurementFromApprovedRequisition(prisma, opts) {
     await writeAuditLog({
       eventType: AuditEvent.PROJECT_ORG_PROCUREMENT_CREATED,
       actorUserId: null,
-      meta: {
-        projectId: opts.projectId,
-        procurementId: procurement.id,
-        procurementNumber: procurement.procurementNumber,
-        requisitionId: req.id,
-        procurementMethod: method,
-        actorOrgUserId: opts.actorOrgUserId,
-        actorRoleName: opts.actorRoleName,
-        departmentId: req.departmentId,
-      },
+      meta: withAcademicAuditMeta(
+        {
+          projectId: opts.projectId,
+          procurementId: procurement.id,
+          procurementNumber: procurement.procurementNumber,
+          requisitionId: req.id,
+          procurementMethod: method,
+          actorOrgUserId: opts.actorOrgUserId,
+          actorRoleName: opts.actorRoleName,
+          departmentId: req.departmentId,
+        },
+        orgAcademicSlateId ? await resolveCurrentOrgSlate(prisma, opts.projectId) : null,
+      ),
     });
 
     await writeAuditLog({
       eventType: AuditEvent.PROJECT_ORG_PROCUREMENT_METHOD_SELECTED,
       actorUserId: null,
-      meta: {
-        projectId: opts.projectId,
-        procurementId: procurement.id,
-        procurementMethod: method,
-        nextProcessQueued: methodMeta.code,
-        nextProcessStarted: true,
-        actorOrgUserId: opts.actorOrgUserId,
-        actorRoleName: opts.actorRoleName,
-      },
+      meta: withAcademicAuditMeta(
+        {
+          projectId: opts.projectId,
+          procurementId: procurement.id,
+          procurementMethod: method,
+          nextProcessQueued: methodMeta.code,
+          nextProcessStarted: true,
+          actorOrgUserId: opts.actorOrgUserId,
+          actorRoleName: opts.actorRoleName,
+        },
+        orgAcademicSlateId ? await resolveCurrentOrgSlate(prisma, opts.projectId) : null,
+      ),
     });
 
     const full = await prisma.projectOrgProcurement.findUnique({

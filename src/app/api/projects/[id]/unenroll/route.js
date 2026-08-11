@@ -34,7 +34,7 @@ export async function POST(request, context) {
 
   const project = await prisma.project.findUnique({ where: { id } });
   if (!project) return NextResponse.json({ error: "Project not found." }, { status: 404 });
-  if (!project.requiresEnrollment || ![Role.LECTURER, Role.EXAMINER].includes(project.creatorRole)) {
+  if (!project.requiresEnrollment || project.creatorRole !== Role.EXAMINER) {
     return NextResponse.json({ error: "Project does not support unenroll." }, { status: 400 });
   }
 

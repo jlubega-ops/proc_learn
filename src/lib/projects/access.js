@@ -33,20 +33,6 @@ export function canViewProjectByRole({ userId, activeRole, project }) {
     return true;
   }
   if (
-    activeRole === Role.LECTURER &&
-    project.ownerUserId === userId &&
-    project.creatorRole === Role.LECTURER
-  ) {
-    return true;
-  }
-  if (
-    activeRole === Role.LECTURER &&
-    project.creatorRole === Role.EXAMINER &&
-    project.purpose === "PRACTICE"
-  ) {
-    return true;
-  }
-  if (
     activeRole === Role.EXAMINER &&
     project.ownerUserId === userId &&
     project.creatorRole === Role.EXAMINER
@@ -54,7 +40,7 @@ export function canViewProjectByRole({ userId, activeRole, project }) {
     return true;
   }
   if (
-    [Role.LECTURER, Role.EXAMINER].includes(activeRole) &&
+    activeRole === Role.EXAMINER &&
     project.creatorRole === Role.STUDENT &&
     project.visibility === "PUBLIC"
   ) {
@@ -64,7 +50,7 @@ export function canViewProjectByRole({ userId, activeRole, project }) {
     activeRole === Role.STUDENT &&
     project.visibility === "PUBLIC" &&
     project.isPublished &&
-    [Role.LECTURER, Role.EXAMINER].includes(project.creatorRole) &&
+    project.creatorRole === Role.EXAMINER &&
     (!project.closeAt || new Date(project.closeAt).getTime() >= Date.now())
   ) {
     return true;
@@ -105,7 +91,7 @@ export function canAccessProjectWorkspace({ userId, activeRole, project, enrollm
 
   if (
     activeRole === Role.STUDENT &&
-    [Role.LECTURER, Role.EXAMINER].includes(project.creatorRole) &&
+    project.creatorRole === Role.EXAMINER &&
     project.requiresEnrollment
   ) {
     return Boolean(enrollment);
@@ -113,4 +99,3 @@ export function canAccessProjectWorkspace({ userId, activeRole, project, enrollm
 
   return true;
 }
-

@@ -22,7 +22,7 @@ export default async function ProjectsPage() {
   if (activeRole === Role.STUDENT) {
     redirect("/organisation");
   }
-  if (![Role.LECTURER, Role.EXAMINER, Role.SYSTEM_ADMIN].includes(activeRole)) {
+  if (![Role.EXAMINER, Role.SYSTEM_ADMIN].includes(activeRole)) {
     redirect("/");
   }
 
@@ -30,7 +30,7 @@ export default async function ProjectsPage() {
     <div className={BRAND_PAGE_SHELL_CLASS}>
       <DashboardPageIntro
         title="Projects"
-        description="Projects are the parent workspace for student practice and assignments. Access, enrollment, publishing, and submissions are role-aware."
+        description="Projects are the parent workspace for student practice and assessments. Access, enrollment, publishing, and submissions are role-aware."
       />
       <Suspense fallback={<p className="text-sm text-zinc-500">Loading projects…</p>}>
         <ProjectsPanel />

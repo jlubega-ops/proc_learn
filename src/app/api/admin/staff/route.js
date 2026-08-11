@@ -53,7 +53,7 @@ export async function GET() {
     where: {
       userRoles: {
         some: {
-          role: { in: [Role.LECTURER, Role.EXAMINER, Role.SYSTEM_ADMIN] },
+          role: { in: [Role.EXAMINER, Role.SYSTEM_ADMIN] },
         },
       },
     },

@@ -13,7 +13,7 @@ export default function AdminStaffPage() {
     <div className={BRAND_PAGE_SHELL_CLASS}>
       <DashboardPageIntro
         title="Staff users"
-        description="System administrators, lecturers, and examiners (not student accounts). Add users, edit roles, suspend, or remove access."
+        description="System administrators and examiners (not student accounts). Add users, edit roles, suspend, or remove access."
       />
       <AdminStaffPanel />
     </div>

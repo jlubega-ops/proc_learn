@@ -62,7 +62,7 @@ import { BRAND_BTN_PRIMARY_CLASS } from "@/lib/brand-ui";
  * }} StaffRow
  */
 
-const STAFF_ROLES = [ROLE.SYSTEM_ADMIN, ROLE.EXAMINER, ROLE.LECTURER];
+const STAFF_ROLES = [ROLE.SYSTEM_ADMIN, ROLE.EXAMINER];
 
 function formatWhen(iso) {
   if (!iso) return "Never";
@@ -97,7 +97,7 @@ export function AdminStaffPanel() {
   const [lastName, setLastName] = useState("");
   const [middleName, setMiddleName] = useState("");
   const [rolePick, setRolePick] = useState(/** @type {Record<string, boolean>} */ ({}));
-  const [activeRole, setActiveRole] = useState(ROLE.LECTURER);
+  const [activeRole, setActiveRole] = useState(ROLE.EXAMINER);
   const [saving, setSaving] = useState(false);
   const [suspendBusy, setSuspendBusy] = useState(false);
   const [unsuspendTarget, setUnsuspendTarget] = useState(/** @type {StaffRow | null} */ (null));

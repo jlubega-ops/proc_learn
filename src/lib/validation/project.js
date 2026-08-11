@@ -120,9 +120,26 @@ export function validateProjectCreateInput({ body, activeRole }) {
   if (durationSeconds !== null && (!Number.isFinite(durationSeconds) || durationSeconds <= 0)) {
     errors.duration = "Duration format is invalid.";
   }
-  if (purpose === ProjectPurpose.ASSIGNMENT && (durationSeconds === null || durationSeconds <= 0)) {
-    errors.duration = "Duration is required for assignment projects.";
+  if (purpose === ProjectPurpose.ASSESSMENT && (durationSeconds === null || durationSeconds <= 0)) {
+    errors.duration = "Duration is required for assessment projects.";
   }
+
+  let maxAttempts = null;
+  if (body?.maxAttempts !== undefined && body?.maxAttempts !== null && body?.maxAttempts !== "") {
+    const n = Number(body.maxAttempts);
+    if (!Number.isInteger(n) || n < 1 || n > 20) {
+      errors.maxAttempts = "Max attempts must be a whole number from 1 to 20.";
+    } else {
+      maxAttempts = n;
+    }
+  } else if (
+    activeRole !== Role.STUDENT &&
+    purpose === ProjectPurpose.ASSESSMENT
+  ) {
+    maxAttempts = 1;
+  }
+
+  const allowEditAfterSubmit = body?.allowEditAfterSubmit === true;
 
   if (
     questionFileUrl &&
@@ -154,6 +171,8 @@ export function validateProjectCreateInput({ body, activeRole }) {
       openAt,
       closeAt,
       durationSeconds: durationSeconds ?? null,
+      maxAttempts,
+      allowEditAfterSubmit,
       isPublished: body?.isPublished === true,
     },
   };

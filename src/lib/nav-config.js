@@ -13,9 +13,11 @@ import DateRangeRounded from "@mui/icons-material/DateRangeRounded";
 import SettingsRounded from "@mui/icons-material/SettingsRounded";
 import AssignmentRounded from "@mui/icons-material/AssignmentRounded";
 import TaskAltRounded from "@mui/icons-material/TaskAltRounded";
+import AssessmentRounded from "@mui/icons-material/AssessmentRounded";
 import Groups2Rounded from "@mui/icons-material/Groups2Rounded";
 import ShoppingCartRounded from "@mui/icons-material/ShoppingCartRounded";
 import StorefrontRounded from "@mui/icons-material/StorefrontRounded";
+import EventNoteRounded from "@mui/icons-material/EventNoteRounded";
 import { ROLE } from "@/lib/roles";
 import { ORG_PERMISSION } from "@/lib/projects/org-role-permissions";
 
@@ -46,14 +48,21 @@ export const SIDEBAR_SECTIONS = [
         label: "Home",
         title: "Dashboard home",
         Icon: HomeRounded,
-        anyOf: [ROLE.SYSTEM_ADMIN, ROLE.EXAMINER, ROLE.LECTURER],
+        anyOf: [ROLE.SYSTEM_ADMIN, ROLE.EXAMINER],
       },
       {
         href: "/projects",
         label: "Projects",
         title: "Review and manage projects",
         Icon: WorkOutlineRounded,
-        anyOf: [ROLE.SYSTEM_ADMIN, ROLE.EXAMINER, ROLE.LECTURER],
+        anyOf: [ROLE.SYSTEM_ADMIN, ROLE.EXAMINER],
+      },
+      {
+        href: "/academic/results",
+        label: "Results",
+        title: "Assessment results, grades, and official export",
+        Icon: AssessmentRounded,
+        anyOf: [ROLE.SYSTEM_ADMIN, ROLE.EXAMINER],
       },
     ],
   },
@@ -72,7 +81,7 @@ export const SIDEBAR_SECTIONS = [
       {
         href: "/admin/staff",
         label: "Staff",
-        title: "Manage administrators, lecturers, and examiners",
+        title: "Manage administrators and examiners",
         Icon: GroupsRounded,
         anyOf: [ROLE.SYSTEM_ADMIN],
       },
@@ -119,6 +128,13 @@ export const SIDEBAR_SECTIONS = [
         anyOf: [ROLE.SYSTEM_ADMIN],
       },
       {
+        href: "/admin/academic-setup",
+        label: "Academic setup",
+        title: "Academic years, semesters, courses and classes",
+        Icon: EventNoteRounded,
+        anyOf: [ROLE.SYSTEM_ADMIN],
+      },
+      {
         href: "/admin/programmes",
         label: "Programmes",
         title: "Create and edit study programmes",
@@ -130,101 +146,171 @@ export const SIDEBAR_SECTIONS = [
 ];
 
 /**
- * Student organisation workspace nav (company unit — not projects).
- * @returns {NavSection[]}
+ * Organisation Administration links (shared by Student My Organisation + project workspace).
+ * @param {string} base e.g. `/organisation` or `/projects/{id}`
+ * @param {string[] | null} [anyOf]
+ * @returns {NavLinkItem[]}
  */
-function studentOrganisationSections() {
-  const base = "/organisation";
+export function organisationAdministrationLinks(base, anyOf = [ROLE.STUDENT]) {
   return [
     {
-      id: "org-main",
+      href: `${base}/org-admin/organisation-structure`,
+      label: "Organisation Structure",
+      title: "Define organisation structure",
+      Icon: BusinessRounded,
+      anyOf,
+    },
+    {
+      href: `${base}/org-admin/departments`,
+      label: "Departments/Units",
+      title: "Manage departments and units",
+      Icon: ApartmentRounded,
+      anyOf,
+    },
+    {
+      href: `${base}/org-admin/users`,
+      label: "Users",
+      title: "Manage organisation user accounts",
+      Icon: GroupsRounded,
+      anyOf,
+    },
+    {
+      href: `${base}/org-admin/roles`,
+      label: "Roles & Permissions",
+      title: "Manage roles and permissions",
+      Icon: BadgeRounded,
+      anyOf,
+    },
+    {
+      href: `${base}/org-admin/financial-years`,
+      label: "Financial Years",
+      title: "Manage financial years",
+      Icon: CalendarMonthRounded,
+      anyOf,
+    },
+    {
+      href: `${base}/org-admin/budgets`,
+      label: "Budgets (read-only)",
+      title: "View organisation budgets — operational preparation is done by department users",
+      Icon: CalendarMonthRounded,
+      anyOf,
+    },
+    {
+      href: `${base}/org-admin/planning-period`,
+      label: "Planning Periods",
+      title: "Manage planning periods",
+      Icon: DateRangeRounded,
+      anyOf,
+    },
+    {
+      href: `${base}/org-admin/process-workflow`,
+      label: "Process Workflows",
+      title: "Add organisation process workflows",
+      Icon: AccountTreeRounded,
+      anyOf,
+    },
+    {
+      href: `${base}/org-admin/committees`,
+      label: "Committees",
+      title: "Manage organisation committees and memberships",
+      Icon: Groups2Rounded,
+      anyOf,
+    },
+    {
+      href: `${base}/org-admin/audit-logs`,
+      label: "Activity logs",
+      title: "View organisation activity and audit history",
+      Icon: HistoryRounded,
+      anyOf,
+    },
+  ];
+}
+
+/**
+ * Student platform nav — Dashboard, My Organisation, My Academic Work.
+ * Deliberately separates org simulation work from examiner-assigned academic work.
+ * @returns {NavSection[]}
+ */
+function studentPlatformSections() {
+  const orgBase = "/organisation";
+  return [
+    {
+      id: "student-main",
       label: "",
       links: [
         {
-          href: base,
-          label: "Organisation home",
-          title: "Open your organisation overview",
+          href: "/",
+          label: "Dashboard",
+          title: "Your student home — what to do next",
           Icon: HomeRounded,
           anyOf: [ROLE.STUDENT],
         },
       ],
     },
     {
-      id: "project-admin",
-      label: "System Administration",
+      id: "my-organisation",
+      label: "My Organisation",
       collapsible: true,
       links: [
         {
-          href: `${base}/org-admin/organisation-structure`,
-          label: "Organisation Structure",
-          title: "Define organisation structure",
+          href: orgBase,
+          label: "Overview",
+          title: "Open your organisation overview",
           Icon: BusinessRounded,
           anyOf: [ROLE.STUDENT],
         },
         {
-          href: `${base}/org-admin/departments`,
-          label: "Departments/Units",
-          title: "Manage departments and units",
-          Icon: ApartmentRounded,
+          href: `${orgBase}/org-admin`,
+          label: "System Administration",
+          title: "Configure structure, users, and organisation settings",
+          Icon: SettingsRounded,
+          anyOf: [ROLE.STUDENT],
+          children: organisationAdministrationLinks(orgBase, [ROLE.STUDENT]),
+        },
+      ],
+    },
+    {
+      id: "my-academic-work",
+      label: "My Academic Work",
+      collapsible: true,
+      links: [
+        {
+          href: "/academic/practice",
+          label: "Practice",
+          title: "Practice projects assigned by your examiner",
+          Icon: WorkOutlineRounded,
           anyOf: [ROLE.STUDENT],
         },
         {
-          href: `${base}/org-admin/users`,
-          label: "Users",
-          title: "Manage organisation user accounts",
-          Icon: GroupsRounded,
+          href: "/academic/assessments",
+          label: "Assessments",
+          title: "Assessment projects assigned by your examiner",
+          Icon: AssignmentRounded,
           anyOf: [ROLE.STUDENT],
         },
         {
-          href: `${base}/org-admin/roles`,
-          label: "Roles & Permissions",
-          title: "Manage roles and permissions",
-          Icon: BadgeRounded,
-          anyOf: [ROLE.STUDENT],
-        },
-        {
-          href: `${base}/org-admin/financial-years`,
-          label: "Financial Years",
-          title: "Manage financial years",
-          Icon: CalendarMonthRounded,
-          anyOf: [ROLE.STUDENT],
-        },
-        {
-          href: `${base}/org-admin/budgets`,
-          label: "Budgets (read-only)",
-          title: "View organisation budgets — operational preparation is done by department users",
-          Icon: CalendarMonthRounded,
-          anyOf: [ROLE.STUDENT],
-        },
-        {
-          href: `${base}/org-admin/planning-period`,
-          label: "Planning Periods",
-          title: "Manage planning periods",
-          Icon: DateRangeRounded,
-          anyOf: [ROLE.STUDENT],
-        },
-        {
-          href: `${base}/org-admin/process-workflow`,
-          label: "Process Workflows",
-          title: "Add organisation process workflows",
-          Icon: AccountTreeRounded,
-          anyOf: [ROLE.STUDENT],
-        },
-        {
-          href: `${base}/org-admin/committees`,
-          label: "Committees",
-          title: "Manage organisation committees and memberships",
-          Icon: Groups2Rounded,
-          anyOf: [ROLE.STUDENT],
-        },
-        {
-          href: `${base}/org-admin/audit-logs`,
-          label: "Activity logs",
-          title: "View organisation activity and audit history",
-          Icon: HistoryRounded,
+          href: "/academic/results",
+          label: "Results",
+          title: "Your scores and feedback when released",
+          Icon: AssessmentRounded,
           anyOf: [ROLE.STUDENT],
         },
       ],
+    },
+  ];
+}
+
+/**
+ * Flat org-admin section for examiner project workspaces (System Administration accordion).
+ * @returns {NavSection[]}
+ */
+function studentOrganisationAdminSection() {
+  return [
+    {
+      id: "project-admin",
+      label: "System Administration",
+      collapsible: true,
+      links: organisationAdministrationLinks("/organisation", [ROLE.STUDENT]),
     },
   ];
 }
@@ -239,12 +325,12 @@ export function sidebarNavForActiveRole(activeRole) {
     id: section.id,
     label:
       section.id === "main" &&
-      [ROLE.LECTURER, ROLE.EXAMINER, ROLE.SYSTEM_ADMIN].includes(activeRole)
+      [ROLE.EXAMINER, ROLE.SYSTEM_ADMIN].includes(activeRole)
         ? "General"
         : section.label,
     collapsible:
       section.id === "main" &&
-      [ROLE.LECTURER, ROLE.EXAMINER, ROLE.SYSTEM_ADMIN].includes(activeRole)
+      [ROLE.EXAMINER, ROLE.SYSTEM_ADMIN].includes(activeRole)
         ? true
         : Boolean(section.collapsible),
     links: section.links.filter((item) => {
@@ -255,7 +341,7 @@ export function sidebarNavForActiveRole(activeRole) {
 }
 
 /**
- * Staff / non-student project workspace nav (kept for lecturer/examiner project pages).
+ * Staff / non-student project workspace nav (kept for examiner project pages).
  * @param {string} projectId
  * @param {{ canManageOrgAdmin?: boolean }} [options]
  * @returns {NavSection[]}
@@ -279,15 +365,11 @@ export function sidebarNavForProjectWorkspace(projectId, options = {}) {
     },
   ];
   if (options.canManageOrgAdmin === true) {
-    const admin = studentOrganisationSections().find((s) => s.id === "project-admin");
+    const admin = studentOrganisationAdminSection().find((s) => s.id === "project-admin");
     if (admin) {
       sections.push({
         ...admin,
-        links: admin.links.map((link) => ({
-          ...link,
-          href: link.href.replace("/organisation", base),
-          anyOf: null,
-        })),
+        links: organisationAdministrationLinks(base, null),
       });
     }
   }
@@ -531,8 +613,36 @@ export function sidebarNavForContext(activeRole, pathname, options = {}) {
   }
 
   if (activeRole === ROLE.STUDENT) {
-    return studentOrganisationSections();
+    return studentPlatformSections();
   }
 
   return sidebarNavForActiveRole(activeRole);
+}
+
+/**
+ * Flatten section labels including nested children (for tests / audits).
+ * @param {NavSection[]} sections
+ * @returns {string[]}
+ */
+export function flattenNavLabels(sections) {
+  return (sections || []).flatMap((section) =>
+    (section.links || []).flatMap((link) => [
+      link.label,
+      ...((link.children || []).map((child) => child.label)),
+    ]),
+  );
+}
+
+/**
+ * Flatten hrefs including nested children.
+ * @param {NavSection[]} sections
+ * @returns {string[]}
+ */
+export function flattenNavHrefs(sections) {
+  return (sections || []).flatMap((section) =>
+    (section.links || []).flatMap((link) => [
+      link.href,
+      ...((link.children || []).map((child) => child.href)),
+    ]),
+  );
 }

@@ -43,7 +43,7 @@ export default async function ProjectDetailsPage({ params }) {
               : ""}
           </p>
           <div className="mt-3 flex flex-wrap items-center gap-2">
-            <Chip size="small" label={project.purpose} color="primary" />
+            <Chip size="small" label={purposeLabel(project.purpose)} color={purposeColor(project.purpose)} />
             <Chip size="small" label={project.status} color={statusColor(project.status)} />
             <Chip size="small" label="Published" color="success" />
           </div>
@@ -81,7 +81,7 @@ export default async function ProjectDetailsPage({ params }) {
           {project.owner?.email || "—"})
         </p>
         <div className="mt-3 flex flex-wrap items-center gap-2">
-          <Chip size="small" label={project.purpose} color={purposeColor(project.purpose)} />
+          <Chip size="small" label={purposeLabel(project.purpose)} color={purposeColor(project.purpose)} />
           <Chip size="small" label={project.status} color={statusColor(project.status)} />
           <Chip size="small" label={project.visibility} color={visibilityColor(project.visibility)} />
           {showStaffFields ? (
@@ -178,6 +178,10 @@ function visibilityColor(visibility) {
   return visibility === "PUBLIC" ? "secondary" : "warning";
 }
 
+function purposeLabel(purpose) {
+  return String(purpose || "").toUpperCase() === "ASSESSMENT" ? "Assessment" : "Practice";
+}
+
 function purposeColor(purpose) {
-  return purpose === "ASSIGNMENT" ? "secondary" : "primary";
+  return String(purpose || "").toUpperCase() === "ASSESSMENT" ? "secondary" : "primary";
 }

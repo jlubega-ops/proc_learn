@@ -21,7 +21,7 @@ export async function POST(request, context) {
   const project = await prisma.project.findUnique({ where: { id } });
   if (
     !project ||
-    ![Role.EXAMINER, Role.LECTURER].includes(project.creatorRole) ||
+    project.creatorRole !== Role.EXAMINER ||
     !project.requiresEnrollment
   ) {
     return NextResponse.json({ error: "Project does not support enrollment." }, { status: 400 });

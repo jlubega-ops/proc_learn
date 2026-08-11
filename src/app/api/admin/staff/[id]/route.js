@@ -25,7 +25,7 @@ async function assertStaffUser(userId) {
     return { error: "Use student endpoints for student accounts.", status: 400 };
   }
   const hasStaff = u.userRoles.some((r) =>
-    [Role.LECTURER, Role.EXAMINER, Role.SYSTEM_ADMIN].includes(r.role),
+    [Role.EXAMINER, Role.SYSTEM_ADMIN].includes(r.role),
   );
   if (!hasStaff) {
     return { error: "Not a staff account.", status: 400 };

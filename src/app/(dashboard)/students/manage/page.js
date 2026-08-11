@@ -32,10 +32,17 @@ export default async function StudentsManagePage() {
           {r === Role.EXAMINER ? (
             <>
               {" "}
-              As an examiner you can add and maintain student records, and suspend or reactivate student
-              accounts. Programme and staff settings stay with system administrators.
+              As an examiner you can add and maintain student records, suspend or reactivate accounts,
+              and use <span className="font-semibold text-primary">Observe</span> to review a
+              student’s organisation and procurement progress (read-only).
             </>
-          ) : null}
+          ) : (
+            <>
+              {" "}
+              Use <span className="font-semibold text-primary">Observe</span> to open a read-only
+              view of a student’s organisation and procurement progress.
+            </>
+          )}
         </p>
       </DashboardPageIntro>
       <AdminStudentsPanel />

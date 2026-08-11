@@ -8,6 +8,7 @@ import Divider from "@mui/material/Divider";
 import IconButton from "@mui/material/IconButton";
 import Tooltip from "@mui/material/Tooltip";
 import EditRounded from "@mui/icons-material/EditRounded";
+import VisibilityRounded from "@mui/icons-material/VisibilityRounded";
 import DeleteOutlineRounded from "@mui/icons-material/DeleteOutlineRounded";
 import PersonAddAlt1Rounded from "@mui/icons-material/PersonAddAlt1Rounded";
 import UploadFileRounded from "@mui/icons-material/UploadFileRounded";
@@ -492,6 +493,18 @@ export function AdminStudentsPanel() {
                   <TableCell>{formatWhen(row.lastLoginAt)}</TableCell>
                   <TableCell align="right" sx={{ whiteSpace: "nowrap" }}>
                     <Box sx={{ display: "inline-flex", gap: 0.25, justifyContent: "flex-end" }}>
+                      <Tooltip title="Observe organisation and progress (read-only)">
+                        <IconButton
+                          size="small"
+                          color="info"
+                          aria-label="Observe student"
+                          component={Link}
+                          href={`/students/${row.id}/observe`}
+                          disabled={refetching}
+                        >
+                          <VisibilityRounded fontSize="small" />
+                        </IconButton>
+                      </Tooltip>
                       <Tooltip title="Edit student">
                         <IconButton
                           size="small"

@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { ProjectPurpose, Role } from "@prisma/client";
+import { Role } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { AuditEvent, writeAuditLog } from "@/lib/audit-log";
 import { getSessionUser, sessionActiveRole } from "@/lib/api/get-session-user";
@@ -111,11 +111,6 @@ export async function PATCH(request, context) {
   const staffManagesStudent = canManageStudentProjectSettings({ activeRole, project: existing });
   const isStudentOwnerEdit =
     activeRole === Role.STUDENT && existing.creatorRole === Role.STUDENT;
-  const isLecturerOwnerEdit =
-    activeRole === Role.LECTURER &&
-    existing.ownerUserId === user.id &&
-    (existing.creatorRole === Role.LECTURER ||
-      (existing.creatorRole === Role.EXAMINER && existing.purpose === ProjectPurpose.PRACTICE));
   const managesExaminerProject = canManageExaminerProject({
     activeRole,
     project: existing,
@@ -125,12 +120,7 @@ export async function PATCH(request, context) {
   if (!staffManagesStudent && !managesExaminerProject && existing.ownerUserId !== user.id) {
     return NextResponse.json({ error: "Forbidden." }, { status: 403 });
   }
-  if (
-    !isStudentOwnerEdit &&
-    !isLecturerOwnerEdit &&
-    !staffManagesStudent &&
-    !managesExaminerProject
-  ) {
+  if (!isStudentOwnerEdit && !staffManagesStudent && !managesExaminerProject) {
     return NextResponse.json(
       { error: "You do not have permission to edit this project in the current role." },
       { status: 403 },
@@ -153,12 +143,6 @@ export async function PATCH(request, context) {
   }
 
   const d = validated.data;
-  if (activeRole === Role.LECTURER && d.purpose !== ProjectPurpose.PRACTICE) {
-    return NextResponse.json(
-      { error: "Lecturer projects can only be practice projects." },
-      { status: 400 },
-    );
-  }
   const row = await prisma.project.update({
     where: { id },
     data: staffManagesStudent
@@ -182,14 +166,14 @@ export async function PATCH(request, context) {
           instructions: d.instructions,
           questionText: d.questionText,
           questionFileUrl: d.questionFileUrl,
-          enrollmentKey: [Role.LECTURER, Role.EXAMINER, Role.SYSTEM_ADMIN].includes(activeRole)
+          enrollmentKey: [Role.EXAMINER, Role.SYSTEM_ADMIN].includes(activeRole)
             ? d.enrollmentAccessKey
             : null,
           isPublished: activeRole === Role.STUDENT ? true : d.isPublished,
           openAt: d.openAt,
           closeAt: d.closeAt,
           durationSeconds: d.durationSeconds,
-          requiresEnrollment: [Role.EXAMINER, Role.LECTURER, Role.SYSTEM_ADMIN].includes(activeRole),
+          requiresEnrollment: [Role.EXAMINER, Role.SYSTEM_ADMIN].includes(activeRole),
         },
   });
 
@@ -216,17 +200,12 @@ export async function DELETE(_request, context) {
     activeRole === Role.STUDENT &&
     existing.creatorRole === Role.STUDENT &&
     existing.ownerUserId === user.id;
-  const isLecturerOwnerDelete =
-    activeRole === Role.LECTURER &&
-    existing.ownerUserId === user.id &&
-    (existing.creatorRole === Role.LECTURER ||
-      (existing.creatorRole === Role.EXAMINER && existing.purpose === ProjectPurpose.PRACTICE));
   const managesExaminerProject = canManageExaminerProject({
     activeRole,
     project: existing,
     userId: user.id,
   });
-  if (!isStudentOwnerDelete && !isLecturerOwnerDelete && !managesExaminerProject) {
+  if (!isStudentOwnerDelete && !managesExaminerProject) {
     return NextResponse.json(
       { error: "You do not have permission to delete this project in the current role." },
       { status: 403 },

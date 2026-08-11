@@ -32,6 +32,7 @@ import RefreshRounded from "@mui/icons-material/RefreshRounded";
 import PlayArrowRounded from "@mui/icons-material/PlayArrowRounded";
 import HowToRegRounded from "@mui/icons-material/HowToRegRounded";
 import GroupRounded from "@mui/icons-material/GroupRounded";
+import AssignmentTurnedInRounded from "@mui/icons-material/AssignmentTurnedInRounded";
 import UploadFileRounded from "@mui/icons-material/UploadFileRounded";
 import LogoutRounded from "@mui/icons-material/LogoutRounded";
 import ContentCopyRounded from "@mui/icons-material/ContentCopyRounded";
@@ -61,25 +62,20 @@ const STUDENT_FILTERS = [
   { value: "all", label: "All" },
   { value: "private", label: "Private" },
   { value: "public", label: "Public" },
-  { value: "assignments", label: "Assignments" },
-  { value: "lecturer", label: "Lecturer projects" },
+  { value: "assessments", label: "Assessments" },
+  { value: "examiner", label: "Examiner projects" },
 ];
 
 const STAFF_SCOPE_FILTERS = [
   { value: "all", label: "All" },
   { value: "student", label: "Student" },
-  { value: "lecturer", label: "Lecturer" },
+  { value: "examiner", label: "Examiner" },
 ];
 
 const STAFF_PURPOSE_FILTERS = [
   { value: "all", label: "All" },
   { value: "practice", label: "Practice" },
-  { value: "assignments", label: "Assignments" },
-];
-
-const LECTURER_PURPOSE_FILTERS = [
-  { value: "all", label: "All" },
-  { value: "practice", label: "Practice" },
+  { value: "assessments", label: "Assessments" },
 ];
 
 const STAFF_STATUS_FILTERS = [
@@ -154,7 +150,7 @@ function openStateColor(state) {
 }
 
 function formatPurpose(value) {
-  if (String(value || "").toUpperCase() === "ASSIGNMENT") return "Assignment";
+  if (String(value || "").toUpperCase() === "ASSESSMENT") return "Assessment";
   return "Practice";
 }
 
@@ -211,7 +207,7 @@ function validateClientForm(activeRole, form) {
     const m = mRaw ? Number(mRaw) : 0;
     const hasDurationInput = (hRaw !== "" || mRaw !== "") && (h > 0 || m > 0);
     const hasPositiveDuration = Number.isFinite(h) && Number.isFinite(m) && h * 60 + m > 0;
-    const requiresDuration = String(form.purpose || "").toUpperCase() === "ASSIGNMENT";
+    const requiresDuration = String(form.purpose || "").toUpperCase() === "ASSESSMENT";
 
     if (hasDurationInput || requiresDuration) {
       if (!Number.isInteger(h) || h < 0) errors.durationHours = "Hours must be 0 or more.";
@@ -224,7 +220,7 @@ function validateClientForm(activeRole, form) {
         !hasPositiveDuration
       ) {
         errors.durationMinutes = requiresDuration
-          ? "Duration is required for assignment projects."
+          ? "Duration is required for assessment projects."
           : "Set at least 1 minute.";
       }
     }
@@ -251,14 +247,13 @@ export function ProjectsPanel() {
   const { session, loading: sessionLoading, setSessionBlocking } = useAuthSession();
   const activeRole = session?.activeRole || "STUDENT";
   const isStudent = activeRole === "STUDENT";
-  const isLecturer = activeRole === "LECTURER";
   const isExaminer = activeRole === "EXAMINER";
   const isSystemAdmin = activeRole === "SYSTEM_ADMIN";
   const isExaminerLike = isExaminer || isSystemAdmin;
-  const isStaffViewer = isLecturer || isExaminerLike;
-  const canCreate = isStudent || isLecturer || isExaminerLike;
+  const isStaffViewer = isExaminerLike;
+  const canCreate = isStudent || isExaminerLike;
   const filterOptions = STUDENT_FILTERS;
-  const staffPurposeFilters = isLecturer ? LECTURER_PURPOSE_FILTERS : STAFF_PURPOSE_FILTERS;
+  const staffPurposeFilters = STAFF_PURPOSE_FILTERS;
   const searchParams = useSearchParams();
 
   const [loading, setLoading] = useState(true);
@@ -329,7 +324,7 @@ export function ProjectsPanel() {
           pageSize: String(rowsPerPage),
         });
         qp.set("filter", filter);
-        if (isLecturer || isExaminer || isSystemAdmin) {
+        if (isExaminer || isSystemAdmin) {
           qp.set("scope", staffScope);
           qp.set("purpose", staffPurpose);
           qp.set("status", staffStatus);
@@ -358,7 +353,6 @@ export function ProjectsPanel() {
       page,
       rowsPerPage,
       filter,
-      isLecturer,
       isExaminer,
       isSystemAdmin,
       staffScope,
@@ -420,7 +414,7 @@ export function ProjectsPanel() {
       name: row.name || "",
       description: row.description || "",
       organizationName: row.organizationName || "",
-      purpose: row.purpose || (isExaminerLike ? "ASSIGNMENT" : "PRACTICE"),
+      purpose: row.purpose || (isExaminerLike ? "ASSESSMENT" : "PRACTICE"),
       visibility: row.visibility || "PRIVATE",
       openAt: row.openAt ? new Date(row.openAt).toISOString().slice(0, 16) : "",
       closeAt: row.closeAt ? new Date(row.closeAt).toISOString().slice(0, 16) : "",
@@ -571,7 +565,7 @@ export function ProjectsPanel() {
       return;
     }
 
-    const isStaffProject = ["LECTURER", "EXAMINER"].includes(String(row.creatorRole || ""));
+    const isStaffProject = String(row.creatorRole || "") === "EXAMINER";
     const isOwnProject = row.ownerUserId === session?.userId;
     const enrollmentStatus = enrollmentStatusForRow(row);
     const isEnrolled =
@@ -749,20 +743,13 @@ export function ProjectsPanel() {
       if (isStudent) {
         return row.ownerUserId === session?.userId && row.creatorRole === "STUDENT";
       }
-      if (isLecturer) {
-        return (
-          row.ownerUserId === session?.userId &&
-          (row.creatorRole === "LECTURER" ||
-            (row.creatorRole === "EXAMINER" && row.purpose === "PRACTICE"))
-        );
-      }
       if (isSystemAdmin) return row.creatorRole === "EXAMINER";
       if (isExaminer) {
         return row.ownerUserId === session?.userId && row.creatorRole === "EXAMINER";
       }
       return false;
     },
-    [isStudent, isLecturer, isExaminer, isSystemAdmin, session?.userId],
+    [isStudent, isExaminer, isSystemAdmin, session?.userId],
   );
 
   if (sessionLoading || loading) {
@@ -820,7 +807,7 @@ export function ProjectsPanel() {
             </Select>
           </FormControl>
         ) : null}
-        {isLecturer || isExaminer || isSystemAdmin ? (
+        {isExaminer || isSystemAdmin ? (
           <FormControl size="small" className="w-full sm:w-44" sx={themedTextFieldSx}>
             <InputLabel id="project-scope-filter-label">Source</InputLabel>
             <Select
@@ -997,19 +984,45 @@ export function ProjectsPanel() {
                           </Tooltip>
                         ) : null}
                         {isExaminerLike && row.creatorRole === "EXAMINER" ? (
-                          <Tooltip title="View submissions">
-                            <IconButton
-                              size="small"
-                              aria-label="View submissions"
-                              onClick={() => router.push(`/projects/${row.id}/submissions`)}
-                              color="secondary"
-                            >
-                              <GroupRounded fontSize="small" />
-                            </IconButton>
-                          </Tooltip>
+                          <>
+                            <Tooltip title="View participants & attempts">
+                              <IconButton
+                                size="small"
+                                color="info"
+                                aria-label="View participants and attempts"
+                                onClick={() => router.push(`/projects/${row.id}/participants`)}
+                              >
+                                <GroupRounded fontSize="small" />
+                              </IconButton>
+                            </Tooltip>
+                            <Tooltip title="Assessment scoring setup">
+                              <IconButton
+                                size="small"
+                                color="primary"
+                                aria-label="Assessment scoring setup"
+                                onClick={() => router.push(`/projects/${row.id}/assessment`)}
+                              >
+                                <SettingsRounded fontSize="small" />
+                              </IconButton>
+                            </Tooltip>
+                            <Tooltip title="Results">
+                              <IconButton
+                                size="small"
+                                color="success"
+                                aria-label="Open results for this project"
+                                onClick={() =>
+                                  router.push(
+                                    `/academic/results?projectId=${encodeURIComponent(row.id)}`,
+                                  )
+                                }
+                              >
+                                <AssignmentTurnedInRounded fontSize="small" />
+                              </IconButton>
+                            </Tooltip>
+                          </>
                         ) : null}
                         {isStudent &&
-                        ["LECTURER", "EXAMINER"].includes(String(row.creatorRole || "")) &&
+                        String(row.creatorRole || "") === "EXAMINER" &&
                         Array.isArray(row.enrollments) &&
                         row.enrollments.some((enrollment) => enrollment?.studentUserId === session?.userId) ? (
                           <Tooltip title="Unenroll from project">
@@ -1106,10 +1119,10 @@ export function ProjectsPanel() {
                 label="Purpose"
                 value={form.purpose}
                 onChange={(e) => setForm((prev) => ({ ...prev, purpose: e.target.value }))}
-                disabled={isStudent || isLecturer}
+                disabled={isStudent}
               >
                 <MenuItem value="PRACTICE">Practice</MenuItem>
-                {isExaminerLike ? <MenuItem value="ASSIGNMENT">Assignment</MenuItem> : null}
+                {isExaminerLike ? <MenuItem value="ASSESSMENT">Assessment</MenuItem> : null}
               </Select>
             </FormControl>
             {isStudent ? (
@@ -1202,7 +1215,7 @@ export function ProjectsPanel() {
                   </Select>
                 </FormControl>
                 <Typography variant="caption" sx={{ ...adminMutedTextSx, mt: 2 }}>
-                  Duration is required for assignment projects; optional for practice (open until close date).
+                  Duration is required for assessment projects; optional for practice (open until close date).
                 </Typography>
               </div>
               {fieldErrors.durationHours || fieldErrors.durationMinutes ? (
@@ -1411,7 +1424,7 @@ export function ProjectsPanel() {
           <Typography variant="body2" color="error" sx={{ mt: 1.5 }}>
             This action permanently deletes project data and student progress.
           </Typography>
-          {["LECTURER", "EXAMINER"].includes(deleteRow?.creatorRole || "") ? (
+          {deleteRow?.creatorRole === "EXAMINER" ? (
             <Typography variant="body2" color="error" sx={{ mt: 0.75 }}>
               If students have started or submitted work, all that progress will be deleted too.
             </Typography>
@@ -1510,7 +1523,7 @@ export function ProjectsPanel() {
                   Open question file
                 </a>
               ) : null}
-              {["LECTURER", "EXAMINER"].includes(String(studentProjectDialog.creatorRole || "")) &&
+              {String(studentProjectDialog.creatorRole || "") === "EXAMINER" &&
               !studentDialogEnrolled &&
               studentProjectDialog.hasEnrollmentKey ? (
                 <TextField
@@ -1536,7 +1549,7 @@ export function ProjectsPanel() {
             Close
           </Button>
           {studentProjectDialog ? (
-            ["LECTURER", "EXAMINER"].includes(String(studentProjectDialog.creatorRole || "")) &&
+            String(studentProjectDialog.creatorRole || "") === "EXAMINER" &&
             !studentDialogEnrolled ? (
               <Button
                 variant="contained"

@@ -1,8 +1,9 @@
 import { NextResponse } from "next/server";
-import { ProjectEnrollmentStatus, ProjectStatus, Role } from "@prisma/client";
+import { ProjectStatus, Role } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { AuditEvent, writeAuditLog } from "@/lib/audit-log";
 import { getSessionUser, sessionActiveRole } from "@/lib/api/get-session-user";
+import { startProjectAttempt } from "@/lib/academic/project-attempts";
 
 export const runtime = "nodejs";
 
@@ -36,6 +37,7 @@ export async function POST(_request, context) {
     );
   }
 
+  // Student-owned project (non-academic catalog)
   if (project.ownerUserId === user.id && project.creatorRole === Role.STUDENT) {
     const updated = await prisma.project.update({
       where: { id },
@@ -54,40 +56,32 @@ export async function POST(_request, context) {
     return NextResponse.json({ project: updated, mode: "self_project" });
   }
 
-  const enrollment = await prisma.projectEnrollment.findUnique({
-    where: { projectId_studentUserId: { projectId: id, studentUserId: user.id } },
-  });
-  if (
-    ![Role.LECTURER, Role.EXAMINER].includes(project.creatorRole) ||
-    !project.requiresEnrollment ||
-    !project.isPublished
-  ) {
-    return NextResponse.json(
-      { error: "This project cannot be started through enrollment flow." },
-      { status: 400 },
-    );
-  }
-  if (!enrollment) {
-    return NextResponse.json({ error: "Please enroll first." }, { status: 400 });
-  }
-  if (enrollment.status === ProjectEnrollmentStatus.SUBMITTED) {
-    return NextResponse.json({ error: "Already submitted." }, { status: 400 });
+  // Academic Project → ProjectAttempt
+  if (project.creatorRole === Role.EXAMINER && project.requiresEnrollment) {
+    try {
+      const result = await startProjectAttempt({
+        projectId: id,
+        studentUserId: user.id,
+        actorUserId: user.id,
+      });
+      await writeAuditLog({
+        eventType: AuditEvent.PROJECT_STARTED,
+        actorUserId: user.id,
+        meta: {
+          projectId: id,
+          mode: "academic_attempt",
+          attemptId: result.attempt?.id,
+        },
+      });
+      return NextResponse.json(result);
+    } catch (e) {
+      const message = e instanceof Error ? e.message : "Could not start attempt.";
+      return NextResponse.json({ error: message }, { status: 400 });
+    }
   }
 
-  const next = await prisma.projectEnrollment.update({
-    where: { id: enrollment.id },
-    data: {
-      status: ProjectEnrollmentStatus.IN_PROGRESS,
-      startedAt: enrollment.startedAt || new Date(),
-    },
-  });
-
-  await writeAuditLog({
-    eventType: AuditEvent.PROJECT_STARTED,
-    actorUserId: user.id,
-    meta: { projectId: id },
-  });
-
-  return NextResponse.json({ enrollment: next });
+  return NextResponse.json(
+    { error: "This project cannot be started through enrollment flow." },
+    { status: 400 },
+  );
 }
-

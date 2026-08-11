@@ -1,0 +1,853 @@
+Phase8 post-implementation regression: 2026-08-12T00:27:51+0300
+=== phase8 ===
+(node:2096) [MODULE_TYPELESS_PACKAGE_JSON] Warning: Module type of file:///d:/Live%20Projects/proc_learn/src/lib/prisma.js is not specified and it doesn't parse as CommonJS.
+Reparsing as ES module because module syntax was detected. This incurs a performance overhead.
+To eliminate this warning, add "type": "module" to d:\Live Projects\proc_learn\package.json.
+(Use `node --trace-warnings ...` to show where the warning was created)
+
+=== Phase 8 Academic Projects + Attempts acceptance ===
+
+  PASS  Attempt start audit key
+  PASS  Attempt submit audit key
+  PASS  ProjectAttemptStatus.IN_PROGRESS exists
+  PASS  Examiner can create PRACTICE
+  PASS  Practice default maxAttempts null (unlimited)
+  PASS  Examiner can create ASSESSMENT with duration
+  PASS  Assessment default maxAttempts 1
+  PASS  Student created
+  PASS  Examiner created
+  PASS  My Organisation exists before attempt
+  PASS  Practice project created
+  PASS  Assessment project created
+  PASS  Practice appears in student catalog
+  PASS  Attempt starts IN_PROGRESS
+  PASS  First attempt number is 1
+  PASS  Attempt bound to academic slate
+  PASS  Attempt bound to academic enrollment
+  PASS  Same My Organisation after start
+  PASS  Attempt uses personal org id
+  PASS  Timer elapsed from server startedAt — elapsed=30
+  PASS  Timer remaining independent of client — rem=90
+  PASS  Refresh resumes same in-progress attempt
+  PASS  Attempt isolation — same attempt id
+  PASS  Attempt submitted
+  PASS  Second attempt created
+  PASS  Attempts are independent rows
+  PASS  Max attempts enforced
+  PASS  Close date blocks new attempts
+  PASS  Participants payload
+  PASS  Participant enrolled count
+  PASS  Examiner sees attempt count
+  PASS  Human submitted status — Submitted
+  PASS  Expired timer auto-submits on next server check
+
+RESULT  33/33 passed
+EXIT:0
+=== phase7 ===
+(node:14128) [MODULE_TYPELESS_PACKAGE_JSON] Warning: Module type of file:///d:/Live%20Projects/proc_learn/src/lib/prisma.js is not specified and it doesn't parse as CommonJS.
+Reparsing as ES module because module syntax was detected. This incurs a performance overhead.
+To eliminate this warning, add "type": "module" to d:\Live Projects\proc_learn\package.json.
+(Use `node --trace-warnings ...` to show where the warning was created)
+
+=== Phase 7 Examiner observation acceptance ===
+
+  PASS  Audit event key
+  PASS  Examiner can observe
+  PASS  Admin can observe
+  PASS  Student cannot observe
+  PASS  Observation mutations denied
+  PASS  Done marker
+  PASS  Current marker
+  PASS  Todo marker
+  PASS  FY stage present
+  PASS  Closure stage present
+  PASS  Examiner demo badge
+  PASS  Admin demo badge
+  PASS  Official students
+  PASS  Demo excluded from official stats
+  PASS  Current AY available
+  PASS  Ephemeral student created
+  PASS  Ephemeral Examiner created
+  PASS  Student personal org exists
+  PASS  Stage count matches keys
+  PASS  Stage states valid
+  PASS  FY stage done when FY exists
+  PASS  Exactly one current stage concept present
+  PASS  FY highlight
+  PASS  Budget highlight
+  PASS  Observation payload is read-only
+  PASS  Student identity
+  PASS  Enrollment active
+  PASS  Defaults to current AY
+  PASS  Semester resolved or null OK
+  PASS  Organisation linked
+  PASS  Progress included
+  PASS  Real student not demo
+  PASS  Official stats include student
+  PASS  Historical year param accepted
+  PASS  Student appears on observation roster
+  PASS  Roster defaults around current AY
+  PASS  Examiner cannot manage student org workspace
+  PASS  Examiner enters Student Mode
+  PASS  Student Mode cannot observe others
+  PASS  Examiner Student Mode enrollment is demo
+  PASS  Examiner demo badge on observation
+  PASS  Demo excluded from official stats
+  PASS  Demo roster includes Examiner demo
+
+RESULT  43/43 passed
+EXIT:0
+=== phase6 ===
+(node:4848) [MODULE_TYPELESS_PACKAGE_JSON] Warning: Module type of file:///d:/Live%20Projects/proc_learn/src/lib/prisma.js is not specified and it doesn't parse as CommonJS.
+Reparsing as ES module because module syntax was detected. This incurs a performance overhead.
+To eliminate this warning, add "type": "module" to d:\Live Projects\proc_learn\package.json.
+(Use `node --trace-warnings ...` to show where the warning was created)
+
+=== Phase 6 student academic navigation acceptance ===
+
+  PASS  Dashboard section present
+  PASS  My Organisation section present
+  PASS  My Academic Work section present
+  PASS  Dashboard label
+  PASS  Organisation Overview label
+  PASS  System Administration nested group
+  PASS  Org admin links remain available
+  PASS  Practice label
+  PASS  Assessments label
+  PASS  Results not in Phase 6 nav
+  PASS  No technical model names in Student nav
+  PASS  Dashboard href /
+  PASS  Overview href /organisation
+  PASS  Practice href
+  PASS  Assessments href
+  PASS  Student nav excludes /admin
+  PASS  Student platform nav excludes Examiner /projects catalog
+  PASS  Examiner still has Projects
+  PASS  Examiner still has Students
+  PASS  Examiner nav has no My Academic Work
+  PASS  Examiner nav remains staff-oriented
+  PASS  System Admin keeps Academic setup
+  PASS  System Admin keeps Staff
+  PASS  System Admin nav has no My Academic Work
+  PASS  Home page meta
+  PASS  Org meta subtitle
+  PASS  Practice page meta
+  PASS  Assessments page meta
+  PASS  Student permissions still locked
+  PASS  Student cannot manage staff
+  PASS  Ephemeral student created
+  PASS  Student default path is Dashboard /
+  PASS  Student has academic year context
+  PASS  Semester context readable when present
+  PASS  My Organisation still exists for student — n=1
+  PASS  Ephemeral Examiner created
+  PASS  Student Mode switch still works
+  PASS  Student Mode defaultPath is Dashboard
+  PASS  Student Mode flag set
+  PASS  Student Mode sees My Organisation
+  PASS  Student Mode sees My Academic Work
+  PASS  Student Mode does not see Staff
+  PASS  Student Mode does not see Academic setup
+  PASS  Admin Student Mode switch works with new nav
+  PASS  Admin Student Mode lands on Dashboard
+
+RESULT  45/45 passed
+EXIT:0
+=== phase5 ===
+(node:14648) [MODULE_TYPELESS_PACKAGE_JSON] Warning: Module type of file:///d:/Live%20Projects/proc_learn/src/lib/prisma.js is not specified and it doesn't parse as CommonJS.
+Reparsing as ES module because module syntax was detected. This incurs a performance overhead.
+To eliminate this warning, add "type": "module" to d:\Live Projects\proc_learn\package.json.
+(Use `node --trace-warnings ...` to show where the warning was created)
+
+=== Phase 5 Student Mode / switch-role acceptance ===
+
+  PASS  Examiner Student Mode → EXAMINER_DEMO
+  PASS  System Admin Student Mode → SYSTEM_ADMIN_DEMO
+  PASS  Real student → STUDENT participation
+  PASS  Participation null when not in Student effective role
+  PASS  isStudentMode true for Examiner→Student
+  PASS  isStudentMode true for Admin→Student
+  PASS  isStudentMode false for real student
+  PASS  Return label Examiner
+  PASS  Return label Admin
+  PASS  ACTIVE_ROLE_SWITCHED event key
+  PASS  Student Mode cannot manage students
+  PASS  Student Mode cannot manage staff
+  PASS  Student Mode cannot manage programmes
+  PASS  Student Mode does not act as examiner
+  PASS  Examiner project manage blocked in Student Mode
+  PASS  Examiner permanent active can manage students
+  PASS  Admin permanent active can manage staff
+  PASS  Student Mode nav is Student-only destinations
+  PASS  Student Mode nav has no /admin routes
+  PASS  Student nav includes Dashboard
+  PASS  Student nav includes Organisation Overview
+  PASS  Student nav includes Practice
+  PASS  Student nav includes Assessments
+  PASS  Examiner nav includes staff destinations
+  PASS  Student cannot activate EXAMINER
+  PASS  Student cannot activate SYSTEM_ADMIN
+  PASS  Student switchable roles is only STUDENT
+  PASS  Examiner can activate STUDENT (Student Mode)
+  PASS  System Admin can activate STUDENT (Student Mode)
+  PASS  Ephemeral Examiner created
+  PASS  Ephemeral System Admin created
+  PASS  Ephemeral real student created
+  PASS  Examiner → Student switch succeeds
+  PASS  Permanent role remains EXAMINER
+  PASS  Effective role becomes STUDENT
+  PASS  Participation EXAMINER_DEMO
+  PASS  Current AY resolved
+  PASS  Demo uses current AY A
+  PASS  Current semester resolved
+  PASS  Demo enrollment ensured
+  PASS  Enrollment participation EXAMINER_DEMO
+  PASS  Demo slate ensured
+  PASS  My Organisation present
+  PASS  No second Student grant created for Examiner
+  PASS  No StudentProfile for Examiner demo
+  PASS  DB activeRole is STUDENT
+  PASS  Context reports Student Mode
+  PASS  No join prompt in Student Mode
+  PASS  Enrolled in current year automatically
+  PASS  Context participation EXAMINER_DEMO
+  PASS  New AY used for next Student Mode session
+  PASS  New demo enrollment on year B
+  PASS  New enrollment id for new year
+  PASS  New slate for new year
+  PASS  Same My Organisation across years
+  PASS  Previous demo enrollment preserved as HISTORICAL
+  PASS  Previous demo slate preserved as HISTORICAL
+  PASS  Return to Examiner succeeds
+  PASS  Effective role restored to EXAMINER
+  PASS  DB activeRole restored to EXAMINER
+  PASS  Permanent role still EXAMINER after return
+  PASS  Demo history rows remain after return
+  PASS  ACTIVE_ROLE_SWITCHED audits written — n=2
+  PASS  Audit has EXAMINER→STUDENT action
+  PASS  Audit permanentRole
+  PASS  Audit effectiveRole
+  PASS  Audit participationType
+  PASS  Audit academicYearId
+  PASS  Audit enrollmentId
+  PASS  Audit slate id
+  PASS  System Admin → Student switch succeeds
+  PASS  Permanent role remains SYSTEM_ADMIN
+  PASS  Admin effective role STUDENT
+  PASS  Participation SYSTEM_ADMIN_DEMO
+  PASS  Admin demo enrollment type
+  PASS  No StudentProfile for Admin demo
+  PASS  Admin Student Mode has no join prompt
+  PASS  Admin context is Student Mode
+  PASS  Return to Admin succeeds
+  PASS  Effective role restored to SYSTEM_ADMIN
+  PASS  Student upward switch rejected
+  PASS  Student activeRole unchanged after rejected switch
+  PASS  Payload isStudentMode
+  PASS  Payload effectiveRole STUDENT
+  PASS  Payload permanentRole EXAMINER
+  PASS  Payload returnRoleLabel
+  PASS  Payload returnRole
+
+RESULT  87/87 passed
+EXIT:0
+=== phase1 ===
+(node:14932) [MODULE_TYPELESS_PACKAGE_JSON] Warning: Module type of file:///d:/Live%20Projects/proc_learn/src/lib/prisma.js is not specified and it doesn't parse as CommonJS.
+Reparsing as ES module because module syntax was detected. This incurs a performance overhead.
+To eliminate this warning, add "type": "module" to d:\Live Projects\proc_learn\package.json.
+(Use `node --trace-warnings ...` to show where the warning was created)
+
+=== Phase 1 academic context acceptance ===
+
+  PASS  ensureCurrentAcademicContext returns year
+  PASS  ensureCurrentAcademicContext returns semester
+  PASS  getCurrentAcademicContext year is current
+  PASS  getCurrentAcademicContext semester is active
+  PASS  Exactly one academic year is current after setCurrent A
+  PASS  Year A is the current year
+  PASS  Exactly one academic year is current after setCurrent B
+  PASS  Year B is the current year
+  PASS  Exactly one semester active after activate sem1
+  PASS  Sem1 is active
+  PASS  Exactly one semester active after activate sem2
+  PASS  Sem2 is active
+  PASS  Course created
+  PASS  Class cohort created
+  PASS  normalizeAcademicYearLabel accepts valid label
+  PASS  normalizeAcademicYearLabel rejects non-consecutive years
+  PASS  validateAcademicYearInput rejects bad label/range
+  PASS  label field error present
+  PASS  AuditEvent ACADEMIC_YEAR_CREATED defined
+  PASS  AuditEvent ACADEMIC_YEAR_UPDATED defined
+  PASS  AuditEvent ACADEMIC_YEAR_SET_CURRENT defined
+  PASS  AuditEvent SEMESTER_CREATED defined
+  PASS  AuditEvent SEMESTER_UPDATED defined
+  PASS  AuditEvent SEMESTER_ACTIVATED defined
+  PASS  AuditEvent COURSE_CREATED defined
+  PASS  AuditEvent COURSE_UPDATED defined
+  PASS  AuditEvent CLASS_COHORT_CREATED defined
+  PASS  AuditEvent CLASS_COHORT_UPDATED defined
+  PASS  All 10 Phase 1 audit events persist — count=10
+
+Passed: 29  Failed: 0
+EXIT:0
+=== phase2 ===
+(node:10640) [MODULE_TYPELESS_PACKAGE_JSON] Warning: Module type of file:///d:/Live%20Projects/proc_learn/src/lib/prisma.js is not specified and it doesn't parse as CommonJS.
+Reparsing as ES module because module syntax was detected. This incurs a performance overhead.
+To eliminate this warning, add "type": "module" to d:\Live Projects\proc_learn\package.json.
+(Use `node --trace-warnings ...` to show where the warning was created)
+
+=== Phase 2 academic enrollment acceptance ===
+
+  PASS  University current year exists
+  PASS  University active semester exists
+  PASS  New student created with enrollment path
+  PASS  New student has exactly one enrollment — n=1
+  PASS  Enrollment is ACTIVE
+  PASS  Enrollment is previous year
+  PASS  Participation type is STUDENT
+  PASS  Context university year is current
+  PASS  Context semester is active semester
+  PASS  Student not enrolled in current year
+  PASS  Join prompt present for previous-year student
+  PASS  Join prompt shows previous label
+  PASS  Join prompt shows current label
+  PASS  Joined current academic year
+  PASS  First join is not alreadyActive
+  PASS  Both previous and current enrollments exist — n=2
+  PASS  Previous enrollment preserved as HISTORICAL
+  PASS  Historical enrollment has endedAt
+  PASS  Current enrollment is ACTIVE
+  PASS  Student enrolled in current year after join
+  PASS  No join prompt when enrolled in current year
+  PASS  Active enrollment matches current year
+  PASS  Semester resolution still correct
+  PASS  Profile label synced to current year
+  PASS  Second join reports alreadyActive
+  PASS  Idempotent join does not duplicate enrollments — n=2
+  PASS  Exactly one ACTIVE enrollment after idempotent join
+  PASS  DB unique constraint blocks duplicate (userId, academicYearId)
+  PASS  Concurrent test student created
+  PASS  Concurrent joins all resolve to current year
+  PASS  Concurrent joins leave a single enrollment row for current year — n=1
+  PASS  Concurrent joins leave exactly one ACTIVE enrollment — n=1
+  PASS  Historical enrollments remain queryable
+  PASS  Legacy student starts with no enrollment rows
+  PASS  Legacy student gets backfill and/or join prompt
+  PASS  Legacy student backfilled enrollment from profile label
+  PASS  AuditEvent STUDENT_ACADEMIC_ENROLLMENT_CREATED defined
+  PASS  AuditEvent STUDENT_ACADEMIC_ENROLLMENT_JOINED_YEAR defined
+  PASS  AuditEvent STUDENT_ACADEMIC_ENROLLMENT_MARKED_HISTORICAL defined
+
+Passed: 39  Failed: 0
+EXIT:0
+=== phase3 ===
+(node:8096) [MODULE_TYPELESS_PACKAGE_JSON] Warning: Module type of file:///d:/Live%20Projects/proc_learn/src/lib/prisma.js is not specified and it doesn't parse as CommonJS.
+Reparsing as ES module because module syntax was detected. This incurs a performance overhead.
+To eliminate this warning, add "type": "module" to d:\Live Projects\proc_learn\package.json.
+(Use `node --trace-warnings ...` to show where the warning was created)
+
+=== Phase 3 OrgAcademicSlate acceptance ===
+
+  PASS  Student created
+  PASS  My Organisation exists
+  PASS  Organisation is personal org
+  PASS  Enrollment for year A exists
+  PASS  New enrollment gets a slate
+  PASS  Slate bound to same My Organisation
+  PASS  New slate is CURRENT
+  PASS  Existing enrollment returns same slate
+  PASS  Second ensure does not create duplicate
+  PASS  Duplicate slate for same enrollment is blocked
+  PASS  Procurement header can bind to slate
+  PASS  Joined academic year B
+  PASS  Join opens org academic slate
+  PASS  Same My Organisation after join
+  PASS  Different years have different slates
+  PASS  Previous slate remains historical
+  PASS  Historical slate has closedAt
+  PASS  My Organisation id unchanged across years
+  PASS  Context resolves current slate
+  PASS  Context still resolves active semester
+  PASS  Context enrollment is year B
+  PASS  resolveCurrentOrgSlateId matches
+  PASS  List includes legacy null slate rows
+  PASS  List excludes previous-year stamped rows
+  PASS  Listed budgets are current slate or null only
+  PASS  New ops associate with current slate
+  PASS  AuditEvent ORG_ACADEMIC_SLATE_CREATED defined
+  PASS  AuditEvent ORG_ACADEMIC_SLATE_MARKED_HISTORICAL defined
+
+Passed: 28  Failed: 0
+EXIT:0
+=== phase4 ===
+(node:10084) [MODULE_TYPELESS_PACKAGE_JSON] Warning: Module type of file:///d:/Live%20Projects/proc_learn/src/lib/prisma.js is not specified and it doesn't parse as CommonJS.
+Reparsing as ES module because module syntax was detected. This incurs a performance overhead.
+To eliminate this warning, add "type": "module" to d:\Live Projects\proc_learn\package.json.
+(Use `node --trace-warnings ...` to show where the warning was created)
+
+=== Phase 4 role & purpose cleanup acceptance ===
+
+  PASS  Prisma Role enum has no LECTURER
+  PASS  Prisma ProjectPurpose has no ASSIGNMENT
+  PASS  EXAMINER role exists
+  PASS  PRACTICE purpose exists
+  PASS  ASSESSMENT purpose exists
+  PASS  App ROLE constant has no LECTURER
+  PASS  App ROLE.EXAMINER present
+  PASS  UI label is Examiner
+  PASS  No Lecturer UI label
+  PASS  EXAMINER is staff
+  PASS  SYSTEM_ADMIN is staff
+  PASS  ROLE_PRECEDENCE has no LECTURER
+  PASS  No LECTURER user_role rows
+  PASS  No LECTURER activeRole settings
+  PASS  No LECTURER creator projects
+  PASS  No ASSIGNMENT purpose projects
+  PASS  At least one EXAMINER grant remains — n=2
+  PASS  Examiner can create PRACTICE
+  PASS  ASSESSMENT requires duration
+  PASS  Duration error present for ASSESSMENT
+  PASS  Examiner can create ASSESSMENT with duration
+  PASS  Validated purpose is ASSESSMENT
+  PASS  Examiner can view own examiner project
+  PASS  Student can view published examiner public project
+  PASS  MySQL user_role enum has no LECTURER — enum('STUDENT','EXAMINER','SYSTEM_ADMIN')
+  PASS  MySQL project.purpose has no ASSIGNMENT — enum('PRACTICE','ASSESSMENT')
+  PASS  MySQL project.purpose includes ASSESSMENT — enum('PRACTICE','ASSESSMENT')
+
+Passed: 27  Failed: 0
+EXIT:0
+=== dependency-chain ===
+(node:712) [MODULE_TYPELESS_PACKAGE_JSON] Warning: Module type of file:///d:/Live%20Projects/proc_learn/src/lib/projects/process-catalogue.js is not specified and it doesn't parse as CommonJS.
+Reparsing as ES module because module syntax was detected. This incurs a performance overhead.
+To eliminate this warning, add "type": "module" to d:\Live Projects\proc_learn\package.json.
+(Use `node --trace-warnings ...` to show where the warning was created)
+Org: Lubega Juma Organization ORG-7DTWX5
+
+=== Setup (FY / period / activate processes) ===
+  PASS  Process template BUDGETING
+  PASS  Process template PROCUREMENT_PLANNING
+  PASS  Process template PROCUREMENT_REQUISITION
+  PASS  Activated Budgeting + Planning + Requisition
+  PASS  FY + ICT + Finance + Procurement depts
+  PASS  Planning period OPEN
+  PASS  Contracts Officer Grace + Finance Officer Helen ready
+  PASS  Role users present
+  PASS  Org Admin cannot create budgets via permission map
+  PASS  UDO can create budgets
+
+=== Budget workflow (UDO→HOD→Finance→AO) ===
+  PASS  Operational user creates department budget
+  PASS  Computer Equipment line created
+  PASS  Budget total 135m (server calc)
+  PASS  Direct Admin approve blocked
+  PASS  Draft budget lines not selectable
+  PASS  John submits budget
+  PASS  Mary HOD budget task
+  PASS  Mary HOD reviews budget
+  PASS  Helen Finance budget task
+  PASS  Helen Finance reviews budget
+  PASS  Sarah AO budget task
+  PASS  Sarah AO approves budget
+  PASS  Budget status APPROVED
+  PASS  Approved budget lines become available
+  PASS  Draft-only budget for plan guard
+
+=== Procurement Plan ===
+  PASS  UDO creates plan with multiple items — {}
+  PASS  Multiple plan items exist
+  PASS  Plan cannot use unapproved budget line — Please fix the highlighted fields.
+  PASS  Plan submitted (OPEN period)
+
+=== Planning workflow ===
+  PASS  Mary HOD plan task
+  PASS  Mary approve plan
+  PASS  David consolidation task
+  PASS  Head PDU MVP consolidation link
+  PASS  David complete consolidation
+  PASS  Grace Contracts Officer task
+  PASS  Grace approve consolidated
+  PASS  Sarah AO plan task
+  PASS  Sarah AO approve plan
+  PASS  Plan APPROVED
+  PASS  Persisted plan status APPROVED
+  PASS  Dept plan linked to consolidated shell
+
+=== Requisition ===
+  PASS  Approved plan available to requisition
+  PASS  Requisition dropdowns can use multiple approved plan items
+  PASS  John drafts REQ-001 from approved plan/budget
+  PASS  Second independent requisition on another plan item
+  PASS  Multiple requisitions keep unique ids
+  PASS  Can deactivate Budgeting process
+  PASS  Budget audit history preserved
+
+=== Summary ===
+Passed: 48
+Failed: 0
+EXIT:0
+=== requisition ===
+(node:3760) [MODULE_TYPELESS_PACKAGE_JSON] Warning: Module type of file:///d:/Live%20Projects/proc_learn/src/lib/projects/requisitions.js is not specified and it doesn't parse as CommonJS.
+Reparsing as ES module because module syntax was detected. This incurs a performance overhead.
+To eliminate this warning, add "type": "module" to d:\Live Projects\proc_learn\package.json.
+(Use `node --trace-warnings ...` to show where the warning was created)
+
+=== Seed check ===
+Org: Lubega Juma Organization ORG-7DTWX5
+  PASS  seed users present
+  PASS  FY / plan / budget / planning period
+  PASS  Planning + Requisition workflows active — 8
+
+=== Happy path ===
+  PASS  John draft created
+  PASS  John submitted
+  PASS  totals calculated — 35000000
+  PASS  workflow instance created
+  PASS  first SUBMIT action recorded
+  PASS  HOD task created for Mary
+  PASS  audit records for submit/start — count=2
+  PASS  plan/funding evidence calculated (not hard-coded true)
+
+=== HOD approve (happy) ===
+  PASS  Mary APPROVE
+  PASS  PO plan verification task created
+
+=== PO verify ===
+  PASS  PO sees planned vs requested qty
+  PASS  Peter VERIFY plan
+  PASS  Head PDU funding task created
+
+=== Head PDU funding ===
+  PASS  funding sufficient from persisted budget
+  PASS  David VERIFY funding
+  PASS  AO approval task created
+
+=== AO approve ===
+  PASS  Sarah APPROVE
+  PASS  REQUISITION = APPROVED
+  PASS  budget committed on AO approve — 35000000
+  PASS  Procurement method selection task exposed
+  PASS  Peter SELECT_METHOD MICRO
+  PASS  next process queued — MICRO_PROCUREMENT
+  PASS  downstream process started — true
+  PASS  procurement record created — PROC-2027-0122
+  PASS  procurement number format — PROC-2027-0122
+  PASS  method persisted on requisition
+  PASS  procurement linked to requisition
+  PASS  procurement method MICRO
+  PASS  John has Raise Micro Procurement Request task
+  PASS  audit actions have actor/decision/timestamp — n=6
+  PASS  actions record status transition
+
+=== HOD RETURN path ===
+  PASS  return-path draft — {}
+  PASS  return-path submit — {}
+  PASS  RETURN requires comment — A comment is required for this decision.
+  PASS  Mary RETURN
+  PASS  correction task back to John
+  PASS  requisition RETURNED
+  PASS  John corrects draft
+  PASS  John resubmits after RETURN
+
+=== HOD REJECT path ===
+  PASS  Mary REJECT
+  PASS  requisition REJECTED
+  PASS  workflow terminated on REJECT
+
+=== Negative tests ===
+  PASS  1 unauthorized / wrong assignee blocked — You are not assigned to this task.
+  PASS  2 wrong role cannot approve — Your active organisation role cannot complete this task.
+  PASS  3 wrong-department HOD blocked — You are not assigned to this task.
+  PASS  4 required fields validated — {"title":"Enter a procurement title.","justification":"Enter a justification.","needDescription":"Describe the need/requ
+  PASS  5 nonexistent plan rejected
+  PASS  6 unapproved plan rejected
+  PASS  7 exceeds planned quantity — Requested quantity (99999) exceeds remaining planned quantity (185).
+  PASS  8 exceeds planned value — Requested value exceeds remaining planned value (662500000.00).
+  PASS  9 exceeds available budget — Insufficient funds. Available 1000.00; requested 3500000.00.
+  PASS  10 inactive workflow blocked — The Requisition submitted Process is currently inactive for this organisation. An Organization Administrator must activate it before this procurement can proceed.
+  PASS  11 setup submit
+  PASS  11 duplicate submit blocked — This requisition cannot be submitted.
+  PASS  12/13 concurrent completion claimed once — ok=1 fail=1
+  PASS  PO FLAG_EXCEPTION requires comment — A comment is required for this decision.
+  PASS  PO RETURN path exercised
+  PASS  14/15 refresh & back: server-side task status is authoritative (no client-only transition)
+  PASS  16 no public status field on draft API; status transitions only via workflow engine
+
+=== Navigation ===
+  PASS  Org Admin sidebar labels — Dashboard, Overview, System Administration, Organisation Structure, Departments/Units, Users, Roles & Permissions, Financial Years, Budgets (read-only), Planning Periods, Process Workflows, Committees, Activity logs, Practice, Assessments
+  PASS  Nav for John — Dashboard, My account, My Tasks, Department Budgets, Procurement Plans, My Requisitions, Procurements, Departments/Units
+  PASS  Nav for Peter — Dashboard, My account, My Tasks, Procurement Plans, Requisitions, Procurements, Suppliers, Procurement Processes, Departments/Units, Planning Periods, Process Workflows
+  PASS  Nav for David — Dashboard, My account, Pending Tasks, Budgets, Plans, Requisitions, Procurements, Suppliers, Organisation Structure, Planning Periods, Process Workflows
+  PASS  Nav for Sarah — Dashboard, My account, Approvals, Budgets, Procurement Plans, Procurement Overview, Procurements, Approval History, Financial Years, Planning Periods
+
+=== Summary ===
+Passed: 67
+Failed: 0
+EXIT:0
+=== procurement-method ===
+(node:13168) [MODULE_TYPELESS_PACKAGE_JSON] Warning: Module type of file:///d:/Live%20Projects/proc_learn/src/lib/projects/requisitions.js is not specified and it doesn't parse as CommonJS.
+Reparsing as ES module because module syntax was detected. This incurs a performance overhead.
+To eliminate this warning, add "type": "module" to d:\Live Projects\proc_learn\package.json.
+(Use `node --trace-warnings ...` to show where the warning was created)
+
+=== Procurement method acceptance ===
+  PASS  draft for unapproved case
+  PASS  unapproved requisition blocked
+  PASS  clear unapproved message — This requisition cannot proceed because it has not yet been approved by the Accounting Officer.
+  PASS  drive desktops to APPROVED
+  PASS  Peter has method task for quotation case
+  PASS  SELECT_METHOD QUOTATION
+  PASS  quotation process started
+  PASS  quotation queued code
+  PASS  quotation procurement created
+  PASS  duplicate conversion blocked
+  PASS  clear duplicate message — A procurement method (QUOTATION) has already been selected for this requisition.
+  PASS  drive tender case to APPROVED
+  PASS  method task for tender inactive case
+  PASS  inactive tender process blocks selection
+  PASS  clear inactive message — The Tender Process is currently inactive for this organisation. An Organization Administrator must activate it before this procurement can proceed.
+  PASS  at least one in-progress quotation procurement
+
+Passed: 16  Failed: 0  Total: 16
+EXIT:0
+=== micro-procurement ===
+(node:6096) [MODULE_TYPELESS_PACKAGE_JSON] Warning: Module type of file:///d:/Live%20Projects/proc_learn/src/lib/projects/requisitions.js is not specified and it doesn't parse as CommonJS.
+Reparsing as ES module because module syntax was detected. This incurs a performance overhead.
+To eliminate this warning, add "type": "module" to d:\Live Projects\proc_learn\package.json.
+(Use `node --trace-warnings ...` to show where the warning was created)
+
+=== Micro procurement acceptance ===
+  PASS  Micro workflow starts
+  PASS  procurement record exists
+  PASS  Requirement raised task for John
+  PASS  Requirement raised
+  PASS  HOD verifies task
+  PASS  HOD verifies
+  PASS  PO confirm budget task
+  PASS  Budget confirmed
+  PASS  AO approve micro task
+  PASS  AO approves
+  PASS  supplier created
+  PASS  Issue Purchase Instruction task
+  PASS  Purchase instruction issued
+  PASS  PI row linked — PI-2027-0017
+  PASS  PI linked to supplier
+
+Passed: 15  Failed: 0  Total: 15
+EXIT:0
+=== quotation-open ===
+(node:12752) [MODULE_TYPELESS_PACKAGE_JSON] Warning: Module type of file:///d:/Live%20Projects/proc_learn/src/lib/projects/requisitions.js is not specified and it doesn't parse as CommonJS.
+Reparsing as ES module because module syntax was detected. This incurs a performance overhead.
+To eliminate this warning, add "type": "module" to d:\Live Projects\proc_learn\package.json.
+(Use `node --trace-warnings ...` to show where the warning was created)
+
+=== Quotation open acceptance ===
+  PASS  RFQ prepared path starts (method)
+  PASS  RFQ prepared
+  PASS  RFQ reviewed
+  PASS  Contracts Officer present
+  PASS  RFQ approved
+  PASS  Suppliers recorded
+  PASS  RFQs issued
+  PASS  Quotations received
+  PASS  Closing rules enforced — No quotations or bids can be submitted because the closing date has passed.
+  PASS  Receive step finalized
+  PASS  Quotations locked
+  PASS  Quotations opened
+  PASS  opened quotation rows — 2
+
+Passed: 13  Failed: 0
+EXIT:0
+=== tender-forward ===
+(node:15132) [MODULE_TYPELESS_PACKAGE_JSON] Warning: Module type of file:///d:/Live%20Projects/proc_learn/src/lib/projects/requisitions.js is not specified and it doesn't parse as CommonJS.
+Reparsing as ES module because module syntax was detected. This incurs a performance overhead.
+To eliminate this warning, add "type": "module" to d:\Live Projects\proc_learn\package.json.
+(Use `node --trace-warnings ...` to show where the warning was created)
+
+=== Tender forward acceptance ===
+  PASS  Tender documents prepare path setup
+  PASS  Tender documents prepared (workflow started)
+  PASS  Tender procurement id resolved
+  PASS  Reviewed prep
+  PASS  Reviewed
+  PASS  Approved
+  PASS  Advertised
+  PASS  Bids received
+  PASS  Closing enforced — No quotations or bids can be submitted because the closing date has passed.
+  PASS  Receive finalized
+  PASS  Bids closed
+  PASS  Bids opened
+  PASS  Forwarded to evaluation
+  PASS  bid rows persist — 1
+
+Passed: 14  Failed: 0
+EXIT:0
+=== procurement-lifecycle ===
+(node:4436) [MODULE_TYPELESS_PACKAGE_JSON] Warning: Module type of file:///d:/Live%20Projects/proc_learn/src/lib/projects/suppliers.js is not specified and it doesn't parse as CommonJS.
+Reparsing as ES module because module syntax was detected. This incurs a performance overhead.
+To eliminate this warning, add "type": "module" to d:\Live Projects\proc_learn\package.json.
+(Use `node --trace-warnings ...` to show where the warning was created)
+
+=== Procurement lifecycle (eval→closure) ===
+  PASS  lifecycle draft
+  PASS  lifecycle submit
+  PASS  task Review
+  PASS  Mary Review
+  PASS  task plan
+  PASS  Peter plan
+  PASS  task funding
+  PASS  David funding
+  PASS  task Approve Requisition
+  PASS  Sarah Approve Requisition
+  PASS  method task
+  PASS  procurement for lifecycle
+  PASS  Evaluation committee assigned
+  PASS  Committee members authorized
+  PASS  Wrong committee membership blocked — You must be an active member of a evaluation committee to do this.
+  PASS  Evaluation performed
+  PASS  Evaluation report created
+  PASS  Evaluation returned correctly
+  PASS  Evaluation approved correctly
+  PASS  Award created
+  PASS  Award cannot happen before evaluation approval
+  PASS  Award communicated
+  PASS  Supplier acceptance where applicable
+  PASS  LPO generated where applicable
+  PASS  LPO approved/issued/accepted
+  PASS  Contract vs LPO branching — Contracts are only issued for the Tender path. Quotation procurements use an LPO instead.
+  PASS  Delivery recorded
+  PASS  Quantity validation
+  PASS  Partial delivery supported where applicable
+  PASS  Acceptance/conformity recorded
+  PASS  Invoice created after delivery
+  PASS  Invoice certification
+  PASS  Invoice verified
+  PASS  Payment cannot exceed invoice — Payment amount exceeds the invoice's remaining balance (75000.00).
+  PASS  Payment recorded
+  PASS  Payment approval
+  PASS  Procurement closes when conditions satisfied
+  PASS  Closure status CLOSED
+  PASS  Closure audit is recorded
+  PASS  Unauthorized role blocked (eval without membership)
+  PASS  Admin cannot bypass — ops use role tasks
+
+Passed: 41  Failed: 0
+EXIT:0
+=== lifecycle-hardening ===
+(node:10676) [MODULE_TYPELESS_PACKAGE_JSON] Warning: Module type of file:///d:/Live%20Projects/proc_learn/src/lib/money.js is not specified and it doesn't parse as CommonJS.
+Reparsing as ES module because module syntax was detected. This incurs a performance overhead.
+To eliminate this warning, add "type": "module" to d:\Live Projects\proc_learn\package.json.
+(Use `node --trace-warnings ...` to show where the warning was created)
+
+=== Lifecycle hardening acceptance ===
+
+  PASS  Money format UGX 3,500,000
+  PASS  Seed student exists
+  PASS  Personal org exists
+  PASS  Core org users present
+  PASS  FY / approved plan / budget line
+  PASS  Draft requisition
+  PASS  Submit requisition
+  PASS  task Review
+  PASS  Mary Review
+  PASS  task Plan
+  PASS  Peter Plan
+  PASS  task Funding
+  PASS  David Funding
+  PASS  task Approve Requisition
+  PASS  Sarah Approve Requisition
+  PASS  method task
+  PASS  SELECT_METHOD QUOTATION
+  PASS  procurement case created — PROC-2027-0128
+  PASS  case id 4-digit — PROC-2027-0128
+  PASS  RFQ step Prepare RFQ
+  PASS  RFQ step Review RFQ
+  PASS  RFQ step Approve RFQ
+  PASS  supplier
+  PASS  Issue RFQs
+  PASS  Receive quotations (add offer)
+  PASS  Receive quotations finalized
+  PASS  Quotations locked
+  PASS  Open quotations
+  PASS  OA cannot create award — The Organization Administrator configures the organisation but cannot perform operational procurement approvals or lifecycle actions.
+  PASS  UDO cannot approve payment — Your organisational role (User Department Officer) cannot perform “approve payment”. Required role: Accounting Officer.
+  PASS  Delivery blocked without active order — No active order was found. Issue a Purchase Instruction, accepted LPO, or active contract before recording delivery.
+  PASS  Closure blocked early — The award must be accepted by the supplier.; Issue and accept the LPO before closing.; Record and pass inspection on at least one delivery.; Certify and verify at least one invoice.
+  PASS  Non-committee eval blocked — You must be an active member of a evaluation committee to do this.
+  PASS  Evaluation created
+  PASS  Evaluation approved
+  PASS  Award created
+  PASS  Award amount display
+  PASS  Award communicated and accepted
+  PASS  LPO created
+  PASS  LPO approved/issued/accepted
+  PASS  Wrong department blocked — You can only perform department-scoped actions on procurements belonging to your own department.
+  PASS  Delivery recorded
+  PASS  Invoice blocked before acceptance — Record and pass inspection on a delivery before raising an invoice.
+  PASS  Inspection accepted
+  PASS  Invoice created
+  PASS  Invoice certified
+  PASS  Invoice verified
+  PASS  Overpayment rejected — Payment amount exceeds the invoice's remaining balance (3500000.00).
+  PASS  Payment raised
+  PASS  Payment approved and paid
+  PASS  Procurement closed
+  PASS  Status CLOSED
+  PASS  Closed procurement cannot be modified — This procurement is closed and cannot be modified.
+  PASS  Serialize exposes award
+  PASS  Serialize exposes deliveries
+  PASS  Serialize exposes invoices
+  PASS  Serialize exposes payments
+  PASS  Serialize exposes closedAt
+  PASS  Timeline includes organisational role
+  PASS  Timeline merges domain audits — domain=34
+  PASS  Timeline includes award audit event
+  PASS  Timeline includes closure audit
+  PASS  Money commas present on case
+
+Passed: 63  Failed: 0
+EXIT:0
+=== canonical-reconciliation ===
+(node:16228) [MODULE_TYPELESS_PACKAGE_JSON] Warning: Module type of file:///d:/Live%20Projects/proc_learn/src/lib/money.js is not specified and it doesn't parse as CommonJS.
+Reparsing as ES module because module syntax was detected. This incurs a performance overhead.
+To eliminate this warning, add "type": "module" to d:\Live Projects\proc_learn\package.json.
+(Use `node --trace-warnings ...` to show where the warning was created)
+
+Canonical reconciliation (safe gaps)
+
+  PASS  Money formatting UGX with commas — UGX 3,500,000
+  PASS  Money formatting empty sentinel
+  PASS  Decision phrase SUBMIT
+  PASS  Timeline actor display name
+  PASS  Timeline actor organisational role
+  PASS  Timeline prefers taskTitle action text — Approved requisition
+  PASS  Timeline status before→after — Status: SUBMITTED → HOD_APPROVED
+  PASS  Timeline carries procurement case number
+  PASS  Timeline includes committee role snapshot
+  PASS  Timeline falls back to decision phrase
+  PASS  Engine keeps QUOTATION_STARTED (not QUOTATION_PROCESS_STARTED)
+  PASS  Engine keeps MICRO_PROCUREMENT_STARTED
+  PASS  Budget engine binding present
+  PASS  Planning engine binding present
+  PASS  Requisition engine binding present
+  PASS  Does not rename to canonical QUOTATION_PROCESS_STARTED
+  PASS  Clear committee context succeeds
+  PASS  Unauthorized committee activation rejected — You are not an active member of that committee.
+  PASS  listMyCommittees returns array
+  PASS  No committee memberships on Peter — skip activate-member check
+  PASS  Non-member evaluation action blocked with educational message — You must be an active member of a evaluation committee to do this.
+  PASS  Procurement case numbers are unique in sample — PROC-2027-0128, PROC-2027-0127, PROC-2027-0126, PROC-2027-0125, PROC-2027-0124
+  PASS  Case identity format PROC-2027-0128
+  PASS  Case identity format PROC-2027-0127
+  PASS  Case identity format PROC-2027-0126
+  PASS  Case identity format PROC-2027-0125
+  PASS  Case identity format PROC-2027-0124
+  PASS  serializeProcurement exposes case number
+  PASS  serializeProcurement exposes timeline
+  PASS  Timeline entries include organisational role — Procurement Officer
+  PASS  Timeline entries include actionText — Prepare RFQ Documents: PROC-2027-0128: Laptop computers hardening 1786483855951
+  PASS  Multiple procurements in same department remain distinct cases
+
+RESULT  32/32 passed
+EXIT:0

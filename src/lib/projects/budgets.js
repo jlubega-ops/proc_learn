@@ -13,6 +13,11 @@ import {
   startWorkflowFromTrigger,
 } from "@/lib/projects/workflow-engine";
 import { ORG_REF_DOC, nextOrgDocumentReference } from "@/lib/projects/org-reference";
+import {
+  resolveCurrentOrgSlate,
+  resolveSlateIdForOrgCreate,
+  withAcademicAuditMeta,
+} from "@/lib/academic/org-academic-slate";
 
 /**
  * @param {unknown} value
@@ -373,23 +378,31 @@ export async function createBudgetWithLines(prisma, opts) {
       currency,
       status: OrgBudgetStatus.DRAFT,
       createdByOrgUserId: opts.actorOrgUserId || null,
+      orgAcademicSlateId: await resolveSlateIdForOrgCreate(prisma, opts.projectId),
       lines: { create: lineRows },
     },
     include: budgetInclude,
   });
 
+  const slate = row.orgAcademicSlateId
+    ? await resolveCurrentOrgSlate(prisma, opts.projectId)
+    : null;
+
   await writeAuditLog({
     eventType: AuditEvent.PROJECT_ORG_BUDGET_CREATED,
     actorUserId: opts.actorUserId || null,
-    meta: {
-      projectId: opts.projectId,
-      budgetId: row.id,
-      financialYearId,
-      departmentId,
-      status: row.status,
-      lineCount: lineRows.length,
-      actorOrgUserId: opts.actorOrgUserId || null,
-    },
+    meta: withAcademicAuditMeta(
+      {
+        projectId: opts.projectId,
+        budgetId: row.id,
+        financialYearId,
+        departmentId,
+        status: row.status,
+        lineCount: lineRows.length,
+        actorOrgUserId: opts.actorOrgUserId || null,
+      },
+      slate,
+    ),
   });
 
   return { ok: true, budget: serializeBudget(row) };

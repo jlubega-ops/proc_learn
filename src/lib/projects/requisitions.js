@@ -13,6 +13,7 @@ import {
   computeBudgetAvailability,
 } from "@/lib/projects/workflow-engine";
 import { ORG_REF_DOC, nextOrgDocumentReference } from "@/lib/projects/org-reference";
+import { resolveSlateIdForOrgCreate } from "@/lib/academic/org-academic-slate";
 
 /**
  * @param {unknown} value
@@ -420,6 +421,7 @@ export async function createOrUpdateRequisitionDraft(prisma, opts) {
       data: {
         projectId: opts.projectId,
         requesterOrgUserId: opts.requesterOrgUserId,
+        orgAcademicSlateId: await resolveSlateIdForOrgCreate(prisma, opts.projectId),
         ...payload,
         items: { create: itemRows },
       },

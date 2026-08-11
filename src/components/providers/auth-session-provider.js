@@ -25,7 +25,13 @@ import {
  * @property {'light'|'dark'} [theme]
  * @property {string[]} [grantedRoles]
  * @property {string[]} [switchableRoles]
+ * @property {string} [permanentRole]
  * @property {string} [activeRole]
+ * @property {string} [effectiveRole]
+ * @property {string | null} [participationType]
+ * @property {boolean} [isStudentMode]
+ * @property {string | null} [returnRoleLabel]
+ * @property {string | null} [returnRole]
  * @property {number} [sessionIdleMinutes]
  * @property {string} [reason]
  */

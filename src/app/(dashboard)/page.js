@@ -1,15 +1,16 @@
-import { redirect } from "next/navigation";
 import { Role } from "@prisma/client";
 import { APP_NAME, ORG_NAME } from "@/lib/appConfig";
 import { getReadableAppSession } from "@/lib/auth/session";
 import { buildIronSessionOptions } from "@/lib/auth/session-options";
 import { buildSessionPayloadForUserId } from "@/lib/auth/session-payload";
+import { StudentDashboardHome } from "@/components/academic/student-dashboard-home";
 import {
   BRAND_CARD_CLASS,
   BRAND_HERO_CARD_CLASS,
   BRAND_PAGE_LEAD_CLASS,
   BRAND_SECTION_TITLE_CLASS,
 } from "@/lib/brand-ui";
+import { prisma } from "@/lib/prisma";
 
 export const metadata = {
   title: "Home",
@@ -21,15 +22,25 @@ export default async function DashboardHomePage() {
     const session = await getReadableAppSession();
     if (session?.userId) {
       const payload = await buildSessionPayloadForUserId(session.userId);
-      if (
-        payload?.authenticated &&
-        payload.activeRole === Role.STUDENT &&
-        typeof payload.personalOrgProjectId === "string" &&
-        payload.personalOrgProjectId &&
-        typeof payload.defaultPath === "string" &&
-        payload.defaultPath.startsWith("/organisation")
-      ) {
-        redirect(payload.defaultPath);
+      if (payload?.authenticated && payload.activeRole === Role.STUDENT) {
+        const user = await prisma.user.findUnique({
+          where: { id: session.userId },
+          select: {
+            id: true,
+            email: true,
+            firstName: true,
+            middleName: true,
+            lastName: true,
+          },
+        });
+        if (user) {
+          return (
+            <StudentDashboardHome
+              user={user}
+              personalOrgName={payload.personalOrgName || null}
+            />
+          );
+        }
       }
     }
   }

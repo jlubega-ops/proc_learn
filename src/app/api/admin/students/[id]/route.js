@@ -9,6 +9,7 @@ import { writeAuditLog, AuditEvent } from "@/lib/audit-log";
 import { notifyAllSystemAdmins } from "@/lib/notify-system-admins";
 import { formatUserDisplayName } from "@/lib/user-display";
 import { prisma } from "@/lib/prisma";
+import { ensureEnrollmentFromProfileLabel } from "@/lib/academic/student-enrollment";
 
 export const runtime = "nodejs";
 
@@ -152,6 +153,13 @@ export async function PATCH(request, ctx) {
         await tx.studentProfile.update({
           where: { userId: id },
           data: spData,
+        });
+      }
+      // Admin year change: move ACTIVE enrollment to the selected year; preserve history.
+      if (academicYearLabel !== undefined) {
+        await ensureEnrollmentFromProfileLabel(tx, {
+          userId: id,
+          academicYearLabel,
         });
       }
     });

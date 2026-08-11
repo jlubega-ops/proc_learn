@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { ProjectPurpose, Role } from "@prisma/client";
+import { Role } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { getSessionUser, sessionActiveRole } from "@/lib/api/get-session-user";
 import { AuditEvent, writeAuditLog } from "@/lib/audit-log";
@@ -21,11 +21,11 @@ function studentFilterWhere(role, filter) {
   if (filter === "public") {
     return { visibility: "PUBLIC" };
   }
-  if (filter === "assignments") {
-    return { purpose: "ASSIGNMENT", isPublished: true };
+  if (filter === "assessments" || filter === "assignments") {
+    return { purpose: "ASSESSMENT", isPublished: true };
   }
-  if (filter === "lecturer") {
-    return { creatorRole: Role.LECTURER, isPublished: true };
+  if (filter === "examiner" || filter === "lecturer") {
+    return { creatorRole: Role.EXAMINER, isPublished: true };
   }
   return {};
 }
@@ -48,6 +48,30 @@ function openStatusWhere(openStatus) {
         { OR: [{ closeAt: null }, { closeAt: { gte: now } }] },
       ],
     };
+  }
+  return {};
+}
+
+/**
+ * @param {string} purpose
+ */
+function purposeWhere(purpose) {
+  if (purpose === "practice") return { purpose: "PRACTICE" };
+  if (purpose === "assessments" || purpose === "assignments") {
+    return { purpose: "ASSESSMENT" };
+  }
+  return {};
+}
+
+/**
+ * @param {string} scope
+ */
+function scopeWhere(scope) {
+  if (scope === "student" || scope === "student_public") {
+    return { creatorRole: Role.STUDENT, visibility: "PUBLIC" };
+  }
+  if (scope === "examiner" || scope === "lecturer") {
+    return { creatorRole: Role.EXAMINER };
   }
   return {};
 }
@@ -87,7 +111,7 @@ export async function GET(request) {
             {
               visibility: "PUBLIC",
               isPublished: true,
-              creatorRole: { in: [Role.LECTURER, Role.EXAMINER] },
+              creatorRole: Role.EXAMINER,
               OR: [{ closeAt: null }, { closeAt: { gte: new Date() } }],
             },
           ],
@@ -105,11 +129,7 @@ export async function GET(request) {
             { creatorRole: Role.STUDENT, visibility: "PUBLIC" },
           ],
         },
-        purpose === "practice"
-          ? { purpose: "PRACTICE" }
-          : purpose === "assignments"
-            ? { purpose: "ASSIGNMENT" }
-            : {},
+        purposeWhere(purpose),
         status === "not_started"
           ? { status: "NOT_STARTED" }
           : status === "in_progress"
@@ -117,18 +137,14 @@ export async function GET(request) {
             : status === "completed"
               ? { status: "COMPLETED" }
               : {},
-        scope === "student" || scope === "student_public"
-          ? { creatorRole: Role.STUDENT, visibility: "PUBLIC" }
-          : scope === "lecturer"
-            ? { creatorRole: { in: [Role.LECTURER, Role.EXAMINER] } }
-          : {},
+        scopeWhere(scope),
         openStatusWhere(openStatus),
         filter === "mine"
           ? { ownerUserId: user.id, creatorRole: Role.EXAMINER }
           : filter === "public-student"
             ? { creatorRole: Role.STUDENT, visibility: "PUBLIC" }
-            : filter === "assignments"
-              ? { ownerUserId: user.id, purpose: "ASSIGNMENT" }
+            : filter === "assessments" || filter === "assignments"
+              ? { ownerUserId: user.id, purpose: "ASSESSMENT" }
               : filter === "private"
                 ? { ownerUserId: user.id, visibility: "PRIVATE" }
                 : filter === "public"
@@ -136,49 +152,10 @@ export async function GET(request) {
                   : {},
       ],
     };
-  } else if (activeRole === Role.LECTURER) {
-    where = {
-      AND: [
-        {
-          OR: [
-            { ownerUserId: user.id, creatorRole: Role.LECTURER },
-            { creatorRole: Role.STUDENT, visibility: "PUBLIC" },
-            { creatorRole: Role.EXAMINER },
-          ],
-        },
-        { purpose: "PRACTICE" },
-        status === "not_started"
-          ? { status: "NOT_STARTED" }
-          : status === "in_progress"
-            ? { status: "IN_PROGRESS" }
-            : status === "completed"
-              ? { status: "COMPLETED" }
-              : {},
-        scope === "student" || scope === "student_public"
-          ? { creatorRole: Role.STUDENT, visibility: "PUBLIC" }
-          : scope === "lecturer"
-            ? { creatorRole: { in: [Role.LECTURER, Role.EXAMINER] } }
-          : {},
-        openStatusWhere(openStatus),
-        filter === "mine"
-          ? { ownerUserId: user.id, creatorRole: Role.LECTURER }
-          : filter === "public-student"
-            ? { creatorRole: Role.STUDENT, visibility: "PUBLIC" }
-            : filter === "private"
-              ? { ownerUserId: user.id, creatorRole: Role.LECTURER, visibility: "PRIVATE" }
-              : filter === "public"
-                ? { visibility: "PUBLIC" }
-                : {},
-      ],
-    };
   } else if (activeRole === Role.SYSTEM_ADMIN) {
     where = {
       AND: [
-        purpose === "practice"
-          ? { purpose: "PRACTICE" }
-          : purpose === "assignments"
-            ? { purpose: "ASSIGNMENT" }
-            : {},
+        purposeWhere(purpose),
         status === "not_started"
           ? { status: "NOT_STARTED" }
           : status === "in_progress"
@@ -188,8 +165,8 @@ export async function GET(request) {
               : {},
         scope === "student" || scope === "student_public"
           ? { creatorRole: Role.STUDENT }
-          : scope === "lecturer"
-            ? { creatorRole: { in: [Role.LECTURER, Role.EXAMINER] } }
+          : scope === "examiner" || scope === "lecturer"
+            ? { creatorRole: Role.EXAMINER }
             : {},
         openStatusWhere(openStatus),
       ],
@@ -241,7 +218,7 @@ export async function POST(request) {
   }
 
   const activeRole = sessionActiveRole(user) || Role.STUDENT;
-  if (![Role.STUDENT, Role.LECTURER, Role.EXAMINER, Role.SYSTEM_ADMIN].includes(activeRole)) {
+  if (![Role.STUDENT, Role.EXAMINER, Role.SYSTEM_ADMIN].includes(activeRole)) {
     return NextResponse.json({ error: "Forbidden." }, { status: 403 });
   }
 
@@ -263,13 +240,6 @@ export async function POST(request) {
   }
 
   const data = validated.data;
-  if (activeRole === Role.LECTURER && data.purpose !== ProjectPurpose.PRACTICE) {
-    return NextResponse.json(
-      { error: "Lecturer projects can only be practice projects." },
-      { status: 400 },
-    );
-  }
-
   const projectCode = await generateUniqueProjectCode(prisma);
 
   const row = await prisma.project.create({
@@ -286,14 +256,16 @@ export async function POST(request) {
       instructions: data.instructions,
       questionText: data.questionText,
       questionFileUrl: data.questionFileUrl,
-      enrollmentKey: [Role.LECTURER, Role.EXAMINER, Role.SYSTEM_ADMIN].includes(activeRole)
+      enrollmentKey: [Role.EXAMINER, Role.SYSTEM_ADMIN].includes(activeRole)
         ? data.enrollmentAccessKey
         : null,
       isPublished: activeRole === Role.STUDENT ? true : data.isPublished,
       openAt: data.openAt,
       closeAt: data.closeAt,
       durationSeconds: data.durationSeconds,
-      requiresEnrollment: [Role.EXAMINER, Role.LECTURER, Role.SYSTEM_ADMIN].includes(activeRole),
+      maxAttempts: data.maxAttempts,
+      allowEditAfterSubmit: Boolean(data.allowEditAfterSubmit),
+      requiresEnrollment: [Role.EXAMINER, Role.SYSTEM_ADMIN].includes(activeRole),
       isPersonalOrg: false,
     },
   });
@@ -313,4 +285,3 @@ export async function POST(request) {
 
   return NextResponse.json({ project: row }, { status: 201 });
 }
-

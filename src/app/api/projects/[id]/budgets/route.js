@@ -9,6 +9,10 @@ import {
   serializeBudget,
   submitBudget,
 } from "@/lib/projects/budgets";
+import {
+  orgOpsSlateListWhere,
+  resolveCurrentOrgSlateId,
+} from "@/lib/academic/org-academic-slate";
 
 export const runtime = "nodejs";
 
@@ -97,6 +101,7 @@ export async function GET(request, context) {
       }
     }
   }
+  Object.assign(where, orgOpsSlateListWhere(await resolveCurrentOrgSlateId(prisma, projectId)));
 
   const budgets = await prisma.projectOrgBudget.findMany({
     where,

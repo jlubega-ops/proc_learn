@@ -170,7 +170,13 @@ export function AccountProfileTabs() {
                       value={profile.studentProfile.registrationNumber}
                     />
                     <Detail label="Programme" value={profile.studentProfile.programmeName} />
-                    <Detail label="Academic year" value={profile.studentProfile.academicYearLabel} />
+                    <Detail
+                      label="Academic year"
+                      value={
+                        profile.studentProfile.enrolledAcademicYearLabel ||
+                        profile.studentProfile.academicYearLabel
+                      }
+                    />
                     <Detail label="Year of study" value={String(profile.studentProfile.yearOfStudy)} />
                   </>
                 ) : null}

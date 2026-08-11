@@ -15,7 +15,7 @@ import {
 } from "../src/lib/projects/requisitions.js";
 import { completeWorkflowTask } from "../src/lib/projects/workflow-engine.js";
 import { orgUserPermissions } from "../src/lib/projects/org-role-permissions.js";
-import { sidebarNavForOrgMember, sidebarNavForContext } from "../src/lib/nav-config.js";
+import { sidebarNavForOrgMember, sidebarNavForContext, flattenNavLabels } from "../src/lib/nav-config.js";
 import { PROCESS_FLOW_CODES } from "../src/lib/projects/process-catalogue.js";
 
 const prisma = new PrismaClient();
@@ -788,7 +788,7 @@ async function main() {
   // --------------------------------------------------------------------------
   console.log("\n=== Navigation ===");
   const adminNav = sidebarNavForContext("STUDENT", "/organisation", {});
-  const adminLabels = adminNav.flatMap((s) => s.links.map((l) => l.label));
+  const adminLabels = flattenNavLabels(adminNav);
   assert(
     ["Organisation Structure", "Departments/Units", "Users", "Roles & Permissions", "Financial Years", "Planning Periods", "Committees", "Process Workflows"].every(
       (l) => adminLabels.includes(l),

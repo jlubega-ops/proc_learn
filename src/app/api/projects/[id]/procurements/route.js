@@ -6,6 +6,10 @@ import {
   procurementInclude,
   serializeProcurement,
 } from "@/lib/projects/procurements";
+import {
+  orgOpsSlateListWhere,
+  resolveCurrentOrgSlateId,
+} from "@/lib/academic/org-academic-slate";
 
 export const runtime = "nodejs";
 
@@ -39,6 +43,7 @@ export async function GET(_request, context) {
       where.departmentId = auth.orgUser.departmentId;
     }
   }
+  Object.assign(where, orgOpsSlateListWhere(await resolveCurrentOrgSlateId(prisma, projectId)));
 
   const rows = await prisma.projectOrgProcurement.findMany({
     where,

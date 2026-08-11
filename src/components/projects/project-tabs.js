@@ -10,7 +10,10 @@ import {
 
 export function ProjectTabs({ projectId, canSeeSubmissionsTab }) {
   const pathname = usePathname() || `/projects/${projectId}`;
-  const isSubmissions = pathname.endsWith("/submissions");
+  const isParticipants =
+    pathname.endsWith("/participants") || pathname.endsWith("/submissions");
+  const isAssessment = pathname.endsWith("/assessment");
+  const isDetails = !isParticipants && !isAssessment;
   const tabBase = "rounded-md px-3 py-1.5 text-sm font-medium transition";
 
   return (
@@ -18,21 +21,38 @@ export function ProjectTabs({ projectId, canSeeSubmissionsTab }) {
       <div className="flex flex-wrap items-center gap-2">
         <Link
           href={`/projects/${projectId}`}
-          className={`${tabBase} ${!isSubmissions ? BRAND_NAV_ACTIVE_CLASS : BRAND_NAV_INACTIVE_CLASS}`}
+          className={`${tabBase} ${isDetails ? BRAND_NAV_ACTIVE_CLASS : BRAND_NAV_INACTIVE_CLASS}`}
           title="View project details"
-          aria-current={!isSubmissions ? "page" : undefined}
+          aria-current={isDetails ? "page" : undefined}
         >
           Details
         </Link>
         {canSeeSubmissionsTab ? (
-          <Link
-            href={`/projects/${projectId}/submissions`}
-            className={`${tabBase} ${isSubmissions ? BRAND_NAV_ACTIVE_CLASS : BRAND_NAV_INACTIVE_CLASS}`}
-            title="View project submissions"
-            aria-current={isSubmissions ? "page" : undefined}
-          >
-            Submissions
-          </Link>
+          <>
+            <Link
+              href={`/projects/${projectId}/participants`}
+              className={`${tabBase} ${isParticipants ? BRAND_NAV_ACTIVE_CLASS : BRAND_NAV_INACTIVE_CLASS}`}
+              title="View enrolled students and attempts"
+              aria-current={isParticipants ? "page" : undefined}
+            >
+              Participants
+            </Link>
+            <Link
+              href={`/projects/${projectId}/assessment`}
+              className={`${tabBase} ${isAssessment ? BRAND_NAV_ACTIVE_CLASS : BRAND_NAV_INACTIVE_CLASS}`}
+              title="Configure assessment scoring"
+              aria-current={isAssessment ? "page" : undefined}
+            >
+              Scoring
+            </Link>
+            <Link
+              href={`/academic/results?projectId=${encodeURIComponent(projectId)}`}
+              className={`${tabBase} ${BRAND_NAV_INACTIVE_CLASS}`}
+              title="Open results for this project"
+            >
+              Results
+            </Link>
+          </>
         ) : null}
       </div>
     </div>

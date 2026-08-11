@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { getSessionUser } from "@/lib/api/get-session-user";
 import { grantedRoles } from "@/lib/roles";
 import { prisma } from "@/lib/prisma";
+import { getActiveEnrollment } from "@/lib/academic/student-enrollment";
 
 export const runtime = "nodejs";
 
@@ -25,6 +26,9 @@ export async function GET() {
   }
 
   const roles = grantedRoles(user.userRoles);
+  const activeEnrollment = user.studentProfile
+    ? await getActiveEnrollment(prisma, user.id)
+    : null;
 
   return NextResponse.json({
     id: user.id,
@@ -51,7 +55,9 @@ export async function GET() {
           programmeName: user.studentProfile.programme.name,
           programmeShortName: user.studentProfile.programme.shortName,
           yearOfStudy: user.studentProfile.yearOfStudy,
+          /** Compatibility field; prefer enrolledAcademicYearLabel for display. */
           academicYearLabel: user.studentProfile.academicYearLabel,
+          enrolledAcademicYearLabel: activeEnrollment?.academicYear?.label || null,
         }
       : null,
   });

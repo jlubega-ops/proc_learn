@@ -17,6 +17,8 @@ import { formatRoleLabel } from "@/lib/roles";
 import { NavbarUserMenu } from "@/components/layout/navbar-user-menu";
 import { NotificationBellMenu } from "@/components/layout/notification-bell-menu";
 import { RoleSwitchOverlay } from "@/components/layout/role-switch-overlay";
+import { JoinAcademicYearPrompt } from "@/components/academic/join-academic-year-prompt";
+import { StudentModeBanner } from "@/components/academic/student-mode-banner";
 import { getDashboardPageMeta } from "@/lib/dashboard-page-meta";
 import { DASHBOARD_MAIN_INNER_CLASS } from "@/lib/dashboard-content-width";
 import { PROJECT_ORG_ENTRY_ROLE_NAME } from "@/lib/project-org-role";
@@ -65,9 +67,14 @@ function navItemIsActive(navPathname, searchParams, href) {
     return navPathname === "/admin";
   }
 
-  // Organisation home must not stay active under /organisation/org-admin/*
+  // Organisation home / Overview must not stay active under /organisation/org-admin/*
   if (base === "/organisation" || base === "/organisation/") {
     return navPathname === "/organisation" || navPathname === "/organisation/";
+  }
+
+  // Dashboard home is exact-match only
+  if (base === "/") {
+    return navPathname === "/" || navPathname === "";
   }
 
   if (navPathname === base) return true;
@@ -568,7 +575,11 @@ export default function DashboardLayoutClient({ children }) {
           className="flex-1 overflow-y-auto px-3 py-4 md:px-6 md:py-6"
           tabIndex={-1}
         >
-          <div className={DASHBOARD_MAIN_INNER_CLASS}>{children}</div>
+          <div className={DASHBOARD_MAIN_INNER_CLASS}>
+            <StudentModeBanner />
+            <JoinAcademicYearPrompt />
+            {children}
+          </div>
         </main>
 
         <footer className="border-t border-[color:var(--border-subtle)] bg-[color:var(--surface-elevated)] px-3 py-3 text-xs text-zinc-500 dark:text-zinc-400 md:px-6">

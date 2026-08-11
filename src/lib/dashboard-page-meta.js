@@ -3,22 +3,58 @@
  * @param {string} [_activeRole]
  */
 export function getDashboardPageMeta(pathname, _activeRole) {
+  if (pathname === "/" || pathname === "")
+    return { title: "Home", subtitle: "Dashboard overview" };
+  if (pathname.startsWith("/academic/practice/"))
+    return { title: "Practice project", subtitle: "My Academic Work" };
+  if (pathname.startsWith("/academic/assessments/"))
+    return { title: "Assessment project", subtitle: "My Academic Work" };
+  if (pathname.startsWith("/academic/practice"))
+    return {
+      title: "Practice",
+      subtitle: "My Academic Work",
+    };
+  if (pathname.startsWith("/academic/assessments"))
+    return {
+      title: "Assessments",
+      subtitle: "My Academic Work",
+    };
+  if (pathname.startsWith("/academic/results"))
+    return {
+      title: "Results",
+      subtitle: "Scores and feedback",
+    };
+  if (pathname.includes("/assessment"))
+    return { title: "Assessment scoring", subtitle: "Academic project" };
+  if (pathname.includes("/participants"))
+    return { title: "Participants", subtitle: "Academic project" };
+  if (pathname.startsWith("/academic"))
+    return {
+      title: "My Academic Work",
+      subtitle: "Projects from your examiner",
+    };
   if (pathname.startsWith("/organisation")) {
     if (pathname.includes("/org-admin/organisation-structure"))
-      return { title: "Organisation structure", subtitle: "System administration" };
+      return { title: "Organisation structure", subtitle: "My Organisation" };
     if (pathname.includes("/org-admin/financial-years"))
-      return { title: "Financial years", subtitle: "System administration" };
+      return { title: "Financial years", subtitle: "My Organisation" };
     if (pathname.includes("/org-admin/planning-period"))
-      return { title: "Planning period", subtitle: "System administration" };
+      return { title: "Planning period", subtitle: "My Organisation" };
     if (pathname.includes("/org-admin/process-workflow"))
-      return { title: "Process workflow", subtitle: "System administration" };
+      return { title: "Process workflow", subtitle: "My Organisation" };
     if (pathname.includes("/org-admin/users"))
-      return { title: "User accounts", subtitle: "System administration" };
+      return { title: "User accounts", subtitle: "My Organisation" };
     if (pathname.includes("/org-admin/departments"))
-      return { title: "Departments / units", subtitle: "System administration" };
+      return { title: "Departments / units", subtitle: "My Organisation" };
     if (pathname.includes("/org-admin/roles"))
-      return { title: "Roles & Permissions", subtitle: "System administration" };
-    return { title: "Organisation", subtitle: "Your organisation workspace" };
+      return { title: "Roles & Permissions", subtitle: "My Organisation" };
+    if (pathname.includes("/org-admin/budgets"))
+      return { title: "Budgets", subtitle: "My Organisation" };
+    if (pathname.includes("/org-admin/committees"))
+      return { title: "Committees", subtitle: "My Organisation" };
+    if (pathname.includes("/org-admin/audit-logs"))
+      return { title: "Activity logs", subtitle: "My Organisation" };
+    return { title: "Organisation", subtitle: "My Organisation" };
   }
   if (pathname.includes("/org-admin/organisation-structure"))
     return { title: "Organisation structure", subtitle: "Project system administration" };
@@ -36,8 +72,6 @@ export function getDashboardPageMeta(pathname, _activeRole) {
     return { title: "Roles & Permissions", subtitle: "Project system administration" };
   if (pathname.includes("/my-account"))
     return { title: "My account", subtitle: "Organisation user account" };
-  if (pathname === "/" || pathname === "")
-    return { title: "Home", subtitle: "Dashboard overview" };
   if (pathname === "/projects" || pathname === "/projects/") {
     return { title: "Projects", subtitle: "Project workspace" };
   }
@@ -54,12 +88,18 @@ export function getDashboardPageMeta(pathname, _activeRole) {
     return { title: "Project roles", subtitle: "Organisation roles for student workspaces" };
   if (pathname.startsWith("/project-settings"))
     return { title: "Project settings", subtitle: "Configure student project behaviour" };
+  if (pathname.startsWith("/admin/academic-setup"))
+    return { title: "Academic setup", subtitle: "Years, semesters, courses and classes" };
   if (pathname.startsWith("/admin/activity"))
     return { title: "Activity logs", subtitle: "Audit trail (system admin)" };
+  if (pathname.startsWith("/admin/programmes"))
+    return { title: "Programmes", subtitle: "Study programmes" };
+  if (pathname.startsWith("/admin/staff"))
+    return { title: "Staff users", subtitle: "Admin and examiner accounts" };
   if (pathname.startsWith("/admin"))
     return { title: "Administration", subtitle: "System tools" };
-  if (pathname.startsWith("/admin/staff"))
-    return { title: "Staff users", subtitle: "Admin, lecturer, examiner accounts" };
+  if (pathname.startsWith("/students/") && pathname.includes("/observe"))
+    return { title: "Observe student", subtitle: "Read-only organisation and progress" };
   if (pathname.startsWith("/students/manage"))
     return { title: "Students", subtitle: "Directory and records" };
   if (pathname.startsWith("/notifications"))

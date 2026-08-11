@@ -78,7 +78,23 @@ export async function ensureStudentPersonalOrg(prisma, userId) {
           isPersonalOrg: true,
         },
       });
+      try {
+        const { ensureCurrentOrgSlateForOwner } = await import(
+          "@/lib/academic/org-academic-slate"
+        );
+        await ensureCurrentOrgSlateForOwner(prisma, userId);
+      } catch {
+        /* slate ensure is non-blocking */
+      }
       return updated;
+    }
+    try {
+      const { ensureCurrentOrgSlateForOwner } = await import(
+        "@/lib/academic/org-academic-slate"
+      );
+      await ensureCurrentOrgSlateForOwner(prisma, userId);
+    } catch {
+      /* slate ensure is non-blocking */
     }
     return existing;
   }
@@ -100,7 +116,6 @@ export async function ensureStudentPersonalOrg(prisma, userId) {
   const canHavePersonalOrg =
     roles.includes(Role.STUDENT) ||
     roles.includes(Role.SYSTEM_ADMIN) ||
-    roles.includes(Role.LECTURER) ||
     roles.includes(Role.EXAMINER);
   if (!canHavePersonalOrg) return null;
 
@@ -136,6 +151,14 @@ export async function ensureStudentPersonalOrg(prisma, userId) {
   });
 
   await ensureProjectOwnerOrgUser(prisma, created.id, userId);
+  try {
+    const { ensureCurrentOrgSlateForOwner } = await import(
+      "@/lib/academic/org-academic-slate"
+    );
+    await ensureCurrentOrgSlateForOwner(prisma, userId);
+  } catch {
+    /* slate ensure is non-blocking */
+  }
   return created;
 }
 
@@ -149,5 +172,5 @@ export async function resolveStudentDefaultPath(prisma, userId, activeRole) {
   if (activeRole !== Role.STUDENT) return null;
   const org = await ensureStudentPersonalOrg(prisma, userId);
   if (!org?.id) return null;
-  return `/organisation`;
+  return `/`;
 }

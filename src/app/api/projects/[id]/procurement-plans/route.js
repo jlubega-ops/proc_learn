@@ -9,6 +9,10 @@ import {
   serializeProcurementPlan,
   submitProcurementPlan,
 } from "@/lib/projects/procurement-plans";
+import {
+  orgOpsSlateListWhere,
+  resolveCurrentOrgSlateId,
+} from "@/lib/academic/org-academic-slate";
 
 export const runtime = "nodejs";
 
@@ -47,6 +51,7 @@ export async function GET(request, context) {
   if (approvedOnly && auth.type === "org" && auth.orgUser.departmentId) {
     where.departmentId = auth.orgUser.departmentId;
   }
+  Object.assign(where, orgOpsSlateListWhere(await resolveCurrentOrgSlateId(prisma, projectId)));
 
   const plans = await prisma.projectOrgProcurementPlan.findMany({
     where,

@@ -11,6 +11,13 @@ import { DEFAULT_POST_AUTH_PATH } from "@/lib/appConfig";
 import { ensureStudentPersonalOrg } from "@/lib/projects/student-personal-org";
 import { ensureCoreProjectOrgRoles } from "@/lib/project-org-role";
 import { ensureBaselineProcessTemplates } from "@/lib/projects/process-catalogue";
+import {
+  ensureDemoStudentModeContext,
+  isStudentMode,
+  resolveParticipationType,
+  resolvePermanentRole,
+  returnRoleLabel,
+} from "@/lib/academic/student-mode";
 
 /**
  * Build client session payload from DB (single source for active role + theme).
@@ -71,12 +78,30 @@ export async function buildSessionPayloadForUserId(userId) {
         personalOrgProjectId = org.id;
         personalOrgName = org.organizationName || org.name || null;
         personalOrgCode = org.projectCode || null;
-        defaultPath = `/organisation`;
+        defaultPath = `/`;
+      }
+
+      // Student Mode (staff): auto-ensure current AY / semester / demo enrollment / slate.
+      if (isStudentMode({ grantedRoles: g, activeRole: active })) {
+        const participationType = resolveParticipationType({
+          grantedRoles: g,
+          activeRole: active,
+        });
+        if (participationType) {
+          await ensureDemoStudentModeContext(user.id, participationType);
+        }
       }
     } catch {
       /* keep default path if provisioning fails */
     }
   }
+
+  const permanentRole = resolvePermanentRole(g);
+  const participationType = resolveParticipationType({
+    grantedRoles: g,
+    activeRole: active,
+  });
+  const studentMode = isStudentMode({ grantedRoles: g, activeRole: active });
 
   return {
     authenticated: true,
@@ -87,7 +112,13 @@ export async function buildSessionPayloadForUserId(userId) {
     theme,
     grantedRoles: g,
     switchableRoles: switchableRoles(g),
+    permanentRole,
     activeRole: active,
+    effectiveRole: active,
+    participationType,
+    isStudentMode: studentMode,
+    returnRoleLabel: studentMode ? returnRoleLabel(g) : null,
+    returnRole: studentMode ? permanentRole : null,
     mustChangePassword: Boolean(user.mustChangePassword),
     personalOrgProjectId,
     personalOrgName,
