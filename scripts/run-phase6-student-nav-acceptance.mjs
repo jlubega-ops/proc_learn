@@ -58,12 +58,25 @@ async function main() {
   const sectionIds = studentNav.map((s) => s.id);
 
   assert(sectionIds.includes("student-main"), "Dashboard section present");
-  assert(sectionIds.includes("my-organisation"), "My Organisation section present");
+  assert(sectionIds.includes("system-administration"), "System Administration section present");
+  assert(sectionIds.includes("manage-organisation"), "Manage Organisation section present");
   assert(sectionIds.includes("my-academic-work"), "My Academic Work section present");
   assert(labels.includes("Dashboard"), "Dashboard label");
   assert(labels.includes("Overview"), "Organisation Overview label");
-  assert(labels.includes("System Administration"), "System Administration nested group");
-  assert(labels.includes("Organisation Structure"), "Org admin links remain available");
+  assert(
+    studentNav.some((s) => s.label === "System Administration"),
+    "System Administration section label",
+  );
+  assert(
+    studentNav.some((s) => s.label === "Manage Organisation"),
+    "Manage Organisation section label",
+  );
+  assert(labels.includes("Departments/Units"), "System Admin departments link");
+  assert(labels.includes("Users"), "System Admin users link");
+  assert(labels.includes("Roles & Permissions"), "System Admin roles link");
+  assert(labels.includes("Activity logs"), "System Admin activity logs link");
+  assert(labels.includes("Organisation"), "Manage Organisation structure link");
+  assert(labels.includes("Financial Years"), "Manage Organisation financial years");
   assert(labels.includes("Practice"), "Practice label");
   assert(labels.includes("Assessments"), "Assessments label");
   assert(labels.includes("Results"), "Results in Student My Academic Work nav");
@@ -71,6 +84,7 @@ async function main() {
     !labels.some((l) => /OrgAcademicSlate|ProjectEnrollment|ProjectAttempt/i.test(l)),
     "No technical model names in Student nav",
   );
+  assert(!sectionIds.includes("my-organisation"), "Legacy My Organisation section removed");
   assert(hrefs.includes("/"), "Dashboard href /");
   assert(hrefs.includes("/organisation"), "Overview href /organisation");
   assert(hrefs.includes("/academic/practice"), "Practice href");
@@ -175,8 +189,10 @@ async function main() {
     const modeNav = sidebarNavForContext(ROLE.STUDENT, "/");
     const modeLabels = flattenNavLabels(modeNav);
     const modeSections = modeNav.map((s) => s.label).filter(Boolean);
-    assert(modeSections.includes("My Organisation"), "Student Mode sees My Organisation");
+    assert(modeSections.includes("System Administration"), "Student Mode sees System Administration");
+    assert(modeSections.includes("Manage Organisation"), "Student Mode sees Manage Organisation");
     assert(modeSections.includes("My Academic Work"), "Student Mode sees My Academic Work");
+    assert(!modeSections.includes("My Organisation"), "Student Mode has no My Organisation section");
     assert(!modeLabels.includes("Staff"), "Student Mode does not see Staff");
     assert(!modeLabels.includes("Academic setup"), "Student Mode does not see Academic setup");
   }

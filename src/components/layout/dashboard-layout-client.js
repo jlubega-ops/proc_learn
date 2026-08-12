@@ -152,7 +152,11 @@ function NavLinks({
       return navItemIsActive(navPathname || "/", searchParams, item.href);
     });
 
-  const defaultSectionId = sections[0]?.id ?? null;
+  const defaultOpenSectionIds = useMemo(
+    () => sections.filter((section) => section.defaultOpen).map((section) => section.id),
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- sections identity follows role/context
+    [activeRole, canManageOrgAdmin, sessionType, orgProjectId, personalOrgProjectId],
+  );
 
   const activeSectionId = useMemo(
     () => sections.find((section) => sectionHasActiveLink(section.links))?.id ?? null,
@@ -163,20 +167,34 @@ function NavLinks({
   const contextKey = `${activeRole}|${sessionType}|${orgProjectId}|${canManageOrgAdmin}|${personalOrgProjectId}`;
   const lastContextKey = useRef("");
 
-  /** One collapsible section open at a time; stays open when navigating links inside it. */
+  /** Accordion: at most one collapsible section open; expanding one closes the others. */
   const [openSectionId, setOpenSectionId] = useState(/** @type {string | null} */ (null));
+
+  const isCollapsibleSection = (sectionId) =>
+    sections.some((section) => section.id === sectionId && section.collapsible);
 
   useEffect(() => {
     const contextChanged = lastContextKey.current !== contextKey;
     lastContextKey.current = contextKey;
 
     setOpenSectionId((prev) => {
+      const activeCollapsible =
+        activeSectionId && isCollapsibleSection(activeSectionId) ? activeSectionId : null;
+
       if (contextChanged || prev === null) {
-        return activeSectionId ?? defaultSectionId;
+        if (activeCollapsible) return activeCollapsible;
+        if (defaultOpenSectionIds.length > 0) return defaultOpenSectionIds[0];
+        return null;
       }
+
+      if (activeCollapsible && prev !== activeCollapsible) {
+        return activeCollapsible;
+      }
+
       return prev;
     });
-  }, [contextKey, activeSectionId, defaultSectionId]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- sections derived from role/context above
+  }, [contextKey, activeSectionId, defaultOpenSectionIds]);
 
   const toggleSection = (sectionId) => {
     setOpenSectionId((prev) => (prev === sectionId ? null : sectionId));

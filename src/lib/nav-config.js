@@ -34,7 +34,13 @@ import { ORG_PERMISSION } from "@/lib/projects/org-role-permissions";
 
 /**
  * Sidebar section. `label` empty = no heading (typically the first block).
- * @typedef {{ id: string; label: string; collapsible?: boolean; links: NavLinkItem[] }} NavSection
+ * @typedef {{
+ *   id: string;
+ *   label: string;
+ *   collapsible?: boolean;
+ *   defaultOpen?: boolean;
+ *   links: NavLinkItem[];
+ * }} NavSection
  */
 
 /** @type {NavSection[]} */
@@ -227,8 +233,100 @@ export function organisationAdministrationLinks(base, anyOf = [ROLE.STUDENT]) {
 }
 
 /**
- * Student platform nav — Dashboard, My Organisation, My Academic Work.
- * Deliberately separates org simulation work from examiner-assigned academic work.
+ * Student platform System Administration — users, roles, structure units, audit.
+ * @param {string} base
+ * @param {string[] | null} [anyOf]
+ * @returns {NavLinkItem[]}
+ */
+function studentSystemAdministrationLinks(base, anyOf = [ROLE.STUDENT]) {
+  return [
+    {
+      href: `${base}/org-admin/departments`,
+      label: "Departments/Units",
+      title: "Manage departments and units",
+      Icon: ApartmentRounded,
+      anyOf,
+    },
+    {
+      href: `${base}/org-admin/users`,
+      label: "Users",
+      title: "Manage organisation user accounts",
+      Icon: GroupsRounded,
+      anyOf,
+    },
+    {
+      href: `${base}/org-admin/roles`,
+      label: "Roles & Permissions",
+      title: "Manage roles and permissions",
+      Icon: BadgeRounded,
+      anyOf,
+    },
+    {
+      href: `${base}/org-admin/audit-logs`,
+      label: "Activity logs",
+      title: "View organisation activity and audit history",
+      Icon: HistoryRounded,
+      anyOf,
+    },
+  ];
+}
+
+/**
+ * Student platform Manage Organisation — structure and procurement setup.
+ * @param {string} base
+ * @param {string[] | null} [anyOf]
+ * @returns {NavLinkItem[]}
+ */
+function studentManageOrganisationLinks(base, anyOf = [ROLE.STUDENT]) {
+  return [
+    {
+      href: `${base}/org-admin/organisation-structure`,
+      label: "Organisation",
+      title: "Define organisation structure",
+      Icon: BusinessRounded,
+      anyOf,
+    },
+    {
+      href: `${base}/org-admin/financial-years`,
+      label: "Financial Years",
+      title: "Manage financial years",
+      Icon: CalendarMonthRounded,
+      anyOf,
+    },
+    {
+      href: `${base}/org-admin/budgets`,
+      label: "Budgets",
+      title: "View organisation budgets — operational preparation is done by department users",
+      Icon: CalendarMonthRounded,
+      anyOf,
+    },
+    {
+      href: `${base}/org-admin/planning-period`,
+      label: "Planning Periods",
+      title: "Manage planning periods",
+      Icon: DateRangeRounded,
+      anyOf,
+    },
+    {
+      href: `${base}/org-admin/process-workflow`,
+      label: "Process Workflows",
+      title: "Add organisation process workflows",
+      Icon: AccountTreeRounded,
+      anyOf,
+    },
+    {
+      href: `${base}/org-admin/committees`,
+      label: "Committees",
+      title: "Manage organisation committees and memberships",
+      Icon: Groups2Rounded,
+      anyOf,
+    },
+  ];
+}
+
+/**
+ * Student platform nav — Dashboard + Overview, System Administration,
+ * Manage Organisation, My Academic Work.
  * @returns {NavSection[]}
  */
 function studentPlatformSections() {
@@ -245,13 +343,6 @@ function studentPlatformSections() {
           Icon: HomeRounded,
           anyOf: [ROLE.STUDENT],
         },
-      ],
-    },
-    {
-      id: "my-organisation",
-      label: "My Organisation",
-      collapsible: true,
-      links: [
         {
           href: orgBase,
           label: "Overview",
@@ -259,15 +350,20 @@ function studentPlatformSections() {
           Icon: BusinessRounded,
           anyOf: [ROLE.STUDENT],
         },
-        {
-          href: `${orgBase}/org-admin`,
-          label: "System Administration",
-          title: "Configure structure, users, and organisation settings",
-          Icon: SettingsRounded,
-          anyOf: [ROLE.STUDENT],
-          children: organisationAdministrationLinks(orgBase, [ROLE.STUDENT]),
-        },
       ],
+    },
+    {
+      id: "system-administration",
+      label: "System Administration",
+      collapsible: true,
+      links: studentSystemAdministrationLinks(orgBase, [ROLE.STUDENT]),
+    },
+    {
+      id: "manage-organisation",
+      label: "Manage Organisation",
+      collapsible: true,
+      defaultOpen: true,
+      links: studentManageOrganisationLinks(orgBase, [ROLE.STUDENT]),
     },
     {
       id: "my-academic-work",

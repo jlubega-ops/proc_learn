@@ -790,7 +790,7 @@ async function main() {
   const adminNav = sidebarNavForContext("STUDENT", "/organisation", {});
   const adminLabels = flattenNavLabels(adminNav);
   assert(
-    ["Organisation Structure", "Departments/Units", "Users", "Roles & Permissions", "Financial Years", "Planning Periods", "Committees", "Process Workflows"].every(
+    ["Organisation", "Departments/Units", "Users", "Roles & Permissions", "Financial Years", "Planning Periods", "Committees", "Process Workflows"].every(
       (l) => adminLabels.includes(l),
     ),
     "Org Admin sidebar labels",

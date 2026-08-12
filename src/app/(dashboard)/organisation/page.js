@@ -64,7 +64,7 @@ export default async function StudentOrganisationHomePage() {
         <h2 className={BRAND_SECTION_TITLE_CLASS}>About</h2>
         <p className={`mt-2 whitespace-pre-wrap ${BRAND_PAGE_LEAD_CLASS}`}>
           {project.description ||
-            "This is your organisation workspace. Use My Organisation → System Administration in the sidebar to manage structure, users, and settings."}
+            "This is your organisation workspace. Use System Administration and Manage Organisation in the sidebar to manage users, structure, and procurement setup."}
         </p>
       </div>
 
@@ -75,9 +75,10 @@ export default async function StudentOrganisationHomePage() {
         </p>
         {ctx.activeRole === Role.STUDENT ? (
           <p className={`mt-2 ${BRAND_PAGE_LEAD_CLASS}`}>
-            Use <span className="font-semibold text-primary">My Organisation → System Administration</span> to
-            configure departments, users, financial years, planning periods, and process workflows
-            for your organisation.
+            Use <span className="font-semibold text-primary">System Administration</span> for
+            departments, users, and roles, and{" "}
+            <span className="font-semibold text-primary">Manage Organisation</span> for structure,
+            financial years, budgets, planning periods, and committees.
           </p>
         ) : null}
       </div>
