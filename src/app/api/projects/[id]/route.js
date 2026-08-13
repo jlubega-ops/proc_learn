@@ -143,6 +143,32 @@ export async function PATCH(request, context) {
   }
 
   const d = validated.data;
+
+  if (managesExaminerProject || staffManagesStudent) {
+    if (d.academicYearId || d.semesterId || d.programmeId) {
+      const [year, semester, programme] = await Promise.all([
+        d.academicYearId
+          ? prisma.academicYear.findUnique({ where: { id: d.academicYearId } })
+          : null,
+        d.semesterId ? prisma.semester.findUnique({ where: { id: d.semesterId } }) : null,
+        d.programmeId ? prisma.programme.findUnique({ where: { id: d.programmeId } }) : null,
+      ]);
+      /** @type {Record<string, string>} */
+      const fieldErrors = {};
+      if (d.academicYearId && !year) fieldErrors.academicYearId = "Choose a valid academic year.";
+      if (d.semesterId && (!semester || (year && semester.academicYearId !== year.id))) {
+        fieldErrors.semesterId = "Choose a semester for the selected academic year.";
+      }
+      if (d.programmeId && !programme) fieldErrors.programmeId = "Choose a valid programme.";
+      if (Object.keys(fieldErrors).length) {
+        return NextResponse.json(
+          { error: "Please fix the highlighted fields.", fieldErrors },
+          { status: 400 },
+        );
+      }
+    }
+  }
+
   const row = await prisma.project.update({
     where: { id },
     data: staffManagesStudent
@@ -156,11 +182,14 @@ export async function PATCH(request, context) {
           openAt: d.openAt,
           closeAt: d.closeAt,
           durationSeconds: d.durationSeconds,
+          academicYearId: d.academicYearId,
+          semesterId: d.semesterId,
+          programmeId: d.programmeId,
         }
       : {
           name: d.name,
           description: d.description,
-          organizationName: activeRole === Role.STUDENT ? d.organizationName : null,
+          organizationName: d.organizationName,
           purpose: d.purpose,
           visibility: d.visibility,
           instructions: d.instructions,
@@ -173,9 +202,31 @@ export async function PATCH(request, context) {
           openAt: d.openAt,
           closeAt: d.closeAt,
           durationSeconds: d.durationSeconds,
+          maxAttempts: d.maxAttempts,
+          allowEditAfterSubmit: Boolean(d.allowEditAfterSubmit),
           requiresEnrollment: [Role.EXAMINER, Role.SYSTEM_ADMIN].includes(activeRole),
+          academicYearId: [Role.EXAMINER, Role.SYSTEM_ADMIN].includes(activeRole)
+            ? d.academicYearId
+            : undefined,
+          semesterId: [Role.EXAMINER, Role.SYSTEM_ADMIN].includes(activeRole)
+            ? d.semesterId
+            : undefined,
+          programmeId: [Role.EXAMINER, Role.SYSTEM_ADMIN].includes(activeRole)
+            ? d.programmeId
+            : undefined,
         },
   });
+
+  if (
+    !staffManagesStudent &&
+    existing.creatorRole === Role.EXAMINER &&
+    d.organizationName
+  ) {
+    await prisma.project.updateMany({
+      where: { sourceAcademicProjectId: row.id, isAttemptOrg: true },
+      data: { name: d.organizationName, organizationName: d.organizationName },
+    });
+  }
 
   await writeAuditLog({
     eventType: AuditEvent.PROJECT_UPDATED,

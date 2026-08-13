@@ -20,7 +20,7 @@ export async function GET(_request, context) {
   if (!id) return NextResponse.json({ error: "Invalid project id." }, { status: 400 });
 
   const project = await prisma.project.findUnique({ where: { id } });
-  if (!project || project.isPersonalOrg) {
+  if (!project || project.isPersonalOrg || project.isAttemptOrg) {
     return NextResponse.json({ error: "Not found." }, { status: 404 });
   }
 
@@ -47,6 +47,7 @@ export async function GET(_request, context) {
       isPublished: data.project.isPublished,
     },
     counts: data.counts,
+    scoring: data.scoring || null,
     participants: data.participants,
   });
 }

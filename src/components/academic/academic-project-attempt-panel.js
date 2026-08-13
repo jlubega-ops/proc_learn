@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import Button from "@mui/material/Button";
 import Chip from "@mui/material/Chip";
 import CircularProgress from "@mui/material/CircularProgress";
@@ -28,14 +29,19 @@ import {
   themedTextFieldSx,
 } from "@/lib/admin-mui-surfaces";
 import { useToast } from "@/components/providers/toast-provider";
+import { useAuthSession } from "@/components/providers/auth-session-provider";
+import { RichHtml } from "@/components/ui/rich-html";
+import { formatCountdownParts } from "@/lib/academic/attempt-timer-format";
 
 /**
  * Student attempt workspace for one Academic Project.
- * Procurement runs in My Organisation; timer is polled from the server.
+ * Starting an attempt opens an isolated organisation shell with the examiner's organisation name.
  *
  * @param {{ projectId: string; purpose: 'PRACTICE' | 'ASSESSMENT' }} props
  */
 export function AcademicProjectAttemptPanel({ projectId, purpose }) {
+  const router = useRouter();
+  const { refresh } = useAuthSession();
   const { showToast } = useToast();
   const backHref = purpose === "ASSESSMENT" ? "/academic/assessments" : "/academic/practice";
   const [loading, setLoading] = useState(true);
@@ -47,6 +53,21 @@ export function AcademicProjectAttemptPanel({ projectId, purpose }) {
   const [keyOpen, setKeyOpen] = useState(false);
   const [enrollmentKey, setEnrollmentKey] = useState("");
   const [submitOpen, setSubmitOpen] = useState(false);
+
+  const [deadlineMs, setDeadlineMs] = useState(/** @type {number | null} */ (null));
+  const [tickLeft, setTickLeft] = useState(/** @type {number | null} */ (null));
+
+  const syncDeadline = useCallback((nextTimer) => {
+    if (nextTimer?.deadlineAt) {
+      const ms = new Date(nextTimer.deadlineAt).getTime();
+      setDeadlineMs(Number.isFinite(ms) ? ms : null);
+    } else if (typeof nextTimer?.remainingSeconds === "number") {
+      setDeadlineMs(Date.now() + nextTimer.remainingSeconds * 1000);
+    } else {
+      setDeadlineMs(null);
+      setTickLeft(null);
+    }
+  }, []);
 
   const loadCatalogRow = useCallback(async () => {
     const res = await fetch(
@@ -60,8 +81,9 @@ export function AcademicProjectAttemptPanel({ projectId, purpose }) {
     setProjectRow(row);
     setAttempt(row.latestAttempt || null);
     setTimer(row.timer || null);
+    syncDeadline(row.timer || null);
     return row;
-  }, [projectId, purpose]);
+  }, [projectId, purpose, syncDeadline]);
 
   const pollTimer = useCallback(async (attemptId) => {
     if (!attemptId) return;
@@ -74,13 +96,27 @@ export function AcademicProjectAttemptPanel({ projectId, purpose }) {
     setAttempt(data.attempt || null);
     setTimer(data.timer || null);
     setProgress(data.progress || null);
+    syncDeadline(data.timer || null);
     if (data.autoExpired) {
       showToast({
         message: "Time expired. Your attempt was submitted automatically.",
         severity: "success",
       });
     }
-  }, [projectId, showToast]);
+  }, [projectId, showToast, syncDeadline]);
+
+  useEffect(() => {
+    if (deadlineMs == null) {
+      setTickLeft(null);
+      return undefined;
+    }
+    const tick = () => {
+      setTickLeft(Math.max(0, Math.floor((deadlineMs - Date.now()) / 1000)));
+    };
+    tick();
+    const id = window.setInterval(tick, 1000);
+    return () => window.clearInterval(id);
+  }, [deadlineMs]);
 
   useEffect(() => {
     let cancelled = false;
@@ -107,7 +143,6 @@ export function AcademicProjectAttemptPanel({ projectId, purpose }) {
     };
   }, [loadCatalogRow, pollTimer, showToast]);
 
-  // Poll server timer every 15s while in progress
   useEffect(() => {
     if (!attempt?.id || attempt.status !== "IN_PROGRESS") return undefined;
     const id = window.setInterval(() => {
@@ -138,12 +173,66 @@ export function AcademicProjectAttemptPanel({ projectId, purpose }) {
       setKeyOpen(false);
       setAttempt(data.attempt || null);
       setTimer(data.timer || null);
+      await refresh();
       showToast({
-        message: data.resumed ? "Attempt resumed." : "Attempt started. Continue in My Organisation.",
+        message: data.resumed
+          ? "Continuing in this project's organisation."
+          : "Attempt started. You are now in this project's organisation.",
         severity: "success",
       });
       await loadCatalogRow();
       if (data.attempt?.id) await pollTimer(data.attempt.id);
+      router.push("/organisation");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function continueInOrg() {
+    setBusy(true);
+    try {
+      const res = await fetch("/api/student/active-org", {
+        method: "POST",
+        credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "enter", academicProjectId: projectId }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (res.ok) {
+        await refresh();
+        showToast({
+          message: "Returned to this project's organisation.",
+          severity: "success",
+        });
+        router.push(data.redirectTo || "/organisation");
+        return;
+      }
+      // Workspace missing — start/resume creates it
+      const startRes = await fetch(`/api/projects/${encodeURIComponent(projectId)}/attempts/start`, {
+        method: "POST",
+        credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({}),
+      });
+      const startData = await startRes.json().catch(() => ({}));
+      if (!startRes.ok) {
+        showToast({
+          message:
+            typeof data.error === "string"
+              ? data.error
+              : typeof startData.error === "string"
+                ? startData.error
+                : "Could not open this organisation.",
+          severity: "error",
+        });
+        return;
+      }
+      await refresh();
+      showToast({
+        message: "Continuing in this project's organisation.",
+        severity: "success",
+      });
+      router.push("/organisation");
     } finally {
       setBusy(false);
     }
@@ -196,12 +285,28 @@ export function AcademicProjectAttemptPanel({ projectId, purpose }) {
     );
   }
 
+  const displayRemaining =
+    tickLeft != null ? tickLeft : timer?.remainingSeconds;
   const remainingLabel =
-    timer?.durationSeconds == null
+    timer?.mode === "NONE" || displayRemaining == null
       ? "No time limit"
-      : timer.remainingSeconds === 0
+      : timer.expired || displayRemaining === 0
         ? "Time up"
-        : formatSeconds(timer.remainingSeconds);
+        : formatCountdownParts(displayRemaining).label;
+
+  const inProgress =
+    attempt?.status === "IN_PROGRESS" || attempt?.status === "RETURNED";
+  const showStart =
+    !inProgress &&
+    projectRow.status?.key !== "closed" &&
+    (!attempt ||
+      attempt.status === "NOT_STARTED" ||
+      attempt.status === "SUBMITTED" ||
+      attempt.status === "COMPLETED");
+  const startLabel =
+    attempt?.status === "SUBMITTED" || attempt?.status === "COMPLETED"
+      ? "Start new attempt"
+      : "Start attempt";
 
   return (
     <div className={BRAND_PAGE_SHELL_CLASS}>
@@ -210,7 +315,7 @@ export function AcademicProjectAttemptPanel({ projectId, purpose }) {
         title={projectRow.name}
         description={
           projectRow.description ||
-          "Complete the required procurement work in My Organisation, then submit this attempt."
+          "Read the instructions and question below. Starting an attempt moves you into this project's organisation."
         }
       >
         <div className="mt-3 flex flex-wrap gap-2">
@@ -218,10 +323,29 @@ export function AcademicProjectAttemptPanel({ projectId, purpose }) {
           <Chip size="small" label={`Attempt ${attempt?.attemptNumber || "—"}`} />
           <Chip
             size="small"
-            color={timer?.expired ? "error" : "default"}
-            label={remainingLabel}
-            title="Server timer — refresh-safe"
+            color={timer?.expired ? "error" : timer?.mode === "DURATION" ? "warning" : "default"}
+            label={
+              timer?.mode === "NONE" || displayRemaining == null
+                ? remainingLabel
+                : timer.expired || displayRemaining === 0
+                  ? "Time up"
+                  : `Time left · ${remainingLabel}`
+            }
+            title={
+              timer?.mode === "DURATION"
+                ? "Server timer — does not pause on logout"
+                : timer?.mode === "WINDOW"
+                  ? "Time left until this project closes"
+                  : "No timed limit"
+            }
           />
+          {timer?.mode === "DURATION" && attempt?.status === "IN_PROGRESS" ? (
+            <Chip
+              size="small"
+              label={`Used ${formatSecondsUsed(timer.elapsedSeconds)}`}
+              title="Wall-clock time since start"
+            />
+          ) : null}
         </div>
       </DashboardPageIntro>
 
@@ -229,15 +353,29 @@ export function AcademicProjectAttemptPanel({ projectId, purpose }) {
         <section className={`${BRAND_CARD_CLASS} p-4 sm:p-5`}>
           <h2 className={BRAND_SECTION_TITLE_CLASS}>Your attempt</h2>
           <p className={`mt-2 ${BRAND_PAGE_LEAD_CLASS}`}>
-            Procurement happens in <strong>My Organisation</strong> on your current academic slate.
-            This project does not create a second organisation.
+            Starting moves you out of your default organisation into this project&apos;s
+            organisation ({projectRow.organizationName || projectRow.name}). You can only work in
+            one project at a time.
+            {purpose === "ASSESSMENT"
+              ? " Exit is disabled for assessments until the window closes."
+              : " You can exit a practice project back to My Organisation."}
           </p>
+          <div className="mt-3 rounded-lg border border-brand-red/30 bg-white px-3 py-2 dark:bg-zinc-950">
+            <p className="text-[11px] font-bold uppercase tracking-wide text-brand-red">Time left</p>
+            <p className="mt-0.5 font-mono text-base font-semibold tabular-nums text-brand-red">
+              {timer?.mode === "NONE" || displayRemaining == null
+                ? "No timed limit"
+                : timer.expired || displayRemaining === 0
+                  ? "Time up"
+                  : formatCountdownParts(displayRemaining).label}
+            </p>
+          </div>
           <div className="mt-4 flex flex-wrap gap-2">
-            {!attempt || attempt.status === "SUBMITTED" || attempt.status === "COMPLETED" ? (
+            {showStart ? (
               <Button
                 type="button"
                 variant="contained"
-                disabled={busy || projectRow.status?.key === "closed"}
+                disabled={busy || (projectRow.status?.key === "closed" && !projectRow.enrolled)}
                 className={`${BRAND_BTN_PRIMARY_CLASS} cursor-pointer disabled:cursor-not-allowed`}
                 onClick={() => {
                   if (projectRow.enrollmentKeyRequired && !projectRow.enrolled) {
@@ -248,24 +386,33 @@ export function AcademicProjectAttemptPanel({ projectId, purpose }) {
                 }}
                 startIcon={busy ? <CircularProgress size={16} color="inherit" /> : null}
               >
-                {attempt?.status === "SUBMITTED" ? "Start new attempt" : "Start attempt"}
+                {startLabel}
               </Button>
             ) : null}
-            {attempt?.status === "IN_PROGRESS" ? (
-              <Button
-                type="button"
-                variant="contained"
-                color="success"
-                disabled={busy}
-                className="cursor-pointer disabled:cursor-not-allowed"
-                onClick={() => setSubmitOpen(true)}
-              >
-                Submit attempt
-              </Button>
+            {inProgress ? (
+              <>
+                <Button
+                  type="button"
+                  variant="contained"
+                  disabled={busy}
+                  className={`${BRAND_BTN_PRIMARY_CLASS} cursor-pointer disabled:cursor-not-allowed`}
+                  onClick={() => void continueInOrg()}
+                  startIcon={busy ? <CircularProgress size={16} color="inherit" /> : null}
+                >
+                  Continue in organisation
+                </Button>
+                <Button
+                  type="button"
+                  variant="contained"
+                  color="success"
+                  disabled={busy}
+                  className="cursor-pointer disabled:cursor-not-allowed"
+                  onClick={() => setSubmitOpen(true)}
+                >
+                  Submit attempt
+                </Button>
+              </>
             ) : null}
-            <Button component={Link} href="/organisation" className="cursor-pointer">
-              Open My Organisation
-            </Button>
             <Button component={Link} href={backHref} className="cursor-pointer">
               Back to list
             </Button>
@@ -297,6 +444,34 @@ export function AcademicProjectAttemptPanel({ projectId, purpose }) {
             </p>
           )}
         </section>
+      </div>
+
+      <div className={`${BRAND_CARD_CLASS} p-4 sm:p-5`}>
+        <h2 className={BRAND_SECTION_TITLE_CLASS}>Instructions</h2>
+        <RichHtml
+          html={projectRow.instructions}
+          empty="No special instructions were added. Complete the procurement work required for this project in its organisation."
+        />
+      </div>
+
+      <div className={`${BRAND_CARD_CLASS} p-4 sm:p-5`}>
+        <h2 className={BRAND_SECTION_TITLE_CLASS}>Question / task</h2>
+        <RichHtml
+          html={projectRow.questionText}
+          empty="No question text was provided for this project."
+        />
+        {projectRow.questionFileUrl ? (
+          <p className="mt-3">
+            <a
+              href={projectRow.questionFileUrl}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="cursor-pointer font-medium text-primary underline-offset-2 hover:underline"
+            >
+              Open question file
+            </a>
+          </p>
+        ) : null}
       </div>
 
       <Dialog open={keyOpen} onClose={() => !busy && setKeyOpen(false)} PaperProps={{ sx: adminDialogPaperSx }}>
@@ -363,12 +538,12 @@ export function AcademicProjectAttemptPanel({ projectId, purpose }) {
 }
 
 /** @param {number} sec */
-function formatSeconds(sec) {
+function formatSecondsUsed(sec) {
   const s = Math.max(0, Math.floor(sec));
   const h = Math.floor(s / 3600);
   const m = Math.floor((s % 3600) / 60);
   const r = s % 60;
-  if (h > 0) return `${h}h ${m}m ${r}s left`;
-  if (m > 0) return `${m}m ${r}s left`;
-  return `${r}s left`;
+  if (h > 0) return `${h}h ${m}m ${r}s`;
+  if (m > 0) return `${m}m ${r}s`;
+  return `${r}s`;
 }

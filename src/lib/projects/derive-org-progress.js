@@ -9,6 +9,7 @@ import {
   OrgProcurementStatus,
   OrgRequisitionStatus,
   OrgWorkflowTaskStatus,
+  Role,
 } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { orgOpsSlateListWhere, resolveCurrentOrgSlateId } from "@/lib/academic/org-academic-slate";
@@ -157,6 +158,102 @@ function markBeforeDone(done, key) {
 }
 
 /**
+ * Shared stage-state computation (list summaries + full observation).
+ * Does not write procurement data.
+ *
+ * @param {{
+ *   activeFy?: any;
+ *   bestBudget?: any;
+ *   bestPlan?: any;
+ *   bestReq?: any;
+ *   bestProc?: any;
+ * }} snaps
+ */
+export function computeObservationStageStates(snaps = {}) {
+  const activeFy = snaps.activeFy || null;
+  const bestBudget = snaps.bestBudget || null;
+  const bestPlan = snaps.bestPlan || null;
+  const bestReq = snaps.bestReq || null;
+  const bestProc = snaps.bestProc || null;
+
+  /** @type {Record<string, boolean>} */
+  const done = {
+    FINANCIAL_YEAR: Boolean(activeFy),
+    BUDGET: Boolean(bestBudget && (BUDGET_RANK[bestBudget.status] || 0) >= 4),
+    PROCUREMENT_PLANNING: Boolean(bestPlan && (PLAN_RANK[bestPlan.status] || 0) >= 4),
+    REQUISITION: Boolean(bestReq && (REQ_RANK[bestReq.status] || 0) >= 2),
+    APPROVAL: Boolean(bestReq && bestReq.status === OrgRequisitionStatus.APPROVED),
+    PROCUREMENT_METHOD: false,
+    EVALUATION: false,
+    CONTRACT: false,
+    DELIVERY: false,
+    CLOSURE: false,
+  };
+
+  if (
+    bestProc &&
+    bestProc.status !== OrgProcurementStatus.CANCELLED &&
+    bestProc.status !== OrgProcurementStatus.REJECTED
+  ) {
+    const mapped = PROC_STATUS_STAGE[bestProc.status];
+    if (mapped) {
+      markBeforeDone(done, mapped);
+      if (bestProc.status === OrgProcurementStatus.CLOSED) {
+        for (const key of OBSERVATION_STAGE_KEYS) done[key] = true;
+      } else if (
+        [
+          OrgProcurementStatus.METHOD_SELECTED,
+          OrgProcurementStatus.IN_PROGRESS,
+          OrgProcurementStatus.SOLICITATION,
+        ].includes(bestProc.status)
+      ) {
+        done.PROCUREMENT_METHOD = true;
+      } else {
+        const mappedIdx = OBSERVATION_STAGE_KEYS.indexOf(mapped);
+        for (let i = 0; i < mappedIdx; i += 1) {
+          done[OBSERVATION_STAGE_KEYS[i]] = true;
+        }
+      }
+    }
+  }
+
+  const currentKey =
+    OBSERVATION_STAGE_KEYS.find((key) => !done[key]) ||
+    (done.CLOSURE ? "CLOSURE" : OBSERVATION_STAGE_KEYS[0]);
+
+  const stages = OBSERVATION_STAGE_KEYS.map((key) => {
+    /** @type {StageState} */
+    let state = "todo";
+    if (done.CLOSURE && key === "CLOSURE") state = "done";
+    else if (done[key]) state = "done";
+    else if (key === currentKey) state = "current";
+    return {
+      key,
+      label: OBSERVATION_STAGE_LABELS[key],
+      marker: stageMarker(state),
+      state,
+    };
+  });
+
+  const completedCount = stages.filter((s) => s.state === "done").length;
+  const currentStage = stages.find((s) => s.state === "current") || null;
+
+  return {
+    done,
+    currentKey,
+    stages,
+    summary: {
+      completedCount,
+      totalCount: stages.length,
+      percent: Math.round((completedCount / Math.max(stages.length, 1)) * 100),
+      currentStageKey: currentStage?.key || (done.CLOSURE ? "CLOSURE" : null),
+      currentStageLabel: currentStage?.label || (done.CLOSURE ? "Closure" : null),
+      remainingCount: stages.filter((s) => s.state === "todo" || s.state === "current").length,
+    },
+  };
+}
+
+/**
  * @param {string} projectId
  * @param {{ db?: import("@prisma/client").PrismaClient }} [opts]
  */
@@ -238,62 +335,17 @@ export async function deriveOrganisationProcurementProgress(projectId, opts = {}
   const bestProc = procurements[0] || null;
   const openTask = openTasks[0] || null;
 
-  /** @type {Record<string, boolean>} */
-  const done = {
-    FINANCIAL_YEAR: Boolean(activeFy),
-    BUDGET: Boolean(bestBudget && (BUDGET_RANK[bestBudget.status] || 0) >= 4),
-    PROCUREMENT_PLANNING: Boolean(bestPlan && (PLAN_RANK[bestPlan.status] || 0) >= 4),
-    REQUISITION: Boolean(bestReq && (REQ_RANK[bestReq.status] || 0) >= 2),
-    APPROVAL: Boolean(bestReq && bestReq.status === OrgRequisitionStatus.APPROVED),
-    PROCUREMENT_METHOD: false,
-    EVALUATION: false,
-    CONTRACT: false,
-    DELIVERY: false,
-    CLOSURE: false,
-  };
+  const computed = computeObservationStageStates({
+    activeFy,
+    bestBudget,
+    bestPlan,
+    bestReq,
+    bestProc,
+  });
 
-  if (
-    bestProc &&
-    bestProc.status !== OrgProcurementStatus.CANCELLED &&
-    bestProc.status !== OrgProcurementStatus.REJECTED
-  ) {
-    const mapped = PROC_STATUS_STAGE[bestProc.status];
-    if (mapped) {
-      markBeforeDone(done, mapped);
-      if (bestProc.status === OrgProcurementStatus.CLOSED) {
-        for (const key of OBSERVATION_STAGE_KEYS) done[key] = true;
-      } else if (
-        [
-          OrgProcurementStatus.METHOD_SELECTED,
-          OrgProcurementStatus.IN_PROGRESS,
-          OrgProcurementStatus.SOLICITATION,
-        ].includes(bestProc.status)
-      ) {
-        // Method chosen — treat method step complete; next is evaluation.
-        done.PROCUREMENT_METHOD = true;
-      } else {
-        // At EVALUATION or later: method is done; mapped stage itself is current (not done).
-        const mappedIdx = OBSERVATION_STAGE_KEYS.indexOf(mapped);
-        for (let i = 0; i < mappedIdx; i += 1) {
-          done[OBSERVATION_STAGE_KEYS[i]] = true;
-        }
-      }
-    }
-  }
-
-  const currentKey =
-    OBSERVATION_STAGE_KEYS.find((key) => !done[key]) ||
-    (done.CLOSURE ? "CLOSURE" : OBSERVATION_STAGE_KEYS[0]);
-
-  const stages = OBSERVATION_STAGE_KEYS.map((key) => {
-    /** @type {StageState} */
-    let state = "todo";
-    if (done.CLOSURE && key === "CLOSURE") state = "done";
-    else if (done[key]) state = "done";
-    else if (key === currentKey) state = "current";
-
+  const stages = computed.stages.map((stage) => {
     const detail = stageDetail({
-      key,
+      key: stage.key,
       activeFy,
       bestBudget,
       bestPlan,
@@ -301,31 +353,20 @@ export async function deriveOrganisationProcurementProgress(projectId, opts = {}
       bestProc,
       openTask,
     });
-
-    return {
-      key,
-      label: OBSERVATION_STAGE_LABELS[key],
-      marker: stageMarker(state),
-      state,
-      ...detail,
-    };
+    return { ...stage, ...detail };
   });
 
-  const completedCount = stages.filter((s) => s.state === "done").length;
-  const currentStage = stages.find((s) => s.state === "current") || null;
   const remaining = stages.filter((s) => s.state === "todo" || s.state === "current");
 
   return {
     projectId,
     stages,
-    summary: {
-      completedCount,
-      totalCount: stages.length,
-      percent: Math.round((completedCount / Math.max(stages.length, 1)) * 100),
-      currentStageKey: currentStage?.key || (done.CLOSURE ? "CLOSURE" : null),
-      currentStageLabel: currentStage?.label || (done.CLOSURE ? "Closure" : null),
-      remainingCount: remaining.length,
-    },
+    remainingStages: remaining.map((s) => ({
+      key: s.key,
+      label: s.label,
+      state: s.state,
+    })),
+    summary: computed.summary,
     counts: {
       financialYears: financialYears.length,
       budgets: budgets.length,
@@ -646,4 +687,136 @@ function stageDetail(p) {
     default:
       return base;
   }
+}
+
+/**
+ * Batch current-stage summaries for students' personal organisations (roster).
+ * Read-only — does not mutate procurement records.
+ *
+ * @param {string[]} ownerUserIds
+ * @param {{ db?: import("@prisma/client").PrismaClient }} [opts]
+ * @returns {Promise<Map<string, {
+ *   organisation: { projectId: string; name: string; projectCode: string | null; status: string };
+ *   summary: ReturnType<typeof computeObservationStageStates>['summary'];
+ *   openTask: { title: string; role: string | null; assignee: string | null } | null;
+ * }>>}
+ */
+export async function listPersonalOrgProgressSummaries(ownerUserIds, opts = {}) {
+  const db = opts.db || prisma;
+  /** @type {Map<string, any>} */
+  const byOwner = new Map();
+  const ids = [...new Set((ownerUserIds || []).filter(Boolean))];
+  if (ids.length === 0) return byOwner;
+
+  const orgs = await db.project.findMany({
+    where: {
+      ownerUserId: { in: ids },
+      isPersonalOrg: true,
+      creatorRole: Role.STUDENT,
+    },
+    select: {
+      id: true,
+      ownerUserId: true,
+      name: true,
+      organizationName: true,
+      projectCode: true,
+      status: true,
+    },
+  });
+  if (orgs.length === 0) return byOwner;
+
+  const projectIds = orgs.map((o) => o.id);
+  const orgUserSelect = {
+    firstName: true,
+    middleName: true,
+    lastName: true,
+    email: true,
+  };
+
+  const [financialYears, budgets, plans, requisitions, procurements, openTasks] = await Promise.all([
+    db.projectOrgFinancialYear.findMany({
+      where: { projectId: { in: projectIds } },
+      select: { id: true, projectId: true, isActive: true, startDate: true },
+      orderBy: { startDate: "desc" },
+    }),
+    db.projectOrgBudget.findMany({
+      where: { projectId: { in: projectIds } },
+      select: { id: true, projectId: true, status: true },
+    }),
+    db.projectOrgProcurementPlan.findMany({
+      where: { projectId: { in: projectIds } },
+      select: { id: true, projectId: true, status: true },
+    }),
+    db.projectOrgRequisition.findMany({
+      where: { projectId: { in: projectIds } },
+      select: { id: true, projectId: true, status: true },
+    }),
+    db.projectOrgProcurement.findMany({
+      where: { projectId: { in: projectIds } },
+      select: { id: true, projectId: true, status: true, updatedAt: true },
+      orderBy: { updatedAt: "desc" },
+    }),
+    db.projectOrgWorkflowTask.findMany({
+      where: {
+        projectId: { in: projectIds },
+        status: { in: [OrgWorkflowTaskStatus.PENDING, OrgWorkflowTaskStatus.IN_PROGRESS] },
+      },
+      orderBy: { createdAt: "desc" },
+      include: { assignee: { select: orgUserSelect } },
+    }),
+  ]);
+
+  /** @param {any[]} rows */
+  const groupByProject = (rows) => {
+    /** @type {Map<string, any[]>} */
+    const map = new Map();
+    for (const row of rows) {
+      const list = map.get(row.projectId) || [];
+      list.push(row);
+      map.set(row.projectId, list);
+    }
+    return map;
+  };
+
+  const fyBy = groupByProject(financialYears);
+  const budgetBy = groupByProject(budgets);
+  const planBy = groupByProject(plans);
+  const reqBy = groupByProject(requisitions);
+  const procBy = groupByProject(procurements);
+  const taskBy = groupByProject(openTasks);
+
+  for (const org of orgs) {
+    const fys = fyBy.get(org.id) || [];
+    const activeFy = fys.find((fy) => fy.isActive) || fys[0] || null;
+    const bestBudget = pickBestByRank(budgetBy.get(org.id) || [], (b) => BUDGET_RANK[b.status] ?? 0);
+    const bestPlan = pickBestByRank(planBy.get(org.id) || [], (p) => PLAN_RANK[p.status] ?? 0);
+    const bestReq = pickBestByRank(reqBy.get(org.id) || [], (r) => REQ_RANK[r.status] ?? 0);
+    const bestProc = (procBy.get(org.id) || [])[0] || null;
+    const openTask = (taskBy.get(org.id) || [])[0] || null;
+    const computed = computeObservationStageStates({
+      activeFy,
+      bestBudget,
+      bestPlan,
+      bestReq,
+      bestProc,
+    });
+    byOwner.set(org.ownerUserId, {
+      organisation: {
+        projectId: org.id,
+        name: org.organizationName || org.name,
+        projectCode: org.projectCode,
+        status: org.status,
+      },
+      summary: computed.summary,
+      openTask: openTask
+        ? {
+            title: openTask.title,
+            role: openTask.requiredRoleName || null,
+            assignee: actorLabel(openTask.assignee),
+          }
+        : null,
+    });
+  }
+
+  return byOwner;
 }

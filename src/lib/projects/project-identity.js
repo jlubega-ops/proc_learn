@@ -1,5 +1,19 @@
 export const CODE_CHARS = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
 
+/** Current organisation codes: ORG-XXXXXX (6 chars from CODE_CHARS). */
+export const ORG_PROJECT_CODE_RE = new RegExp(`^ORG-[${CODE_CHARS}]{6}$`);
+
+/** Legacy short codes used before ORG-XXXXXX. */
+const LEGACY_PROJECT_CODE_RE = new RegExp(`^[${CODE_CHARS}]{5}$`);
+
+/**
+ * @param {unknown} raw
+ */
+export function isOrganisationProjectCode(raw) {
+  const code = String(raw || "").trim().toUpperCase();
+  return ORG_PROJECT_CODE_RE.test(code) || LEGACY_PROJECT_CODE_RE.test(code);
+}
+
 /**
  * @param {number} [length]
  * @returns {string}

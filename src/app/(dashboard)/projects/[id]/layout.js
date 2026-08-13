@@ -4,7 +4,10 @@ import { getReadableAppSession } from "@/lib/auth/session";
 import { getSessionUser, sessionActiveRole } from "@/lib/api/get-session-user";
 import { prisma } from "@/lib/prisma";
 import { actsAsExaminerRole } from "@/lib/projects/access";
-import { fetchAuthorizedProjectWorkspace, fetchAuthorizedOrgUserWorkspace } from "@/lib/projects/workspace-access";
+import {
+  fetchAuthorizedProjectWorkspace,
+  fetchAuthorizedOrgUserWorkspace,
+} from "@/lib/projects/workspace-access";
 import { ProjectTabs } from "@/components/projects/project-tabs";
 
 export default async function ProjectDetailLayout({ children, params }) {
@@ -16,14 +19,13 @@ export default async function ProjectDetailLayout({ children, params }) {
   if (!session) redirect(`/login?next=/projects/${id}&reason=idle`);
 
   if (session.orgUserId) {
-    const access = await fetchAuthorizedOrgUserWorkspace(prisma, session.orgUserId);
+    const access = await fetchAuthorizedOrgUserWorkspace(
+      prisma,
+      session.orgUserId,
+    );
     if (!access || access.project.id !== id) notFound();
 
-    return (
-      <div className="w-full space-y-4">
-        {children}
-      </div>
-    );
+    return <div className="w-full space-y-4">{children}</div>;
   }
 
   const user = await getSessionUser();

@@ -26,7 +26,7 @@ export async function GET(request) {
 
   if (projectId) {
     const project = await prisma.project.findUnique({ where: { id: projectId } });
-    if (!project || project.isPersonalOrg) {
+    if (!project || project.isPersonalOrg || project.isAttemptOrg) {
       return NextResponse.json({ error: "Not found." }, { status: 404 });
     }
     if (

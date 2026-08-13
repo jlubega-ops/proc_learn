@@ -1,11 +1,8 @@
-import { CODE_CHARS } from "@/lib/projects/project-identity";
-
-const PROJECT_CODE_PATTERN = new RegExp(
-  `^([${CODE_CHARS}]{5})$`,
-);
+import { isOrganisationProjectCode } from "@/lib/projects/project-identity";
 
 /**
- * Parses an organisation login username: local_PROJECTCODE@domain
+ * Parses an organisation login username: local_ORG-XXXXXX@domain
+ * (also accepts legacy local_XXXXX@domain 5-char codes).
  * @param {unknown} raw
  * @returns {{ baseEmail: string; projectCode: string } | null}
  */
@@ -22,7 +19,7 @@ export function parseOrgLoginIdentifier(raw) {
 
   const emailLocal = local.slice(0, underscore);
   const projectCode = local.slice(underscore + 1).toUpperCase();
-  if (!emailLocal || !PROJECT_CODE_PATTERN.test(projectCode)) return null;
+  if (!emailLocal || !isOrganisationProjectCode(projectCode)) return null;
 
   const baseEmail = domain ? `${emailLocal}@${domain}` : emailLocal;
   return { baseEmail, projectCode };

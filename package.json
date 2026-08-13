@@ -9,7 +9,9 @@
     "lint": "eslint",
     "postinstall": "prisma generate",
     "db:push": "prisma db push",
-    "db:seed": "node prisma/seed.cjs"
+    "db:seed": "node prisma/seed.cjs",
+    "db:seed:deploy": "node --import ./scripts/register-path-alias.mjs scripts/seed-deploy-defaults.mjs",
+    "db:seed:presentation": "node --import ./scripts/register-path-alias.mjs scripts/seed-presentation.mjs"
   },
   "prisma": {
     "seed": "node prisma/seed.cjs"

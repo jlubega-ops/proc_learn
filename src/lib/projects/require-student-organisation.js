@@ -2,13 +2,20 @@ import { redirect } from "next/navigation";
 import { Role } from "@prisma/client";
 import { getSessionUser, sessionActiveRole } from "@/lib/api/get-session-user";
 import { prisma } from "@/lib/prisma";
-import { ensureStudentPersonalOrg } from "@/lib/projects/student-personal-org";
+import { resolveStudentActiveOrganisation } from "@/lib/projects/student-active-org";
 
 /**
- * Resolves the signed-in student's personal organisation project id (creates if needed).
+ * Resolves the signed-in student's current organisation shell (personal or attempt workspace).
  * Redirects non-students away. Never sends an authenticated user to /login (that loops
  * with the login page bounce-back to /organisation).
- * @returns {Promise<{ projectId: string; organizationName: string | null; name: string; projectCode: string | null }>}
+ * @returns {Promise<{
+ *   projectId: string;
+ *   organizationName: string | null;
+ *   name: string;
+ *   projectCode: string | null;
+ *   kind: string;
+ *   locked: boolean;
+ * }>}
  */
 export async function requireStudentOrganisation() {
   const user = await getSessionUser();
@@ -19,22 +26,24 @@ export async function requireStudentOrganisation() {
     redirect("/");
   }
 
-  let org = null;
+  let resolved = null;
   try {
-    org = await ensureStudentPersonalOrg(prisma, user.id);
+    resolved = await resolveStudentActiveOrganisation(prisma, user.id);
   } catch {
-    org = null;
+    resolved = null;
   }
 
-  if (!org?.id) {
-    // Signed-in but organisation could not be provisioned — avoid /login bounce loop.
+  if (!resolved?.org?.id) {
     redirect("/");
   }
 
+  const org = resolved.org;
   return {
     projectId: org.id,
     organizationName: org.organizationName || null,
     name: org.name,
     projectCode: org.projectCode || null,
+    kind: resolved.kind,
+    locked: Boolean(resolved.locked),
   };
 }

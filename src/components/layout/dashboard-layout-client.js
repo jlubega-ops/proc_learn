@@ -18,6 +18,8 @@ import { NavbarUserMenu } from "@/components/layout/navbar-user-menu";
 import { NotificationBellMenu } from "@/components/layout/notification-bell-menu";
 import { RoleSwitchOverlay } from "@/components/layout/role-switch-overlay";
 import { JoinAcademicYearPrompt } from "@/components/academic/join-academic-year-prompt";
+import { JoinPracticeProjectPrompt } from "@/components/academic/join-practice-project-prompt";
+import { ActiveOrgContextBanner, StudentExitOrgSidebarButton } from "@/components/academic/active-org-context-banner";
 import { StudentModeBanner } from "@/components/academic/student-mode-banner";
 import { getDashboardPageMeta } from "@/lib/dashboard-page-meta";
 import { DASHBOARD_MAIN_INNER_CLASS } from "@/lib/dashboard-content-width";
@@ -129,6 +131,7 @@ function NavLinks({
   orgPermissions = [],
   orgRoleName = "",
   personalOrgProjectId = "",
+  orgContext = "PERSONAL",
 }) {
   const navPathname = usePathname();
   const sections = sidebarNavForContext(activeRole, navPathname || "/", {
@@ -138,6 +141,7 @@ function NavLinks({
     permissions: orgPermissions,
     roleName: orgRoleName || null,
     personalOrgProjectId,
+    orgContext,
   });
 
   const childActive = (children) =>
@@ -155,16 +159,16 @@ function NavLinks({
   const defaultOpenSectionIds = useMemo(
     () => sections.filter((section) => section.defaultOpen).map((section) => section.id),
     // eslint-disable-next-line react-hooks/exhaustive-deps -- sections identity follows role/context
-    [activeRole, canManageOrgAdmin, sessionType, orgProjectId, personalOrgProjectId],
+    [activeRole, canManageOrgAdmin, sessionType, orgProjectId, personalOrgProjectId, orgContext],
   );
 
   const activeSectionId = useMemo(
     () => sections.find((section) => sectionHasActiveLink(section.links))?.id ?? null,
     // eslint-disable-next-line react-hooks/exhaustive-deps -- pathname/searchParams drive active section
-    [navPathname, searchParams, activeRole, canManageOrgAdmin, sessionType, orgProjectId, personalOrgProjectId],
+    [navPathname, searchParams, activeRole, canManageOrgAdmin, sessionType, orgProjectId, personalOrgProjectId, orgContext],
   );
 
-  const contextKey = `${activeRole}|${sessionType}|${orgProjectId}|${canManageOrgAdmin}|${personalOrgProjectId}`;
+  const contextKey = `${activeRole}|${sessionType}|${orgProjectId}|${canManageOrgAdmin}|${personalOrgProjectId}|${orgContext}`;
   const lastContextKey = useRef("");
 
   /** Accordion: at most one collapsible section open; expanding one closes the others. */
@@ -308,6 +312,7 @@ function NavLinksWithSearch({
   orgPermissions,
   orgRoleName,
   personalOrgProjectId,
+  orgContext,
   ...props
 }) {
   const searchParams = useSearchParams();
@@ -321,6 +326,7 @@ function NavLinksWithSearch({
       orgPermissions={orgPermissions}
       orgRoleName={orgRoleName}
       personalOrgProjectId={personalOrgProjectId}
+      orgContext={orgContext}
     />
   );
 }
@@ -337,8 +343,11 @@ export default function DashboardLayoutClient({ children }) {
   const orgPermissions = Array.isArray(session?.permissions) ? session.permissions : [];
   const orgRoleName = isOrgSession ? String(session?.orgRoleName || "") : "";
   const personalOrgProjectId = !isOrgSession
-    ? String(session?.personalOrgProjectId || "")
+    ? String(session?.activeOrgProjectId || session?.personalOrgProjectId || "")
     : "";
+  const orgContext = !isOrgSession
+    ? String(session?.orgContext || "PERSONAL")
+    : "PERSONAL";
   const pathProjectId = isOrgSession ? orgProjectId : projectIdFromPath(pathname || "/");
   const onOrganisation = !isOrgSession && activeRole === "STUDENT" && isOrganisationPath(pathname || "/");
   const projectId = onOrganisation ? personalOrgProjectId : pathProjectId;
@@ -369,8 +378,8 @@ export default function DashboardLayoutClient({ children }) {
       return;
     }
 
-    if (onOrganisation && session?.personalOrgName) {
-      setProjectOrgLabel(String(session.personalOrgName).trim());
+    if (onOrganisation && (session?.activeOrgName || session?.personalOrgName)) {
+      setProjectOrgLabel(String(session.activeOrgName || session.personalOrgName).trim());
       setCanManageOrgAdmin(true);
       setProjectOrgLoading(false);
       return;
@@ -474,6 +483,7 @@ export default function DashboardLayoutClient({ children }) {
               orgPermissions={orgPermissions}
               orgRoleName={orgRoleName}
               personalOrgProjectId={personalOrgProjectId}
+              orgContext={orgContext}
             />
           </Suspense>
         </nav>
@@ -490,7 +500,9 @@ export default function DashboardLayoutClient({ children }) {
               Sign in
             </Link>
           </div>
-        ) : null}
+        ) : (
+          <StudentExitOrgSidebarButton onNavigate={() => setDrawerOpen(false)} />
+        )}
       </aside>
 
       <div className="flex min-w-0 flex-1 flex-col">
@@ -516,15 +528,43 @@ export default function DashboardLayoutClient({ children }) {
                 </div>
                 <div className="h-8 w-px bg-zinc-200 dark:bg-zinc-700" aria-hidden />
                 <div className="min-w-0">
-                  <p className="truncate text-[11px] font-bold uppercase tracking-wide text-zinc-500 dark:text-zinc-400">
-                    Organization workspace
-                  </p>
-                  <p className="truncate text-xs font-semibold text-zinc-800 dark:text-zinc-100">
-                    Organization: {projectOrgLoading ? "Loading…" : projectOrgLabel || "Current organization"}
-                  </p>
-                  <p className="truncate text-[11px] font-bold uppercase tracking-wide text-primary">
-                    Role: {isOrgSession ? orgRoleName || "Organisation user" : PROJECT_ORG_ENTRY_ROLE_NAME}
-                  </p>
+                  {orgContext === "PRACTICE" || orgContext === "ASSESSMENT" ? (
+                    <>
+                      <p
+                        className={`truncate text-[11px] font-bold uppercase tracking-wide ${
+                          orgContext === "ASSESSMENT" ? "text-brand-red" : "text-primary"
+                        }`}
+                      >
+                        {orgContext === "ASSESSMENT"
+                          ? "Assessment project organisation"
+                          : "Practice project organisation"}
+                      </p>
+                      <p className="truncate text-xs font-semibold text-zinc-800 dark:text-zinc-100">
+                        {projectOrgLoading
+                          ? "Loading…"
+                          : projectOrgLabel || session?.activeOrgName || "Project organisation"}
+                      </p>
+                      <p className="truncate text-[11px] font-medium text-zinc-500 dark:text-zinc-400">
+                        Not your default My Organisation · Role: {PROJECT_ORG_ENTRY_ROLE_NAME}
+                      </p>
+                    </>
+                  ) : (
+                    <>
+                      <p className="truncate text-[11px] font-bold uppercase tracking-wide text-zinc-500 dark:text-zinc-400">
+                        Organization workspace
+                      </p>
+                      <p className="truncate text-xs font-semibold text-zinc-800 dark:text-zinc-100">
+                        Organization:{" "}
+                        {projectOrgLoading ? "Loading…" : projectOrgLabel || "Current organization"}
+                      </p>
+                      <p className="truncate text-[11px] font-bold uppercase tracking-wide text-primary">
+                        Role:{" "}
+                        {isOrgSession
+                          ? orgRoleName || "Organisation user"
+                          : PROJECT_ORG_ENTRY_ROLE_NAME}
+                      </p>
+                    </>
+                  )}
                 </div>
               </div>
             ) : (
@@ -588,6 +628,8 @@ export default function DashboardLayoutClient({ children }) {
           </div>
         </header>
 
+        <ActiveOrgContextBanner />
+
         <main
           id="main-content"
           className="flex-1 overflow-y-auto px-3 py-4 md:px-6 md:py-6"
@@ -596,6 +638,7 @@ export default function DashboardLayoutClient({ children }) {
           <div className={DASHBOARD_MAIN_INNER_CLASS}>
             <StudentModeBanner />
             <JoinAcademicYearPrompt />
+            <JoinPracticeProjectPrompt />
             {children}
           </div>
         </main>

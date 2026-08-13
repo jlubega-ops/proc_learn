@@ -57,7 +57,7 @@ export function OrgRequisitionDetailPanel({ projectId, requisitionId }) {
   const [history, setHistory] = useState(/** @type {any[]} */ ([]));
   const [decision, setDecision] = useState("APPROVE");
   const [comment, setComment] = useState("");
-  const [procurementMethod, setProcurementMethod] = useState("MICRO");
+  const [procurementMethod, setProcurementMethod] = useState("");
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -88,7 +88,7 @@ export function OrgRequisitionDetailPanel({ projectId, requisitionId }) {
               : "APPROVE",
       );
       setComment("");
-      setProcurementMethod("MICRO");
+      setProcurementMethod("");
     } finally {
       setLoading(false);
     }
@@ -274,8 +274,9 @@ export function OrgRequisitionDetailPanel({ projectId, requisitionId }) {
                 fullWidth
                 required
                 sx={themedTextFieldSx}
-                helperText="Starts the method workflow and creates a Procurement record."
+                helperText="Choose Micro, Quotation, or Tender. Recording this decision creates a Procurement record and starts that method’s workflow."
               >
+                <MenuItem value="">Select a method</MenuItem>
                 <MenuItem value="MICRO">Micro Procurement</MenuItem>
                 <MenuItem value="QUOTATION">Quotation</MenuItem>
                 <MenuItem value="TENDER">Tender</MenuItem>

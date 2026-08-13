@@ -204,6 +204,12 @@ async function main() {
       roster.students.some((r) => r.id === student.id),
       "Student appears on observation roster",
     );
+    const rosterRow = roster.students.find((r) => r.id === student.id);
+    assert(
+      rosterRow?.organisation?.projectId === org.id,
+      "Roster includes personal organisation",
+    );
+    assert(Boolean(rosterRow?.currentStageLabel), "Roster shows current procurement stage");
     assert(
       roster.academicYear?.id === uni.academicYear.id || !roster.academicYear,
       "Roster defaults around current AY",

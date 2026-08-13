@@ -395,26 +395,48 @@ export async function createProcurementFromApprovedRequisition(prisma, opts) {
     };
   }
 
-  if (req.procurementMethod) {
+  const existingProcurement = await prisma.projectOrgProcurement.findFirst({
+    where: { requisitionId: req.id },
+    include: procurementInclude,
+  });
+
+  // Retry / heal: method or procurement already saved, but the SELECT_METHOD
+  // task may still be open if the first click only partially succeeded.
+  if (existingProcurement) {
+    const existingMethod = String(existingProcurement.procurementMethod || "").toUpperCase();
+    if (existingMethod && existingMethod !== method) {
+      return {
+        ok: false,
+        error: `A procurement method (${existingMethod}) has already been selected for this requisition.`,
+        status: 400,
+        code: "METHOD_ALREADY_SELECTED",
+      };
+    }
     return {
-      ok: false,
-      error: `A procurement method (${req.procurementMethod}) has already been selected for this requisition.`,
-      status: 400,
-      code: "METHOD_ALREADY_SELECTED",
+      ok: true,
+      alreadySelected: true,
+      procurement: serializeProcurement(existingProcurement),
+      nextProcessQueued: METHOD_PROCESS_BY_ENUM[existingMethod || method]?.code || methodMeta.code,
+      nextProcessStarted: true,
+      workflow: null,
     };
   }
 
-  const existingProcurement = await prisma.projectOrgProcurement.findFirst({
-    where: { requisitionId: req.id },
-    select: { id: true, procurementNumber: true, status: true },
-  });
-  if (existingProcurement) {
-    return {
-      ok: false,
-      error: `This requisition has already been converted into procurement ${existingProcurement.procurementNumber}.`,
-      status: 400,
-      code: "PROCUREMENT_ALREADY_EXISTS",
-    };
+  if (req.procurementMethod) {
+    const stored = String(req.procurementMethod).toUpperCase();
+    if (stored !== method) {
+      return {
+        ok: false,
+        error: `A procurement method (${req.procurementMethod}) has already been selected for this requisition.`,
+        status: 400,
+        code: "METHOD_ALREADY_SELECTED",
+      };
+    }
+    // Orphan flag with no procurement row — clear and continue so the officer can finish.
+    await prisma.projectOrgRequisition.update({
+      where: { id: req.id },
+      data: { procurementMethod: null },
+    });
   }
 
   if (!req.financialYear?.isActive) {

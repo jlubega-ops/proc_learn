@@ -30,7 +30,7 @@ export default async function ProjectsPage() {
     <div className={BRAND_PAGE_SHELL_CLASS}>
       <DashboardPageIntro
         title="Projects"
-        description="Projects are the parent workspace for student practice and assessments. Access, enrollment, publishing, and submissions are role-aware."
+        description="Practice and Assessment projects you create for students. Student organisations are listed under Participation."
       />
       <Suspense fallback={<p className="text-sm text-zinc-500">Loading projects…</p>}>
         <ProjectsPanel />

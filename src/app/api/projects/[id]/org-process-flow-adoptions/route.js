@@ -17,6 +17,7 @@ import {
   serializeProjectOrgProcessFlowAdoption,
 } from "@/lib/projects/org-process-flow-adoptions";
 import { migrateLegacyProcessAdoptions } from "@/lib/projects/process-catalogue";
+import { resolveAllowedProcessCodesForOrgProject } from "@/lib/academic/assessment-config";
 
 export const runtime = "nodejs";
 
@@ -73,18 +74,26 @@ export async function GET(request, context) {
 
   const adoptionByFlowId = new Map(adoptedRows.map((row) => [row.processFlowId, row]));
 
+  const allowedCodes = await resolveAllowedProcessCodesForOrgProject(prisma, projectId);
+  const catalogueFiltered =
+    allowedCodes == null
+      ? catalogueRows
+      : catalogueRows.filter((row) => !row.code || allowedCodes.includes(row.code));
+
   return NextResponse.json({
     adopted: adoptedRows.map((row) => ({
       ...serializeProjectOrgProcessFlowAdoption(row),
       items: itemsByFlowId.get(row.processFlowId) || [],
     })),
     adoptedTotal: adoptedRows.length,
-    catalogue: catalogueRows.map((row) => ({
+    catalogue: catalogueFiltered.map((row) => ({
       ...serializeCatalogueProcessFlow(row, adoptionByFlowId),
       items: itemsByFlowId.get(row.id) || [],
     })),
-    total: catalogueRows.length,
+    total: catalogueFiltered.length,
     canAdopt,
+    restrictedByExaminer: allowedCodes != null,
+    allowedProcessCodes: allowedCodes,
   });
 }
 
@@ -126,11 +135,22 @@ export async function POST(request, context) {
 
   const processFlow = await prisma.projectOrgProcessFlow.findUnique({
     where: { id: processFlowId },
-    select: { id: true, name: true },
+    select: { id: true, name: true, code: true },
   });
   if (!processFlow) {
     return NextResponse.json(
       { error: "Selected process is not available.", fieldErrors: { processFlowId: "Choose a valid process." } },
+      { status: 400 },
+    );
+  }
+
+  const allowedCodes = await resolveAllowedProcessCodesForOrgProject(prisma, projectId);
+  if (allowedCodes && processFlow.code && !allowedCodes.includes(processFlow.code)) {
+    return NextResponse.json(
+      {
+        error: "This process is not available for this project.",
+        fieldErrors: { processFlowId: "The examiner did not allow this process." },
+      },
       { status: 400 },
     );
   }

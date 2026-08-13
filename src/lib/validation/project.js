@@ -94,6 +94,8 @@ export function validateProjectCreateInput({ body, activeRole }) {
 
   if (!name) errors.name = "Project name is required.";
   if (name.length > 255) errors.name = "Project name is too long.";
+  if (!organizationName) errors.organizationName = "Organisation name is required.";
+  if (organizationName.length > 255) errors.organizationName = "Organisation name is too long.";
 
   let purpose = PURPOSE_VALUES.has(purposeIn) ? purposeIn : ProjectPurpose.PRACTICE;
   let visibility = VISIBILITY_VALUES.has(visibilityIn)
@@ -102,7 +104,6 @@ export function validateProjectCreateInput({ body, activeRole }) {
 
   if (activeRole === Role.STUDENT) {
     purpose = ProjectPurpose.PRACTICE;
-    if (!organizationName) errors.organizationName = "Organisation name is required.";
   }
 
   const openAt = parseDate(body?.openAt);
@@ -125,17 +126,21 @@ export function validateProjectCreateInput({ body, activeRole }) {
   }
 
   let maxAttempts = null;
-  if (body?.maxAttempts !== undefined && body?.maxAttempts !== null && body?.maxAttempts !== "") {
-    const n = Number(body.maxAttempts);
-    if (!Number.isInteger(n) || n < 1 || n > 20) {
-      errors.maxAttempts = "Max attempts must be a whole number from 1 to 20.";
+  const maxRaw = body?.maxAttempts;
+  if (maxRaw === "unlimited" || maxRaw === "UNLIMITED" || maxRaw === "") {
+    maxAttempts = null;
+  } else if (maxRaw === null) {
+    // Explicit unlimited (e.g. existing DB null, or form choice)
+    maxAttempts = null;
+  } else if (maxRaw !== undefined) {
+    const n = Number(maxRaw);
+    if (!Number.isInteger(n) || n < 1 || n > 9) {
+      errors.maxAttempts = "Max attempts must be 1–9, or unlimited.";
     } else {
       maxAttempts = n;
     }
-  } else if (
-    activeRole !== Role.STUDENT &&
-    purpose === ProjectPurpose.ASSESSMENT
-  ) {
+  } else if (activeRole !== Role.STUDENT) {
+    // Create default: one attempt
     maxAttempts = 1;
   }
 
@@ -153,6 +158,31 @@ export function validateProjectCreateInput({ body, activeRole }) {
   if (activeRole !== Role.STUDENT && enrollmentAccessKey && !ACCESS_KEY_REGEX.test(enrollmentAccessKey)) {
     errors.enrollmentAccessKey =
       "Enrollment key must be exactly 5 characters, uppercase letters/numbers only (no 0,1,I,O).";
+  }
+
+  /** @type {string | null} */
+  let academicYearId = null;
+  /** @type {string | null} */
+  let semesterId = null;
+  /** @type {string | null} */
+  let programmeId = null;
+
+  if (activeRole !== Role.STUDENT) {
+    academicYearId =
+      typeof body?.academicYearId === "string" && body.academicYearId.trim()
+        ? body.academicYearId.trim()
+        : null;
+    semesterId =
+      typeof body?.semesterId === "string" && body.semesterId.trim()
+        ? body.semesterId.trim()
+        : null;
+    programmeId =
+      typeof body?.programmeId === "string" && body.programmeId.trim()
+        ? body.programmeId.trim()
+        : null;
+    if (!academicYearId) errors.academicYearId = "Choose an academic year.";
+    if (!semesterId) errors.semesterId = "Choose a semester.";
+    if (!programmeId) errors.programmeId = "Choose a programme.";
   }
 
   return {
@@ -174,6 +204,9 @@ export function validateProjectCreateInput({ body, activeRole }) {
       maxAttempts,
       allowEditAfterSubmit,
       isPublished: body?.isPublished === true,
+      academicYearId,
+      semesterId,
+      programmeId,
     },
   };
 }

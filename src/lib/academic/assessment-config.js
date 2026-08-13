@@ -1,23 +1,21 @@
 /**
- * Examiner assessment configuration (checkpoints + scoring mode).
+ * Examiner assessment configuration — automatic process completion against a grading scale.
  */
-import {
-  AssessmentCheckpointKind,
-  AssessmentGradingMode,
-  OrgProcurementMethod,
-} from "@prisma/client";
+import { AssessmentGradingMode } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { AuditEvent, writeAuditLog } from "@/lib/audit-log";
-import { OBSERVATION_STAGE_KEYS, OBSERVATION_STAGE_LABELS } from "@/lib/projects/derive-org-progress";
 import { getOrCreateProjectAssessment } from "@/lib/academic/assessment-evaluate";
+import { humanGradingMode, computeFinalScore } from "@/lib/academic/assessment-scoring";
 import {
-  humanGradingMode,
-  computeFinalScore,
-} from "@/lib/academic/assessment-scoring";
-
-const CHECKPOINT_KINDS = new Set(Object.values(AssessmentCheckpointKind));
-const GRADING_MODES = new Set(Object.values(AssessmentGradingMode));
-const METHODS = new Set(Object.values(OrgProcurementMethod));
+  ASSESSMENT_PASS_MARK_PRESETS,
+  ASSESSMENT_PROCESS_CATALOGUE,
+  DEFAULT_ASSESSMENT_PASS_MARK,
+  DEFAULT_ASSESSMENT_TOTAL_MARKS,
+  assessmentProcessMeta,
+  processDisableBlockers,
+  redistributeProcessMarks,
+  validateAllowedProcessSet,
+} from "@/lib/academic/assessment-process-catalogue";
 
 /**
  * @param {unknown} value
@@ -31,188 +29,150 @@ function cleanText(value) {
  */
 export function serializeAssessmentConfig(assessment) {
   if (!assessment) return null;
-  const checkpoints = (assessment.checkpoints || []).filter((c) => c.isActive !== false);
-  const autoMaxMarks = checkpoints.reduce((s, c) => s + Math.max(0, c.marks || 0), 0);
-  const manualMax =
-    assessment.gradingMode === AssessmentGradingMode.AUTOMATIC
-      ? 0
-      : Math.max(0, assessment.manualMaxMarks || 0);
+  const processes = (assessment.processes || []).map((p) => {
+    const meta = assessmentProcessMeta(p.processCode);
+    return {
+      id: p.id,
+      processCode: p.processCode,
+      name: meta?.name || p.processCode,
+      summary: meta?.summary || "",
+      group: meta?.group || "CORE",
+      dependsOn: meta?.dependsOn || [],
+      dependsOnAny: meta?.dependsOnAny || [],
+      sortOrder: p.sortOrder,
+      isAllowed: p.isAllowed !== false,
+      marks: p.marks,
+      marksPinned: Boolean(p.marksPinned),
+      disableBlockers: [],
+    };
+  });
+  const allowedCodes = processes.filter((p) => p.isAllowed).map((p) => p.processCode);
+  for (const row of processes) {
+    row.disableBlockers = processDisableBlockers(row.processCode, allowedCodes);
+  }
+  const autoMaxMarks = processes
+    .filter((p) => p.isAllowed)
+    .reduce((s, p) => s + Math.max(0, p.marks || 0), 0);
+  const totalMarks = Math.max(0, assessment.totalMarks || autoMaxMarks || DEFAULT_ASSESSMENT_TOTAL_MARKS);
   return {
     id: assessment.id,
     projectId: assessment.projectId,
-    gradingMode: assessment.gradingMode,
-    gradingModeLabel: humanGradingMode(assessment.gradingMode),
-    manualMaxMarks: manualMax,
+    gradingMode: AssessmentGradingMode.AUTOMATIC,
+    gradingModeLabel: humanGradingMode(AssessmentGradingMode.AUTOMATIC),
+    manualMaxMarks: 0,
     autoMaxMarks,
-    totalPossibleMarks: autoMaxMarks + manualMax,
+    totalMarks,
+    totalPossibleMarks: totalMarks,
     passMarkPercent: assessment.passMarkPercent,
+    scoringEnabled: assessment.scoringEnabled !== false,
     resultsReleased: assessment.resultsReleased,
     scoringRule:
-      "Final score = min(auto score + manual score, total possible). Pass when final % ≥ pass mark.",
-    checkpoints: (assessment.checkpoints || []).map((c) => ({
-      id: c.id,
-      sortOrder: c.sortOrder,
-      label: c.label,
-      kind: c.kind,
-      stageKey: c.stageKey,
-      stageLabel: c.stageKey ? OBSERVATION_STAGE_LABELS[c.stageKey] || c.stageKey : null,
-      procurementMethod: c.procurementMethod,
-      marks: c.marks,
-      isActive: c.isActive,
-    })),
+      "Automatic: each allowed process scores its marks when that process is completed in the organisation. Pass when final % ≥ pass mark.",
+    processes,
+    checkpoints: [],
     createdAt: assessment.createdAt,
     updatedAt: assessment.updatedAt,
   };
 }
 
-export function assessmentCheckpointCatalogue() {
+export function assessmentScoringCatalogue() {
   return {
-    kinds: [
-      {
-        value: AssessmentCheckpointKind.STAGE_COMPLETED,
-        label: "Stage completed",
-        needsStage: true,
-      },
-      {
-        value: AssessmentCheckpointKind.STAGE_REACHED,
-        label: "Stage reached",
-        needsStage: true,
-      },
-      {
-        value: AssessmentCheckpointKind.PROCUREMENT_METHOD,
-        label: "Correct procurement method",
-        needsMethod: true,
-      },
-      {
-        value: AssessmentCheckpointKind.ATTEMPT_SUBMITTED,
-        label: "Attempt submitted",
-      },
-    ],
-    stages: OBSERVATION_STAGE_KEYS.map((key) => ({
-      value: key,
-      label: OBSERVATION_STAGE_LABELS[key],
+    passMarkPresets: ASSESSMENT_PASS_MARK_PRESETS,
+    defaultTotalMarks: DEFAULT_ASSESSMENT_TOTAL_MARKS,
+    defaultPassMarkPercent: DEFAULT_ASSESSMENT_PASS_MARK,
+    processes: ASSESSMENT_PROCESS_CATALOGUE.map((p) => ({
+      code: p.code,
+      name: p.name,
+      summary: p.summary,
+      dependsOn: p.dependsOn,
+      dependsOnAny: p.dependsOnAny || [],
+      group: p.group,
     })),
-    methods: Object.values(OrgProcurementMethod).map((value) => ({
-      value,
-      label: value.charAt(0) + value.slice(1).toLowerCase(),
-    })),
-    gradingModes: [
-      { value: AssessmentGradingMode.AUTOMATIC, label: "Automatic only" },
-      { value: AssessmentGradingMode.MANUAL, label: "Manual only" },
-      { value: AssessmentGradingMode.COMBINED, label: "Automatic + manual" },
-    ],
   };
+}
+
+/** @deprecated use assessmentScoringCatalogue */
+export function assessmentCheckpointCatalogue() {
+  return assessmentScoringCatalogue();
 }
 
 /**
  * @param {any} body
  */
-export function validateAssessmentConfigInput(body) {
+export function validateAssessmentProcessConfig(body) {
   /** @type {Record<string, string>} */
   const errors = {};
-  const modeIn = cleanText(body?.gradingMode).toUpperCase();
-  const gradingMode = GRADING_MODES.has(modeIn)
-    ? modeIn
-    : AssessmentGradingMode.COMBINED;
 
-  let passMarkPercent = 50;
+  let totalMarks = DEFAULT_ASSESSMENT_TOTAL_MARKS;
+  if (body?.totalMarks !== undefined && body?.totalMarks !== "") {
+    const n = Number(body.totalMarks);
+    if (!Number.isInteger(n) || n < 10 || n > 1000) {
+      errors.totalMarks = "Total marks must be a whole number from 10 to 1000.";
+    } else {
+      totalMarks = n;
+    }
+  }
+
+  let passMarkPercent = DEFAULT_ASSESSMENT_PASS_MARK;
   if (body?.passMarkPercent !== undefined && body?.passMarkPercent !== "") {
     const n = Number(body.passMarkPercent);
-    if (!Number.isInteger(n) || n < 0 || n > 100) {
-      errors.passMarkPercent = "Pass mark must be a whole number from 0 to 100.";
+    if (!Number.isInteger(n) || n < 1 || n > 100) {
+      errors.passMarkPercent = "Pass mark must be a whole number from 1 to 100.";
     } else {
       passMarkPercent = n;
     }
   }
 
-  let manualMaxMarks = 0;
-  if (body?.manualMaxMarks !== undefined && body?.manualMaxMarks !== "") {
-    const n = Number(body.manualMaxMarks);
-    if (!Number.isInteger(n) || n < 0 || n > 1000) {
-      errors.manualMaxMarks = "Manual marks must be a whole number from 0 to 1000.";
-    } else {
-      manualMaxMarks = n;
-    }
-  }
-
-  if (gradingMode === AssessmentGradingMode.AUTOMATIC) {
-    manualMaxMarks = 0;
-  } else if (
-    gradingMode === AssessmentGradingMode.MANUAL &&
-    manualMaxMarks <= 0
-  ) {
-    errors.manualMaxMarks = "Manual assessment needs a manual marks total greater than 0.";
-  } else if (
-    gradingMode === AssessmentGradingMode.COMBINED &&
-    manualMaxMarks < 0
-  ) {
-    errors.manualMaxMarks = "Manual marks cannot be negative.";
-  }
-
-  const rawCheckpoints = Array.isArray(body?.checkpoints) ? body.checkpoints : [];
-  /** @type {any[]} */
-  const checkpoints = [];
-  rawCheckpoints.forEach((raw, index) => {
-    const label = cleanText(raw?.label) || `Checkpoint ${index + 1}`;
-    const kindIn = cleanText(raw?.kind).toUpperCase();
-    if (!CHECKPOINT_KINDS.has(kindIn)) {
-      errors[`checkpoints.${index}.kind`] = "Choose a valid checkpoint type.";
+  const byCode = new Map(ASSESSMENT_PROCESS_CATALOGUE.map((p) => [p.code, p]));
+  const raw = Array.isArray(body?.processes) ? body.processes : [];
+  /** @type {Array<{ processCode: string; isAllowed: boolean; marks: number; marksPinned: boolean }>} */
+  const incoming = [];
+  raw.forEach((row, index) => {
+    const code = cleanText(row?.processCode).toUpperCase();
+    if (!byCode.has(code)) {
+      errors[`processes.${index}.processCode`] = "Unknown process.";
       return;
     }
-    const marks = Number(raw?.marks);
-    if (!Number.isInteger(marks) || marks < 0 || marks > 500) {
-      errors[`checkpoints.${index}.marks`] = "Marks must be a whole number from 0 to 500.";
-      return;
-    }
-    let stageKey = cleanText(raw?.stageKey).toUpperCase() || null;
-    let procurementMethod = cleanText(raw?.procurementMethod).toUpperCase() || null;
-    if (
-      kindIn === AssessmentCheckpointKind.STAGE_COMPLETED ||
-      kindIn === AssessmentCheckpointKind.STAGE_REACHED
-    ) {
-      if (!stageKey || !OBSERVATION_STAGE_KEYS.includes(stageKey)) {
-        errors[`checkpoints.${index}.stageKey`] = "Choose a procurement stage.";
-        return;
-      }
-      procurementMethod = null;
-    } else if (kindIn === AssessmentCheckpointKind.PROCUREMENT_METHOD) {
-      if (!procurementMethod || !METHODS.has(procurementMethod)) {
-        errors[`checkpoints.${index}.procurementMethod`] =
-          "Choose a procurement method.";
-        return;
-      }
-      stageKey = null;
-    } else {
-      stageKey = null;
-      procurementMethod = null;
-    }
-    checkpoints.push({
-      label: label.slice(0, 255),
-      kind: kindIn,
-      stageKey,
-      procurementMethod,
-      marks,
-      sortOrder: index,
-      isActive: raw?.isActive === false ? false : true,
+    incoming.push({
+      processCode: code,
+      isAllowed: row?.isAllowed !== false,
+      marksPinned: row?.marksPinned === true,
+      marks: Math.max(0, Math.round(Number(row?.marks) || 0)),
     });
   });
 
-  if (
-    gradingMode !== AssessmentGradingMode.MANUAL &&
-    checkpoints.filter((c) => c.isActive).length === 0
-  ) {
-    errors.checkpoints = "Add at least one checkpoint for automatic scoring.";
-  }
+  const merged = ASSESSMENT_PROCESS_CATALOGUE.map((meta) => {
+    const found = incoming.find((r) => r.processCode === meta.code);
+    return (
+      found || {
+        processCode: meta.code,
+        isAllowed: true,
+        marksPinned: false,
+        marks: 0,
+      }
+    );
+  });
+
+  const allowedCodes = merged.filter((p) => p.isAllowed).map((p) => p.processCode);
+  const depErrors = validateAllowedProcessSet(allowedCodes);
+  if (depErrors.length) errors.processes = depErrors[0];
+
+  const split = redistributeProcessMarks(merged, totalMarks);
+  if (!split.ok && split.error) errors.marks = split.error;
+
+  const scoringEnabled = body?.scoringEnabled !== false;
 
   return {
     ok: Object.keys(errors).length === 0,
     errors,
     data: {
-      gradingMode,
+      gradingMode: AssessmentGradingMode.AUTOMATIC,
+      manualMaxMarks: 0,
       passMarkPercent,
-      manualMaxMarks,
+      totalMarks,
+      scoringEnabled,
       resultsReleased: body?.resultsReleased === true,
-      checkpoints,
+      processes: split.rows,
     },
   };
 }
@@ -227,21 +187,58 @@ export function validateAssessmentConfigInput(body) {
  */
 export async function upsertProjectAssessmentConfig(opts) {
   const db = opts.db || prisma;
-  const validated = validateAssessmentConfigInput(opts.body);
+  const project = await db.project.findUnique({ where: { id: opts.projectId } });
+  if (!project || project.isPersonalOrg || project.isAttemptOrg) {
+    const err = new Error("Not found.");
+    // @ts-ignore
+    err.code = "NOT_FOUND";
+    throw err;
+  }
+
+  // Practice: allow toggling scoring on/off without requiring full process payload.
+  if (
+    opts.body?.action === "enable_scoring" ||
+    opts.body?.action === "disable_scoring" ||
+    (opts.body?.scoringEnabled !== undefined && !Array.isArray(opts.body?.processes))
+  ) {
+    const enable =
+      opts.body?.action === "enable_scoring"
+        ? true
+        : opts.body?.action === "disable_scoring"
+          ? false
+          : opts.body?.scoringEnabled !== false;
+    let assessment = await getOrCreateProjectAssessment(db, {
+      projectId: opts.projectId,
+      createIfMissing: true,
+      scoringEnabled: enable,
+    });
+    assessment = await db.projectAssessment.update({
+      where: { id: assessment.id },
+      data: { scoringEnabled: enable },
+      include: {
+        checkpoints: { orderBy: { sortOrder: "asc" } },
+        processes: { orderBy: { sortOrder: "asc" } },
+      },
+    });
+    await writeAuditLog({
+      eventType: AuditEvent.PROJECT_ASSESSMENT_UPDATED,
+      actorUserId: opts.actorUserId,
+      meta: {
+        projectId: opts.projectId,
+        assessmentId: assessment.id,
+        scoringEnabled: enable,
+      },
+    });
+    return serializeAssessmentConfig(assessment);
+  }
+
+  const validated = validateAssessmentProcessConfig(opts.body);
   if (!validated.ok) {
     const err = new Error("Please fix the highlighted fields.");
     // @ts-ignore
     err.code = "VALIDATION";
     // @ts-ignore
     err.errors = validated.errors;
-    throw err;
-  }
-
-  const project = await db.project.findUnique({ where: { id: opts.projectId } });
-  if (!project || project.isPersonalOrg) {
-    const err = new Error("Not found.");
-    // @ts-ignore
-    err.code = "NOT_FOUND";
     throw err;
   }
 
@@ -254,35 +251,44 @@ export async function upsertProjectAssessmentConfig(opts) {
       ? await tx.projectAssessment.update({
           where: { id: existing.id },
           data: {
-            gradingMode: validated.data.gradingMode,
-            manualMaxMarks: validated.data.manualMaxMarks,
+            gradingMode: AssessmentGradingMode.AUTOMATIC,
+            manualMaxMarks: 0,
             passMarkPercent: validated.data.passMarkPercent,
+            totalMarks: validated.data.totalMarks,
+            scoringEnabled: validated.data.scoringEnabled,
             resultsReleased: validated.data.resultsReleased,
           },
         })
       : await tx.projectAssessment.create({
           data: {
             projectId: opts.projectId,
-            gradingMode: validated.data.gradingMode,
-            manualMaxMarks: validated.data.manualMaxMarks,
+            gradingMode: AssessmentGradingMode.AUTOMATIC,
+            manualMaxMarks: 0,
             passMarkPercent: validated.data.passMarkPercent,
+            totalMarks: validated.data.totalMarks,
+            scoringEnabled: validated.data.scoringEnabled,
             resultsReleased: validated.data.resultsReleased,
           },
         });
 
-    await tx.assessmentCheckpoint.deleteMany({ where: { assessmentId: row.id } });
-    if (validated.data.checkpoints.length > 0) {
-      await tx.assessmentCheckpoint.createMany({
-        data: validated.data.checkpoints.map((c) => ({
-          assessmentId: row.id,
-          ...c,
-        })),
-      });
-    }
+    await tx.assessmentProcess.deleteMany({ where: { assessmentId: row.id } });
+    await tx.assessmentProcess.createMany({
+      data: validated.data.processes.map((p, index) => ({
+        assessmentId: row.id,
+        processCode: p.processCode,
+        sortOrder: index,
+        isAllowed: p.isAllowed,
+        marks: p.marks,
+        marksPinned: p.marksPinned,
+      })),
+    });
 
     return tx.projectAssessment.findUnique({
       where: { id: row.id },
-      include: { checkpoints: { orderBy: { sortOrder: "asc" } } },
+      include: {
+        checkpoints: { orderBy: { sortOrder: "asc" } },
+        processes: { orderBy: { sortOrder: "asc" } },
+      },
     });
   });
 
@@ -294,15 +300,54 @@ export async function upsertProjectAssessmentConfig(opts) {
     meta: {
       projectId: opts.projectId,
       assessmentId: assessment?.id,
-      gradingMode: validated.data.gradingMode,
-      checkpointCount: validated.data.checkpoints.length,
-      manualMaxMarks: validated.data.manualMaxMarks,
+      gradingMode: AssessmentGradingMode.AUTOMATIC,
+      totalMarks: validated.data.totalMarks,
+      scoringEnabled: validated.data.scoringEnabled,
+      allowedProcessCount: validated.data.processes.filter((p) => p.isAllowed).length,
       passMarkPercent: validated.data.passMarkPercent,
       resultsReleased: validated.data.resultsReleased,
     },
   });
 
   return serializeAssessmentConfig(assessment);
+}
+
+/**
+ * Allowed engine process codes for an Academic Project. Null means unrestricted (default org).
+ * @param {import("@prisma/client").PrismaClient} db
+ * @param {string} academicProjectId
+ * @returns {Promise<string[] | null>}
+ */
+export async function resolveAllowedProcessCodes(db, academicProjectId) {
+  if (!academicProjectId) return null;
+  const assessment = await db.projectAssessment.findUnique({
+    where: { projectId: academicProjectId },
+    include: { processes: true },
+  });
+  if (!assessment?.processes?.length) return null;
+  const allowed = assessment.processes.filter((p) => p.isAllowed !== false).map((p) => p.processCode);
+  return allowed.length ? allowed : [];
+}
+
+/**
+ * @param {import("@prisma/client").PrismaClient} db
+ * @param {string} orgProjectId
+ * @returns {Promise<string[] | null>} null = show full catalogue (personal org)
+ */
+export async function resolveAllowedProcessCodesForOrgProject(db, orgProjectId) {
+  const project = await db.project.findUnique({
+    where: { id: orgProjectId },
+    select: {
+      isPersonalOrg: true,
+      isAttemptOrg: true,
+      sourceAcademicProjectId: true,
+    },
+  });
+  if (!project || project.isPersonalOrg || !project.isAttemptOrg || !project.sourceAcademicProjectId) {
+    return null;
+  }
+  const allowed = await resolveAllowedProcessCodes(db, project.sourceAcademicProjectId);
+  return allowed;
 }
 
 /**
@@ -329,7 +374,10 @@ export async function setAssessmentResultsReleased(opts) {
   assessment = await db.projectAssessment.update({
     where: { id: assessment.id },
     data: { resultsReleased: Boolean(opts.resultsReleased) },
-    include: { checkpoints: { orderBy: { sortOrder: "asc" } } },
+    include: {
+      checkpoints: { orderBy: { sortOrder: "asc" } },
+      processes: { orderBy: { sortOrder: "asc" } },
+    },
   });
 
   if (opts.resultsReleased) {
@@ -344,3 +392,4 @@ export async function setAssessmentResultsReleased(opts) {
 }
 
 export { computeFinalScore, getOrCreateProjectAssessment };
+export { validateAssessmentProcessConfig as validateAssessmentConfigInput };

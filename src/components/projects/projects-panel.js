@@ -43,6 +43,7 @@ import { useRouter, useSearchParams } from "next/navigation";
 import { format, isValid, parseISO } from "date-fns";
 import { useToast } from "@/components/providers/toast-provider";
 import { useAuthSession } from "@/components/providers/auth-session-provider";
+import { sanitizeRichHtml } from "@/lib/sanitize-rich-html";
 import {
   adminCenteredLoadingBoxSx,
   adminDialogPaperSx,
@@ -67,9 +68,8 @@ const STUDENT_FILTERS = [
 ];
 
 const STAFF_SCOPE_FILTERS = [
-  { value: "all", label: "All" },
-  { value: "student", label: "Student" },
-  { value: "examiner", label: "Examiner" },
+  { value: "examiner", label: "Examiner projects" },
+  { value: "student", label: "Student projects" },
 ];
 
 const STAFF_PURPOSE_FILTERS = [
@@ -170,11 +170,15 @@ function defaultForm() {
     closeAt: "",
     durationHours: "0",
     durationMinutes: "0",
+    maxAttempts: "1",
     instructions: "",
     questionText: "",
     questionFileUrl: "",
     enrollmentAccessKey: "",
     isPublished: false,
+    academicYearId: "",
+    semesterId: "",
+    programmeId: "",
   };
 }
 
@@ -195,7 +199,7 @@ function validateClientForm(activeRole, form) {
   /** @type {Record<string, string>} */
   const errors = {};
   if (!String(form.name || "").trim()) errors.name = "Project name is required.";
-  if (activeRole === "STUDENT" && !String(form.organizationName || "").trim()) {
+  if (!String(form.organizationName || "").trim()) {
     errors.organizationName = "Organisation name is required.";
   }
   const dateRange = validateDateTimeRange(form.openAt, form.closeAt);
@@ -239,6 +243,17 @@ function validateClientForm(activeRole, form) {
         "Use exactly 5 chars (A-Z, 2-9), excluding confusing characters like 0/1/I/O.";
     }
   }
+  if (activeRole !== "STUDENT") {
+    if (!String(form.academicYearId || "").trim()) {
+      errors.academicYearId = "Choose an academic year.";
+    }
+    if (!String(form.semesterId || "").trim()) {
+      errors.semesterId = "Choose a semester.";
+    }
+    if (!String(form.programmeId || "").trim()) {
+      errors.programmeId = "Choose a programme.";
+    }
+  }
   return errors;
 }
 
@@ -263,15 +278,23 @@ export function ProjectsPanel() {
   const [rowsPerPage, setRowsPerPage] = useState(10);
   const [total, setTotal] = useState(0);
   const [filter, setFilter] = useState("all");
-  const [staffScope, setStaffScope] = useState("all");
+  const [staffScope, setStaffScope] = useState("examiner");
   const [staffPurpose, setStaffPurpose] = useState("all");
   const [staffStatus, setStaffStatus] = useState("all");
   const [openStatus, setOpenStatus] = useState("open");
+  const [filterAcademicYearId, setFilterAcademicYearId] = useState("");
+  const [filterSemesterId, setFilterSemesterId] = useState("");
+  const [filterProgrammeId, setFilterProgrammeId] = useState("");
+  const [academicYears, setAcademicYears] = useState(/** @type {any[]} */ ([]));
+  const [semesters, setSemesters] = useState(/** @type {any[]} */ ([]));
+  const [programmes, setProgrammes] = useState(/** @type {any[]} */ ([]));
+  const [metaReady, setMetaReady] = useState(false);
 
   const [openEditor, setOpenEditor] = useState(false);
   const [busyEditor, setBusyEditor] = useState(false);
   const [editingId, setEditingId] = useState("");
   const [editingManagedStudent, setEditingManagedStudent] = useState(false);
+  const [isDuplicateDraft, setIsDuplicateDraft] = useState(false);
   const [form, setForm] = useState(defaultForm());
   const [fieldErrors, setFieldErrors] = useState({});
 
@@ -325,9 +348,13 @@ export function ProjectsPanel() {
         });
         qp.set("filter", filter);
         if (isExaminer || isSystemAdmin) {
-          qp.set("scope", staffScope);
+          if (isSystemAdmin) qp.set("scope", staffScope);
+          else qp.set("scope", "examiner");
           qp.set("purpose", staffPurpose);
           qp.set("status", staffStatus);
+          if (filterAcademicYearId) qp.set("academicYearId", filterAcademicYearId);
+          if (filterSemesterId) qp.set("semesterId", filterSemesterId);
+          if (filterProgrammeId) qp.set("programmeId", filterProgrammeId);
         }
         qp.set("openStatus", openStatus);
         const res = await fetch(`/api/projects?${qp.toString()}`, {
@@ -359,19 +386,101 @@ export function ProjectsPanel() {
       staffPurpose,
       staffStatus,
       openStatus,
+      filterAcademicYearId,
+      filterSemesterId,
+      filterProgrammeId,
       showToast,
     ],
   );
 
   useEffect(() => {
+    if (!isExaminerLike) return undefined;
+    let cancelled = false;
+    (async () => {
+      try {
+        const [yearsRes, progRes] = await Promise.all([
+          fetch("/api/admin/academic-years", { credentials: "include" }),
+          fetch("/api/programmes", { credentials: "include" }),
+        ]);
+        const yearsJson = await yearsRes.json().catch(() => ({}));
+        const progJson = await progRes.json().catch(() => ({}));
+        if (cancelled) return;
+        const years = Array.isArray(yearsJson.academicYears) ? yearsJson.academicYears : [];
+        const progs = Array.isArray(progJson.programmes) ? progJson.programmes : [];
+        setAcademicYears(years);
+        setProgrammes(progs);
+        const currentYear = years.find((y) => y.isCurrent) || years[0] || null;
+        const defaultProgramme = progs.find((p) => p.shortName === "GEN") || progs[0] || null;
+        if (!filterAcademicYearId && currentYear?.id) setFilterAcademicYearId(currentYear.id);
+        if (!filterProgrammeId && defaultProgramme?.id) setFilterProgrammeId(defaultProgramme.id);
+        setMetaReady(true);
+      } catch {
+        if (!cancelled) setMetaReady(true);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [isExaminerLike]);
+
+  useEffect(() => {
+    if (!isExaminerLike || !filterAcademicYearId) {
+      setSemesters([]);
+      return undefined;
+    }
+    let cancelled = false;
+    (async () => {
+      const res = await fetch(
+        `/api/admin/semesters?academicYearId=${encodeURIComponent(filterAcademicYearId)}`,
+        { credentials: "include" },
+      );
+      const json = await res.json().catch(() => ({}));
+      if (cancelled) return;
+      const list = Array.isArray(json.semesters) ? json.semesters : [];
+      setSemesters(list);
+      const active = list.find((s) => s.isActive) || list[0] || null;
+      setFilterSemesterId((prev) => {
+        if (prev && list.some((s) => s.id === prev)) return prev;
+        return active?.id || "";
+      });
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [isExaminerLike, filterAcademicYearId]);
+
+  useEffect(() => {
+    if (!isExaminerLike || !form.academicYearId || !openEditor) return undefined;
+    let cancelled = false;
+    (async () => {
+      const res = await fetch(
+        `/api/admin/semesters?academicYearId=${encodeURIComponent(form.academicYearId)}`,
+        { credentials: "include" },
+      );
+      const json = await res.json().catch(() => ({}));
+      if (cancelled) return;
+      const list = Array.isArray(json.semesters) ? json.semesters : [];
+      setSemesters((prev) => {
+        const byId = new Map(prev.map((s) => [s.id, s]));
+        for (const s of list) byId.set(s.id, s);
+        return [...byId.values()];
+      });
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [isExaminerLike, form.academicYearId, openEditor]);
+
+  useEffect(() => {
     if (sessionLoading) return;
+    if (isExaminerLike && !metaReady) return;
     void load();
-  }, [load, sessionLoading]);
+  }, [load, sessionLoading, isExaminerLike, metaReady]);
 
   useEffect(() => {
     setFilter("all");
     setPage(0);
-    setStaffScope("all");
+    setStaffScope("examiner");
     setStaffPurpose("all");
     setStaffStatus("all");
     setOpenStatus("open");
@@ -379,15 +488,17 @@ export function ProjectsPanel() {
 
   useEffect(() => {
     const scope = searchParams.get("scope");
-    if (scope === "student" && (isExaminer || isSystemAdmin)) {
+    // Student organisations are listed under Participation — only optional student-created projects here.
+    if (scope === "student" && isSystemAdmin) {
       setStaffScope("student");
       setPage(0);
     }
-  }, [searchParams, isExaminer, isSystemAdmin]);
+  }, [searchParams, isSystemAdmin]);
 
   const resetEditorState = useCallback(() => {
     setEditingId("");
     setEditingManagedStudent(false);
+    setIsDuplicateDraft(false);
     setForm(defaultForm());
     setFieldErrors({});
     setOpenEditor(false);
@@ -395,11 +506,24 @@ export function ProjectsPanel() {
 
   const openCreate = () => {
     setEditingId("");
+    setIsDuplicateDraft(false);
+    const currentYear = academicYears.find((y) => y.isCurrent) || academicYears[0];
+    const yearId = currentYear?.id || filterAcademicYearId || "";
+    const yearSemesters = semesters.filter((s) => s.academicYearId === yearId);
+    const activeSem = yearSemesters.find((s) => s.isActive) || yearSemesters[0];
+    const defaultProgramme =
+      programmes.find((p) => p.id === filterProgrammeId) ||
+      programmes.find((p) => p.shortName === "GEN") ||
+      programmes[0];
     setForm({
       ...defaultForm(),
       visibility: isStudent ? "PRIVATE" : "PUBLIC",
-      purpose: isStudent ? "PRACTICE" : "PRACTICE",
+      purpose: "PRACTICE",
       isPublished: isStudent,
+      enrollmentAccessKey: isStudent ? "" : generateEnrollmentAccessKey(),
+      academicYearId: yearId,
+      semesterId: activeSem?.id || filterSemesterId || "",
+      programmeId: defaultProgramme?.id || "",
     });
     setFieldErrors({});
     setInstructionsEditorReady(false);
@@ -410,6 +534,7 @@ export function ProjectsPanel() {
   const openEdit = (row, managedStudent = false) => {
     setEditingId(row.id);
     setEditingManagedStudent(Boolean(managedStudent));
+    setIsDuplicateDraft(false);
     setForm({
       name: row.name || "",
       description: row.description || "",
@@ -420,11 +545,47 @@ export function ProjectsPanel() {
       closeAt: row.closeAt ? new Date(row.closeAt).toISOString().slice(0, 16) : "",
       durationHours: row.durationSeconds ? String(Math.floor(row.durationSeconds / 3600)) : "0",
       durationMinutes: row.durationSeconds ? String(Math.floor((row.durationSeconds % 3600) / 60)) : "0",
+      maxAttempts:
+        row.maxAttempts == null || row.maxAttempts === 0 ? "unlimited" : String(row.maxAttempts),
       instructions: row.instructions || "",
       questionText: row.questionText || "",
       questionFileUrl: row.questionFileUrl || "",
       enrollmentAccessKey: row.enrollmentKey || "",
       isPublished: Boolean(row.isPublished),
+      academicYearId: row.academicYearId || row.academicYear?.id || "",
+      semesterId: row.semesterId || row.semester?.id || "",
+      programmeId: row.programmeId || row.programme?.id || "",
+    });
+    setFieldErrors({});
+    setInstructionsEditorReady(false);
+    setQuestionEditorReady(false);
+    setOpenEditor(true);
+  };
+
+  const openDuplicate = (row) => {
+    setEditingId("");
+    setEditingManagedStudent(false);
+    setIsDuplicateDraft(true);
+    setForm({
+      name: `Copy of ${row.name || "project"}`.slice(0, 255),
+      description: row.description || "",
+      organizationName: row.organizationName || "",
+      purpose: row.purpose || "PRACTICE",
+      visibility: "PUBLIC",
+      openAt: row.openAt ? new Date(row.openAt).toISOString().slice(0, 16) : "",
+      closeAt: row.closeAt ? new Date(row.closeAt).toISOString().slice(0, 16) : "",
+      durationHours: row.durationSeconds ? String(Math.floor(row.durationSeconds / 3600)) : "0",
+      durationMinutes: row.durationSeconds ? String(Math.floor((row.durationSeconds % 3600) / 60)) : "0",
+      maxAttempts:
+        row.maxAttempts == null || row.maxAttempts === 0 ? "unlimited" : String(row.maxAttempts),
+      instructions: row.instructions || "",
+      questionText: row.questionText || "",
+      questionFileUrl: row.questionFileUrl || "",
+      enrollmentAccessKey: generateEnrollmentAccessKey(),
+      isPublished: false,
+      academicYearId: row.academicYearId || row.academicYear?.id || filterAcademicYearId || "",
+      semesterId: row.semesterId || row.semester?.id || filterSemesterId || "",
+      programmeId: row.programmeId || row.programme?.id || filterProgrammeId || "",
     });
     setFieldErrors({});
     setInstructionsEditorReady(false);
@@ -452,14 +613,19 @@ export function ProjectsPanel() {
         questionText: String(form.questionText || "").trim(),
         questionFileUrl: String(form.questionFileUrl || "").trim(),
         enrollmentAccessKey: String(form.enrollmentAccessKey || "").trim().toUpperCase(),
+        academicYearId: String(form.academicYearId || "").trim(),
+        semesterId: String(form.semesterId || "").trim(),
+        programmeId: String(form.programmeId || "").trim(),
         duration:
           formRole !== "STUDENT" &&
           Number(form.durationHours || 0) * 60 + Number(form.durationMinutes || 0) > 0
             ? `${Number(form.durationHours || 0)}h ${Number(form.durationMinutes || 0)}m`
             : "",
+        maxAttempts: formRole === "STUDENT" ? undefined : form.maxAttempts || "1",
       };
-      const res = await fetch(editingId ? `/api/projects/${editingId}` : "/api/projects", {
-        method: editingId ? "PATCH" : "POST",
+      const isCreate = !editingId || isDuplicateDraft;
+      const res = await fetch(isCreate ? "/api/projects" : `/api/projects/${editingId}`, {
+        method: isCreate ? "POST" : "PATCH",
         credentials: "include",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(payload),
@@ -476,10 +642,19 @@ export function ProjectsPanel() {
         return;
       }
       showToast({
-        message: editingId ? "Project updated." : "Project created.",
+        message: isCreate
+          ? isDuplicateDraft
+            ? "Project duplicated."
+            : "Project created."
+          : "Project updated.",
         severity: "success",
       });
+      const createdId = isCreate ? data.project?.id : null;
       resetEditorState();
+      if (createdId && formRole !== "STUDENT") {
+        router.push(`/projects/${createdId}`);
+        return;
+      }
       await load({ silent: true });
     } finally {
       setBusyEditor(false);
@@ -807,17 +982,18 @@ export function ProjectsPanel() {
             </Select>
           </FormControl>
         ) : null}
-        {isExaminer || isSystemAdmin ? (
-          <FormControl size="small" className="w-full sm:w-44" sx={themedTextFieldSx}>
+        {isSystemAdmin ? (
+          <FormControl size="small" className="w-full sm:w-52" sx={themedTextFieldSx}>
             <InputLabel id="project-scope-filter-label">Source</InputLabel>
             <Select
               labelId="project-scope-filter-label"
               label="Source"
               value={staffScope}
               onChange={(e) => {
-                setStaffScope(String(e.target.value || "all"));
+                setStaffScope(String(e.target.value || "examiner"));
                 setPage(0);
               }}
+              title="Student organisations are under Participation"
             >
               {STAFF_SCOPE_FILTERS.map((f) => (
                 <MenuItem key={f.value} value={f.value}>
@@ -847,25 +1023,69 @@ export function ProjectsPanel() {
             </Select>
           </FormControl>
         ) : null}
-        {isStaffViewer ? (
-          <FormControl size="small" className="w-full sm:w-44" sx={themedTextFieldSx}>
-            <InputLabel id="project-status-filter-label">Status</InputLabel>
-            <Select
-              labelId="project-status-filter-label"
-              label="Status"
-              value={staffStatus}
-              onChange={(e) => {
-                setStaffStatus(String(e.target.value || "all"));
-                setPage(0);
-              }}
-            >
-              {STAFF_STATUS_FILTERS.map((f) => (
-                <MenuItem key={f.value} value={f.value}>
-                  {f.label}
-                </MenuItem>
-              ))}
-            </Select>
-          </FormControl>
+        {isExaminerLike ? (
+          <>
+            <FormControl size="small" className="w-full sm:w-44" sx={themedTextFieldSx}>
+              <InputLabel id="filter-ay-label">Academic year</InputLabel>
+              <Select
+                labelId="filter-ay-label"
+                label="Academic year"
+                value={filterAcademicYearId}
+                onChange={(e) => {
+                  setFilterAcademicYearId(String(e.target.value || ""));
+                  setFilterSemesterId("");
+                  setPage(0);
+                }}
+              >
+                {academicYears.map((y) => (
+                  <MenuItem key={y.id} value={y.id}>
+                    {y.label}
+                    {y.isCurrent ? " (current)" : ""}
+                  </MenuItem>
+                ))}
+              </Select>
+            </FormControl>
+            <FormControl size="small" className="w-full sm:w-40" sx={themedTextFieldSx}>
+              <InputLabel id="filter-sem-label">Semester</InputLabel>
+              <Select
+                labelId="filter-sem-label"
+                label="Semester"
+                value={filterSemesterId}
+                onChange={(e) => {
+                  setFilterSemesterId(String(e.target.value || ""));
+                  setPage(0);
+                }}
+              >
+                <MenuItem value="">All</MenuItem>
+                {semesters
+                  .filter((s) => !filterAcademicYearId || s.academicYearId === filterAcademicYearId)
+                  .map((s) => (
+                    <MenuItem key={s.id} value={s.id}>
+                      {s.name}
+                      {s.isActive ? " (active)" : ""}
+                    </MenuItem>
+                  ))}
+              </Select>
+            </FormControl>
+            <FormControl size="small" className="w-full sm:w-44" sx={themedTextFieldSx}>
+              <InputLabel id="filter-prog-label">Programme</InputLabel>
+              <Select
+                labelId="filter-prog-label"
+                label="Programme"
+                value={filterProgrammeId}
+                onChange={(e) => {
+                  setFilterProgrammeId(String(e.target.value || ""));
+                  setPage(0);
+                }}
+              >
+                {programmes.map((p) => (
+                  <MenuItem key={p.id} value={p.id}>
+                    {p.shortName || p.name}
+                  </MenuItem>
+                ))}
+              </Select>
+            </FormControl>
+          </>
         ) : null}
         <FormControl size="small" className="w-full sm:w-44" sx={themedTextFieldSx}>
           <InputLabel id="project-open-status-filter-label">Open status</InputLabel>
@@ -894,7 +1114,7 @@ export function ProjectsPanel() {
               <TableRow>
                 <TableCell>Project</TableCell>
                 <TableCell>Purpose</TableCell>
-                <TableCell>Status</TableCell>
+                {isStudent ? <TableCell>Status</TableCell> : <TableCell>Attempts</TableCell>}
                 <TableCell>Visibility</TableCell>
                 <TableCell>Published</TableCell>
                 <TableCell>Open status</TableCell>
@@ -926,14 +1146,29 @@ export function ProjectsPanel() {
                     </TableCell>
                     <TableCell>{formatPurpose(row.purpose)}</TableCell>
                     <TableCell>
-                      <Chip
-                        size="small"
-                        label={isStudent && row.ownerUserId !== session?.userId ? enrollmentStatus : row.status}
-                        color={statusChipColor(
-                          isStudent && row.ownerUserId !== session?.userId ? enrollmentStatus : row.status,
-                        )}
-                        sx={{ "& .MuiChip-label": { fontSize: "0.68rem", px: 0.75 } }}
-                      />
+                      {isStudent ? (
+                        <Chip
+                          size="small"
+                          label={
+                            row.ownerUserId !== session?.userId ? enrollmentStatus : row.status
+                          }
+                          color={statusChipColor(
+                            row.ownerUserId !== session?.userId ? enrollmentStatus : row.status,
+                          )}
+                          sx={{ "& .MuiChip-label": { fontSize: "0.68rem", px: 0.75 } }}
+                        />
+                      ) : (
+                        <Chip
+                          size="small"
+                          color="primary"
+                          label={
+                            row.maxAttempts == null || row.maxAttempts === 0
+                              ? "Unlimited"
+                              : `${row.maxAttempts}`
+                          }
+                          sx={{ "& .MuiChip-label": { fontSize: "0.68rem", px: 0.75 } }}
+                        />
+                      )}
                     </TableCell>
                     <TableCell>{row.visibility}</TableCell>
                     <TableCell>{row.isPublished ? "Yes" : "No"}</TableCell>
@@ -954,6 +1189,19 @@ export function ProjectsPanel() {
                               color="primary"
                             >
                               <SettingsRounded fontSize="small" />
+                            </IconButton>
+                          </Tooltip>
+                        ) : null}
+                        {canEditOrDelete(row) && row.creatorRole === "EXAMINER" ? (
+                          <Tooltip title="Duplicate project">
+                            <IconButton
+                              size="small"
+                              aria-label="Duplicate project"
+                              onClick={() => openDuplicate(row)}
+                              disabled={busyEditor}
+                              color="primary"
+                            >
+                              <ContentCopyRounded fontSize="small" />
                             </IconButton>
                           </Tooltip>
                         ) : null}
@@ -1010,11 +1258,7 @@ export function ProjectsPanel() {
                                 size="small"
                                 color="success"
                                 aria-label="Open results for this project"
-                                onClick={() =>
-                                  router.push(
-                                    `/academic/results?projectId=${encodeURIComponent(row.id)}`,
-                                  )
-                                }
+                                onClick={() => router.push(`/projects/${row.id}/results`)}
                               >
                                 <AssignmentTurnedInRounded fontSize="small" />
                               </IconButton>
@@ -1072,11 +1316,13 @@ export function ProjectsPanel() {
 
       <Dialog open={openEditor} onClose={() => (busyEditor ? null : resetEditorState())} fullWidth maxWidth="md">
         <DialogTitle>
-          {editingId
-            ? editingManagedStudent
-              ? "Manage student project settings"
-              : "Edit project"
-            : "Create project"}
+          {editingManagedStudent
+            ? "Manage student project settings"
+            : isDuplicateDraft
+              ? "Duplicate project"
+              : editingId
+                ? "Edit project"
+                : "Create project"}
         </DialogTitle>
         <DialogContent dividers sx={adminDialogPaperSx} className="space-y-4">
           <TextField
@@ -1089,18 +1335,92 @@ export function ProjectsPanel() {
             fullWidth
             sx={themedTextFieldSx}
           />
-          {isStudent ? (
-            <TextField
-              margin="dense"
-              label="Organisation name"
-              value={form.organizationName}
-              onChange={(e) => setForm((prev) => ({ ...prev, organizationName: e.target.value }))}
-              error={Boolean(fieldErrors.organizationName)}
-              helperText={fieldErrors.organizationName || " "}
-              fullWidth
-              sx={themedTextFieldSx}
-            />
+          {isExaminerLike ? (
+            <div className="grid grid-cols-1 gap-3 md:grid-cols-3">
+              <FormControl fullWidth margin="dense" sx={themedTextFieldSx} error={Boolean(fieldErrors.academicYearId)}>
+                <InputLabel id="form-ay-label">Academic year</InputLabel>
+                <Select
+                  labelId="form-ay-label"
+                  label="Academic year"
+                  value={form.academicYearId}
+                  onChange={(e) => {
+                    const yearId = String(e.target.value || "");
+                    const yearSemesters = semesters.filter((s) => s.academicYearId === yearId);
+                    const activeSem = yearSemesters.find((s) => s.isActive) || yearSemesters[0];
+                    setForm((prev) => ({
+                      ...prev,
+                      academicYearId: yearId,
+                      semesterId: activeSem?.id || "",
+                    }));
+                  }}
+                >
+                  {academicYears.map((y) => (
+                    <MenuItem key={y.id} value={y.id}>
+                      {y.label}
+                      {y.isCurrent ? " (current)" : ""}
+                    </MenuItem>
+                  ))}
+                </Select>
+                {fieldErrors.academicYearId ? (
+                  <p className="mt-1 text-xs text-red-600">{fieldErrors.academicYearId}</p>
+                ) : null}
+              </FormControl>
+              <FormControl fullWidth margin="dense" sx={themedTextFieldSx} error={Boolean(fieldErrors.semesterId)}>
+                <InputLabel id="form-sem-label">Semester</InputLabel>
+                <Select
+                  labelId="form-sem-label"
+                  label="Semester"
+                  value={form.semesterId}
+                  onChange={(e) => setForm((prev) => ({ ...prev, semesterId: e.target.value }))}
+                >
+                  {semesters
+                    .filter((s) => !form.academicYearId || s.academicYearId === form.academicYearId)
+                    .map((s) => (
+                      <MenuItem key={s.id} value={s.id}>
+                        {s.name}
+                        {s.isActive ? " (active)" : ""}
+                      </MenuItem>
+                    ))}
+                </Select>
+                {fieldErrors.semesterId ? (
+                  <p className="mt-1 text-xs text-red-600">{fieldErrors.semesterId}</p>
+                ) : null}
+              </FormControl>
+              <FormControl fullWidth margin="dense" sx={themedTextFieldSx} error={Boolean(fieldErrors.programmeId)}>
+                <InputLabel id="form-prog-label">Programme</InputLabel>
+                <Select
+                  labelId="form-prog-label"
+                  label="Programme"
+                  value={form.programmeId}
+                  onChange={(e) => setForm((prev) => ({ ...prev, programmeId: e.target.value }))}
+                >
+                  {programmes.map((p) => (
+                    <MenuItem key={p.id} value={p.id}>
+                      {p.shortName ? `${p.shortName} — ${p.name}` : p.name}
+                    </MenuItem>
+                  ))}
+                </Select>
+                {fieldErrors.programmeId ? (
+                  <p className="mt-1 text-xs text-red-600">{fieldErrors.programmeId}</p>
+                ) : null}
+              </FormControl>
+            </div>
           ) : null}
+          <TextField
+            margin="dense"
+            label="Organisation name"
+            value={form.organizationName}
+            onChange={(e) => setForm((prev) => ({ ...prev, organizationName: e.target.value }))}
+            error={Boolean(fieldErrors.organizationName)}
+            helperText={
+              fieldErrors.organizationName ||
+              (isStudent
+                ? " "
+                : "Each enrolled student works in a separate organisation with this name.")
+            }
+            fullWidth
+            sx={themedTextFieldSx}
+          />
           <TextField
             margin="dense"
             label="Description (optional)"
@@ -1226,6 +1546,39 @@ export function ProjectsPanel() {
               <div className="pt-1 text-xs text-zinc-500 dark:text-zinc-400">
                 Duration preview: {Number(form.durationHours || 0)}h {Number(form.durationMinutes || 0)}m
               </div>
+              <FormControl
+                margin="dense"
+                fullWidth
+                size="small"
+                error={Boolean(fieldErrors.maxAttempts)}
+                sx={themedTextFieldSx}
+              >
+                <InputLabel id="max-attempts-label">Allowed attempts</InputLabel>
+                <Select
+                  labelId="max-attempts-label"
+                  label="Allowed attempts"
+                  value={form.maxAttempts || "1"}
+                  onChange={(e) =>
+                    setForm((prev) => ({ ...prev, maxAttempts: String(e.target.value) }))
+                  }
+                >
+                  {Array.from({ length: 9 }, (_, i) => (
+                    <MenuItem key={`att-${i + 1}`} value={String(i + 1)}>
+                      {i + 1}
+                    </MenuItem>
+                  ))}
+                  <MenuItem value="unlimited">Unlimited</MenuItem>
+                </Select>
+                <Typography variant="caption" sx={adminMutedTextSx} className="block pt-1">
+                  Default is 1. Students may start another attempt only while they still have
+                  attempts remaining.
+                </Typography>
+                {fieldErrors.maxAttempts ? (
+                  <Typography color="error" variant="caption">
+                    {fieldErrors.maxAttempts}
+                  </Typography>
+                ) : null}
+              </FormControl>
               <div className="rounded-lg border border-zinc-200 p-3 dark:border-zinc-700">
                 <Typography variant="body2" sx={{ fontWeight: 600 }}>
                   Enrollment key (optional)
@@ -1397,7 +1750,7 @@ export function ProjectsPanel() {
         </DialogContent>
         <DialogActions sx={adminDialogPaperSx}>
           <Button onClick={resetEditorState} disabled={busyEditor}>
-            Cancel
+            {isDuplicateDraft ? "Discard" : "Cancel"}
           </Button>
           <Button onClick={saveProject} variant="contained" disabled={busyEditor}>
             {busyEditor ? <CircularProgress size={18} color="inherit" /> : editingId ? "Save" : "Create"}
@@ -1503,14 +1856,18 @@ export function ProjectsPanel() {
               ) : null}
               {studentProjectDialog.instructions ? (
                 <div
-                  className="prose prose-sm max-w-none dark:prose-invert"
-                  dangerouslySetInnerHTML={{ __html: studentProjectDialog.instructions }}
+                  className="rich-html max-w-none"
+                  dangerouslySetInnerHTML={{
+                    __html: sanitizeRichHtml(studentProjectDialog.instructions),
+                  }}
                 />
               ) : null}
               {studentProjectDialog.questionText ? (
                 <div
-                  className="prose prose-sm max-w-none dark:prose-invert"
-                  dangerouslySetInnerHTML={{ __html: studentProjectDialog.questionText }}
+                  className="rich-html max-w-none"
+                  dangerouslySetInnerHTML={{
+                    __html: sanitizeRichHtml(studentProjectDialog.questionText),
+                  }}
                 />
               ) : null}
               {studentProjectDialog.questionFileUrl ? (

@@ -4,7 +4,7 @@ import { generateShortAlphanumericCode } from "@/lib/projects/project-identity";
 export const PROJECT_ORG_LEARN_PASSWORD = "password123";
 
 /**
- * Builds a simulated org username scoped to one project: local_PROJECTCODE@domain
+ * Builds a simulated org username scoped to one project: local_ORG-XXXXXX@domain
  * @param {unknown} email
  * @param {unknown} projectCode
  */

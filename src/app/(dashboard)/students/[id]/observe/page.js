@@ -8,21 +8,19 @@ export const metadata = {
 };
 
 /**
- * @param {{ params: Promise<{ id: string }>; searchParams: Promise<{ tab?: string }> }} props
+ * @param {{ params: Promise<{ id: string }> }} props
  */
-export default async function ObserveStudentPage({ params, searchParams }) {
+export default async function ObserveStudentPage({ params }) {
   const user = await getSessionUser();
   const active = sessionActiveRole(user);
   if (!user) {
-    redirect("/login?next=/students/manage");
+    redirect("/login?next=/academic/participation");
   }
   if (!canObserveStudentOrganisation({ activeRole: active })) {
     redirect("/");
   }
 
   const { id } = await params;
-  const sp = await searchParams;
-  const tab = typeof sp?.tab === "string" ? sp.tab : "overview";
 
-  return <ExaminerStudentObservePanel studentId={id} initialTab={tab} />;
+  return <ExaminerStudentObservePanel studentId={id} />;
 }

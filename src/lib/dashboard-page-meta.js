@@ -19,6 +19,11 @@ export function getDashboardPageMeta(pathname, _activeRole) {
       title: "Assessments",
       subtitle: "My Academic Work",
     };
+  if (pathname.startsWith("/academic/participation"))
+    return {
+      title: "Student participation",
+      subtitle: "Organisations and procurement progress",
+    };
   if (pathname.startsWith("/academic/results"))
     return {
       title: "Results",
@@ -28,12 +33,16 @@ export function getDashboardPageMeta(pathname, _activeRole) {
     return { title: "Assessment scoring", subtitle: "Academic project" };
   if (pathname.includes("/participants"))
     return { title: "Participants", subtitle: "Academic project" };
+  if (pathname.startsWith("/projects/") && pathname.includes("/results"))
+    return { title: "Results", subtitle: "Academic project" };
   if (pathname.startsWith("/academic"))
     return {
       title: "My Academic Work",
       subtitle: "Projects from your examiner",
     };
   if (pathname.startsWith("/organisation")) {
+    if (pathname === "/organisation/overview" || pathname.startsWith("/organisation/overview/"))
+      return { title: "Project overview", subtitle: "Instructions and question" };
     if (pathname.includes("/org-admin/organisation-structure"))
       return { title: "Organisation structure", subtitle: "My Organisation" };
     if (pathname.includes("/org-admin/financial-years"))

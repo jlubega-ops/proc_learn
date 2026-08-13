@@ -29,6 +29,12 @@ export async function POST(request, context) {
   if (!project.isPublished) {
     return NextResponse.json({ error: "Project is not published." }, { status: 400 });
   }
+  if (project.openAt && new Date(project.openAt).getTime() > Date.now()) {
+    return NextResponse.json(
+      { error: "This project is not open yet. Enrollment is not available." },
+      { status: 400 },
+    );
+  }
   if (project.closeAt && new Date(project.closeAt).getTime() < Date.now()) {
     return NextResponse.json(
       { error: "This project is closed. Enrollment is no longer available." },

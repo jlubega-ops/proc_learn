@@ -1,21 +1,17 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import Button from "@mui/material/Button";
 import Chip from "@mui/material/Chip";
 import CircularProgress from "@mui/material/CircularProgress";
-import FormControl from "@mui/material/FormControl";
-import IconButton from "@mui/material/IconButton";
-import InputLabel from "@mui/material/InputLabel";
-import MenuItem from "@mui/material/MenuItem";
-import Select from "@mui/material/Select";
+import Switch from "@mui/material/Switch";
 import TextField from "@mui/material/TextField";
 import Tooltip from "@mui/material/Tooltip";
 import Box from "@mui/material/Box";
-import DeleteOutlineRounded from "@mui/icons-material/DeleteOutlineRounded";
-import AddRounded from "@mui/icons-material/AddRounded";
+import Alert from "@mui/material/Alert";
 import SaveRounded from "@mui/icons-material/SaveRounded";
+import LockRounded from "@mui/icons-material/LockRounded";
 import {
   DashboardPageIntro,
   BRAND_PAGE_SHELL_CLASS,
@@ -28,9 +24,21 @@ import {
   themedTextFieldSx,
 } from "@/lib/admin-mui-surfaces";
 import { useToast } from "@/components/providers/toast-provider";
+import {
+  ASSESSMENT_PROCESS_CATALOGUE,
+  processDisableBlockers,
+  redistributeProcessMarks,
+  requiredPrerequisiteCodes,
+} from "@/lib/academic/assessment-process-catalogue";
+
+const GROUP_LABEL = {
+  CORE: "Core path",
+  METHOD: "Procurement methods (a student normally completes one)",
+  AWARD: "Award and contracting",
+  PAY: "Invoice and payment",
+};
 
 /**
- * Examiner assessment configuration for one Academic Project.
  * @param {{ projectId: string }} props
  */
 export function ExaminerAssessmentConfigPanel({ projectId }) {
@@ -39,11 +47,15 @@ export function ExaminerAssessmentConfigPanel({ projectId }) {
   const [saving, setSaving] = useState(false);
   const [project, setProject] = useState(/** @type {any} */ (null));
   const [catalogue, setCatalogue] = useState(/** @type {any} */ (null));
-  const [gradingMode, setGradingMode] = useState("COMBINED");
-  const [manualMaxMarks, setManualMaxMarks] = useState("40");
+  const [totalMarks, setTotalMarks] = useState("100");
   const [passMarkPercent, setPassMarkPercent] = useState("50");
   const [resultsReleased, setResultsReleased] = useState(false);
-  const [checkpoints, setCheckpoints] = useState(/** @type {any[]} */ ([]));
+  const [scoringEnabled, setScoringEnabled] = useState(true);
+  const [processes, setProcesses] = useState(
+    /** @type {Array<{ processCode: string; isAllowed: boolean; marks: number; marksPinned: boolean }>} */ (
+      []
+    ),
+  );
   /** @type {[Record<string, string>, Function]} */
   const [fieldErrors, setFieldErrors] = useState({});
 
@@ -56,7 +68,7 @@ export function ExaminerAssessmentConfigPanel({ projectId }) {
       const json = await res.json().catch(() => ({}));
       if (!res.ok) {
         showToast({
-          message: typeof json.error === "string" ? json.error : "Could not load assessment.",
+          message: typeof json.error === "string" ? json.error : "Could not load scoring.",
           severity: "error",
         });
         return;
@@ -65,39 +77,18 @@ export function ExaminerAssessmentConfigPanel({ projectId }) {
       setCatalogue(json.catalogue || null);
       const a = json.assessment;
       if (a) {
-        setGradingMode(a.gradingMode || "COMBINED");
-        setManualMaxMarks(String(a.manualMaxMarks ?? 0));
+        setTotalMarks(String(a.totalMarks ?? 100));
         setPassMarkPercent(String(a.passMarkPercent ?? 50));
         setResultsReleased(Boolean(a.resultsReleased));
-        setCheckpoints(
-          (a.checkpoints || []).map((c) => ({
-            label: c.label,
-            kind: c.kind,
-            stageKey: c.stageKey || "",
-            procurementMethod: c.procurementMethod || "",
-            marks: String(c.marks ?? 0),
-            isActive: c.isActive !== false,
+        setScoringEnabled(a.scoringEnabled !== false);
+        setProcesses(
+          (a.processes || []).map((p) => ({
+            processCode: p.processCode,
+            isAllowed: p.isAllowed !== false,
+            marks: Number(p.marks) || 0,
+            marksPinned: Boolean(p.marksPinned),
           })),
         );
-      } else {
-        setCheckpoints([
-          {
-            label: "Attempt submitted",
-            kind: "ATTEMPT_SUBMITTED",
-            stageKey: "",
-            procurementMethod: "",
-            marks: "10",
-            isActive: true,
-          },
-          {
-            label: "Requisition approved",
-            kind: "STAGE_COMPLETED",
-            stageKey: "APPROVAL",
-            procurementMethod: "",
-            marks: "30",
-            isActive: true,
-          },
-        ]);
       }
     } finally {
       setLoading(false);
@@ -108,6 +99,39 @@ export function ExaminerAssessmentConfigPanel({ projectId }) {
     void load();
   }, [load]);
 
+  const split = useMemo(() => {
+    const total = Number(totalMarks);
+    return redistributeProcessMarks(processes, Number.isFinite(total) ? total : 100);
+  }, [processes, totalMarks]);
+
+  const displayRows = split.rows;
+  const allowedSum = displayRows.filter((p) => p.isAllowed).reduce((s, p) => s + (p.marks || 0), 0);
+
+  function patchProcess(code, patch) {
+    setProcesses((prev) => {
+      const current =
+        prev.length > 0
+          ? prev
+          : ASSESSMENT_PROCESS_CATALOGUE.map((m) => ({
+              processCode: m.code,
+              isAllowed: true,
+              marks: 0,
+              marksPinned: false,
+            }));
+      let next = current.map((row) =>
+        row.processCode === code ? { ...row, ...patch } : { ...row },
+      );
+      if (patch.isAllowed === true) {
+        const required = requiredPrerequisiteCodes(code);
+        next = next.map((row) =>
+          required.includes(row.processCode) ? { ...row, isAllowed: true } : row,
+        );
+      }
+      const total = Number(totalMarks);
+      return redistributeProcessMarks(next, Number.isFinite(total) ? total : 100).rows;
+    });
+  }
+
   async function save() {
     setSaving(true);
     setFieldErrors({});
@@ -117,14 +141,11 @@ export function ExaminerAssessmentConfigPanel({ projectId }) {
         credentials: "include",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          gradingMode,
-          manualMaxMarks: Number(manualMaxMarks),
+          totalMarks: Number(totalMarks),
           passMarkPercent: Number(passMarkPercent),
           resultsReleased,
-          checkpoints: checkpoints.map((c) => ({
-            ...c,
-            marks: Number(c.marks),
-          })),
+          scoringEnabled,
+          processes: displayRows,
         }),
       });
       const json = await res.json().catch(() => ({}));
@@ -136,7 +157,37 @@ export function ExaminerAssessmentConfigPanel({ projectId }) {
         });
         return;
       }
-      showToast({ message: "Assessment configuration saved.", severity: "success" });
+      showToast({ message: "Scoring saved.", severity: "success" });
+      await load();
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function toggleScoring(enable) {
+    setSaving(true);
+    try {
+      const res = await fetch(`/api/projects/${encodeURIComponent(projectId)}/assessment`, {
+        method: "PUT",
+        credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          action: enable ? "enable_scoring" : "disable_scoring",
+        }),
+      });
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        showToast({
+          message: typeof json.error === "string" ? json.error : "Could not update scoring.",
+          severity: "error",
+        });
+        return;
+      }
+      setScoringEnabled(Boolean(json.assessment?.scoringEnabled));
+      showToast({
+        message: enable ? "Scoring enabled." : "Scoring disabled.",
+        severity: "success",
+      });
       await load();
     } finally {
       setSaving(false);
@@ -174,247 +225,298 @@ export function ExaminerAssessmentConfigPanel({ projectId }) {
     return (
       <Box sx={adminCenteredLoadingBoxSx} role="status" aria-busy="true">
         <CircularProgress sx={adminLoadingSpinnerSx} />
+        <p className="mt-2 text-sm">Loading scoring…</p>
       </Box>
     );
   }
+
+  const presets = catalogue?.passMarkPresets || [30, 40, 50, 60, 70];
+  const groups = ["CORE", "METHOD", "AWARD", "PAY"];
+  const isPractice = String(project?.purpose || "").toUpperCase() === "PRACTICE";
+  const showSetup = !isPractice || scoringEnabled;
 
   return (
     <div className={BRAND_PAGE_SHELL_CLASS}>
       <DashboardPageIntro
         hero
-        title={project?.name || "Assessment scoring"}
-        description="Configure automatic checkpoints from real procurement progress, plus optional manual marks. Final score = auto + manual (capped at total)."
+        title="Scoring"
+        description={
+          isPractice && !scoringEnabled
+            ? `${project?.name || "This practice project"} has scoring turned off. Enable scoring to configure marks and processes.`
+            : `${project?.name || "This project"} is marked automatically. Allowed processes share the total grade. Completing a process awards its marks.`
+        }
       >
         <div className="mt-3 flex flex-wrap gap-2">
-          <Chip size="small" label={project?.purpose || "Project"} color="primary" />
-          <Chip
-            size="small"
-            label={resultsReleased ? "Results released" : "Results not released"}
-            color={resultsReleased ? "success" : "warning"}
-          />
+          <Chip size="small" color="info" label={isPractice ? "Practice" : "Assessment"} />
+          {scoringEnabled ? (
+            <Chip size="small" color="success" label="Scoring on" />
+          ) : (
+            <Chip size="small" color="warning" label="Scoring off" />
+          )}
+          {showSetup ? (
+            <>
+              <Chip size="small" label={`Out of ${totalMarks || 100}`} />
+              <Chip size="small" color="warning" label={`Pass at ${passMarkPercent}%`} />
+            </>
+          ) : null}
+          {resultsReleased ? (
+            <Chip size="small" color="success" label="Results released" />
+          ) : (
+            <Chip size="small" color="warning" label="Results hidden" />
+          )}
         </div>
-        <div className="mt-3 flex flex-wrap gap-2">
-          <Button component={Link} href={`/projects/${projectId}/participants`} className="cursor-pointer">
-            Participants
-          </Button>
-          <Button
-            component={Link}
-            href={`/academic/results?projectId=${encodeURIComponent(projectId)}`}
-            className="cursor-pointer"
-          >
+        <div className="mt-4 flex flex-wrap gap-2">
+          {isPractice ? (
+            <Button
+              type="button"
+              variant={scoringEnabled ? "outlined" : "contained"}
+              disabled={saving}
+              className={`${scoringEnabled ? "" : BRAND_BTN_PRIMARY_CLASS} cursor-pointer disabled:cursor-not-allowed`}
+              onClick={() => void toggleScoring(!scoringEnabled)}
+            >
+              {scoringEnabled ? "Disable scoring" : "Enable scoring"}
+            </Button>
+          ) : null}
+          {showSetup ? (
+            <>
+              <Button
+                type="button"
+                variant="contained"
+                disabled={saving}
+                className={`${BRAND_BTN_PRIMARY_CLASS} cursor-pointer disabled:cursor-not-allowed`}
+                onClick={() => void save()}
+                startIcon={saving ? <CircularProgress size={16} color="inherit" /> : <SaveRounded />}
+              >
+                Save scoring
+              </Button>
+              <Button
+                type="button"
+                disabled={saving}
+                className="cursor-pointer disabled:cursor-not-allowed"
+                onClick={() => void toggleRelease(!resultsReleased)}
+              >
+                {resultsReleased ? "Hide results from students" : "Release results"}
+              </Button>
+            </>
+          ) : null}
+          <Button component={Link} href={`/projects/${projectId}/results`} className="cursor-pointer">
             Results
-          </Button>
-          <Button component={Link} href="/projects" className="cursor-pointer">
-            Back
           </Button>
         </div>
       </DashboardPageIntro>
 
-      <p className={`${BRAND_PAGE_LEAD_CLASS} mb-4`}>
-        Automatic checks read My Organisation procurement state. They do not invent a second workflow
-        engine.
-      </p>
-
-      <form
-        noValidate
-        className={`${BRAND_CARD_CLASS} space-y-4 p-4`}
-        onSubmit={(e) => {
-          e.preventDefault();
-          void save();
-        }}
-      >
-        <h2 className={BRAND_SECTION_TITLE_CLASS}>Scoring</h2>
-        <div className="grid gap-3 sm:grid-cols-3">
-          <FormControl fullWidth>
-            <InputLabel id="grading-mode-label">Scoring mode</InputLabel>
-            <Select
-              labelId="grading-mode-label"
-              label="Scoring mode"
-              value={gradingMode}
-              onChange={(e) => setGradingMode(e.target.value)}
-              className="cursor-pointer"
-            >
-              {(catalogue?.gradingModes || []).map((m) => (
-                <MenuItem key={m.value} value={m.value} className="cursor-pointer">
-                  {m.label}
-                </MenuItem>
-              ))}
-            </Select>
-          </FormControl>
+      {!showSetup ? (
+        <section className={`${BRAND_CARD_CLASS} p-4 sm:p-5`}>
+          <p className={BRAND_PAGE_LEAD_CLASS}>
+            Practice projects do not score by default. Turn on scoring to set a grading scale and
+            allowed processes for this project.
+          </p>
+        </section>
+      ) : (
+        <>
+      <section className={`${BRAND_CARD_CLASS} p-4 sm:p-5`}>
+        <h2 className={BRAND_SECTION_TITLE_CLASS}>Grading scale</h2>
+        <p className={`mt-2 ${BRAND_PAGE_LEAD_CLASS}`}>
+          Default total is 100. Pass mark is a percentage of that total (50, 30, 70, and so on).
+        </p>
+        <div className="mt-4 grid gap-3 sm:grid-cols-2">
           <TextField
-            label="Manual marks (max)"
-            value={manualMaxMarks}
-            onChange={(e) => setManualMaxMarks(e.target.value)}
-            error={Boolean(fieldErrors.manualMaxMarks)}
-            helperText={fieldErrors.manualMaxMarks || "0 when automatic-only"}
+            label="Total marks"
+            value={totalMarks}
+            onChange={(e) => {
+              setTotalMarks(e.target.value);
+            }}
+            onBlur={() => {
+              const n = Number(totalMarks);
+              setProcesses((prev) =>
+                redistributeProcessMarks(prev, Number.isFinite(n) ? n : 100).rows,
+              );
+            }}
+            error={Boolean(fieldErrors.totalMarks || fieldErrors.marks)}
+            helperText={fieldErrors.totalMarks || fieldErrors.marks || " "}
+            fullWidth
             sx={themedTextFieldSx}
-            disabled={gradingMode === "AUTOMATIC"}
+            inputProps={{ inputMode: "numeric" }}
           />
           <TextField
             label="Pass mark (%)"
             value={passMarkPercent}
             onChange={(e) => setPassMarkPercent(e.target.value)}
             error={Boolean(fieldErrors.passMarkPercent)}
-            helperText={fieldErrors.passMarkPercent || "Default 50"}
+            helperText={fieldErrors.passMarkPercent || " "}
+            fullWidth
             sx={themedTextFieldSx}
+            inputProps={{ inputMode: "numeric" }}
           />
         </div>
-
-        <div className="flex flex-wrap items-center justify-between gap-2">
-          <h2 className={BRAND_SECTION_TITLE_CLASS}>Checkpoints</h2>
-          <Button
-            type="button"
-            startIcon={<AddRounded />}
-            className="cursor-pointer"
-            onClick={() =>
-              setCheckpoints((prev) => [
-                ...prev,
-                {
-                  label: "New checkpoint",
-                  kind: "STAGE_COMPLETED",
-                  stageKey: "BUDGET",
-                  procurementMethod: "",
-                  marks: "10",
-                  isActive: true,
-                },
-              ])
-            }
-          >
-            Add checkpoint
-          </Button>
-        </div>
-        {fieldErrors.checkpoints ? (
-          <p className="text-sm text-brand-red">{fieldErrors.checkpoints}</p>
-        ) : null}
-
-        <div className="space-y-3">
-          {checkpoints.map((cp, index) => (
-            <div key={index} className="grid gap-2 rounded-lg border border-[var(--border)] p-3 sm:grid-cols-12">
-              <TextField
-                className="sm:col-span-4"
-                label="Label"
-                value={cp.label}
-                onChange={(e) => {
-                  const next = [...checkpoints];
-                  next[index] = { ...cp, label: e.target.value };
-                  setCheckpoints(next);
-                }}
-                sx={themedTextFieldSx}
-              />
-              <FormControl className="sm:col-span-3" fullWidth>
-                <InputLabel id={`kind-${index}`}>Type</InputLabel>
-                <Select
-                  labelId={`kind-${index}`}
-                  label="Type"
-                  value={cp.kind}
-                  onChange={(e) => {
-                    const next = [...checkpoints];
-                    next[index] = { ...cp, kind: e.target.value };
-                    setCheckpoints(next);
-                  }}
-                  className="cursor-pointer"
-                >
-                  {(catalogue?.kinds || []).map((k) => (
-                    <MenuItem key={k.value} value={k.value} className="cursor-pointer">
-                      {k.label}
-                    </MenuItem>
-                  ))}
-                </Select>
-              </FormControl>
-              {(cp.kind === "STAGE_COMPLETED" || cp.kind === "STAGE_REACHED") && (
-                <FormControl className="sm:col-span-3" fullWidth>
-                  <InputLabel id={`stage-${index}`}>Stage</InputLabel>
-                  <Select
-                    labelId={`stage-${index}`}
-                    label="Stage"
-                    value={cp.stageKey || ""}
-                    onChange={(e) => {
-                      const next = [...checkpoints];
-                      next[index] = { ...cp, stageKey: e.target.value };
-                      setCheckpoints(next);
-                    }}
-                    className="cursor-pointer"
-                    error={Boolean(fieldErrors[`checkpoints.${index}.stageKey`])}
-                  >
-                    {(catalogue?.stages || []).map((s) => (
-                      <MenuItem key={s.value} value={s.value} className="cursor-pointer">
-                        {s.label}
-                      </MenuItem>
-                    ))}
-                  </Select>
-                </FormControl>
-              )}
-              {cp.kind === "PROCUREMENT_METHOD" && (
-                <FormControl className="sm:col-span-3" fullWidth>
-                  <InputLabel id={`method-${index}`}>Method</InputLabel>
-                  <Select
-                    labelId={`method-${index}`}
-                    label="Method"
-                    value={cp.procurementMethod || ""}
-                    onChange={(e) => {
-                      const next = [...checkpoints];
-                      next[index] = { ...cp, procurementMethod: e.target.value };
-                      setCheckpoints(next);
-                    }}
-                    className="cursor-pointer"
-                  >
-                    {(catalogue?.methods || []).map((m) => (
-                      <MenuItem key={m.value} value={m.value} className="cursor-pointer">
-                        {m.label}
-                      </MenuItem>
-                    ))}
-                  </Select>
-                </FormControl>
-              )}
-              <TextField
-                className="sm:col-span-1"
-                label="Marks"
-                value={cp.marks}
-                onChange={(e) => {
-                  const next = [...checkpoints];
-                  next[index] = { ...cp, marks: e.target.value };
-                  setCheckpoints(next);
-                }}
-                sx={themedTextFieldSx}
-                error={Boolean(fieldErrors[`checkpoints.${index}.marks`])}
-              />
-              <div className="flex items-center sm:col-span-1">
-                <Tooltip title="Remove checkpoint">
-                  <IconButton
-                    color="error"
-                    aria-label="Remove checkpoint"
-                    className="cursor-pointer"
-                    onClick={() => setCheckpoints((prev) => prev.filter((_, i) => i !== index))}
-                  >
-                    <DeleteOutlineRounded />
-                  </IconButton>
-                </Tooltip>
-              </div>
-            </div>
+        <div className="mt-1 flex flex-wrap gap-2">
+          {presets.map((n) => (
+            <Chip
+              key={n}
+              label={`${n}%`}
+              color={String(passMarkPercent) === String(n) ? "primary" : "default"}
+              onClick={() => setPassMarkPercent(String(n))}
+              className="cursor-pointer"
+            />
           ))}
         </div>
+      </section>
 
-        <div className="flex flex-wrap gap-2 pt-2">
-          <Button
-            type="submit"
-            variant="contained"
-            startIcon={saving ? <CircularProgress size={16} color="inherit" /> : <SaveRounded />}
-            disabled={saving}
-            className={`${BRAND_BTN_PRIMARY_CLASS} cursor-pointer disabled:cursor-not-allowed`}
-          >
-            {saving ? "Saving…" : "Save configuration"}
-          </Button>
-          <Button
-            type="button"
-            variant="outlined"
-            disabled={saving}
-            className="cursor-pointer disabled:cursor-not-allowed"
-            onClick={() => void toggleRelease(!resultsReleased)}
-          >
-            {resultsReleased ? "Hide results from students" : "Release results to students"}
-          </Button>
+      <section className={`${BRAND_CARD_CLASS} p-4 sm:p-5`}>
+        <h2 className={BRAND_SECTION_TITLE_CLASS}>Available processes</h2>
+        <p className={`mt-2 ${BRAND_PAGE_LEAD_CLASS}`}>
+          These are the processes organisation admins can see and enable for this project. The
+          default organisation is unchanged. You cannot turn off a process that a later allowed
+          process still needs — for example Requisition needs Budgeting and Planning.
+        </p>
+        {fieldErrors.processes ? (
+          <Alert severity="error" className="mt-3">
+            {fieldErrors.processes}
+          </Alert>
+        ) : null}
+        <div className="mt-4 space-y-5">
+          {groups.map((group) => {
+            const items = ASSESSMENT_PROCESS_CATALOGUE.filter((p) => p.group === group);
+            return (
+              <div key={group}>
+                <h3 className="mb-2 text-sm font-semibold text-foreground">{GROUP_LABEL[group]}</h3>
+                <ul className="space-y-2">
+                  {items.map((meta) => {
+                    const row = displayRows.find((p) => p.processCode === meta.code) || {
+                      processCode: meta.code,
+                      isAllowed: true,
+                      marks: 0,
+                      marksPinned: false,
+                    };
+                    const allowedCodes = displayRows
+                      .filter((p) => p.isAllowed)
+                      .map((p) => p.processCode);
+                    const blockers = row.isAllowed
+                      ? processDisableBlockers(meta.code, allowedCodes)
+                      : [];
+                    const lockedOff = blockers.length > 0;
+                    const prereqNames = (meta.dependsOn || [])
+                      .map((c) => ASSESSMENT_PROCESS_CATALOGUE.find((x) => x.code === c)?.name)
+                      .filter(Boolean);
+                    const anyNames = (meta.dependsOnAny || [])
+                      .map((c) => ASSESSMENT_PROCESS_CATALOGUE.find((x) => x.code === c)?.name)
+                      .filter(Boolean);
+                    return (
+                      <li
+                        key={meta.code}
+                        className="flex flex-col gap-1 rounded-lg border border-[color:var(--border-subtle)] p-3 sm:flex-row sm:items-start sm:justify-between"
+                      >
+                        <div className="min-w-0">
+                          <div className="flex flex-wrap items-center gap-2">
+                            <span className="font-medium">{meta.name}</span>
+                            {lockedOff ? (
+                              <Tooltip title={blockers.join(" ")}>
+                                <LockRounded fontSize="small" color="warning" />
+                              </Tooltip>
+                            ) : null}
+                          </div>
+                          <p className={`mt-1 text-sm ${BRAND_PAGE_LEAD_CLASS}`}>{meta.summary}</p>
+                          {prereqNames.length ? (
+                            <p className="mt-1 text-xs text-zinc-500">
+                              Needs: {prereqNames.join(" and ")}
+                            </p>
+                          ) : null}
+                          {anyNames.length ? (
+                            <p className="mt-1 text-xs text-zinc-500">
+                              Needs one of: {anyNames.join(", ")}
+                            </p>
+                          ) : null}
+                          {lockedOff ? (
+                            <p className="mt-1 text-xs text-amber-700 dark:text-amber-400">
+                              {blockers[0]}
+                            </p>
+                          ) : null}
+                        </div>
+                        <div className="flex shrink-0 items-center gap-2">
+                          <span className="text-sm">{row.isAllowed ? "Allowed" : "Hidden"}</span>
+                          <Switch
+                            checked={row.isAllowed}
+                            disabled={lockedOff && row.isAllowed}
+                            onChange={(e) => {
+                              if (!e.target.checked && lockedOff) return;
+                              patchProcess(meta.code, {
+                                isAllowed: e.target.checked,
+                                marksPinned: e.target.checked ? row.marksPinned : false,
+                              });
+                            }}
+                            inputProps={{ "aria-label": `Allow ${meta.name}` }}
+                          />
+                        </div>
+                      </li>
+                    );
+                  })}
+                </ul>
+              </div>
+            );
+          })}
         </div>
-      </form>
+      </section>
+
+      <section className={`${BRAND_CARD_CLASS} p-4 sm:p-5`}>
+        <h2 className={BRAND_SECTION_TITLE_CLASS}>Marks per process</h2>
+        <p className={`mt-2 ${BRAND_PAGE_LEAD_CLASS}`}>
+          Allowed processes share {totalMarks || 100} marks. Set a mark on one process to pin it;
+          the others share what remains. Total of allowed processes is {allowedSum} /{" "}
+          {totalMarks || 100}.
+        </p>
+        {!split.ok && split.error ? (
+          <Alert severity="error" className="mt-3">
+            {split.error}
+          </Alert>
+        ) : null}
+        <ul className="mt-4 space-y-2">
+          {displayRows
+            .filter((p) => p.isAllowed)
+            .map((row) => {
+              const meta = ASSESSMENT_PROCESS_CATALOGUE.find((p) => p.code === row.processCode);
+              return (
+                <li
+                  key={row.processCode}
+                  className="grid items-center gap-2 rounded-lg border border-[color:var(--border-subtle)] p-3 sm:grid-cols-[1fr_8rem_auto]"
+                >
+                  <div>
+                    <div className="font-medium">{meta?.name || row.processCode}</div>
+                    {row.marksPinned ? (
+                      <span className="text-xs text-primary">Pinned — remaining marks share the rest</span>
+                    ) : (
+                      <span className="text-xs text-zinc-500">Auto share</span>
+                    )}
+                  </div>
+                  <TextField
+                    label="Marks"
+                    size="small"
+                    value={String(row.marks)}
+                    onChange={(e) => {
+                      const n = Math.max(0, Math.round(Number(e.target.value) || 0));
+                      patchProcess(row.processCode, { marks: n, marksPinned: true });
+                    }}
+                    sx={themedTextFieldSx}
+                    inputProps={{ inputMode: "numeric", "aria-label": `Marks for ${meta?.name}` }}
+                  />
+                  {row.marksPinned ? (
+                    <Button
+                      type="button"
+                      size="small"
+                      className="cursor-pointer"
+                      onClick={() => patchProcess(row.processCode, { marksPinned: false })}
+                    >
+                      Share auto
+                    </Button>
+                  ) : (
+                    <span />
+                  )}
+                </li>
+              );
+            })}
+        </ul>
+      </section>
+        </>
+      )}
     </div>
   );
 }

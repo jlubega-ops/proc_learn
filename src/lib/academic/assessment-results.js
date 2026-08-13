@@ -67,6 +67,7 @@ export async function listAssessmentResultRows(opts = {}) {
     enrollment: {
       project: {
         isPersonalOrg: false,
+        isAttemptOrg: false,
         ...(opts.projectId ? { id: opts.projectId } : {}),
         ...(opts.purpose ? { purpose: opts.purpose } : {}),
         ...(opts.ownerUserId ? { ownerUserId: opts.ownerUserId } : {}),
@@ -305,7 +306,7 @@ export async function listStudentOwnResults(opts) {
     where: {
       enrollment: {
         studentUserId: opts.studentUserId,
-        project: { isPersonalOrg: false, assessment: { isNot: null } },
+        project: { isPersonalOrg: false, isAttemptOrg: false, assessment: { isNot: null } },
       },
     },
     include: {

@@ -61,8 +61,9 @@ export function AcademicProjectsListPanel({ purpose, title, description }) {
     <div className={BRAND_PAGE_SHELL_CLASS}>
       <DashboardPageIntro hero title={title} description={description}>
         <p className="mt-3 text-sm text-zinc-600 dark:text-zinc-400">
-          Work happens in My Organisation. Progress reflects your real procurement activity for the
-          current academic year.
+          Open a project to read instructions and the question. Starting an attempt moves you into
+          that project&apos;s organisation (one project at a time). Practice and Assessments stay
+          under My Academic Work in your default organisation.
         </p>
       </DashboardPageIntro>
 
@@ -96,11 +97,31 @@ export function AcademicProjectsListPanel({ purpose, title, description }) {
                     <p className={`mt-1 ${BRAND_PAGE_LEAD_CLASS}`}>{p.description}</p>
                   ) : null}
                   <div className="mt-2 flex flex-wrap gap-2">
-                    <Chip size="small" color="primary" label={p.status?.label || "—"} />
+                    <Chip
+                      size="small"
+                      color={
+                        p.status?.key === "closed"
+                          ? "error"
+                          : p.status?.key === "in_progress"
+                            ? "info"
+                            : "primary"
+                      }
+                      label={p.status?.label || "—"}
+                    />
                     {p.durationSeconds ? (
                       <Chip
                         size="small"
+                        color="warning"
                         label={`Timed · ${Math.round(p.durationSeconds / 60)} min`}
+                      />
+                    ) : p.closeAt ? (
+                      <Chip size="small" label="Closes with window" />
+                    ) : null}
+                    {p.timer?.remainingSeconds != null && !p.timer?.expired ? (
+                      <Chip
+                        size="small"
+                        color="warning"
+                        label={`${Math.ceil(p.timer.remainingSeconds / 60)} min left`}
                       />
                     ) : null}
                     {p.attemptCount > 0 ? (
@@ -110,16 +131,44 @@ export function AcademicProjectsListPanel({ purpose, title, description }) {
                   <p className="mt-2 text-xs text-zinc-500">
                     {p.openAt ? `Opens ${fmt(p.openAt)}` : "Open"}
                     {p.closeAt ? ` · Closes ${fmt(p.closeAt)}` : ""}
+                    {!p.canEnroll && !p.enrolled ? " · Enrollment closed" : ""}
                   </p>
                 </div>
-                <Button
-                  component={Link}
-                  href={p.href}
-                  variant="contained"
-                  className={`${BRAND_BTN_PRIMARY_CLASS} cursor-pointer`}
-                >
-                  Open
-                </Button>
+                <div className="flex flex-wrap gap-2">
+                  <Button
+                    component={Link}
+                    href={p.href}
+                    variant="outlined"
+                    className="cursor-pointer"
+                  >
+                    View project
+                  </Button>
+                  {p.latestAttempt?.status === "IN_PROGRESS" ||
+                  p.latestAttempt?.status === "RETURNED" ? (
+                    <Button
+                      component={Link}
+                      href={p.href}
+                      variant="contained"
+                      className={`${BRAND_BTN_PRIMARY_CLASS} cursor-pointer`}
+                    >
+                      Continue
+                    </Button>
+                  ) : (
+                    <Button
+                      component={Link}
+                      href={p.href}
+                      variant="contained"
+                      disabled={p.status?.key === "closed" && !p.enrolled}
+                      className={`${BRAND_BTN_PRIMARY_CLASS} cursor-pointer disabled:cursor-not-allowed`}
+                    >
+                      {p.status?.key === "closed" && !p.enrolled
+                        ? "Closed"
+                        : p.latestAttempt
+                          ? "Open"
+                          : "Start"}
+                    </Button>
+                  )}
+                </div>
               </div>
             </li>
           ))}

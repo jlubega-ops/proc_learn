@@ -63,19 +63,6 @@ function purposeWhere(purpose) {
   return {};
 }
 
-/**
- * @param {string} scope
- */
-function scopeWhere(scope) {
-  if (scope === "student" || scope === "student_public") {
-    return { creatorRole: Role.STUDENT, visibility: "PUBLIC" };
-  }
-  if (scope === "examiner" || scope === "lecturer") {
-    return { creatorRole: Role.EXAMINER };
-  }
-  return {};
-}
-
 export async function GET(request) {
   const user = await getSessionUser();
   if (!user) {
@@ -89,6 +76,9 @@ export async function GET(request) {
   const purpose = String(searchParams.get("purpose") || "all").toLowerCase();
   const status = String(searchParams.get("status") || "all").toLowerCase();
   const openStatus = String(searchParams.get("openStatus") || "all").toLowerCase();
+  const academicYearId = String(searchParams.get("academicYearId") || "").trim();
+  const semesterId = String(searchParams.get("semesterId") || "").trim();
+  const programmeId = String(searchParams.get("programmeId") || "").trim();
   const page = Math.max(1, Number(searchParams.get("page") || 1));
   const pageSizeRaw = Number(searchParams.get("pageSize") || 10);
   const pageSize = Math.min(50, Math.max(1, Number.isFinite(pageSizeRaw) ? pageSizeRaw : 10));
@@ -96,6 +86,16 @@ export async function GET(request) {
 
   /** @type {import("@prisma/client").Prisma.ProjectWhereInput} */
   let where = {};
+
+  /** @type {import("@prisma/client").Prisma.ProjectWhereInput} */
+  const academicFilter =
+    activeRole === Role.EXAMINER || activeRole === Role.SYSTEM_ADMIN
+      ? {
+          ...(academicYearId ? { academicYearId } : {}),
+          ...(semesterId ? { semesterId } : {}),
+          ...(programmeId ? { programmeId } : {}),
+        }
+      : {};
 
   if (activeRole === Role.STUDENT) {
     const studentSpecific = studentFilterWhere(activeRole, filter);
@@ -107,6 +107,7 @@ export async function GET(request) {
               ownerUserId: user.id,
               creatorRole: Role.STUDENT,
               isPersonalOrg: false,
+              isAttemptOrg: false,
             },
             {
               visibility: "PUBLIC",
@@ -121,13 +122,14 @@ export async function GET(request) {
       ],
     };
   } else if (activeRole === Role.EXAMINER) {
+    // Practice / Assessment projects only — student My Organisation shells live under Participation.
     where = {
       AND: [
         {
-          OR: [
-            { ownerUserId: user.id, creatorRole: Role.EXAMINER },
-            { creatorRole: Role.STUDENT, visibility: "PUBLIC" },
-          ],
+          ownerUserId: user.id,
+          creatorRole: Role.EXAMINER,
+          isPersonalOrg: false,
+          isAttemptOrg: false,
         },
         purposeWhere(purpose),
         status === "not_started"
@@ -137,24 +139,23 @@ export async function GET(request) {
             : status === "completed"
               ? { status: "COMPLETED" }
               : {},
-        scopeWhere(scope),
         openStatusWhere(openStatus),
-        filter === "mine"
-          ? { ownerUserId: user.id, creatorRole: Role.EXAMINER }
-          : filter === "public-student"
-            ? { creatorRole: Role.STUDENT, visibility: "PUBLIC" }
-            : filter === "assessments" || filter === "assignments"
-              ? { ownerUserId: user.id, purpose: "ASSESSMENT" }
-              : filter === "private"
-                ? { ownerUserId: user.id, visibility: "PRIVATE" }
-                : filter === "public"
-                  ? { visibility: "PUBLIC" }
-                  : {},
+        filter === "assessments" || filter === "assignments"
+          ? { purpose: "ASSESSMENT" }
+          : filter === "practice"
+            ? { purpose: "PRACTICE" }
+            : filter === "private"
+              ? { visibility: "PRIVATE" }
+              : filter === "public"
+                ? { visibility: "PUBLIC" }
+                : {},
+        academicFilter,
       ],
     };
   } else if (activeRole === Role.SYSTEM_ADMIN) {
     where = {
       AND: [
+        { isPersonalOrg: false, isAttemptOrg: false },
         purposeWhere(purpose),
         status === "not_started"
           ? { status: "NOT_STARTED" }
@@ -163,12 +164,16 @@ export async function GET(request) {
             : status === "completed"
               ? { status: "COMPLETED" }
               : {},
+        // Default: examiner Practice / Assessment projects. Student orgs → Participation.
         scope === "student" || scope === "student_public"
-          ? { creatorRole: Role.STUDENT }
-          : scope === "examiner" || scope === "lecturer"
-            ? { creatorRole: Role.EXAMINER }
-            : {},
+          ? {
+              creatorRole: Role.STUDENT,
+              isPersonalOrg: false,
+              isAttemptOrg: false,
+            }
+          : { creatorRole: Role.EXAMINER },
         openStatusWhere(openStatus),
+        academicFilter,
       ],
     };
   } else {
@@ -179,7 +184,13 @@ export async function GET(request) {
     activeRole === Role.STUDENT
       ? { owner: { select: { id: true, firstName: true, lastName: true, email: true } }, enrollments: { where: { studentUserId: user.id }, take: 1 } }
       : activeRole === Role.EXAMINER || activeRole === Role.SYSTEM_ADMIN
-        ? { owner: { select: { id: true, firstName: true, lastName: true, email: true } }, enrollments: true }
+        ? {
+            owner: { select: { id: true, firstName: true, lastName: true, email: true } },
+            enrollments: true,
+            academicYear: { select: { id: true, label: true, isCurrent: true } },
+            semester: { select: { id: true, name: true, isActive: true } },
+            programme: { select: { id: true, name: true, shortName: true } },
+          }
         : { owner: { select: { id: true, firstName: true, lastName: true, email: true } } };
 
   const [total, rows] = await Promise.all([
@@ -240,6 +251,30 @@ export async function POST(request) {
   }
 
   const data = validated.data;
+
+  if ([Role.EXAMINER, Role.SYSTEM_ADMIN].includes(activeRole)) {
+    const [year, semester, programme] = await Promise.all([
+      data.academicYearId
+        ? prisma.academicYear.findUnique({ where: { id: data.academicYearId } })
+        : null,
+      data.semesterId ? prisma.semester.findUnique({ where: { id: data.semesterId } }) : null,
+      data.programmeId ? prisma.programme.findUnique({ where: { id: data.programmeId } }) : null,
+    ]);
+    /** @type {Record<string, string>} */
+    const fieldErrors = {};
+    if (!year) fieldErrors.academicYearId = "Choose a valid academic year.";
+    if (!semester || (year && semester.academicYearId !== year.id)) {
+      fieldErrors.semesterId = "Choose a semester for the selected academic year.";
+    }
+    if (!programme || !programme.isActive) fieldErrors.programmeId = "Choose an active programme.";
+    if (Object.keys(fieldErrors).length) {
+      return NextResponse.json(
+        { error: "Please fix the highlighted fields.", fieldErrors },
+        { status: 400 },
+      );
+    }
+  }
+
   const projectCode = await generateUniqueProjectCode(prisma);
 
   const row = await prisma.project.create({
@@ -249,7 +284,7 @@ export async function POST(request) {
       projectCode,
       name: data.name,
       description: data.description,
-      organizationName: activeRole === Role.STUDENT ? data.organizationName : null,
+      organizationName: data.organizationName,
       purpose: data.purpose,
       status: "NOT_STARTED",
       visibility: activeRole === Role.STUDENT ? data.visibility : "PUBLIC",
@@ -267,8 +302,29 @@ export async function POST(request) {
       allowEditAfterSubmit: Boolean(data.allowEditAfterSubmit),
       requiresEnrollment: [Role.EXAMINER, Role.SYSTEM_ADMIN].includes(activeRole),
       isPersonalOrg: false,
+      isAttemptOrg: false,
+      academicYearId: [Role.EXAMINER, Role.SYSTEM_ADMIN].includes(activeRole)
+        ? data.academicYearId
+        : null,
+      semesterId: [Role.EXAMINER, Role.SYSTEM_ADMIN].includes(activeRole) ? data.semesterId : null,
+      programmeId: [Role.EXAMINER, Role.SYSTEM_ADMIN].includes(activeRole)
+        ? data.programmeId
+        : null,
     },
   });
+
+  if ([Role.EXAMINER, Role.SYSTEM_ADMIN].includes(activeRole)) {
+    try {
+      const { getOrCreateProjectAssessment } = await import("@/lib/academic/assessment-evaluate");
+      await getOrCreateProjectAssessment(prisma, {
+        projectId: row.id,
+        createIfMissing: true,
+        scoringEnabled: row.purpose === "ASSESSMENT",
+      });
+    } catch {
+      /* scoring seed is non-blocking */
+    }
+  }
 
   await writeAuditLog({
     eventType: AuditEvent.PROJECT_CREATED,

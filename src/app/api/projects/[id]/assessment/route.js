@@ -4,7 +4,7 @@ import { getSessionUser, sessionActiveRole } from "@/lib/api/get-session-user";
 import { prisma } from "@/lib/prisma";
 import { canManageExaminerProject, actsAsExaminerRole } from "@/lib/projects/access";
 import {
-  assessmentCheckpointCatalogue,
+  assessmentScoringCatalogue,
   getOrCreateProjectAssessment,
   serializeAssessmentConfig,
   upsertProjectAssessmentConfig,
@@ -15,7 +15,7 @@ export const runtime = "nodejs";
 
 async function loadManagedProject(user, activeRole, projectId) {
   const project = await prisma.project.findUnique({ where: { id: projectId } });
-  if (!project || project.isPersonalOrg) return { error: NextResponse.json({ error: "Not found." }, { status: 404 }) };
+  if (!project || project.isPersonalOrg || project.isAttemptOrg) return { error: NextResponse.json({ error: "Not found." }, { status: 404 }) };
   if (
     !canManageExaminerProject({ activeRole, project, userId: user.id }) &&
     activeRole !== Role.SYSTEM_ADMIN
@@ -40,7 +40,8 @@ export async function GET(_request, context) {
 
   const assessment = await getOrCreateProjectAssessment(prisma, {
     projectId: id,
-    createIfMissing: false,
+    createIfMissing: true,
+    scoringEnabled: gate.project.purpose === "ASSESSMENT",
   });
 
   return NextResponse.json({
@@ -50,7 +51,7 @@ export async function GET(_request, context) {
       purpose: gate.project.purpose,
     },
     assessment: serializeAssessmentConfig(assessment),
-    catalogue: assessmentCheckpointCatalogue(),
+    catalogue: assessmentScoringCatalogue(),
   });
 }
 
@@ -77,6 +78,36 @@ export async function PUT(request, context) {
     } catch (e) {
       // @ts-ignore
       if (e?.code === "NO_ASSESSMENT") {
+        return NextResponse.json({ error: e.message }, { status: 400 });
+      }
+      throw e;
+    }
+  }
+
+  if (
+    body?.action === "regrade" ||
+    body?.action === "regrade_all" ||
+    body?.action === "force_submit"
+  ) {
+    try {
+      const { regradeProjectAttempts } = await import("@/lib/academic/assessment-evaluate");
+      /** @type {string[] | null} */
+      let attemptIds = null;
+      if (Array.isArray(body?.attemptIds)) {
+        attemptIds = body.attemptIds.map((id) => String(id || "").trim()).filter(Boolean);
+      } else if (body?.action === "regrade" && body?.attemptId) {
+        attemptIds = [String(body.attemptId).trim()].filter(Boolean);
+      }
+      const result = await regradeProjectAttempts({
+        projectId: id,
+        actorUserId: user.id,
+        attemptIds,
+        forceSubmitOnly: body?.action === "force_submit",
+      });
+      return NextResponse.json(result);
+    } catch (e) {
+      // @ts-ignore
+      if (e?.code === "NO_ASSESSMENT" || e?.code === "SCORING_DISABLED") {
         return NextResponse.json({ error: e.message }, { status: 400 });
       }
       throw e;

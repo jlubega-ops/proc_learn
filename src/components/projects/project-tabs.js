@@ -10,10 +10,10 @@ import {
 
 export function ProjectTabs({ projectId, canSeeSubmissionsTab }) {
   const pathname = usePathname() || `/projects/${projectId}`;
-  const isParticipants =
-    pathname.endsWith("/participants") || pathname.endsWith("/submissions");
+  const isParticipants = pathname.includes("/participants") || pathname.endsWith("/submissions");
   const isAssessment = pathname.endsWith("/assessment");
-  const isDetails = !isParticipants && !isAssessment;
+  const isResults = pathname.endsWith("/results");
+  const isDetails = !isParticipants && !isAssessment && !isResults;
   const tabBase = "rounded-md px-3 py-1.5 text-sm font-medium transition";
 
   return (
@@ -46,9 +46,10 @@ export function ProjectTabs({ projectId, canSeeSubmissionsTab }) {
               Scoring
             </Link>
             <Link
-              href={`/academic/results?projectId=${encodeURIComponent(projectId)}`}
-              className={`${tabBase} ${BRAND_NAV_INACTIVE_CLASS}`}
-              title="Open results for this project"
+              href={`/projects/${projectId}/results`}
+              className={`${tabBase} ${isResults ? BRAND_NAV_ACTIVE_CLASS : BRAND_NAV_INACTIVE_CLASS}`}
+              title="View enrolled student results for this project"
+              aria-current={isResults ? "page" : undefined}
             >
               Results
             </Link>

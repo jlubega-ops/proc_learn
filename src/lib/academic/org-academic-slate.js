@@ -1,5 +1,6 @@
 /**
- * OrgAcademicSlate — academic-year context over durable My Organisation (personal Project).
+ * OrgAcademicSlate — academic-year context over one organisation Project
+ * (personal My Organisation, or a per-attempt Practice/Assessment shell).
  *
  * See `org-academic-slate.design.js` for Phase 3 touchpoints and safety boundaries.
  */
@@ -107,8 +108,8 @@ async function markOtherSlatesHistorical(tx, projectId, exceptSlateId) {
 }
 
 /**
- * Ensure CURRENT OrgAcademicSlate for an enrollment on the student's My Organisation.
- * Preserves prior slates as HISTORICAL. Never creates a new organisation.
+ * Ensure CURRENT OrgAcademicSlate for an enrollment on one organisation Project
+ * (personal org or an attempt workspace). Never moves a slate between organisations.
  *
  * @param {import("@prisma/client").PrismaClient | import("@prisma/client").Prisma.TransactionClient} db
  * @param {{
@@ -126,8 +127,8 @@ export async function ensureOrgAcademicSlate(db, opts) {
       : university.semester?.id || null;
 
   const run = async (/** @type {import("@prisma/client").Prisma.TransactionClient} */ tx) => {
-    const existing = await tx.orgAcademicSlate.findUnique({
-      where: { enrollmentId: opts.enrollmentId },
+    const existing = await tx.orgAcademicSlate.findFirst({
+      where: { projectId: opts.projectId, enrollmentId: opts.enrollmentId },
       include: { academicYear: true, semester: true },
     });
 
@@ -141,7 +142,6 @@ export async function ensureOrgAcademicSlate(db, opts) {
           closedAt: null,
           academicYearId: opts.academicYearId,
           semesterId,
-          projectId: opts.projectId,
           openedAt:
             existing.status === OrgAcademicSlateStatus.CURRENT
               ? existing.openedAt
@@ -170,8 +170,8 @@ export async function ensureOrgAcademicSlate(db, opts) {
       return { slate: created, created: true, alreadyCurrent: false };
     } catch (e) {
       if (e instanceof Prisma.PrismaClientKnownRequestError && e.code === "P2002") {
-        const again = await tx.orgAcademicSlate.findUnique({
-          where: { enrollmentId: opts.enrollmentId },
+        const again = await tx.orgAcademicSlate.findFirst({
+          where: { projectId: opts.projectId, enrollmentId: opts.enrollmentId },
           include: { academicYear: true, semester: true },
         });
         if (!again) throw e;
@@ -198,6 +198,29 @@ export async function ensureOrgAcademicSlate(db, opts) {
 }
 
 /**
+ * Ensure CURRENT slate for a specific organisation project + the owner's active enrollment.
+ * @param {import("@prisma/client").PrismaClient} [db]
+ * @param {string} projectId
+ * @param {string} userId
+ */
+export async function ensureCurrentOrgSlateForProject(db = prisma, projectId, userId) {
+  if (!projectId || !userId) return null;
+  const enrollment = await getActiveEnrollment(db, userId);
+  if (!enrollment) return null;
+
+  const result = await ensureOrgAcademicSlate(db, {
+    projectId,
+    enrollmentId: enrollment.id,
+    academicYearId: enrollment.academicYearId,
+  });
+  return {
+    projectId,
+    ...result,
+    slate: serializeOrgAcademicSlate(result.slate),
+  };
+}
+
+/**
  * Ensure CURRENT slate for the owner's personal org + active enrollment (lazy).
  * @param {import("@prisma/client").PrismaClient} [db]
  * @param {string} userId
@@ -205,19 +228,7 @@ export async function ensureOrgAcademicSlate(db, opts) {
 export async function ensureCurrentOrgSlateForOwner(db = prisma, userId) {
   const org = await findStudentPersonalOrg(db, userId);
   if (!org?.id) return null;
-  const enrollment = await getActiveEnrollment(db, userId);
-  if (!enrollment) return null;
-
-  const result = await ensureOrgAcademicSlate(db, {
-    projectId: org.id,
-    enrollmentId: enrollment.id,
-    academicYearId: enrollment.academicYearId,
-  });
-  return {
-    projectId: org.id,
-    ...result,
-    slate: serializeOrgAcademicSlate(result.slate),
-  };
+  return ensureCurrentOrgSlateForProject(db, org.id, userId);
 }
 
 /**
@@ -254,15 +265,15 @@ export async function resolveCurrentOrgSlate(db = prisma, projectId) {
 export async function resolveSlateIdForOrgCreate(db, projectId) {
   const project = await db.project.findUnique({
     where: { id: projectId },
-    select: { id: true, isPersonalOrg: true, ownerUserId: true },
+    select: { id: true, isPersonalOrg: true, isAttemptOrg: true, ownerUserId: true },
   });
   if (!project) return null;
 
   let slateId = await resolveCurrentOrgSlateId(db, projectId);
   if (slateId) return slateId;
 
-  if (project.isPersonalOrg && project.ownerUserId) {
-    const ensured = await ensureCurrentOrgSlateForOwner(db, project.ownerUserId);
+  if ((project.isPersonalOrg || project.isAttemptOrg) && project.ownerUserId) {
+    const ensured = await ensureCurrentOrgSlateForProject(db, project.id, project.ownerUserId);
     return ensured?.slate?.id || null;
   }
   return null;

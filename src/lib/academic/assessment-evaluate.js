@@ -17,6 +17,12 @@ import {
 import { findStudentPersonalOrg } from "@/lib/projects/student-personal-org";
 import { orgOpsSlateListWhere } from "@/lib/academic/org-academic-slate";
 import { computeFinalScore } from "@/lib/academic/assessment-scoring";
+import {
+  ASSESSMENT_PROCESS_CATALOGUE,
+  DEFAULT_ASSESSMENT_TOTAL_MARKS,
+  evaluateAllowedProcesses,
+  redistributeProcessMarks,
+} from "@/lib/academic/assessment-process-catalogue";
 
 /**
  * @param {any} checkpoint
@@ -122,28 +128,136 @@ export function evaluateCheckpointAgainstDomain(checkpoint, ctx) {
 }
 
 /**
- * Ensure a ProjectAssessment row exists (optional by default for Practice).
+ * Ensure a ProjectAssessment row exists with A–Z process allocations.
  * @param {import("@prisma/client").PrismaClient} db
- * @param {{ projectId: string; createIfMissing?: boolean }} opts
+ * @param {{
+ *   projectId: string;
+ *   createIfMissing?: boolean;
+ *   scoringEnabled?: boolean;
+ * }} opts
  */
 export async function getOrCreateProjectAssessment(db, opts) {
+  const include = {
+    checkpoints: { orderBy: { sortOrder: "asc" } },
+    processes: { orderBy: { sortOrder: "asc" } },
+  };
   const existing = await db.projectAssessment.findUnique({
     where: { projectId: opts.projectId },
-    include: { checkpoints: { orderBy: { sortOrder: "asc" } } },
+    include,
   });
-  if (existing) return existing;
+  if (existing) {
+    if (!existing.processes?.length) {
+      await seedAssessmentProcesses(db, existing.id, existing.totalMarks || DEFAULT_ASSESSMENT_TOTAL_MARKS);
+      return db.projectAssessment.findUnique({
+        where: { id: existing.id },
+        include,
+      });
+    }
+    return existing;
+  }
   if (!opts.createIfMissing) return null;
 
-  return db.projectAssessment.create({
+  const scoringEnabled = opts.scoringEnabled !== false;
+  const created = await db.projectAssessment.create({
     data: {
       projectId: opts.projectId,
-      gradingMode: AssessmentGradingMode.COMBINED,
-      manualMaxMarks: 40,
+      gradingMode: AssessmentGradingMode.AUTOMATIC,
+      manualMaxMarks: 0,
       passMarkPercent: 50,
+      totalMarks: DEFAULT_ASSESSMENT_TOTAL_MARKS,
+      scoringEnabled,
       resultsReleased: false,
     },
-    include: { checkpoints: { orderBy: { sortOrder: "asc" } } },
   });
+  await seedAssessmentProcesses(db, created.id, DEFAULT_ASSESSMENT_TOTAL_MARKS);
+  return db.projectAssessment.findUnique({
+    where: { id: created.id },
+    include,
+  });
+}
+
+/**
+ * @param {import("@prisma/client").PrismaClient} db
+ * @param {string} assessmentId
+ * @param {number} totalMarks
+ */
+export async function seedAssessmentProcesses(db, assessmentId, totalMarks = DEFAULT_ASSESSMENT_TOTAL_MARKS) {
+  const split = redistributeProcessMarks(
+    ASSESSMENT_PROCESS_CATALOGUE.map((p) => ({
+      processCode: p.code,
+      isAllowed: true,
+      marksPinned: false,
+      marks: 0,
+    })),
+    totalMarks,
+  );
+  await db.assessmentProcess.createMany({
+    data: split.rows.map((row, index) => ({
+      assessmentId,
+      processCode: row.processCode,
+      sortOrder: index,
+      isAllowed: row.isAllowed,
+      marks: row.marks,
+      marksPinned: false,
+    })),
+    skipDuplicates: true,
+  });
+}
+
+/**
+ * Live automatic score from the student's organisation domain (no student writes).
+ * @param {import("@prisma/client").PrismaClient} db
+ * @param {{
+ *   orgId: string | null;
+ *   assessment: any;
+ *   academicSlateId?: string | null;
+ * }} opts
+ */
+export async function computeLiveProcessScore(db, opts) {
+  if (!opts.orgId || !opts.assessment) return null;
+  const processRows = (opts.assessment.processes || []).filter((p) => p.isAllowed !== false);
+  if (!processRows.length) return null;
+
+  let slateWhere = {};
+  if (opts.academicSlateId) {
+    slateWhere = orgOpsSlateListWhere(opts.academicSlateId);
+  }
+  const [progress, procurements] = await Promise.all([
+    deriveOrganisationProcurementProgress(opts.orgId, { db }),
+    db.projectOrgProcurement.findMany({
+      where: { projectId: opts.orgId, ...slateWhere },
+      select: { procurementMethod: true, status: true },
+      take: 100,
+    }),
+  ]);
+  const results = evaluateAllowedProcesses(processRows, { progress, procurements });
+  const autoScore = results.reduce((s, r) => s + (r.awarded || 0), 0);
+  const totalMarks = Math.max(
+    0,
+    opts.assessment.totalMarks || processRows.reduce((s, p) => s + Math.max(0, p.marks || 0), 0),
+  );
+  const computed = computeFinalScore({
+    gradingMode: AssessmentGradingMode.AUTOMATIC,
+    autoScore,
+    manualScore: null,
+    autoMaxMarks: totalMarks,
+    manualMaxMarks: 0,
+    passMarkPercent: opts.assessment.passMarkPercent,
+    manualEntered: false,
+  });
+  return {
+    autoScore: computed.autoScore,
+    finalScore: computed.finalScore,
+    finalPercent: computed.finalPercent,
+    totalMarks,
+    passFail: computed.passFail,
+    completedCount: results.filter((r) => r.satisfied).length,
+    allowedCount: results.length,
+    processes: results,
+    currentStageLabel: progress?.summary?.currentStageLabel || null,
+    currentStageKey: progress?.summary?.currentStageKey || null,
+    progressPercent: progress?.summary?.percent ?? null,
+  };
 }
 
 /**
@@ -177,6 +291,9 @@ export async function autoEvaluateProjectAttempt(opts) {
   });
   if (!assessment) {
     return { skipped: true, reason: "No assessment configuration" };
+  }
+  if (assessment.scoringEnabled === false) {
+    return { skipped: true, reason: "Scoring is disabled for this project" };
   }
 
   if (assessment.gradingMode === AssessmentGradingMode.MANUAL) {
@@ -223,42 +340,67 @@ export async function autoEvaluateProjectAttempt(opts) {
   }
 
   const studentUserId = attempt.enrollment.studentUserId;
-  const org = await findStudentPersonalOrg(db, studentUserId);
+  const orgId =
+    attempt.workspaceProjectId ||
+    (
+      await db.project.findFirst({
+        where: {
+          ownerUserId: studentUserId,
+          isAttemptOrg: true,
+          sourceAcademicProjectId: attempt.enrollment.projectId,
+        },
+        select: { id: true },
+      })
+    )?.id ||
+    (await findStudentPersonalOrg(db, studentUserId))?.id ||
+    null;
   let progress = null;
   /** @type {{ procurementMethod: string | null }[]} */
   let procurements = [];
-  if (org?.id) {
-    progress = await deriveOrganisationProcurementProgress(org.id, { db });
+  if (orgId) {
+    progress = await deriveOrganisationProcurementProgress(orgId, { db });
     let slateWhere = {};
     if (attempt.academicSlateId) {
       slateWhere = orgOpsSlateListWhere(attempt.academicSlateId);
     }
     procurements = await db.projectOrgProcurement.findMany({
-      where: { projectId: org.id, ...slateWhere },
-      select: { procurementMethod: true },
+      where: { projectId: orgId, ...slateWhere },
+      select: { procurementMethod: true, status: true },
       take: 100,
     });
   }
 
-  const activeCheckpoints = (assessment.checkpoints || []).filter((c) => c.isActive);
-  const checkpointResults = activeCheckpoints.map((cp) =>
-    evaluateCheckpointAgainstDomain(cp, {
-      progress,
-      procurements,
-      attempt,
-    }),
-  );
-  const autoMaxMarks = activeCheckpoints.reduce((s, c) => s + Math.max(0, c.marks || 0), 0);
-  const autoScore = checkpointResults.reduce((s, r) => s + (r.awarded || 0), 0);
+  const processRows = (assessment.processes || []).filter((p) => p.isAllowed !== false);
+  /** @type {any[]} */
+  let checkpointResults = [];
+  let autoMaxMarks = 0;
+  let autoScore = 0;
+
+  if (processRows.length) {
+    checkpointResults = evaluateAllowedProcesses(processRows, { progress, procurements });
+    autoMaxMarks = processRows.reduce((s, p) => s + Math.max(0, p.marks || 0), 0);
+    autoScore = checkpointResults.reduce((s, r) => s + (r.awarded || 0), 0);
+  } else {
+    const activeCheckpoints = (assessment.checkpoints || []).filter((c) => c.isActive);
+    checkpointResults = activeCheckpoints.map((cp) =>
+      evaluateCheckpointAgainstDomain(cp, {
+        progress,
+        procurements,
+        attempt,
+      }),
+    );
+    autoMaxMarks = activeCheckpoints.reduce((s, c) => s + Math.max(0, c.marks || 0), 0);
+    autoScore = checkpointResults.reduce((s, r) => s + (r.awarded || 0), 0);
+  }
 
   const computed = computeFinalScore({
-    gradingMode: assessment.gradingMode,
+    gradingMode: AssessmentGradingMode.AUTOMATIC,
     autoScore,
-    manualScore: attempt.grade?.manualScore,
-    autoMaxMarks,
-    manualMaxMarks: assessment.manualMaxMarks,
+    manualScore: null,
+    autoMaxMarks: assessment.totalMarks || autoMaxMarks,
+    manualMaxMarks: 0,
     passMarkPercent: assessment.passMarkPercent,
-    manualEntered: attempt.grade?.manualScore != null,
+    manualEntered: false,
   });
 
   const grade = await db.projectAttemptGrade.upsert({
@@ -477,4 +619,129 @@ export async function manualGradeProjectAttempt(opts) {
   });
 
   return { grade, computed };
+}
+
+/**
+ * Re-run automatic evaluation for one, many, or all attempts on a project.
+ * In-progress / returned attempts are force-submitted first, then marked.
+ *
+ * @param {{
+ *   projectId: string;
+ *   actorUserId: string;
+ *   attemptId?: string | null;
+ *   attemptIds?: string[] | null;
+ *   forceSubmitOnly?: boolean;
+ *   db?: import("@prisma/client").PrismaClient;
+ * }} opts
+ */
+export async function regradeProjectAttempts(opts) {
+  const db = opts.db || prisma;
+  const assessment = await getOrCreateProjectAssessment(db, {
+    projectId: opts.projectId,
+    createIfMissing: false,
+  });
+  if (!assessment && !opts.forceSubmitOnly) {
+    const err = new Error("Configure assessment scoring first.");
+    // @ts-ignore
+    err.code = "NO_ASSESSMENT";
+    throw err;
+  }
+  if (assessment && assessment.scoringEnabled === false && !opts.forceSubmitOnly) {
+    const err = new Error("Scoring is disabled for this project.");
+    // @ts-ignore
+    err.code = "SCORING_DISABLED";
+    throw err;
+  }
+
+  /** @type {string[] | null} */
+  let idFilter = null;
+  if (Array.isArray(opts.attemptIds) && opts.attemptIds.length > 0) {
+    idFilter = opts.attemptIds.map((id) => String(id || "").trim()).filter(Boolean);
+  } else if (opts.attemptId) {
+    idFilter = [String(opts.attemptId).trim()].filter(Boolean);
+  }
+
+  const attempts = await db.projectAttempt.findMany({
+    where: {
+      enrollment: { projectId: opts.projectId },
+      ...(idFilter ? { id: { in: idFilter } } : {}),
+      status: {
+        in: [
+          ProjectAttemptStatus.SUBMITTED,
+          ProjectAttemptStatus.UNDER_REVIEW,
+          ProjectAttemptStatus.COMPLETED,
+          ProjectAttemptStatus.IN_PROGRESS,
+          ProjectAttemptStatus.RETURNED,
+        ],
+      },
+    },
+    include: {
+      enrollment: { select: { studentUserId: true } },
+    },
+    take: 500,
+  });
+
+  const { submitProjectAttempt } = await import("@/lib/academic/project-attempts");
+
+  let graded = 0;
+  let submitted = 0;
+  let skipped = 0;
+
+  for (const row of attempts) {
+    const needsSubmit =
+      row.status === ProjectAttemptStatus.IN_PROGRESS ||
+      row.status === ProjectAttemptStatus.RETURNED;
+
+    try {
+      if (needsSubmit) {
+        await submitProjectAttempt({
+          attemptId: row.id,
+          studentUserId: row.enrollment.studentUserId,
+          actorUserId: opts.actorUserId,
+          forceByStaff: true,
+          db,
+        });
+        submitted += 1;
+        graded += 1;
+        continue;
+      }
+
+      // Already submitted / under review / completed — recompute marks
+      if (!assessment || assessment.scoringEnabled === false) {
+        skipped += 1;
+        continue;
+      }
+
+      const result = await autoEvaluateProjectAttempt({
+        attemptId: row.id,
+        actorUserId: opts.actorUserId,
+        db,
+      });
+      if (result?.skipped) skipped += 1;
+      else graded += 1;
+    } catch {
+      skipped += 1;
+    }
+  }
+
+  await writeAuditLog({
+    eventType: AuditEvent.PROJECT_ASSESSMENT_UPDATED,
+    actorUserId: opts.actorUserId,
+    meta: {
+      projectId: opts.projectId,
+      action: opts.forceSubmitOnly
+        ? "FORCE_SUBMIT"
+        : idFilter?.length === 1
+          ? "REGRADE_ONE"
+          : idFilter?.length
+            ? "REGRADE_SELECTED"
+            : "REGRADE_ALL",
+      attemptIds: idFilter,
+      graded,
+      submitted,
+      skipped,
+    },
+  });
+
+  return { graded, submitted, skipped, total: attempts.length };
 }

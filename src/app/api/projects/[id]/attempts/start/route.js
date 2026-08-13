@@ -26,7 +26,7 @@ export async function POST(request, context) {
   if (!id) return NextResponse.json({ error: "Invalid project id." }, { status: 400 });
 
   const project = await prisma.project.findUnique({ where: { id } });
-  if (!project || project.isPersonalOrg) {
+  if (!project || project.isPersonalOrg || project.isAttemptOrg) {
     return NextResponse.json({ error: "Not found." }, { status: 404 });
   }
 
@@ -78,6 +78,7 @@ export async function POST(request, context) {
       ok: true,
       ...result,
       enrollment: result.enrollment,
+      redirectTo: "/organisation",
     });
   } catch (e) {
     const code = e && typeof e === "object" && "code" in e ? e.code : "";
@@ -89,7 +90,8 @@ export async function POST(request, context) {
             code === "WINDOW_CLOSED" ||
             code === "NOT_PUBLISHED" ||
             code === "NOT_ACADEMIC" ||
-            code === "NO_ORG"
+            code === "NO_ORG" ||
+            code === "ASSESSMENT_LOCKED" || code === "PROJECT_IN_PROGRESS"
           ? 400
           : 500;
     if (status === 500) console.error(e);

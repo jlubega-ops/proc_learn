@@ -1,7 +1,10 @@
 /**
  * Academic ProjectAttempt lifecycle — enrollment is membership; attempt is execution.
- * Timer is server-authoritative (startedAt + Project.durationSeconds).
- * Procurement work happens on the student's My Organisation; progress is observed from domain.
+ * Timer is server-authoritative:
+ *   - Duration (H:MM) → countdown from startedAt; does not pause on logout
+ *   - No duration → countdown to project closeAt
+ *   - When both apply after start → earlier deadline wins
+ * Each student works in an isolated organisation shell for this academic project.
  */
 import {
   ProjectAttemptStatus,
@@ -11,11 +14,20 @@ import {
 } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { AuditEvent, writeAuditLog } from "@/lib/audit-log";
-import { findStudentPersonalOrg, ensureStudentPersonalOrg } from "@/lib/projects/student-personal-org";
-import { ensureCurrentOrgSlateForOwner } from "@/lib/academic/org-academic-slate";
+import { findStudentPersonalOrg } from "@/lib/projects/student-personal-org";
+import { ensureStudentAttemptOrganisation } from "@/lib/projects/student-attempt-org";
+import {
+  findStudentAssessmentLock,
+  findStudentInProgressAttempt,
+  persistStudentActiveOrg,
+} from "@/lib/projects/student-active-org";
+import { ensureCurrentOrgSlateForProject } from "@/lib/academic/org-academic-slate";
 import { getActiveEnrollment } from "@/lib/academic/student-enrollment";
 import { deriveOrganisationProcurementProgress } from "@/lib/projects/derive-org-progress";
 import { OBSERVATION_STAGE_LABELS } from "@/lib/projects/derive-org-progress";
+import { getOrCreateProjectAssessment, computeLiveProcessScore } from "@/lib/academic/assessment-evaluate";
+
+export { formatDurationClock, formatDurationHuman } from "@/lib/academic/attempt-timer-format";
 
 /**
  * @param {any} project
@@ -59,8 +71,8 @@ export function humanAcademicProjectStatus({ project, enrollment, latestAttempt,
     return { key: "not_started", label: "Not started" };
   }
   if (latestAttempt.status === ProjectAttemptStatus.IN_PROGRESS) {
-    if (timer && timer.remainingSeconds === 0 && timer.durationSeconds != null) {
-      return { key: "in_progress", label: "Time expired — submit" };
+    if (timer?.expired) {
+      return { key: "in_progress", label: "Time expired — submitting" };
     }
     return { key: "in_progress", label: "In progress" };
   }
@@ -80,39 +92,150 @@ export function humanAcademicProjectStatus({ project, enrollment, latestAttempt,
 }
 
 /**
- * Server-authoritative timer snapshot for an in-progress attempt.
+ * Server-authoritative timer snapshot.
+ * Duration does not pause when the student logs out — it is wall-clock from startedAt.
+ *
  * @param {{ attempt: any; project: any; now?: Date }} p
  */
 export function computeAttemptTimer({ attempt, project, now = new Date() }) {
+  const nowMs = now.getTime();
   const durationSeconds =
     typeof project?.durationSeconds === "number" && project.durationSeconds > 0
       ? project.durationSeconds
       : null;
+  const closeAt = project?.closeAt ? new Date(project.closeAt) : null;
+  const openAt = project?.openAt ? new Date(project.openAt) : null;
+  const closeAtMs =
+    closeAt && !Number.isNaN(closeAt.getTime()) ? closeAt.getTime() : null;
+  const openAtIso = openAt && !Number.isNaN(openAt.getTime()) ? openAt.toISOString() : null;
+  const closeAtIso = closeAtMs != null ? new Date(closeAtMs).toISOString() : null;
 
-  if (!attempt?.startedAt || durationSeconds == null) {
-    return {
-      durationSeconds,
-      elapsedSeconds: attempt?.durationSecondsUsed || 0,
-      remainingSeconds: durationSeconds,
-      expired: false,
-      serverNow: now.toISOString(),
-      deadlineAt: null,
-    };
+  const startedAt = attempt?.startedAt ? new Date(attempt.startedAt) : null;
+  const startedOk = startedAt && !Number.isNaN(startedAt.getTime()) ? startedAt : null;
+  const submittedAt = attempt?.submittedAt ? new Date(attempt.submittedAt) : null;
+  const submittedOk =
+    submittedAt && !Number.isNaN(submittedAt.getTime()) ? submittedAt : null;
+
+  const inFlight =
+    attempt?.status === ProjectAttemptStatus.IN_PROGRESS ||
+    attempt?.status === ProjectAttemptStatus.RETURNED;
+
+  /** Elapsed wall time from start (does not pause). */
+  let elapsedSeconds = 0;
+  if (startedOk) {
+    const endMs = submittedOk ? submittedOk.getTime() : nowMs;
+    elapsedSeconds = Math.max(0, Math.floor((endMs - startedOk.getTime()) / 1000));
+  } else if (typeof attempt?.durationSecondsUsed === "number") {
+    elapsedSeconds = Math.max(0, attempt.durationSecondsUsed);
   }
 
-  const startedAt = new Date(attempt.startedAt);
-  const elapsed = Math.max(0, Math.floor((now.getTime() - startedAt.getTime()) / 1000));
-  const remaining = Math.max(0, durationSeconds - elapsed);
-  const deadlineAt = new Date(startedAt.getTime() + durationSeconds * 1000);
+  /** @type {'DURATION' | 'WINDOW' | 'NONE'} */
+  let mode = "NONE";
+  /** @type {Date | null} */
+  let deadlineAt = null;
+
+  if (durationSeconds != null && startedOk) {
+    mode = "DURATION";
+    deadlineAt = new Date(startedOk.getTime() + durationSeconds * 1000);
+    if (closeAtMs != null && closeAtMs < deadlineAt.getTime()) {
+      deadlineAt = new Date(closeAtMs);
+    }
+  } else if (durationSeconds != null && !startedOk) {
+    mode = "DURATION";
+    deadlineAt = null;
+  } else if (closeAtMs != null) {
+    mode = "WINDOW";
+    deadlineAt = new Date(closeAtMs);
+  }
+
+  let remainingSeconds = null;
+  let expired = false;
+
+  if (submittedOk) {
+    remainingSeconds = 0;
+    expired = false;
+  } else if (deadlineAt) {
+    remainingSeconds = Math.max(0, Math.floor((deadlineAt.getTime() - nowMs) / 1000));
+    expired = remainingSeconds === 0 && (inFlight || (!attempt && mode === "WINDOW"));
+  } else if (mode === "DURATION" && durationSeconds != null) {
+    remainingSeconds = durationSeconds;
+    expired = false;
+  }
+
+  if (inFlight && closeAtMs != null && nowMs >= closeAtMs) {
+    expired = true;
+    remainingSeconds = 0;
+    if (!deadlineAt) deadlineAt = new Date(closeAtMs);
+  }
+
+  const limitSeconds =
+    mode === "DURATION" && durationSeconds != null
+      ? durationSeconds
+      : mode === "WINDOW" && closeAtMs != null && startedOk
+        ? Math.max(0, Math.floor((closeAtMs - startedOk.getTime()) / 1000))
+        : mode === "WINDOW" && closeAtMs != null
+          ? Math.max(0, Math.floor((closeAtMs - nowMs) / 1000))
+          : null;
 
   return {
+    mode,
     durationSeconds,
-    elapsedSeconds: elapsed,
-    remainingSeconds: remaining,
-    expired: remaining === 0,
+    openAt: openAtIso,
+    closeAt: closeAtIso,
+    startedAt: startedOk ? startedOk.toISOString() : null,
+    submittedAt: submittedOk ? submittedOk.toISOString() : null,
+    elapsedSeconds,
+    remainingSeconds,
+    limitSeconds,
+    expired: Boolean(expired),
     serverNow: now.toISOString(),
-    deadlineAt: deadlineAt.toISOString(),
+    deadlineAt: deadlineAt ? deadlineAt.toISOString() : null,
+    pausesOnLogout: false,
+    label:
+      mode === "DURATION"
+        ? "Timed attempt"
+        : mode === "WINDOW"
+          ? "Closes with project window"
+          : "No time limit",
   };
+}
+
+/**
+ * Auto-submit an in-progress attempt when the server timer has expired.
+ * @param {{
+ *   attemptId: string;
+ *   studentUserId: string;
+ *   actorUserId?: string | null;
+ *   db?: import("@prisma/client").PrismaClient;
+ * }} opts
+ */
+export async function autoSubmitIfAttemptExpired(opts) {
+  const db = opts.db || prisma;
+  const attempt = await db.projectAttempt.findUnique({
+    where: { id: opts.attemptId },
+    include: { enrollment: { include: { project: true } } },
+  });
+  if (!attempt || attempt.enrollment.studentUserId !== opts.studentUserId) {
+    return null;
+  }
+  if (
+    attempt.status !== ProjectAttemptStatus.IN_PROGRESS &&
+    attempt.status !== ProjectAttemptStatus.RETURNED
+  ) {
+    return null;
+  }
+  const timer = computeAttemptTimer({
+    attempt,
+    project: attempt.enrollment.project,
+  });
+  if (!timer.expired) return null;
+  return submitProjectAttempt({
+    attemptId: attempt.id,
+    studentUserId: opts.studentUserId,
+    actorUserId: opts.actorUserId || opts.studentUserId,
+    autoExpired: true,
+    db,
+  });
 }
 
 /**
@@ -132,6 +255,7 @@ export function serializeAttempt(attempt) {
     currentStageKey: attempt.currentStageKey,
     academicSlateId: attempt.academicSlateId,
     studentAcademicEnrollmentId: attempt.studentAcademicEnrollmentId,
+    workspaceProjectId: attempt.workspaceProjectId || null,
     createdAt: attempt.createdAt,
     updatedAt: attempt.updatedAt,
   };
@@ -151,7 +275,8 @@ export async function ensureProjectEnrollment(db, { projectId, studentUserId }) 
 }
 
 /**
- * Start a new ProjectAttempt (or resume NOT_STARTED). Binds current personal-org slate.
+ * Start a new ProjectAttempt (or resume NOT_STARTED / IN_PROGRESS).
+ * Creates an isolated organisation shell (same name as the examiner specified).
  * @param {{
  *   projectId: string;
  *   studentUserId: string;
@@ -162,7 +287,7 @@ export async function ensureProjectEnrollment(db, { projectId, studentUserId }) 
 export async function startProjectAttempt(opts) {
   const db = opts.db || prisma;
   const project = await db.project.findUnique({ where: { id: opts.projectId } });
-  if (!project || project.isPersonalOrg) {
+  if (!project || project.isPersonalOrg || project.isAttemptOrg) {
     const err = new Error("Academic project not found.");
     // @ts-ignore
     err.code = "NOT_FOUND";
@@ -184,6 +309,29 @@ export async function startProjectAttempt(opts) {
     const err = new Error("This project is not open right now.");
     // @ts-ignore
     err.code = "WINDOW_CLOSED";
+    throw err;
+  }
+
+  const otherInProgress = await findStudentInProgressAttempt(db, opts.studentUserId, {
+    excludeAcademicProjectId: opts.projectId,
+  });
+  if (otherInProgress?.academicProject?.id) {
+    const otherName = otherInProgress.academicProject.name || "another project";
+    const err = new Error(
+      `You already have an active attempt in “${otherName}”. Finish or leave that project before starting another.`,
+    );
+    // @ts-ignore
+    err.code = "PROJECT_IN_PROGRESS";
+    throw err;
+  }
+
+  const otherLock = await findStudentAssessmentLock(db, opts.studentUserId);
+  if (otherLock?.academicProject?.id && otherLock.academicProject.id !== opts.projectId) {
+    const err = new Error(
+      "You are already in an assessment organisation and cannot start another project until it closes.",
+    );
+    // @ts-ignore
+    err.code = "ASSESSMENT_LOCKED";
     throw err;
   }
 
@@ -215,12 +363,18 @@ export async function startProjectAttempt(opts) {
         db,
       });
     }
+    const workspace = await resumeAttemptWorkspace(db, {
+      studentUserId: opts.studentUserId,
+      academicProject: project,
+      attempt: active,
+    });
     const progress = await refreshAttemptProgressCache(db, active, opts.studentUserId);
     return {
       attempt: serializeAttempt(progress || active),
       enrollment,
       project,
       timer,
+      workspaceProjectId: workspace?.id || null,
       resumed: true,
     };
   }
@@ -243,16 +397,21 @@ export async function startProjectAttempt(opts) {
     }
   }
 
-  // Personal org + current academic slate (never create a new organisation)
-  await ensureStudentPersonalOrg(db, opts.studentUserId);
-  const personalOrg = await findStudentPersonalOrg(db, opts.studentUserId);
-  if (!personalOrg?.id) {
-    const err = new Error("My Organisation is required before starting.");
+  const workspace = await ensureStudentAttemptOrganisation(db, {
+    studentUserId: opts.studentUserId,
+    academicProject: project,
+  });
+  if (!workspace?.id) {
+    const err = new Error("Could not open the organisation workspace for this project.");
     // @ts-ignore
     err.code = "NO_ORG";
     throw err;
   }
-  const slateResult = await ensureCurrentOrgSlateForOwner(db, opts.studentUserId);
+  const slateResult = await ensureCurrentOrgSlateForProject(
+    db,
+    workspace.id,
+    opts.studentUserId,
+  );
   const academicEnrollment = await getActiveEnrollment(db, opts.studentUserId);
 
   const nextNumber =
@@ -275,6 +434,7 @@ export async function startProjectAttempt(opts) {
         startedAt: now,
         academicSlateId: slateResult?.slate?.id || null,
         studentAcademicEnrollmentId: academicEnrollment?.id || null,
+        workspaceProjectId: workspace.id,
       },
     });
   } else {
@@ -286,9 +446,12 @@ export async function startProjectAttempt(opts) {
         startedAt: now,
         academicSlateId: slateResult?.slate?.id || null,
         studentAcademicEnrollmentId: academicEnrollment?.id || null,
+        workspaceProjectId: workspace.id,
       },
     });
   }
+
+  await persistStudentActiveOrg(db, opts.studentUserId, workspace.id);
 
   await db.projectEnrollment.update({
     where: { id: enrollment.id },
@@ -309,7 +472,7 @@ export async function startProjectAttempt(opts) {
       attemptNumber: attempt.attemptNumber,
       academicSlateId: attempt.academicSlateId,
       studentAcademicEnrollmentId: attempt.studentAcademicEnrollmentId,
-      personalOrgProjectId: personalOrg.id,
+      workspaceProjectId: workspace.id,
       purpose: project.purpose,
     },
   });
@@ -320,7 +483,7 @@ export async function startProjectAttempt(opts) {
     enrollment,
     project,
     timer,
-    personalOrgProjectId: personalOrg.id,
+    workspaceProjectId: workspace.id,
     resumed: false,
   };
 }
@@ -334,19 +497,38 @@ export async function startProjectAttempt(opts) {
  *   db?: import("@prisma/client").PrismaClient;
  * }} opts
  */
+/**
+ * Submit a ProjectAttempt (student or staff force-submit).
+ * @param {{
+ *   attemptId: string;
+ *   studentUserId: string;
+ *   actorUserId?: string;
+ *   autoExpired?: boolean;
+ *   forceByStaff?: boolean;
+ *   db?: import("@prisma/client").PrismaClient;
+ * }} opts
+ */
 export async function submitProjectAttempt(opts) {
   const db = opts.db || prisma;
   const attempt = await db.projectAttempt.findUnique({
     where: { id: opts.attemptId },
     include: { enrollment: { include: { project: true } } },
   });
-  if (!attempt || attempt.enrollment.studentUserId !== opts.studentUserId) {
+  if (!attempt) {
+    const err = new Error("Attempt not found.");
+    // @ts-ignore
+    err.code = "NOT_FOUND";
+    throw err;
+  }
+  const forceByStaff = Boolean(opts.forceByStaff);
+  if (!forceByStaff && attempt.enrollment.studentUserId !== opts.studentUserId) {
     const err = new Error("Attempt not found.");
     // @ts-ignore
     err.code = "NOT_FOUND";
     throw err;
   }
 
+  const studentUserId = attempt.enrollment.studentUserId;
   const project = attempt.enrollment.project;
   const now = new Date();
 
@@ -355,7 +537,25 @@ export async function submitProjectAttempt(opts) {
     attempt.status === ProjectAttemptStatus.COMPLETED ||
     attempt.status === ProjectAttemptStatus.UNDER_REVIEW
   ) {
-    if (!project.allowEditAfterSubmit) {
+    if (!project.allowEditAfterSubmit && !forceByStaff) {
+      return {
+        attempt: serializeAttempt(attempt),
+        alreadySubmitted: true,
+        timer: computeAttemptTimer({ attempt, project, now }),
+      };
+    }
+    if (forceByStaff && !project.allowEditAfterSubmit) {
+      // Already submitted — re-run scoring only
+      try {
+        const { autoEvaluateProjectAttempt } = await import("@/lib/academic/assessment-evaluate");
+        await autoEvaluateProjectAttempt({
+          attemptId: attempt.id,
+          actorUserId: opts.actorUserId || studentUserId,
+          db,
+        });
+      } catch {
+        /* keep existing submission */
+      }
       return {
         attempt: serializeAttempt(attempt),
         alreadySubmitted: true,
@@ -376,10 +576,9 @@ export async function submitProjectAttempt(opts) {
   }
 
   const timer = computeAttemptTimer({ attempt, project, now });
-  const used = timer.durationSeconds != null ? timer.elapsedSeconds : attempt.durationSecondsUsed;
+  const used = timer.elapsedSeconds;
 
-  // Refresh progress cache from personal org before locking
-  await refreshAttemptProgressCache(db, attempt, opts.studentUserId);
+  await refreshAttemptProgressCache(db, attempt, studentUserId);
 
   const updated = await db.projectAttempt.update({
     where: { id: attempt.id },
@@ -401,26 +600,25 @@ export async function submitProjectAttempt(opts) {
 
   await writeAuditLog({
     eventType: AuditEvent.PROJECT_ATTEMPT_SUBMITTED,
-    actorUserId: opts.actorUserId || opts.studentUserId,
-    targetUserId: opts.studentUserId,
+    actorUserId: opts.actorUserId || studentUserId,
+    targetUserId: studentUserId,
     meta: {
       projectId: project.id,
       enrollmentId: attempt.enrollmentId,
       attemptId: attempt.id,
       attemptNumber: attempt.attemptNumber,
       autoExpired: Boolean(opts.autoExpired),
+      forceByStaff,
       durationSecondsUsed: used,
       purpose: project.purpose,
     },
   });
 
-  // Phase 9: when assessment config exists, auto-evaluate from real domain state.
-  // Phase 10: never return grade scores to the student until results are released.
   try {
     const { autoEvaluateProjectAttempt } = await import("@/lib/academic/assessment-evaluate");
     await autoEvaluateProjectAttempt({
       attemptId: attempt.id,
-      actorUserId: opts.actorUserId || opts.studentUserId,
+      actorUserId: opts.actorUserId || studentUserId,
       db,
     });
   } catch {
@@ -432,6 +630,7 @@ export async function submitProjectAttempt(opts) {
     alreadySubmitted: false,
     timer: { ...timer, remainingSeconds: 0, expired: timer.expired },
     autoExpired: Boolean(opts.autoExpired),
+    forceByStaff,
   };
 }
 
@@ -442,9 +641,30 @@ export async function submitProjectAttempt(opts) {
  */
 async function refreshAttemptProgressCache(db, attempt, studentUserId) {
   try {
-    const org = await findStudentPersonalOrg(db, studentUserId);
-    if (!org?.id) return null;
-    const progress = await deriveOrganisationProcurementProgress(org.id, { db });
+    const personal = await findStudentPersonalOrg(db, studentUserId);
+    let workspaceId = attempt.workspaceProjectId || null;
+    if (!workspaceId && attempt.enrollmentId) {
+      const enrollment = attempt.enrollment?.projectId
+        ? attempt.enrollment
+        : await db.projectEnrollment.findUnique({
+            where: { id: attempt.enrollmentId },
+            select: { projectId: true },
+          });
+      if (enrollment?.projectId) {
+        const ws = await db.project.findFirst({
+          where: {
+            ownerUserId: studentUserId,
+            isAttemptOrg: true,
+            sourceAcademicProjectId: enrollment.projectId,
+          },
+          select: { id: true },
+        });
+        workspaceId = ws?.id || null;
+      }
+    }
+    const orgId = workspaceId || personal?.id;
+    if (!orgId) return null;
+    const progress = await deriveOrganisationProcurementProgress(orgId, { db });
     return db.projectAttempt.update({
       where: { id: attempt.id },
       data: {
@@ -465,6 +685,57 @@ async function refreshAttemptProgressCache(db, attempt, studentUserId) {
 }
 
 /**
+ * Resume: switch into an existing attempt workspace. Do not create a new empty
+ * shell for legacy attempts that still run on My Organisation.
+ * @param {import("@prisma/client").PrismaClient} db
+ * @param {{ studentUserId: string; academicProject: any; attempt: any }} p
+ */
+async function resumeAttemptWorkspace(db, { studentUserId, academicProject, attempt }) {
+  let workspace = null;
+  if (attempt?.workspaceProjectId) {
+    workspace = await db.project.findFirst({
+      where: { id: attempt.workspaceProjectId, ownerUserId: studentUserId },
+      select: {
+        id: true,
+        name: true,
+        organizationName: true,
+        projectCode: true,
+        isAttemptOrg: true,
+        sourceAcademicProjectId: true,
+      },
+    });
+  }
+  if (!workspace) {
+    workspace = await db.project.findFirst({
+      where: {
+        ownerUserId: studentUserId,
+        isAttemptOrg: true,
+        sourceAcademicProjectId: academicProject.id,
+      },
+      select: {
+        id: true,
+        name: true,
+        organizationName: true,
+        projectCode: true,
+        isAttemptOrg: true,
+        sourceAcademicProjectId: true,
+      },
+    });
+  }
+  if (workspace?.id) {
+    if (attempt?.id && attempt.workspaceProjectId !== workspace.id) {
+      await db.projectAttempt.update({
+        where: { id: attempt.id },
+        data: { workspaceProjectId: workspace.id },
+      });
+      attempt.workspaceProjectId = workspace.id;
+    }
+    await persistStudentActiveOrg(db, studentUserId, workspace.id);
+  }
+  return workspace;
+}
+
+/**
  * Student catalog for Practice / Assessments.
  * @param {{
  *   studentUserId: string;
@@ -479,6 +750,7 @@ export async function listStudentAcademicProjects(opts) {
   const projects = await db.project.findMany({
     where: {
       isPersonalOrg: false,
+      isAttemptOrg: false,
       creatorRole: Role.EXAMINER,
       requiresEnrollment: true,
       isPublished: true,
@@ -503,19 +775,25 @@ export async function listStudentAcademicProjects(opts) {
   return projects.map((project) => {
     const enrollment = byProject.get(project.id) || null;
     const latestAttempt = enrollment?.attempts?.[0] || null;
-    const timer = latestAttempt
-      ? computeAttemptTimer({ attempt: latestAttempt, project })
-      : null;
+    const timer = computeAttemptTimer({
+      attempt: latestAttempt,
+      project,
+    });
     const status = humanAcademicProjectStatus({
       project,
       enrollment,
       latestAttempt,
       timer,
     });
+    const canEnroll = academicProjectAvailability(project).key === "available";
     return {
       id: project.id,
       name: project.name,
+      organizationName: project.organizationName,
       description: project.description,
+      instructions: project.instructions || null,
+      questionText: project.questionText || null,
+      questionFileUrl: project.questionFileUrl || null,
       purpose: project.purpose,
       openAt: project.openAt,
       closeAt: project.closeAt,
@@ -529,6 +807,7 @@ export async function listStudentAcademicProjects(opts) {
       latestAttempt: serializeAttempt(latestAttempt),
       timer,
       status,
+      canEnroll,
       href:
         purpose === ProjectPurpose.ASSESSMENT
           ? `/academic/assessments/${project.id}`
@@ -559,13 +838,38 @@ export async function listAcademicProjectParticipants(opts) {
           },
         },
       },
-      attempts: { orderBy: { attemptNumber: "desc" } },
+      attempts: {
+        orderBy: { attemptNumber: "desc" },
+        include: { grade: true },
+      },
     },
     orderBy: { enrolledAt: "desc" },
     take: 200,
   });
 
-  const participants = enrollments.map((e) => {
+  const assessment = await getOrCreateProjectAssessment(db, {
+    projectId: opts.projectId,
+    createIfMissing: true,
+  });
+
+  const liveScores = await Promise.all(
+    enrollments.map(async (e) => {
+      const latest = e.attempts[0] || null;
+      const orgId = latest?.workspaceProjectId || null;
+      if (!orgId || !assessment) return null;
+      try {
+        return await computeLiveProcessScore(db, {
+          orgId,
+          assessment,
+          academicSlateId: latest.academicSlateId || null,
+        });
+      } catch {
+        return null;
+      }
+    }),
+  );
+
+  const participants = enrollments.map((e, index) => {
     const latest = e.attempts[0] || null;
     const timer = latest ? computeAttemptTimer({ attempt: latest, project }) : null;
     const status = humanAcademicProjectStatus({
@@ -575,7 +879,12 @@ export async function listAcademicProjectParticipants(opts) {
       timer,
     });
     const participationType = e.student.academicEnrollments?.[0]?.participationType || "STUDENT";
-    const stageKey = latest?.currentStageKey ?? null;
+    const live = liveScores[index];
+    const stageKey = live?.currentStageKey || latest?.currentStageKey || null;
+    const grade = latest?.grade || null;
+    const submitted = Boolean(latest?.submittedAt);
+    const livePercent = live?.finalPercent ?? null;
+    const storedPercent = grade?.finalPercent ?? null;
     return {
       enrollmentId: e.id,
       studentUserId: e.studentUserId,
@@ -587,13 +896,33 @@ export async function listAcademicProjectParticipants(opts) {
       enrolledAt: e.enrolledAt,
       attemptCount: e.attempts.length,
       latestAttempt: serializeAttempt(latest),
+      workspaceProjectId: latest?.workspaceProjectId || null,
       timer,
       status,
-      progressPercent: latest?.progressPercent ?? null,
+      progressPercent: live?.progressPercent ?? latest?.progressPercent ?? null,
       currentStageKey: stageKey,
-      currentStageLabel: stageKey
+      currentStageLabel: live?.currentStageLabel || (stageKey
         ? OBSERVATION_STAGE_LABELS[stageKey] || stageKey
-        : null,
+        : null),
+      marks:
+        livePercent != null || storedPercent != null
+          ? {
+              finalScore: live?.finalScore ?? grade?.finalScore,
+              finalPercent: livePercent ?? storedPercent,
+              totalMarks: live?.totalMarks || assessment?.totalMarks || null,
+              status: grade?.status || null,
+              live: livePercent != null,
+              completedCount: live?.completedCount ?? null,
+              allowedCount: live?.allowedCount ?? null,
+            }
+          : submitted && grade
+            ? {
+                finalScore: grade.finalScore,
+                finalPercent: grade.finalPercent,
+                status: grade.status,
+              }
+            : null,
+      processScores: live?.processes || null,
     };
   });
 
@@ -605,7 +934,17 @@ export async function listAcademicProjectParticipants(opts) {
     completed: participants.filter((p) => p.status.key === "completed").length,
   };
 
-  return { project, participants, counts };
+  return {
+    project,
+    participants,
+    counts,
+    scoring: assessment
+      ? {
+          totalMarks: assessment.totalMarks || 100,
+          passMarkPercent: assessment.passMarkPercent || 50,
+        }
+      : null,
+  };
 }
 
 export { ProjectAttemptStatus, ProjectPurpose };

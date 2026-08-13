@@ -33,8 +33,8 @@ export default async function StudentsManagePage() {
             <>
               {" "}
               As an examiner you can add and maintain student records, suspend or reactivate accounts,
-              and use <span className="font-semibold text-primary">Observe</span> to review a
-              student’s organisation and procurement progress (read-only).
+              and open <span className="font-semibold text-primary">Participation</span> to review
+              each student’s organisation and procurement stage (read-only).
             </>
           ) : (
             <>

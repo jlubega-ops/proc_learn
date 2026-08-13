@@ -19,6 +19,9 @@ export async function GET(request) {
   const { searchParams } = request.nextUrl;
   const q = searchParams.get("q") || "";
   const academicYearId = searchParams.get("academicYearId") || null;
+  const semesterId = searchParams.get("semesterId") || null;
+  const page = searchParams.get("page") || "1";
+  const pageSize = searchParams.get("pageSize") || "20";
   const participationRaw = (searchParams.get("participation") || "all").trim();
   const participation =
     participationRaw === "students" || participationRaw === "demo" ? participationRaw : "all";
@@ -26,7 +29,10 @@ export async function GET(request) {
   const data = await listExaminerObservationStudents({
     q,
     academicYearId,
+    semesterId,
     participation,
+    page: Number(page),
+    pageSize: Number(pageSize),
   });
 
   return NextResponse.json(data);

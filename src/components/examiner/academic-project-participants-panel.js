@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import Button from "@mui/material/Button";
 import Chip from "@mui/material/Chip";
@@ -11,8 +11,13 @@ import TableBody from "@mui/material/TableBody";
 import TableCell from "@mui/material/TableCell";
 import TableContainer from "@mui/material/TableContainer";
 import TableHead from "@mui/material/TableHead";
+import TablePagination from "@mui/material/TablePagination";
 import TableRow from "@mui/material/TableRow";
 import Paper from "@mui/material/Paper";
+import IconButton from "@mui/material/IconButton";
+import Tooltip from "@mui/material/Tooltip";
+import VisibilityRounded from "@mui/icons-material/VisibilityRounded";
+import RefreshRounded from "@mui/icons-material/RefreshRounded";
 import {
   DashboardPageIntro,
   BRAND_PAGE_SHELL_CLASS,
@@ -26,6 +31,7 @@ import {
   adminTableSx,
 } from "@/lib/admin-mui-surfaces";
 import { useToast } from "@/components/providers/toast-provider";
+import { formatDurationClock } from "@/lib/academic/attempt-timer-format";
 
 /**
  * @param {{ projectId: string }} props
@@ -34,32 +40,48 @@ export function AcademicProjectParticipantsPanel({ projectId }) {
   const { showToast } = useToast();
   const [loading, setLoading] = useState(true);
   const [data, setData] = useState(/** @type {any} */ (null));
+  const [page, setPage] = useState(0);
+  const [rowsPerPage, setRowsPerPage] = useState(10);
 
-  const load = useCallback(async () => {
-    setLoading(true);
-    try {
-      const res = await fetch(
-        `/api/projects/${encodeURIComponent(projectId)}/participants`,
-        { credentials: "include" },
-      );
-      const json = await res.json().catch(() => ({}));
-      if (!res.ok) {
-        showToast({
-          message: typeof json.error === "string" ? json.error : "Could not load participants.",
-          severity: "error",
-        });
-        setData(null);
-        return;
+  const load = useCallback(
+    async ({ silent } = {}) => {
+      if (!silent) setLoading(true);
+      try {
+        const res = await fetch(
+          `/api/projects/${encodeURIComponent(projectId)}/participants`,
+          { credentials: "include" },
+        );
+        const json = await res.json().catch(() => ({}));
+        if (!res.ok) {
+          if (!silent) {
+            showToast({
+              message:
+                typeof json.error === "string" ? json.error : "Could not load participants.",
+              severity: "error",
+            });
+            setData(null);
+          }
+          return;
+        }
+        setData(json);
+      } finally {
+        if (!silent) setLoading(false);
       }
-      setData(json);
-    } finally {
-      setLoading(false);
-    }
-  }, [projectId, showToast]);
+    },
+    [projectId, showToast],
+  );
 
   useEffect(() => {
     void load();
+    const timer = setInterval(() => void load({ silent: true }), 15000);
+    return () => clearInterval(timer);
   }, [load]);
+
+  const participants = data?.participants || [];
+  const paged = useMemo(() => {
+    const start = page * rowsPerPage;
+    return participants.slice(start, start + rowsPerPage);
+  }, [participants, page, rowsPerPage]);
 
   if (loading && !data) {
     return (
@@ -89,17 +111,22 @@ export function AcademicProjectParticipantsPanel({ projectId }) {
       <DashboardPageIntro
         hero
         title={p.name}
-        description="Read enrollment, attempt status, and jump to scoring or results."
+        description="Enrolled students, live stage, and current automatic score. Open a student for the full project report."
       >
         <div className="mt-3 flex flex-wrap gap-2">
-          <Chip size="small" label={p.purpose} color="primary" />
-          <Chip size="small" label={`Enrolled ${counts.enrolled || 0}`} />
-          <Chip size="small" label={`In progress ${counts.inProgress || 0}`} />
-          <Chip size="small" label={`Submitted ${counts.submitted || 0}`} />
+          <Chip size="small" color="primary" label={p.purpose} />
+          <Chip size="small" color="info" label={`Enrolled ${counts.enrolled || 0}`} />
+          <Chip size="small" color="warning" label={`In progress ${counts.inProgress || 0}`} />
+          <Chip size="small" color="success" label={`Submitted ${counts.submitted || 0}`} />
         </div>
         <div className="mt-3 flex flex-wrap gap-2">
-          <Button component={Link} href="/projects" className="cursor-pointer">
-            Projects
+          <Button
+            type="button"
+            className="cursor-pointer"
+            startIcon={<RefreshRounded />}
+            onClick={() => void load()}
+          >
+            Refresh
           </Button>
           <Button
             component={Link}
@@ -108,76 +135,141 @@ export function AcademicProjectParticipantsPanel({ projectId }) {
           >
             Scoring setup
           </Button>
-          <Button
-            component={Link}
-            href={`/academic/results?projectId=${encodeURIComponent(projectId)}`}
-            className="cursor-pointer"
-          >
+          <Button component={Link} href={`/projects/${projectId}/results`} className="cursor-pointer">
             Results
-          </Button>
-          <Button type="button" className="cursor-pointer" onClick={() => void load()}>
-            Refresh
           </Button>
         </div>
       </DashboardPageIntro>
 
       <h2 className={`${BRAND_SECTION_TITLE_CLASS} mb-2`}>Participants</h2>
-      {!data.participants?.length ? (
+      {!participants.length ? (
         <p className={BRAND_PAGE_LEAD_CLASS}>No students have enrolled yet.</p>
       ) : (
-        <TableContainer component={Paper} sx={adminOutlinedTableContainerSx}>
-          <Table size="small" sx={adminTableSx}>
-            <TableHead>
-              <TableRow>
-                <TableCell>Student</TableCell>
-                <TableCell>Status</TableCell>
-                <TableCell>Attempts</TableCell>
-                <TableCell>Progress</TableCell>
-                <TableCell>Timer</TableCell>
-              </TableRow>
-            </TableHead>
-            <TableBody>
-              {data.participants.map((row) => (
-                <TableRow key={row.enrollmentId}>
-                  <TableCell>
-                    <div className="font-medium">{row.displayName}</div>
-                    <div className="text-xs text-zinc-500">{row.email}</div>
-                    {row.participationType && row.participationType !== "STUDENT" ? (
-                      <Chip
-                        size="small"
-                        color="warning"
-                        className="mt-1"
-                        label={
-                          row.participationType === "EXAMINER_DEMO"
-                            ? "Examiner demo"
-                            : "System admin demo"
-                        }
-                      />
-                    ) : null}
-                  </TableCell>
-                  <TableCell>{row.status?.label || "—"}</TableCell>
-                  <TableCell>{row.attemptCount}</TableCell>
-                  <TableCell>
-                    {row.progressPercent != null ? `${row.progressPercent}%` : "—"}
-                    {row.currentStageLabel || row.currentStageKey ? (
-                      <div className="text-xs opacity-70">
-                        {row.currentStageLabel || row.currentStageKey}
-                      </div>
-                    ) : null}
-                  </TableCell>
-                  <TableCell>
-                    {row.timer?.durationSeconds == null
-                      ? "—"
-                      : row.timer.expired
-                        ? "Expired"
-                        : `${row.timer.remainingSeconds}s left`}
-                  </TableCell>
+        <Paper sx={adminOutlinedTableContainerSx}>
+          <TableContainer>
+            <Table size="small" sx={adminTableSx}>
+              <TableHead>
+                <TableRow>
+                  <TableCell>Student</TableCell>
+                  <TableCell>Status</TableCell>
+                  <TableCell>Stage</TableCell>
+                  <TableCell>Time</TableCell>
+                  <TableCell>Live score</TableCell>
+                  <TableCell>Attempts</TableCell>
+                  <TableCell align="right">Actions</TableCell>
                 </TableRow>
-              ))}
-            </TableBody>
-          </Table>
-        </TableContainer>
+              </TableHead>
+              <TableBody>
+                {paged.map((row) => (
+                  <TableRow key={row.enrollmentId}>
+                    <TableCell>
+                      <div className="font-medium">{row.displayName}</div>
+                      <div className="text-xs text-zinc-500">{row.email}</div>
+                      {row.participationType && row.participationType !== "STUDENT" ? (
+                        <Chip
+                          size="small"
+                          color="warning"
+                          className="mt-1"
+                          label={
+                            row.participationType === "EXAMINER_DEMO"
+                              ? "Examiner demo"
+                              : "System admin demo"
+                          }
+                        />
+                      ) : null}
+                    </TableCell>
+                    <TableCell>
+                      <StatusChip status={row.status} />
+                    </TableCell>
+                    <TableCell>
+                      {row.currentStageLabel || row.currentStageKey || "—"}
+                      {row.progressPercent != null ? (
+                        <div className="text-xs opacity-70">{row.progressPercent}%</div>
+                      ) : null}
+                    </TableCell>
+                    <TableCell>
+                      {row.timer?.expired ? (
+                        <Chip size="small" color="error" label="Time up" />
+                      ) : row.timer?.remainingSeconds != null ? (
+                        <div>
+                          <span className="font-medium">
+                            {formatDurationClock(row.timer.remainingSeconds)} left
+                          </span>
+                          <div className="text-xs text-zinc-500">
+                            Used {formatDurationClock(row.timer.elapsedSeconds)}
+                          </div>
+                        </div>
+                      ) : row.timer?.mode === "NONE" ? (
+                        "No limit"
+                      ) : (
+                        "—"
+                      )}
+                    </TableCell>
+                    <TableCell>
+                      {row.marks?.finalScore != null && row.marks?.totalMarks != null ? (
+                        <div>
+                          {row.marks.finalScore}/{row.marks.totalMarks}
+                          {row.marks.finalPercent != null ? ` (${row.marks.finalPercent}%)` : ""}
+                          {row.marks.live ? (
+                            <div className="text-xs text-primary">Live</div>
+                          ) : null}
+                        </div>
+                      ) : row.marks?.finalPercent != null ? (
+                        `${row.marks.finalPercent}%`
+                      ) : (
+                        "—"
+                      )}
+                    </TableCell>
+                    <TableCell>{row.attemptCount}</TableCell>
+                    <TableCell align="right">
+                      <div className="flex flex-nowrap justify-end">
+                        <Tooltip title="Open student report for this project">
+                          <IconButton
+                            component={Link}
+                            href={`/projects/${projectId}/participants/${row.studentUserId}`}
+                            size="small"
+                            color="primary"
+                            className="cursor-pointer"
+                            aria-label={`Open report for ${row.displayName}`}
+                          >
+                            <VisibilityRounded fontSize="small" />
+                          </IconButton>
+                        </Tooltip>
+                      </div>
+                    </TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          </TableContainer>
+          <TablePagination
+            component="div"
+            count={participants.length}
+            page={page}
+            onPageChange={(_e, next) => setPage(next)}
+            rowsPerPage={rowsPerPage}
+            onRowsPerPageChange={(e) => {
+              setRowsPerPage(Number(e.target.value));
+              setPage(0);
+            }}
+            rowsPerPageOptions={[5, 10, 20, 50]}
+          />
+        </Paper>
       )}
     </div>
   );
+}
+
+/**
+ * @param {{ status?: { key?: string; label?: string } }} props
+ */
+function StatusChip({ status }) {
+  const key = status?.key || "";
+  const label = status?.label || "—";
+  if (key === "in_progress") return <Chip size="small" color="info" label={label} />;
+  if (key === "submitted" || key === "completed") {
+    return <Chip size="small" color="success" label={label} />;
+  }
+  if (key === "not_started") return <Chip size="small" color="warning" label={label} />;
+  return <Chip size="small" color="primary" label={label} />;
 }

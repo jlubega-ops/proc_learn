@@ -49,10 +49,11 @@ export async function GET(_request, context) {
 
   if (
     isOwnerStudent &&
-    attempt.status === ProjectAttemptStatus.IN_PROGRESS
+    (attempt.status === ProjectAttemptStatus.IN_PROGRESS ||
+      attempt.status === ProjectAttemptStatus.RETURNED)
   ) {
     const timerCheck = computeAttemptTimer({ attempt, project });
-    if (timerCheck.expired && project.durationSeconds) {
+    if (timerCheck.expired) {
       autoSubmitted = await submitProjectAttempt({
         attemptId: attempt.id,
         studentUserId: user.id,
@@ -74,9 +75,22 @@ export async function GET(_request, context) {
   let progress = null;
   if (isOwnerStudent || isExaminer) {
     const orgUserId = attempt.enrollment.studentUserId;
-    const org = await findStudentPersonalOrg(prisma, orgUserId);
-    if (org?.id) {
-      progress = await deriveOrganisationProcurementProgress(org.id);
+    const orgId =
+      attempt.workspaceProjectId ||
+      (
+        await prisma.project.findFirst({
+          where: {
+            ownerUserId: orgUserId,
+            isAttemptOrg: true,
+            sourceAcademicProjectId: projectId,
+          },
+          select: { id: true },
+        })
+      )?.id ||
+      (await findStudentPersonalOrg(prisma, orgUserId))?.id ||
+      null;
+    if (orgId) {
+      progress = await deriveOrganisationProcurementProgress(orgId);
     }
   }
 

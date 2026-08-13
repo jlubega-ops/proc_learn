@@ -28,7 +28,10 @@ export function validateLoginFields(values) {
   } else {
     const schoolErr = schoolEmailFieldError(identifier);
     if (schoolErr) {
-      errors.identifier = schoolErr;
+      errors.identifier =
+        String(identifier).includes("_") && String(identifier).toUpperCase().includes("ORG-")
+          ? "Enter the organisation username exactly as shown (e.g. john_ORG-AB12CD@example.com)."
+          : schoolErr;
     }
   }
 

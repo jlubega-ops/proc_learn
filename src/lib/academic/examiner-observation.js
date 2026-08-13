@@ -6,17 +6,32 @@ import { prisma } from "@/lib/prisma";
 import { formatUserDisplayName } from "@/lib/user-display";
 import { getCurrentAcademicContext } from "@/lib/academic/academic-context";
 import { findStudentPersonalOrg } from "@/lib/projects/student-personal-org";
-import { deriveOrganisationProcurementProgress } from "@/lib/projects/derive-org-progress";
+import {
+  deriveOrganisationProcurementProgress,
+  listPersonalOrgProgressSummaries,
+} from "@/lib/projects/derive-org-progress";
 import {
   isOfficialStudentParticipation,
   observationDemoBadge,
 } from "@/lib/academic/examiner-observation-access";
+import { budgetInclude, serializeBudget } from "@/lib/projects/budgets";
+import {
+  procurementPlanInclude,
+  serializeProcurementPlan,
+} from "@/lib/projects/procurement-plans";
+import { requisitionInclude, serializeRequisition } from "@/lib/projects/requisitions";
+import { procurementInclude, serializeProcurement } from "@/lib/projects/procurements";
+import {
+  orgOpsSlateListWhere,
+  resolveCurrentOrgSlateId,
+} from "@/lib/academic/org-academic-slate";
 
 /**
  * @param {string} studentUserId
  * @param {{
  *   academicYearId?: string | null;
  *   db?: import("@prisma/client").PrismaClient;
+ *   orgProjectId?: string | null;
  * }} [opts]
  */
 export async function getExaminerStudentObservation(studentUserId, opts = {}) {
@@ -91,22 +106,103 @@ export async function getExaminerStudentObservation(studentUserId, opts = {}) {
       : null;
   }
 
-  const org = await findStudentPersonalOrg(db, user.id);
+  const org = Object.prototype.hasOwnProperty.call(opts, "orgProjectId")
+    ? opts.orgProjectId
+      ? await db.project.findFirst({
+          where: {
+            id: opts.orgProjectId,
+            ownerUserId: user.id,
+          },
+          select: {
+            id: true,
+            name: true,
+            organizationName: true,
+            projectCode: true,
+            status: true,
+            isPersonalOrg: true,
+            isAttemptOrg: true,
+            sourceAcademicProjectId: true,
+          },
+        })
+      : null
+    : await findStudentPersonalOrg(db, user.id);
 
   /** @type {any} */
   let progress = null;
   /** @type {any[]} */
   let recentActivity = [];
+  /** @type {any[]} */
+  let players = [];
+  /** @type {any[]} */
+  let actions = [];
+  /** @type {any[]} */
+  let liveTasks = [];
+
+  /** @type {any} */
+  let work = null;
 
   if (org?.id) {
     progress = await deriveOrganisationProcurementProgress(org.id, { db });
-    const audits = await db.auditLog.findMany({
-      where: {
-        eventType: { startsWith: "PROJECT_ORG_" },
-      },
-      orderBy: { createdAt: "desc" },
-      take: 80,
-    });
+    const [audits, orgUsers, workflowActions, openTasks] = await Promise.all([
+      db.auditLog.findMany({
+        where: {
+          eventType: { startsWith: "PROJECT_ORG_" },
+        },
+        orderBy: { createdAt: "desc" },
+        take: 80,
+      }),
+      db.projectOrgUser.findMany({
+        where: { projectId: org.id },
+        orderBy: { createdAt: "asc" },
+        include: {
+          projectOrgRole: { select: { name: true } },
+          department: { select: { name: true, code: true } },
+        },
+      }),
+      db.projectOrgWorkflowAction.findMany({
+        where: { projectId: org.id },
+        orderBy: { createdAt: "desc" },
+        take: 80,
+        include: {
+          actor: {
+            select: {
+              firstName: true,
+              middleName: true,
+              lastName: true,
+              email: true,
+              isProjectAdmin: true,
+              projectOrgRole: { select: { name: true } },
+            },
+          },
+          instance: {
+            select: {
+              entityType: true,
+              processFlow: { select: { name: true, code: true } },
+            },
+          },
+          task: { select: { title: true, requiredRoleName: true, stepNumber: true } },
+        },
+      }),
+      db.projectOrgWorkflowTask.findMany({
+        where: {
+          projectId: org.id,
+          status: { in: ["PENDING", "IN_PROGRESS"] },
+        },
+        orderBy: { createdAt: "asc" },
+        take: 20,
+        include: {
+          assignee: {
+            select: {
+              firstName: true,
+              middleName: true,
+              lastName: true,
+              email: true,
+              projectOrgRole: { select: { name: true } },
+            },
+          },
+        },
+      }),
+    ]);
     recentActivity = audits
       .filter((a) => {
         const meta = /** @type {any} */ (a.meta);
@@ -122,6 +218,40 @@ export async function getExaminerStudentObservation(studentUserId, opts = {}) {
             ? /** @type {any} */ (a.meta).description
             : null) || humanEvent(a.eventType),
       }));
+
+    players = orgUsers.map((u) => ({
+      id: u.id,
+      displayName: formatUserDisplayName(u),
+      email: u.email,
+      roleName: u.projectOrgRole?.name || null,
+      departmentName: u.department?.name || null,
+      isProjectAdmin: Boolean(u.isProjectAdmin),
+      lastLoginAt: u.lastLoginAt,
+    }));
+
+    actions = workflowActions.map((a) => ({
+      id: a.id,
+      createdAt: a.createdAt,
+      decision: a.decision,
+      comment: a.comment || null,
+      actorName: a.actor ? formatUserDisplayName(a.actor) : null,
+      actorRole: a.actorRoleName || a.actor?.projectOrgRole?.name || null,
+      processName: a.instance?.processFlow?.name || null,
+      taskTitle: a.task?.title || null,
+      previousStatus: a.previousStatus || null,
+      newStatus: a.newStatus || null,
+    }));
+
+    liveTasks = openTasks.map((t) => ({
+      id: t.id,
+      title: t.title,
+      status: t.status,
+      role: t.requiredRoleName || t.assignee?.projectOrgRole?.name || null,
+      assignee: t.assignee ? formatUserDisplayName(t.assignee) : null,
+      createdAt: t.createdAt,
+    }));
+
+    work = await loadObservationWorkDossier(db, org.id);
   }
 
   const years = await db.academicYear.findMany({
@@ -199,18 +329,113 @@ export async function getExaminerStudentObservation(studentUserId, opts = {}) {
         }
       : null,
     progress,
+    remainingStages: progress?.remainingStages || [],
+    players,
+    actions,
+    liveTasks,
+    work,
     recentActivity,
   };
 }
 
 /**
+ * Full submitted work for examiner inspection (read-only). Reuses operational
+ * serializers — does not alter procurement records.
+ *
+ * @param {import("@prisma/client").PrismaClient} db
+ * @param {string} projectId
+ */
+async function loadObservationWorkDossier(db, projectId) {
+  let slateWhere = {};
+  try {
+    const slateId = await resolveCurrentOrgSlateId(db, projectId);
+    slateWhere = orgOpsSlateListWhere(slateId);
+  } catch {
+    slateWhere = {};
+  }
+
+  const [financialYears, departments, budgets, plans, requisitions, procurements] =
+    await Promise.all([
+      db.projectOrgFinancialYear.findMany({
+        where: { projectId },
+        orderBy: { startDate: "desc" },
+        take: 20,
+      }),
+      db.projectOrgDepartment.findMany({
+        where: { projectId },
+        orderBy: { name: "asc" },
+        take: 80,
+        select: {
+          id: true,
+          name: true,
+          code: true,
+          unitType: true,
+          isActive: true,
+          parentId: true,
+        },
+      }),
+      db.projectOrgBudget.findMany({
+        where: { projectId, ...slateWhere },
+        orderBy: { updatedAt: "desc" },
+        take: 30,
+        include: budgetInclude,
+      }),
+      db.projectOrgProcurementPlan.findMany({
+        where: { projectId, ...slateWhere },
+        orderBy: { updatedAt: "desc" },
+        take: 30,
+        include: procurementPlanInclude,
+      }),
+      db.projectOrgRequisition.findMany({
+        where: { projectId, ...slateWhere },
+        orderBy: { updatedAt: "desc" },
+        take: 30,
+        include: requisitionInclude,
+      }),
+      db.projectOrgProcurement.findMany({
+        where: { projectId, ...slateWhere },
+        orderBy: { updatedAt: "desc" },
+        take: 20,
+        include: procurementInclude,
+      }),
+    ]);
+
+  return {
+    financialYears: financialYears.map((fy) => ({
+      id: fy.id,
+      label: fy.label,
+      startDate: fy.startDate,
+      endDate: fy.endDate,
+      isActive: fy.isActive,
+      description: fy.description || null,
+    })),
+    departments: departments.map((d) => ({
+      id: d.id,
+      name: d.name,
+      code: d.code || null,
+      unitType: d.unitType || null,
+      isActive: d.isActive,
+      parentId: d.parentId || null,
+    })),
+    budgets: budgets.map(serializeBudget),
+    plans: plans.map(serializeProcurementPlan),
+    requisitions: requisitions.map(serializeRequisition),
+    procurements: procurements.map((p) => serializeProcurement(p)),
+  };
+}
+
+/**
  * Roster for observation: real students + demo enrollments for selected year.
- * Defaults to current academic year.
+ * Defaults to current academic year. Page is paginated; org + current stage
+ * are attached only for the current page.
  *
  * @param {{
  *   q?: string;
  *   academicYearId?: string | null;
+ *   semesterId?: string | null;
  *   participation?: 'all' | 'students' | 'demo';
+ *   page?: number;
+ *   pageSize?: number;
  *   db?: import("@prisma/client").PrismaClient;
  * }} [opts]
  */
@@ -220,6 +445,8 @@ export async function listExaminerObservationStudents(opts = {}) {
   const yearId = opts.academicYearId || university.academicYear?.id || null;
   const participation = opts.participation || "all";
   const q = (opts.q || "").trim();
+  const page = Math.max(1, Number(opts.page) || 1);
+  const pageSize = Math.min(100, Math.max(10, Number(opts.pageSize) || 20));
 
   /** @type {import("@prisma/client").Prisma.StudentAcademicEnrollmentWhereInput} */
   const where = {
@@ -304,14 +531,65 @@ export async function listExaminerObservationStudents(opts = {}) {
     .filter((u) => !enrolledIds.has(u.id))
     .map((u) => serializeObservationRow(u, null));
 
+  const allStudents = [...fromEnrollments, ...fromProfiles];
+  const total = allStudents.length;
+  const start = (page - 1) * pageSize;
+  const pageRows = allStudents.slice(start, start + pageSize);
+
+  const progressByOwner = await listPersonalOrgProgressSummaries(
+    pageRows.map((r) => r.id),
+    { db },
+  );
+
+  const students = pageRows.map((row) => {
+    const extra = progressByOwner.get(row.id);
+    return {
+      ...row,
+      organisation: extra?.organisation || null,
+      currentStageKey: extra?.summary?.currentStageKey || null,
+      currentStageLabel: extra?.summary?.currentStageLabel || (extra ? "Not started" : null),
+      progressPercent: extra?.summary?.percent ?? null,
+      openTask: extra?.openTask || null,
+    };
+  });
+
+  const years = await db.academicYear.findMany({
+    orderBy: { label: "desc" },
+    take: 12,
+    select: { id: true, label: true, isCurrent: true },
+  });
+  const semesters = yearId
+    ? await db.semester.findMany({
+        where: { academicYearId: yearId },
+        orderBy: { startDate: "asc" },
+        select: { id: true, name: true, isActive: true, academicYearId: true },
+      })
+    : [];
+  const selectedSemester =
+    (opts.semesterId && semesters.find((s) => s.id === opts.semesterId)) ||
+    semesters.find((s) => s.isActive) ||
+    university.semester ||
+    null;
+
   return {
-    academicYear: university.academicYear
-      ? { id: university.academicYear.id, label: university.academicYear.label }
-      : null,
-    semester: university.semester
-      ? { id: university.semester.id, name: university.semester.name }
-      : null,
-    students: [...fromEnrollments, ...fromProfiles],
+    academicYear: yearId
+      ? years.find((y) => y.id === yearId) || university.academicYear
+      : university.academicYear,
+    semester: selectedSemester
+      ? {
+          id: selectedSemester.id,
+          name: selectedSemester.name,
+          isActive: selectedSemester.isActive,
+        }
+      : university.semester
+        ? { id: university.semester.id, name: university.semester.name, isActive: true }
+        : null,
+    availableYears: years,
+    availableSemesters: semesters,
+    page,
+    pageSize,
+    total,
+    students,
   };
 }
 

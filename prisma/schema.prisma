@@ -398,9 +398,13 @@ model UserSettings {
   user       User     @relation(fields: [userId], references: [id], onDelete: Cascade)
   theme      String   @default("light") @db.VarChar(16)
   activeRole Role     @default(STUDENT) @map("active_role")
+  /// Student's current organisation shell: personal org or a per-attempt workspace.
+  activeOrgProjectId String?  @map("active_org_project_id") @db.VarChar(36)
+  activeOrgProject   Project? @relation("UserActiveOrg", fields: [activeOrgProjectId], references: [id], onDelete: SetNull)
   createdAt  DateTime @default(now()) @map("created_at")
   updatedAt  DateTime @updatedAt @map("updated_at")
 
+  @@index([activeOrgProjectId])
   @@map("user_settings")
 }
 
@@ -416,6 +420,7 @@ model Programme {
 
   students StudentProfile[]
   courses  Course[]
+  projects Project[]
 
   @@map("programme")
 }
@@ -437,6 +442,7 @@ model AcademicYear {
   classCohorts ClassCohort[]
   enrollments  StudentAcademicEnrollment[]
   orgSlates    OrgAcademicSlate[]
+  projects     Project[]
 
   @@index([isCurrent])
   @@map("academic_year")
@@ -458,6 +464,7 @@ model Semester {
 
   classCohorts ClassCohort[]
   orgSlates    OrgAcademicSlate[]
+  projects     Project[]
 
   @@index([academicYearId, name])
   @@index([isActive])
@@ -543,8 +550,8 @@ model StudentAcademicEnrollment {
   createdAt         DateTime                   @default(now()) @map("created_at")
   updatedAt         DateTime                   @updatedAt @map("updated_at")
 
-  /// One slate per enrollment (clean academic participation over the same My Organisation).
-  orgSlate OrgAcademicSlate?
+  /// One slate per organisation project for this academic enrollment.
+  orgSlates OrgAcademicSlate[]
   projectAttempts ProjectAttempt[]
 
   @@unique([userId, academicYearId])
@@ -554,13 +561,13 @@ model StudentAcademicEnrollment {
   @@map("student_academic_enrollment")
 }
 
-/// Academic-year participation context over a student's durable My Organisation (personal Project).
-/// Never creates a second organisation — only scopes new ops to this academic participation.
+/// Academic-year participation context over one organisation Project (personal or attempt workspace).
+/// One slate per (organisation project, academic enrollment) — never share a slate across orgs.
 model OrgAcademicSlate {
   id             String                 @id @default(uuid())
   projectId      String                 @map("project_id")
   project        Project                @relation(fields: [projectId], references: [id], onDelete: Cascade)
-  enrollmentId   String                 @unique @map("enrollment_id")
+  enrollmentId   String                 @map("enrollment_id")
   enrollment     StudentAcademicEnrollment @relation(fields: [enrollmentId], references: [id], onDelete: Cascade)
   academicYearId String                 @map("academic_year_id")
   academicYear   AcademicYear           @relation(fields: [academicYearId], references: [id], onDelete: Restrict)
@@ -692,6 +699,19 @@ model Project {
   projectCode        String?           @unique @map("project_code") @db.VarChar(16)
   /// True for the student's home organisation (one per student owner).
   isPersonalOrg      Boolean           @default(false) @map("is_personal_org")
+  /// Isolated organisation shell created when a student starts a Practice/Assessment attempt.
+  isAttemptOrg       Boolean           @default(false) @map("is_attempt_org")
+  /// Academic project (examiner PRACTICE/ASSESSMENT) this attempt workspace was created for.
+  sourceAcademicProjectId String?      @map("source_academic_project_id")
+  sourceAcademicProject   Project?     @relation("AcademicProjectWorkspaces", fields: [sourceAcademicProjectId], references: [id], onDelete: Cascade)
+  attemptWorkspaces       Project[]    @relation("AcademicProjectWorkspaces")
+  /// Academic context for Practice / Assessment projects (examiner-created).
+  academicYearId     String?           @map("academic_year_id")
+  academicYear       AcademicYear?     @relation(fields: [academicYearId], references: [id], onDelete: SetNull)
+  semesterId         String?           @map("semester_id")
+  semester           Semester?         @relation(fields: [semesterId], references: [id], onDelete: SetNull)
+  programmeId        String?           @map("programme_id")
+  programme          Programme?        @relation(fields: [programmeId], references: [id], onDelete: SetNull)
   createdAt          DateTime          @default(now()) @map("created_at")
   updatedAt          DateTime          @updatedAt @map("updated_at")
 
@@ -714,11 +734,17 @@ model Project {
   orgWorkflowActions      ProjectOrgWorkflowAction[]
   orgAcademicSlates       OrgAcademicSlate[]
   assessment              ProjectAssessment?
+  workspaceAttempts       ProjectAttempt[] @relation("AttemptWorkspace")
+  activeOrgForUsers       UserSettings[]   @relation("UserActiveOrg")
 
   @@index([ownerUserId, createdAt])
   @@index([ownerUserId, isPersonalOrg])
+  @@index([ownerUserId, isAttemptOrg])
+  @@index([sourceAcademicProjectId])
   @@index([creatorRole, purpose, isPublished])
   @@index([visibility, isPublished])
+  @@index([academicYearId, programmeId])
+  @@index([semesterId])
   @@map("project")
 }
 
@@ -750,17 +776,20 @@ model ProjectAttempt {
   enrollmentId                String              @map("enrollment_id")
   enrollment                  ProjectEnrollment   @relation(fields: [enrollmentId], references: [id], onDelete: Cascade)
   attemptNumber               Int                 @map("attempt_number")
-  /// Student's My Organisation CURRENT slate when the attempt started.
+  /// Organisation shell CURRENT slate when the attempt started (personal or attempt workspace).
   academicSlateId             String?             @map("academic_slate_id")
   academicSlate               OrgAcademicSlate?   @relation(fields: [academicSlateId], references: [id], onDelete: SetNull)
   studentAcademicEnrollmentId String?             @map("student_academic_enrollment_id")
   studentAcademicEnrollment   StudentAcademicEnrollment? @relation(fields: [studentAcademicEnrollmentId], references: [id], onDelete: SetNull)
+  /// Isolated organisation Project this attempt is executed in (null = legacy personal-org attempts).
+  workspaceProjectId          String?             @map("workspace_project_id")
+  workspaceProject            Project?            @relation("AttemptWorkspace", fields: [workspaceProjectId], references: [id], onDelete: SetNull)
   status                      ProjectAttemptStatus @default(NOT_STARTED)
   startedAt                   DateTime?           @map("started_at")
   submittedAt                 DateTime?           @map("submitted_at")
   /// Seconds of active work; primarily derived from startedAt→now/submit for the timer.
   durationSecondsUsed         Int                 @default(0) @map("duration_seconds_used")
-  /// Cache only — progress is derived from the personal-org procurement domain.
+  /// Cache only — progress is derived from the attempt workspace procurement domain.
   progressPercent             Int?                @map("progress_percent")
   currentStageKey             String?             @map("current_stage_key") @db.VarChar(64)
   createdAt                   DateTime            @default(now()) @map("created_at")
@@ -772,6 +801,7 @@ model ProjectAttempt {
   @@index([enrollmentId, status])
   @@index([academicSlateId])
   @@index([studentAcademicEnrollmentId])
+  @@index([workspaceProjectId])
   @@map("project_attempt")
 }
 
@@ -781,17 +811,22 @@ model ProjectAssessment {
   id                 String                @id @default(uuid())
   projectId          String                @unique @map("project_id")
   project            Project               @relation(fields: [projectId], references: [id], onDelete: Cascade)
-  gradingMode        AssessmentGradingMode @default(COMBINED) @map("grading_mode")
+  gradingMode        AssessmentGradingMode @default(AUTOMATIC) @map("grading_mode")
   /// Examiner-entered marks cap (0 for AUTOMATIC). Auto cap = sum of active checkpoint marks.
   manualMaxMarks     Int                   @default(0) @map("manual_max_marks")
   /// Pass when finalPercent >= this value (default 50).
   passMarkPercent    Int                   @default(50) @map("pass_mark_percent")
+  /// Total grade this project is scored out of. Allowed processes share this total.
+  totalMarks         Int                   @default(100) @map("total_marks")
+  /// When false, Practice projects skip scoring UI/eval (Assessment defaults to true).
+  scoringEnabled     Boolean               @default(true) @map("scoring_enabled")
   /// When true, students may see their final score and feedback.
   resultsReleased    Boolean               @default(false) @map("results_released")
   createdAt          DateTime              @default(now()) @map("created_at")
   updatedAt          DateTime              @updatedAt @map("updated_at")
 
   checkpoints AssessmentCheckpoint[]
+  processes   AssessmentProcess[]
   grades      ProjectAttemptGrade[]
 
   @@map("project_assessment")
@@ -815,6 +850,25 @@ model AssessmentCheckpoint {
 
   @@index([assessmentId, sortOrder])
   @@map("assessment_checkpoint")
+}
+
+/// One engine process in an Academic Project assessment. Allowed processes share totalMarks.
+model AssessmentProcess {
+  id           String            @id @default(uuid())
+  assessmentId String            @map("assessment_id")
+  assessment   ProjectAssessment @relation(fields: [assessmentId], references: [id], onDelete: Cascade)
+  processCode  String            @map("process_code") @db.VarChar(64)
+  sortOrder    Int               @default(0) @map("sort_order")
+  isAllowed    Boolean           @default(true) @map("is_allowed")
+  marks        Int               @default(0)
+  /// When true, examiner set this mark; remaining allowed processes share what is left.
+  marksPinned  Boolean           @default(false) @map("marks_pinned")
+  createdAt    DateTime          @default(now()) @map("created_at")
+  updatedAt    DateTime          @updatedAt @map("updated_at")
+
+  @@unique([assessmentId, processCode])
+  @@index([assessmentId, sortOrder])
+  @@map("assessment_process")
 }
 
 /// One grade per ProjectAttempt. Demo participation may have grades but is excluded from official stats/exports.

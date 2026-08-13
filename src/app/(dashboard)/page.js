@@ -23,6 +23,14 @@ export default async function DashboardHomePage() {
     if (session?.userId) {
       const payload = await buildSessionPayloadForUserId(session.userId);
       if (payload?.authenticated && payload.activeRole === Role.STUDENT) {
+        if (
+          payload.orgContext === "PRACTICE" ||
+          payload.orgContext === "ASSESSMENT" ||
+          payload.assessmentLocked
+        ) {
+          const { redirect } = await import("next/navigation");
+          redirect("/organisation");
+        }
         const user = await prisma.user.findUnique({
           where: { id: session.userId },
           select: {

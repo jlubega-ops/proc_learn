@@ -288,3 +288,62 @@ html.dark .MuiDialogContent-dividers {
     cursor: not-allowed;
   }
 }
+
+@keyframes attempt-timer-pulse {
+  0%,
+  100% {
+    box-shadow: 0 0 0 0 color-mix(in oklab, var(--brand-red) 45%, transparent);
+    filter: brightness(1);
+  }
+  50% {
+    box-shadow: 0 0 0 6px color-mix(in oklab, var(--brand-red) 0%, transparent);
+    filter: brightness(1.08);
+  }
+}
+
+.attempt-timer-urgent {
+  animation: attempt-timer-pulse 1s ease-in-out infinite;
+}
+
+/* TinyMCE / rich-text display (no typography plugin required) */
+.rich-html {
+  font-size: 0.875rem;
+  line-height: 1.6;
+  color: color-mix(in oklab, var(--foreground) 82%, transparent);
+}
+.rich-html :where(p, ul, ol, blockquote, pre, table) {
+  margin-top: 0.5em;
+  margin-bottom: 0.5em;
+}
+.rich-html :where(ul, ol) {
+  padding-left: 1.25rem;
+}
+.rich-html :where(ul) {
+  list-style: disc;
+}
+.rich-html :where(ol) {
+  list-style: decimal;
+}
+.rich-html :where(h1, h2, h3, h4) {
+  margin-top: 0.75em;
+  margin-bottom: 0.35em;
+  font-weight: 600;
+  color: var(--foreground);
+}
+.rich-html :where(a) {
+  color: var(--brand-blue);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+.rich-html :where(img) {
+  max-width: 100%;
+  height: auto;
+}
+.rich-html :where(table) {
+  width: 100%;
+  border-collapse: collapse;
+}
+.rich-html :where(th, td) {
+  border: 1px solid var(--border-subtle);
+  padding: 0.35rem 0.5rem;
+}

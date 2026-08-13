@@ -20,6 +20,7 @@ import TableContainer from "@mui/material/TableContainer";
 import TableHead from "@mui/material/TableHead";
 import TableRow from "@mui/material/TableRow";
 import Typography from "@mui/material/Typography";
+import Alert from "@mui/material/Alert";
 import AddRounded from "@mui/icons-material/AddRounded";
 import CheckCircleRounded from "@mui/icons-material/CheckCircleRounded";
 import DeleteOutlineRounded from "@mui/icons-material/DeleteOutlineRounded";
@@ -105,6 +106,7 @@ export function ProjectOrgProcessWorkflowPanel({ projectId }) {
 
   const [adopted, setAdopted] = useState(/** @type {any[]} */ ([]));
   const [catalogue, setCatalogue] = useState(/** @type {any[]} */ ([]));
+  const [restrictedByExaminer, setRestrictedByExaminer] = useState(false);
 
   const [expandedCatalogueId, setExpandedCatalogueId] = useState(
     /** @type {string | false} */ (false),
@@ -137,6 +139,7 @@ export function ProjectOrgProcessWorkflowPanel({ projectId }) {
         }
         setAdopted(Array.isArray(data.adopted) ? data.adopted : []);
         setCatalogue(Array.isArray(data.catalogue) ? data.catalogue : []);
+        setRestrictedByExaminer(Boolean(data.restrictedByExaminer));
         if (typeof data.canAdopt === "boolean") setCanAdopt(data.canAdopt);
 
         // Prefill step cache from embedded items (avoids a fragile second fetch).
@@ -452,6 +455,12 @@ export function ProjectOrgProcessWorkflowPanel({ projectId }) {
             ? "Expand a process to review its steps and activate it for your organisation."
             : "Expand a process to view its steps."}
         </Typography>
+        {restrictedByExaminer ? (
+          <Alert severity="info" className="mb-3">
+            Only processes allowed for this academic project are listed. You still activate each one
+            here before staff can use it.
+          </Alert>
+        ) : null}
 
         <div className="mb-3 flex flex-wrap gap-2">
           <Button

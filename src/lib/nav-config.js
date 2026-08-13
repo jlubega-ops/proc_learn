@@ -14,6 +14,7 @@ import SettingsRounded from "@mui/icons-material/SettingsRounded";
 import AssignmentRounded from "@mui/icons-material/AssignmentRounded";
 import TaskAltRounded from "@mui/icons-material/TaskAltRounded";
 import AssessmentRounded from "@mui/icons-material/AssessmentRounded";
+import VisibilityRounded from "@mui/icons-material/VisibilityRounded";
 import Groups2Rounded from "@mui/icons-material/Groups2Rounded";
 import ShoppingCartRounded from "@mui/icons-material/ShoppingCartRounded";
 import StorefrontRounded from "@mui/icons-material/StorefrontRounded";
@@ -64,10 +65,10 @@ export const SIDEBAR_SECTIONS = [
         anyOf: [ROLE.SYSTEM_ADMIN, ROLE.EXAMINER],
       },
       {
-        href: "/academic/results",
-        label: "Results",
-        title: "Assessment results, grades, and official export",
-        Icon: AssessmentRounded,
+        href: "/academic/participation",
+        label: "Participation",
+        title: "View student organisations and procurement progress",
+        Icon: VisibilityRounded,
         anyOf: [ROLE.SYSTEM_ADMIN, ROLE.EXAMINER],
       },
     ],
@@ -326,27 +327,35 @@ function studentManageOrganisationLinks(base, anyOf = [ROLE.STUDENT]) {
 
 /**
  * Student platform nav — Dashboard + Overview, System Administration,
- * Manage Organisation, My Academic Work.
+ * Manage Organisation, My Academic Work (personal org only).
+ * Inside Practice/Assessment: no My Academic Work; Overview = project overview.
+ * @param {{ orgContext?: 'PERSONAL' | 'PRACTICE' | 'ASSESSMENT' }} [options]
  * @returns {NavSection[]}
  */
-function studentPlatformSections() {
+function studentPlatformSections(options = {}) {
   const orgBase = "/organisation";
-  return [
+  const inProjectOrg = options.orgContext === "PRACTICE" || options.orgContext === "ASSESSMENT";
+  /** @type {NavSection[]} */
+  const sections = [
     {
       id: "student-main",
       label: "",
       links: [
         {
-          href: "/",
+          href: inProjectOrg ? orgBase : "/",
           label: "Dashboard",
-          title: "Your student home — what to do next",
+          title: inProjectOrg
+            ? "This project's organisation dashboard"
+            : "Your student home — what to do next",
           Icon: HomeRounded,
           anyOf: [ROLE.STUDENT],
         },
         {
-          href: orgBase,
-          label: "Overview",
-          title: "Open your organisation overview",
+          href: inProjectOrg ? `${orgBase}/overview` : orgBase,
+          label: inProjectOrg ? "Project overview" : "Overview",
+          title: inProjectOrg
+            ? "Instructions, question, and project details"
+            : "Open your organisation overview",
           Icon: BusinessRounded,
           anyOf: [ROLE.STUDENT],
         },
@@ -365,7 +374,10 @@ function studentPlatformSections() {
       defaultOpen: true,
       links: studentManageOrganisationLinks(orgBase, [ROLE.STUDENT]),
     },
-    {
+  ];
+
+  if (!inProjectOrg) {
+    sections.push({
       id: "my-academic-work",
       label: "My Academic Work",
       collapsible: true,
@@ -392,8 +404,10 @@ function studentPlatformSections() {
           anyOf: [ROLE.STUDENT],
         },
       ],
-    },
-  ];
+    });
+  }
+
+  return sections;
 }
 
 /**
@@ -699,6 +713,7 @@ export function sidebarNavForOrgMember(projectId, permissions = [], options = {}
  *   permissions?: string[];
  *   roleName?: string | null;
  *   personalOrgProjectId?: string | null;
+ *   orgContext?: 'PERSONAL' | 'PRACTICE' | 'ASSESSMENT' | null;
  * }} [options]
  */
 export function sidebarNavForContext(activeRole, pathname, options = {}) {
@@ -709,7 +724,9 @@ export function sidebarNavForContext(activeRole, pathname, options = {}) {
   }
 
   if (activeRole === ROLE.STUDENT) {
-    return studentPlatformSections();
+    return studentPlatformSections({
+      orgContext: options.orgContext || "PERSONAL",
+    });
   }
 
   return sidebarNavForActiveRole(activeRole);

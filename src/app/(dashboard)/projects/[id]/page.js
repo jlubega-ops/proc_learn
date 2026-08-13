@@ -3,6 +3,7 @@ import { format, isValid, parseISO } from "date-fns";
 import { getProjectWorkspacePageContext } from "@/lib/projects/project-page-context";
 import { prisma } from "@/lib/prisma";
 import { formatUserDisplayName } from "@/lib/user-display";
+import { sanitizeRichHtml } from "@/lib/sanitize-rich-html";
 
 export const metadata = {
   title: "Project details",
@@ -96,11 +97,18 @@ export default async function ProjectDetailsPage({ params }) {
 
       {showStaffFields ? (
         <div className="rounded-xl border border-zinc-200 bg-white p-4 dark:border-zinc-800 dark:bg-zinc-900">
-          <h2 className="text-base font-semibold text-zinc-900 dark:text-white">Schedule</h2>
+          <h2 className="text-base font-semibold text-zinc-900 dark:text-white">Time &amp; schedule</h2>
           <p className="mt-2 text-sm text-zinc-700 dark:text-zinc-300">Open: {fmtDate(project.openAt)}</p>
           <p className="text-sm text-zinc-700 dark:text-zinc-300">Close: {fmtDate(project.closeAt)}</p>
           <p className="text-sm text-zinc-700 dark:text-zinc-300">
-            Duration: {fmtDuration(project.durationSeconds)}
+            Attempt duration: {fmtDuration(project.durationSeconds)}
+            {project.durationSeconds
+              ? " (counts down from start — does not pause on logout)"
+              : " (no timed attempt; students see time left until close)"}
+          </p>
+          <p className="mt-2 text-sm font-medium text-zinc-800 dark:text-zinc-200">
+            Window: {windowStatusLabel(project)}
+            {windowRemainingLabel(project) ? ` · ${windowRemainingLabel(project)}` : ""}
           </p>
         </div>
       ) : null}
@@ -118,8 +126,8 @@ export default async function ProjectDetailsPage({ params }) {
             <h2 className="text-base font-semibold text-zinc-900 dark:text-white">Instructions</h2>
             {project.instructions ? (
               <div
-                className="prose prose-sm mt-2 max-w-none dark:prose-invert"
-                dangerouslySetInnerHTML={{ __html: project.instructions }}
+                className="rich-html mt-2 max-w-none"
+                dangerouslySetInnerHTML={{ __html: sanitizeRichHtml(project.instructions) }}
               />
             ) : (
               <p className="mt-2 text-sm text-zinc-600 dark:text-zinc-400">—</p>
@@ -130,8 +138,8 @@ export default async function ProjectDetailsPage({ params }) {
             <h2 className="text-base font-semibold text-zinc-900 dark:text-white">Question</h2>
             {project.questionText ? (
               <div
-                className="prose prose-sm mt-2 max-w-none dark:prose-invert"
-                dangerouslySetInnerHTML={{ __html: project.questionText }}
+                className="rich-html mt-2 max-w-none"
+                dangerouslySetInnerHTML={{ __html: sanitizeRichHtml(project.questionText) }}
               />
             ) : (
               <p className="mt-2 text-sm text-zinc-600 dark:text-zinc-400">—</p>
@@ -161,10 +169,31 @@ function fmtDate(value) {
 }
 
 function fmtDuration(seconds) {
-  if (!seconds || seconds <= 0) return "—";
+  if (!seconds || seconds <= 0) return "Not set";
   const h = Math.floor(seconds / 3600);
   const m = Math.floor((seconds % 3600) / 60);
   return `${h}h ${m}m`;
+}
+
+function windowStatusLabel(project) {
+  const now = Date.now();
+  const openAt = project.openAt ? new Date(project.openAt).getTime() : null;
+  const closeAt = project.closeAt ? new Date(project.closeAt).getTime() : null;
+  if (openAt && now < openAt) return "Not yet open";
+  if (closeAt && now > closeAt) return "Closed";
+  return "Open";
+}
+
+function windowRemainingLabel(project) {
+  const closeAt = project.closeAt ? new Date(project.closeAt).getTime() : null;
+  if (!closeAt) return null;
+  const now = Date.now();
+  if (now > closeAt) return "Ended";
+  const sec = Math.floor((closeAt - now) / 1000);
+  const h = Math.floor(sec / 3600);
+  const m = Math.floor((sec % 3600) / 60);
+  if (h > 0) return `${h}h ${m}m left until close`;
+  return `${m}m left until close`;
 }
 
 function statusColor(status) {
