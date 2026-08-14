@@ -28,7 +28,13 @@ import bcrypt from "bcryptjs";
 import {
   AcademicParticipationType,
   AssessmentGradingMode,
-  AttemptGradeStatus,
+  OrgBudgetStatus,
+  OrgProcurementMethod,
+  OrgProcurementPlanStatus,
+  OrgProcurementStatus,
+  OrgRequisitionStatus,
+  OrgUnitType,
+  Prisma,
   ProjectAttemptStatus,
   ProjectEnrollmentStatus,
   ProjectPurpose,
@@ -42,7 +48,10 @@ import {
   CORE_ORG_ROLE_DEFINITIONS,
   ensureCoreProjectOrgRoles,
 } from "../src/lib/project-org-role.js";
-import { ensureBaselineProcessTemplates } from "../src/lib/projects/process-catalogue.js";
+import {
+  ensureBaselineProcessTemplates,
+  PROCESS_FLOW_CODES,
+} from "../src/lib/projects/process-catalogue.js";
 import { ensureCurrentAcademicContext } from "../src/lib/academic/academic-context.js";
 import { ensureActiveEnrollment } from "../src/lib/academic/student-enrollment.js";
 import { ensureStudentPersonalOrg } from "../src/lib/projects/student-personal-org.js";
@@ -52,6 +61,7 @@ import {
   submitProjectAttempt,
 } from "../src/lib/academic/project-attempts.js";
 import {
+  autoEvaluateProjectAttempt,
   getOrCreateProjectAssessment,
 } from "../src/lib/academic/assessment-evaluate.js";
 import { persistStudentActiveOrg } from "../src/lib/projects/student-active-org.js";
@@ -498,47 +508,368 @@ async function clearStudentAttempts(projectId, studentUserId) {
   });
 }
 
+const PROCUREMENT_DEPTH = {
+  fy: 1,
+  budget: 2,
+  plan: 3,
+  requisition: 4,
+  micro: 5,
+  closed: 6,
+};
+
+async function adoptDemoProcessFlows(projectId) {
+  for (const code of Object.values(PROCESS_FLOW_CODES)) {
+    const flow = await prisma.projectOrgProcessFlow.findFirst({ where: { code } });
+    if (!flow) continue;
+    await prisma.projectOrgProcessFlowAdoption.upsert({
+      where: {
+        projectId_processFlowId: { projectId, processFlowId: flow.id },
+      },
+      create: {
+        projectId,
+        processFlowId: flow.id,
+        isActive: true,
+        activatedAt: new Date(),
+      },
+      update: {
+        isActive: true,
+        activatedAt: new Date(),
+        deactivatedAt: null,
+      },
+    });
+  }
+}
+
 /**
- * @param {string} attemptId
- * @param {string} assessmentId
- * @param {string} actorUserId
- * @param {boolean} pass
- * @param {string} feedback
+ * Write real procurement domain records into an organisation so live scoring
+ * (process A–Z) is non-zero. Depth controls how far the path goes.
+ *
+ * @param {{
+ *   orgId: string;
+ *   depth: keyof typeof PROCUREMENT_DEPTH;
+ *   academicSlateId?: string | null;
+ *   tag?: string;
+ * }} opts
  */
-async function forceDemoGrade(attemptId, assessmentId, actorUserId, pass, feedback) {
-  const score = pass ? 78 : 38;
-  await prisma.projectAttemptGrade.upsert({
-    where: { attemptId },
-    create: {
-      attemptId,
-      assessmentId,
-      autoScore: score,
-      manualScore: null,
-      finalScore: score,
-      finalPercent: score,
-      passFail: pass ? "PASS" : "FAIL",
-      status: AttemptGradeStatus.GRADED,
-      feedback,
-      gradedByUserId: actorUserId,
-      gradedAt: new Date(),
-      autoEvaluatedAt: new Date(),
-    },
-    update: {
-      autoScore: score,
-      finalScore: score,
-      finalPercent: score,
-      passFail: pass ? "PASS" : "FAIL",
-      status: AttemptGradeStatus.GRADED,
-      feedback,
-      gradedByUserId: actorUserId,
-      gradedAt: new Date(),
-      autoEvaluatedAt: new Date(),
-    },
+async function seedOrgProcurementWork(opts) {
+  const { orgId, depth, academicSlateId = null, tag = "DEMO" } = opts;
+  const level = PROCUREMENT_DEPTH[depth] || 1;
+  const now = new Date();
+  const stamp = tag.replace(/[^A-Z0-9]/gi, "").slice(-6) || "DEMO";
+
+  await adoptDemoProcessFlows(orgId);
+
+  let ict = await prisma.projectOrgDepartment.findFirst({
+    where: { projectId: orgId, code: "ICT" },
   });
-  await prisma.projectAttempt.update({
-    where: { id: attemptId },
-    data: { status: ProjectAttemptStatus.COMPLETED },
+  if (!ict) {
+    ict = await prisma.projectOrgDepartment.create({
+      data: {
+        projectId: orgId,
+        name: "ICT",
+        code: "ICT",
+        unitType: OrgUnitType.DEPARTMENT,
+        isActive: true,
+      },
+    });
+  }
+
+  const requester = await prisma.projectOrgUser.findFirst({
+    where: { projectId: orgId, isProjectAdmin: true },
   });
+  if (!requester) {
+    throw new Error(`No organisation administrator on ${orgId}`);
+  }
+
+  let fy = await prisma.projectOrgFinancialYear.findFirst({
+    where: { projectId: orgId, label: "2026/2027" },
+  });
+  if (!fy) {
+    fy = await prisma.projectOrgFinancialYear.create({
+      data: {
+        projectId: orgId,
+        label: "2026/2027",
+        startDate: new Date("2026-07-01"),
+        endDate: new Date("2027-06-30"),
+        isActive: true,
+        description: "Demo financial year",
+      },
+    });
+  } else if (!fy.isActive) {
+    fy = await prisma.projectOrgFinancialYear.update({
+      where: { id: fy.id },
+      data: { isActive: true },
+    });
+  }
+
+  let period = await prisma.projectOrgPlanningPeriod.findFirst({
+    where: { projectId: orgId, financialYearId: fy.id },
+  });
+  if (!period) {
+    period = await prisma.projectOrgPlanningPeriod.create({
+      data: {
+        projectId: orgId,
+        financialYearId: fy.id,
+        startDate: new Date("2026-05-01"),
+        endDate: new Date("2026-05-31"),
+        status: "OPEN",
+      },
+    });
+  }
+
+  if (level < PROCUREMENT_DEPTH.budget) return { orgId, fyId: fy.id };
+
+  const budgetApproved = level >= PROCUREMENT_DEPTH.budget;
+  let budget = await prisma.projectOrgBudget.findFirst({
+    where: { projectId: orgId, financialYearId: fy.id, title: "ICT Capital Budget 2026/2027" },
+  });
+  const budgetData = {
+    departmentId: ict.id,
+    status: budgetApproved ? OrgBudgetStatus.APPROVED : OrgBudgetStatus.DRAFT,
+    createdByOrgUserId: requester.id,
+    submittedAt: budgetApproved ? now : null,
+    approvedAt: budgetApproved ? now : null,
+    approvedByOrgUserId: budgetApproved ? requester.id : null,
+    orgAcademicSlateId: academicSlateId,
+  };
+  if (!budget) {
+    budget = await prisma.projectOrgBudget.create({
+      data: {
+        projectId: orgId,
+        financialYearId: fy.id,
+        title: "ICT Capital Budget 2026/2027",
+        description: "Demo ICT capital budget",
+        budgetReference: `ICT-BUD-${stamp}`,
+        ...budgetData,
+      },
+    });
+  } else {
+    budget = await prisma.projectOrgBudget.update({
+      where: { id: budget.id },
+      data: budgetData,
+    });
+  }
+
+  let line = await prisma.projectOrgBudgetLine.findFirst({
+    where: { projectId: orgId, financialYearId: fy.id, code: "ICT-CAPEX-01" },
+  });
+  if (!line) {
+    line = await prisma.projectOrgBudgetLine.create({
+      data: {
+        projectId: orgId,
+        budgetId: budget.id,
+        financialYearId: fy.id,
+        departmentId: ict.id,
+        code: "ICT-CAPEX-01",
+        name: "Computer Equipment",
+        category: "ICT Equipment",
+        approvedAmount: new Prisma.Decimal("800000000.00"),
+        committedAmount: new Prisma.Decimal("0.00"),
+        isActive: true,
+      },
+    });
+  }
+
+  if (level < PROCUREMENT_DEPTH.plan) return { orgId, fyId: fy.id, budgetId: budget.id };
+
+  const planApproved = level >= PROCUREMENT_DEPTH.plan;
+  let plan = await prisma.projectOrgProcurementPlan.findFirst({
+    where: { projectId: orgId, title: "ICT Equipment Plan 2026/27" },
+    include: { items: true },
+  });
+  if (!plan) {
+    plan = await prisma.projectOrgProcurementPlan.create({
+      data: {
+        projectId: orgId,
+        financialYearId: fy.id,
+        planningPeriodId: period.id,
+        departmentId: ict.id,
+        planReference: `ICT-PP-${stamp}`,
+        title: "ICT Equipment Plan 2026/27",
+        status: planApproved ? OrgProcurementPlanStatus.APPROVED : OrgProcurementPlanStatus.DRAFT,
+        createdByOrgUserId: requester.id,
+        submittedAt: planApproved ? now : null,
+        approvedAt: planApproved ? now : null,
+        approvedByOrgUserId: planApproved ? requester.id : null,
+        orgAcademicSlateId: academicSlateId,
+        items: {
+          create: [
+            {
+              itemNumber: 1,
+              title: "Laptop Computers",
+              description: "Business laptops for staff",
+              category: "ICT Equipment",
+              quantity: new Prisma.Decimal("20"),
+              unitOfMeasure: "Unit",
+              estimatedUnitPrice: new Prisma.Decimal("3500000.00"),
+              estimatedTotal: new Prisma.Decimal("70000000.00"),
+              budgetLineId: line.id,
+              priority: "Normal",
+              justification: "Presentation demo plan item.",
+            },
+          ],
+        },
+      },
+      include: { items: true },
+    });
+  } else {
+    plan = await prisma.projectOrgProcurementPlan.update({
+      where: { id: plan.id },
+      data: {
+        status: planApproved ? OrgProcurementPlanStatus.APPROVED : OrgProcurementPlanStatus.DRAFT,
+        submittedAt: planApproved ? now : null,
+        approvedAt: planApproved ? now : null,
+        approvedByOrgUserId: planApproved ? requester.id : null,
+      },
+      include: { items: true },
+    });
+  }
+  const planItem = plan.items?.[0] || null;
+
+  if (level < PROCUREMENT_DEPTH.requisition) {
+    return { orgId, fyId: fy.id, budgetId: budget.id, planId: plan.id };
+  }
+
+  /**
+   * @param {string} ref
+   * @param {string} title
+   * @param {import("@prisma/client").OrgProcurementMethod} method
+   */
+  async function upsertApprovedRequisition(ref, title, method) {
+    let req = await prisma.projectOrgRequisition.findFirst({
+      where: { projectId: orgId, requisitionReference: ref },
+    });
+    const reqData = {
+      financialYearId: fy.id,
+      departmentId: ict.id,
+      procurementPlanId: plan.id,
+      procurementPlanItemId: planItem?.id || null,
+      budgetLineId: line.id,
+      requesterOrgUserId: requester.id,
+      title,
+      category: "ICT Equipment",
+      justification: "Presentation seed requisition.",
+      needDescription: title,
+      estimatedTotalValue: new Prisma.Decimal("70000000.00"),
+      status: OrgRequisitionStatus.APPROVED,
+      procurementMethod: method,
+      submittedAt: now,
+      approvedAt: now,
+      approvedByOrgUserId: requester.id,
+      orgAcademicSlateId: academicSlateId,
+    };
+    if (!req) {
+      req = await prisma.projectOrgRequisition.create({
+        data: {
+          projectId: orgId,
+          requisitionReference: ref,
+          ...reqData,
+          items: {
+            create: [
+              {
+                lineNumber: 1,
+                itemName: "Laptop Computers",
+                quantity: new Prisma.Decimal("20"),
+                unitOfMeasure: "Unit",
+                estimatedUnitPrice: new Prisma.Decimal("3500000.00"),
+                estimatedTotal: new Prisma.Decimal("70000000.00"),
+              },
+            ],
+          },
+        },
+      });
+    } else {
+      req = await prisma.projectOrgRequisition.update({
+        where: { id: req.id },
+        data: reqData,
+      });
+    }
+    return req;
+  }
+
+  /**
+   * @param {string} reqId
+   * @param {string} number
+   * @param {import("@prisma/client").OrgProcurementMethod} method
+   * @param {import("@prisma/client").OrgProcurementStatus} status
+   */
+  async function upsertProcurement(reqId, number, method, status) {
+    let proc = await prisma.projectOrgProcurement.findFirst({
+      where: { projectId: orgId, procurementNumber: number },
+    });
+    const procData = {
+      financialYearId: fy.id,
+      departmentId: ict.id,
+      requisitionId: reqId,
+      procurementPlanItemId: planItem?.id || null,
+      budgetLineId: line.id,
+      title: "Laptop Computers",
+      procurementMethod: method,
+      status,
+      officerOrgUserId: requester.id,
+      methodSelectedAt: now,
+      closedAt: status === OrgProcurementStatus.CLOSED ? now : null,
+      closedByOrgUserId: status === OrgProcurementStatus.CLOSED ? requester.id : null,
+      orgAcademicSlateId: academicSlateId,
+    };
+    if (!proc) {
+      proc = await prisma.projectOrgProcurement.create({
+        data: {
+          projectId: orgId,
+          procurementNumber: number,
+          ...procData,
+        },
+      });
+    } else {
+      proc = await prisma.projectOrgProcurement.update({
+        where: { id: proc.id },
+        data: procData,
+      });
+    }
+    return proc;
+  }
+
+  const microReq = await upsertApprovedRequisition(
+    `ICT-REQ-${stamp}-M`,
+    "Laptops — micro procurement",
+    OrgProcurementMethod.MICRO,
+  );
+
+  if (level === PROCUREMENT_DEPTH.requisition) {
+    return { orgId, requisitionId: microReq.id };
+  }
+
+  if (level === PROCUREMENT_DEPTH.micro) {
+    await upsertProcurement(
+      microReq.id,
+      `PROC-${stamp}-M`,
+      OrgProcurementMethod.MICRO,
+      OrgProcurementStatus.IN_PROGRESS,
+    );
+    return { orgId, requisitionId: microReq.id };
+  }
+
+  // Full close-out: micro closed + quotation awarded/closed so most A–Z processes score.
+  await upsertProcurement(
+    microReq.id,
+    `PROC-${stamp}-M`,
+    OrgProcurementMethod.MICRO,
+    OrgProcurementStatus.CLOSED,
+  );
+
+  const quoteReq = await upsertApprovedRequisition(
+    `ICT-REQ-${stamp}-Q`,
+    "Laptops — quotation",
+    OrgProcurementMethod.QUOTATION,
+  );
+  await upsertProcurement(
+    quoteReq.id,
+    `PROC-${stamp}-Q`,
+    OrgProcurementMethod.QUOTATION,
+    OrgProcurementStatus.CLOSED,
+  );
+
+  return { orgId, requisitionId: microReq.id };
 }
 
 /**
@@ -594,6 +925,27 @@ async function applyAttemptScenario(projectId, studentUserId, scenario, actorUse
       studentUserId,
       actorUserId: studentUserId,
     });
+    const workspaceId = started.workspaceProjectId || started.attempt?.workspaceProjectId;
+    if (!workspaceId) {
+      throw new Error(`Attempt workspace missing for ${studentUserId} on ${projectId}`);
+    }
+
+    const depth =
+      scenario === "start"
+        ? "fy"
+        : scenario === "submit"
+          ? "micro"
+          : scenario === "grade_fail"
+            ? "budget"
+            : "closed";
+
+    await seedOrgProcurementWork({
+      orgId: workspaceId,
+      depth,
+      academicSlateId: started.attempt?.academicSlateId || null,
+      tag: `${String(studentUserId).slice(-4)}${scenario}`.toUpperCase(),
+    });
+
     if (scenario === "start") {
       return started.attempt;
     }
@@ -604,28 +956,24 @@ async function applyAttemptScenario(projectId, studentUserId, scenario, actorUse
       actorUserId: studentUserId,
     });
 
-    if (scenario === "submit") {
-      return started.attempt;
-    }
-
-    const assessment = await getOrCreateProjectAssessment(prisma, {
-      projectId,
-      createIfMissing: true,
-      scoringEnabled: true,
-    });
-    if (!assessment?.id) {
-      throw new Error(`No assessment config for project ${projectId}`);
-    }
-
-    await forceDemoGrade(
-      started.attempt.id,
-      assessment.id,
+    const scored = await autoEvaluateProjectAttempt({
+      attemptId: started.attempt.id,
       actorUserId,
-      scenario === "grade_pass",
+    });
+
+    const feedback =
       scenario === "grade_pass"
-        ? "Solid procurement path. Keep documenting approvals clearly."
-        : "Incomplete procurement trail. Revisit requisition and approval steps.",
-    );
+        ? "Solid procurement path. Budget, plan, requisition, and award trail are complete."
+        : scenario === "grade_fail"
+          ? "Incomplete procurement trail. Only budgeting is in place — finish planning and requisition."
+          : null;
+
+    if (feedback && scored?.grade?.id) {
+      await prisma.projectAttemptGrade.update({
+        where: { id: scored.grade.id },
+        data: { feedback },
+      });
+    }
 
     return started.attempt;
   } finally {
@@ -692,6 +1040,28 @@ async function main() {
     );
   }
   console.log(`Students + personal orgs: ${studentRows.length}`);
+  console.log("Seeding default organisation procurement work…");
+  const personalDepths = [
+    "closed",
+    "plan",
+    "budget",
+    "micro",
+    "fy",
+    "closed",
+    "requisition",
+    "fy",
+    "plan",
+    "budget",
+  ];
+  for (let i = 0; i < studentRows.length; i += 1) {
+    const orgId = studentRows[i].org?.id;
+    if (!orgId) continue;
+    await seedOrgProcurementWork({
+      orgId,
+      depth: personalDepths[i] || "fy",
+      tag: `PERS${String(i + 1).padStart(2, "0")}`,
+    });
+  }
 
   const now = new Date();
   const day = 24 * 3600_000;
@@ -825,8 +1195,8 @@ async function main() {
       where: { id: assessment.id },
       data: {
         scoringEnabled: true,
-        gradingMode: AssessmentGradingMode.COMBINED,
-        manualMaxMarks: 20,
+        gradingMode: AssessmentGradingMode.AUTOMATIC,
+        manualMaxMarks: 0,
         passMarkPercent: 50,
         totalMarks: 100,
         resultsReleased: project.id === assessmentReleased.id,

@@ -26,12 +26,13 @@ import RefreshRounded from "@mui/icons-material/RefreshRounded";
 import AutorenewRounded from "@mui/icons-material/AutorenewRounded";
 import ReplayRounded from "@mui/icons-material/ReplayRounded";
 import SendRounded from "@mui/icons-material/SendRounded";
+import DownloadRounded from "@mui/icons-material/DownloadRounded";
 import {
   DashboardPageIntro,
   BRAND_PAGE_SHELL_CLASS,
   BRAND_PAGE_LEAD_CLASS,
 } from "@/components/layout/dashboard-page-intro";
-import { BRAND_SECTION_TITLE_CLASS } from "@/lib/brand-ui";
+import { BRAND_BTN_PRIMARY_CLASS, BRAND_SECTION_TITLE_CLASS } from "@/lib/brand-ui";
 import {
   adminCenteredLoadingBoxSx,
   adminDialogPaperSx,
@@ -51,6 +52,7 @@ export function AcademicProjectResultsPanel({ projectId }) {
   const [page, setPage] = useState(0);
   const [rowsPerPage, setRowsPerPage] = useState(10);
   const [busy, setBusy] = useState("");
+  const [exporting, setExporting] = useState(false);
   /** @type {[Set<string>, function]} */
   const [selected, setSelected] = useState(() => new Set());
   const [confirm, setConfirm] = useState(
@@ -58,6 +60,39 @@ export function AcademicProjectResultsPanel({ projectId }) {
       null
     ),
   );
+
+  async function exportExcel() {
+    setExporting(true);
+    try {
+      const res = await fetch(
+        `/api/projects/${encodeURIComponent(projectId)}/results/export`,
+        { credentials: "include" },
+      );
+      if (!res.ok) {
+        const json = await res.json().catch(() => ({}));
+        showToast({
+          message: typeof json.error === "string" ? json.error : "Export failed.",
+          severity: "error",
+        });
+        return;
+      }
+      const blob = await res.blob();
+      const header = res.headers.get("Content-Disposition") || "";
+      const match = header.match(/filename="([^"]+)"/);
+      const filename = match?.[1] || "proc-learn-grades.xlsx";
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = filename;
+      a.click();
+      URL.revokeObjectURL(url);
+      showToast({ message: "Student grades exported.", severity: "success" });
+    } catch {
+      showToast({ message: "Export failed.", severity: "error" });
+    } finally {
+      setExporting(false);
+    }
+  }
 
   const load = useCallback(
     async ({ silent } = {}) => {
@@ -257,6 +292,26 @@ export function AcademicProjectResultsPanel({ projectId }) {
           >
             Refresh
           </Button>
+          <Tooltip title="Download student details, times, and scores as Excel">
+            <span>
+              <Button
+                type="button"
+                variant="contained"
+                className={`${BRAND_BTN_PRIMARY_CLASS} cursor-pointer disabled:cursor-not-allowed`}
+                disabled={exporting}
+                startIcon={
+                  exporting ? (
+                    <CircularProgress size={14} color="inherit" />
+                  ) : (
+                    <DownloadRounded />
+                  )
+                }
+                onClick={() => void exportExcel()}
+              >
+                Download Excel
+              </Button>
+            </span>
+          </Tooltip>
           <Button
             type="button"
             className="cursor-pointer disabled:cursor-not-allowed"

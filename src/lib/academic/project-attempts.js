@@ -818,10 +818,15 @@ export async function listStudentAcademicProjects(opts) {
 
 /**
  * Examiner participant snapshot for one academic project.
- * @param {{ projectId: string; db?: import("@prisma/client").PrismaClient }} opts
+ * @param {{
+ *   projectId: string;
+ *   db?: import("@prisma/client").PrismaClient;
+ *   take?: number;
+ * }} opts
  */
 export async function listAcademicProjectParticipants(opts) {
   const db = opts.db || prisma;
+  const take = Math.min(5000, Math.max(1, Number(opts.take) || 200));
   const project = await db.project.findUnique({ where: { id: opts.projectId } });
   if (!project) return null;
 
@@ -844,7 +849,7 @@ export async function listAcademicProjectParticipants(opts) {
       },
     },
     orderBy: { enrolledAt: "desc" },
-    take: 200,
+    take,
   });
 
   const assessment = await getOrCreateProjectAssessment(db, {
@@ -892,6 +897,7 @@ export async function listAcademicProjectParticipants(opts) {
       email: e.student.email,
       studentNumber: e.student.studentProfile?.studentNumber || null,
       programme: e.student.studentProfile?.programme?.shortName || null,
+      academicYearLabel: e.student.academicEnrollments?.[0]?.academicYear?.label || null,
       participationType,
       enrolledAt: e.enrolledAt,
       attemptCount: e.attempts.length,
