@@ -1,6 +1,7 @@
 import { randomBytes } from "crypto";
 import { NextResponse } from "next/server";
 import { safeNextPath } from "@/lib/auth/safe-next-path";
+import { redirectToAppPath } from "@/lib/auth/app-redirect";
 import {
   getGoogleOAuthRedirectUri,
   getGoogleOAuthScopes,
@@ -12,15 +13,20 @@ export function GET(request) {
   const clientId = process.env.GOOGLE_CLIENT_ID?.trim();
   const nextDest = safeNextPath(request.nextUrl.searchParams.get("next"));
 
+  const loginError = (code) => {
+    const q = new URLSearchParams({ error: code, next: nextDest });
+    return redirectToAppPath(`/login?${q.toString()}`);
+  };
+
   if (!clientId) {
-    const u = new URL("/login", request.url);
-    u.searchParams.set("error", "oauth_config");
-    u.searchParams.set("next", nextDest);
-    return NextResponse.redirect(u);
+    return loginError("oauth_config");
   }
 
   const state = randomBytes(24).toString("hex");
   const redirectUri = getGoogleOAuthRedirectUri();
+  if (!redirectUri) {
+    return loginError("oauth_config");
+  }
 
   const url = new URL("https://accounts.google.com/o/oauth2/v2/auth");
   url.searchParams.set("client_id", clientId);

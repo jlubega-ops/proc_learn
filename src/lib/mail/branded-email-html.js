@@ -1,4 +1,4 @@
-import { APP_BASE_URL, APP_NAME, ORG_NAME, ORG_SHORT } from "@/lib/appConfig";
+import { APP_NAME, ORG_NAME, ORG_SHORT, getAppBaseUrl } from "@/lib/appConfig";
 
 /** MUBS / Proc Learn brand — align with app shell and sign-in card */
 export const BRAND_PRIMARY = "#008bd0";
@@ -23,7 +23,7 @@ function escapeHtml(s) {
  * @param {string} path e.g. `/assets/mubs.png`
  */
 export function publicAssetUrl(path) {
-  const base = APP_BASE_URL.replace(/\/$/, "");
+  const base = getAppBaseUrl();
   const p = path.startsWith("/") ? path : `/${path}`;
   return `${base}${p}`;
 }

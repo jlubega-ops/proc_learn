@@ -1,6 +1,6 @@
 import { sendTransactionalMail } from "@/lib/mail";
 import { buildActivationUrl } from "@/lib/auth-links";
-import { APP_BASE_URL, APP_NAME } from "@/lib/appConfig";
+import { APP_NAME, appAbsoluteUrl } from "@/lib/appConfig";
 import { formatRoleLabel } from "@/lib/roles";
 import { buildBrandedTransactionalEmail } from "@/lib/mail/branded-email-html";
 
@@ -20,7 +20,7 @@ export async function sendBrandedTransactional(to, subject, payload) {
  */
 export async function sendStaffWelcomeEmail(p) {
   const name = p.displayName?.trim() || "there";
-  const loginUrl = `${APP_BASE_URL.replace(/\/$/, "")}/login`;
+  const loginUrl = appAbsoluteUrl("/login");
   const roleLabels = (p.roles || []).map((r) => formatRoleLabel(r)).join(", ") || "Staff";
   return sendBrandedTransactional(p.email, `Your ${APP_NAME} staff account is ready`, {
     preheader: `Temporary password and sign-in steps for ${APP_NAME}.`,

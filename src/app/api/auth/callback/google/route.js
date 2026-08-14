@@ -1,10 +1,10 @@
-import { NextResponse } from "next/server";
 import { cookies } from "next/headers";
 import { UserAccountStatus } from "@prisma/client";
 import { getAppSession, initSessionActivity } from "@/lib/auth/session";
 import { buildIronSessionOptions } from "@/lib/auth/session-options";
 import { safeNextPath } from "@/lib/auth/safe-next-path";
 import { DEFAULT_POST_AUTH_PATH } from "@/lib/appConfig";
+import { redirectToAppPath } from "@/lib/auth/app-redirect";
 import { getGoogleOAuthRedirectUri } from "@/lib/oauth/google-config";
 import {
   fetchGoogleProfileFromTokens,
@@ -20,10 +20,9 @@ import { normalizeEmail } from "@/lib/validation/email";
 
 export const runtime = "nodejs";
 
-function redirectToLogin(request, query) {
-  const u = new URL("/login", request.url);
-  if (query) u.search = query;
-  return NextResponse.redirect(u);
+function redirectToLogin(query) {
+  const q = query ? `?${query.replace(/^\?/, "")}` : "";
+  return redirectToAppPath(`/login${q}`);
 }
 
 export async function GET(request) {
@@ -31,7 +30,7 @@ export async function GET(request) {
   const userAgent = getRequestUserAgent(request);
 
   if (!buildIronSessionOptions()) {
-    return redirectToLogin(request, "error=auth_config");
+    return redirectToLogin("error=auth_config");
   }
 
   const url = request.nextUrl;
@@ -42,16 +41,19 @@ export async function GET(request) {
   const nextRaw = cookieStore.get("pl_google_oauth_next")?.value;
 
   if (!code || !state || !storedState || state !== storedState) {
-    return redirectToLogin(request, "error=oauth_state");
+    return redirectToLogin("error=oauth_state");
   }
 
   const clientId = process.env.GOOGLE_CLIENT_ID?.trim();
   const clientSecret = process.env.GOOGLE_CLIENT_SECRET?.trim();
   if (!clientId || !clientSecret) {
-    return redirectToLogin(request, "error=oauth_config");
+    return redirectToLogin("error=oauth_config");
   }
 
   const redirectUri = getGoogleOAuthRedirectUri();
+  if (!redirectUri) {
+    return redirectToLogin("error=oauth_config");
+  }
   const tokenRes = await fetch("https://oauth2.googleapis.com/token", {
     method: "POST",
     headers: { "Content-Type": "application/x-www-form-urlencoded" },
@@ -65,13 +67,13 @@ export async function GET(request) {
   });
 
   if (!tokenRes.ok) {
-    return redirectToLogin(request, "error=oauth_token");
+    return redirectToLogin("error=oauth_token");
   }
 
   const tokens = await tokenRes.json();
   const idToken = typeof tokens.id_token === "string" ? tokens.id_token : "";
   if (!idToken) {
-    return redirectToLogin(request, "error=oauth_token");
+    return redirectToLogin("error=oauth_token");
   }
 
   const infoRes = await fetch(
@@ -79,15 +81,15 @@ export async function GET(request) {
   );
   const info = await infoRes.json().catch(() => ({}));
   if (!infoRes.ok || info.aud !== clientId) {
-    return redirectToLogin(request, "error=oauth_userinfo");
+    return redirectToLogin("error=oauth_userinfo");
   }
 
   const email = normalizeEmail(info.email);
   if (!email) {
-    return redirectToLogin(request, "error=oauth_email");
+    return redirectToLogin("error=oauth_email");
   }
   if (!isMubsSchoolEmail(email)) {
-    return redirectToLogin(request, "error=oauth_mubs_email");
+    return redirectToLogin("error=oauth_mubs_email");
   }
 
   const user = await prisma.user.findUnique({
@@ -96,11 +98,11 @@ export async function GET(request) {
   });
 
   if (!user) {
-    return redirectToLogin(request, "error=google_not_registered");
+    return redirectToLogin("error=google_not_registered");
   }
 
   if (user.accountStatus === UserAccountStatus.SUSPENDED) {
-    return redirectToLogin(request, "error=account_suspended");
+    return redirectToLogin("error=account_suspended");
   }
 
   const accessToken =
@@ -152,7 +154,7 @@ export async function GET(request) {
 
   const session = await getAppSession();
   if (!session) {
-    return redirectToLogin(request, "error=auth_config");
+    return redirectToLogin("error=auth_config");
   }
 
   session.userId = user.id;
@@ -188,7 +190,7 @@ export async function GET(request) {
       dest = payload.defaultPath;
     }
   }
-  const res = NextResponse.redirect(new URL(dest, request.url));
+  const res = redirectToAppPath(dest);
   res.cookies.delete("pl_google_oauth_state");
   res.cookies.delete("pl_google_oauth_next");
   return res;

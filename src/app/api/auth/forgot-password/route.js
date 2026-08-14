@@ -9,6 +9,7 @@ import { prisma } from "@/lib/prisma";
 import { normalizeEmail } from "@/lib/validation/email";
 import { schoolEmailFieldError } from "@/lib/validation/school-email";
 import { getRequestIp, getRequestUserAgent } from "@/lib/request-meta";
+import { getAppBaseUrl } from "@/lib/appConfig";
 
 export const runtime = "nodejs";
 
@@ -18,6 +19,13 @@ const PUBLIC_MESSAGE =
   "If an account exists for that email, we sent password reset instructions.";
 
 export async function POST(request) {
+  if (!getAppBaseUrl()) {
+    return NextResponse.json(
+      { error: "Server is not configured (APP_URL)." },
+      { status: 503 },
+    );
+  }
+
   let body;
   try {
     body = await request.json();

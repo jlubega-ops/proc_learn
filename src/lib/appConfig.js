@@ -18,16 +18,54 @@ export const DEFAULT_POST_AUTH_PATH =
   process.env.NEXT_PUBLIC_DEFAULT_POST_AUTH_PATH?.trim() || "/";
 
 /**
- * Absolute app URL for emails and OAuth (activation links, etc.).
- * Use `APP_URL` in `.env`; if missing, fall back to `NEXTAUTH_URL`.
+ * Normalize a configured origin (scheme + host + optional port). No default host.
+ * @param {string} raw
+ * @returns {string}
  */
-export const APP_BASE_URL =
-  process.env.APP_URL?.trim() ||
-  process.env.NEXTAUTH_URL?.trim() ||
-  "http://localhost:3000";
+function normalizePublicOrigin(raw) {
+  const trimmed = String(raw || "").trim();
+  if (!trimmed) return "";
+  try {
+    const withScheme = /^[a-zA-Z][a-zA-Z\d+\-.]*:\/\//.test(trimmed)
+      ? trimmed
+      : `https://${trimmed}`;
+    const u = new URL(withScheme);
+    if (u.protocol !== "http:" && u.protocol !== "https:") return "";
+    return `${u.protocol}//${u.host}`;
+  } catch {
+    return "";
+  }
+}
+
+/**
+ * Public site origin from env only (`APP_URL`, then `NEXTAUTH_URL`).
+ * Never falls back to a hardcoded host. Empty string if unset / invalid.
+ */
+export function getAppBaseUrl() {
+  return (
+    normalizePublicOrigin(process.env.APP_URL || "") ||
+    normalizePublicOrigin(process.env.NEXTAUTH_URL || "")
+  );
+}
+
+/**
+ * Absolute URL on the public origin (emails, OAuth, post-auth redirects).
+ * @param {string} pathAndSearch pathname starting with `/`, optionally with query
+ * @returns {string}
+ */
+export function appAbsoluteUrl(pathAndSearch) {
+  const base = getAppBaseUrl();
+  const raw = String(pathAndSearch || "/");
+  const path = raw.startsWith("/") ? raw : `/${raw}`;
+  if (!base) {
+    throw new Error(
+      "APP_URL (or NEXTAUTH_URL) must be set to the public site origin, for example https://example.org",
+    );
+  }
+  return `${base}${path}`;
+}
 
 /** Idle logout window in minutes (server-enforced when implemented). */
 const idleRaw = process.env.SESSION_IDLE_MINUTES?.trim();
 export const SESSION_IDLE_MINUTES =
   idleRaw && !Number.isNaN(Number(idleRaw)) ? Number(idleRaw) : 30;
-
