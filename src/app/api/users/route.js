@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { AuthTokenType } from "@prisma/client";
 import { getSessionUser, sessionActiveRole } from "@/lib/api/get-session-user";
 import { canManageStudents } from "@/lib/api/student-scope";
-import { isAllowedAcademicYearLabel } from "@/lib/academic-years";
+import { isRegisteredAcademicYearLabel } from "@/lib/academic/academic-context";
 import { buildActivationUrl } from "@/lib/auth-links";
 import { createAuthTokenRecord } from "@/lib/auth-token";
 import { isStudentMubsEmail, isValidStudentNumberDigits } from "@/lib/mubs-email";
@@ -14,6 +14,7 @@ import { writeAuditLog, AuditEvent } from "@/lib/audit-log";
 import { notifyAllSystemAdmins } from "@/lib/notify-system-admins";
 import { prisma } from "@/lib/prisma";
 import { insertPendingStudentUser } from "@/lib/student-insert";
+import { parseCampus } from "@/lib/campuses";
 
 export const runtime = "nodejs";
 
@@ -75,6 +76,7 @@ async function createStudentUser(actor, body) {
   const academicYearLabel = String(body?.academicYearLabel ?? "").trim();
   const yearRaw = Number(body?.yearOfStudy);
   const yearOfStudy = [1, 2, 3].includes(yearRaw) ? yearRaw : 3;
+  const campus = parseCampus(body?.campus);
 
   if (!isStudentMubsEmail(email)) {
     return NextResponse.json(
@@ -103,9 +105,15 @@ async function createStudentUser(actor, body) {
   if (!programmeId) {
     return NextResponse.json({ error: "Programme is required." }, { status: 400 });
   }
-  if (!isAllowedAcademicYearLabel(academicYearLabel)) {
+  if (!campus) {
     return NextResponse.json(
-      { error: "Academic year is not in the allowed list." },
+      { error: "Campus is required (Main, Arua, Mbarara, Jinja, or Mbale)." },
+      { status: 400 },
+    );
+  }
+  if (!(await isRegisteredAcademicYearLabel(academicYearLabel))) {
+    return NextResponse.json(
+      { error: "Choose an academic year from Academic setup." },
       { status: 400 },
     );
   }
@@ -130,6 +138,7 @@ async function createStudentUser(actor, body) {
     programmeId,
     academicYearLabel,
     yearOfStudy,
+    campus,
     sex: sex ?? null,
     profilePhotoUrl,
   });

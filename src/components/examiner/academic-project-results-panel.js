@@ -27,6 +27,10 @@ import AutorenewRounded from "@mui/icons-material/AutorenewRounded";
 import ReplayRounded from "@mui/icons-material/ReplayRounded";
 import SendRounded from "@mui/icons-material/SendRounded";
 import DownloadRounded from "@mui/icons-material/DownloadRounded";
+import FormControl from "@mui/material/FormControl";
+import InputLabel from "@mui/material/InputLabel";
+import Select from "@mui/material/Select";
+import MenuItem from "@mui/material/MenuItem";
 import {
   DashboardPageIntro,
   BRAND_PAGE_SHELL_CLASS,
@@ -39,8 +43,10 @@ import {
   adminLoadingSpinnerSx,
   adminOutlinedTableContainerSx,
   adminTableSx,
+  themedTextFieldSx,
 } from "@/lib/admin-mui-surfaces";
 import { useToast } from "@/components/providers/toast-provider";
+import { campusSelectOptions } from "@/lib/campuses";
 
 /**
  * @param {{ projectId: string }} props
@@ -51,6 +57,7 @@ export function AcademicProjectResultsPanel({ projectId }) {
   const [data, setData] = useState(/** @type {any} */ (null));
   const [page, setPage] = useState(0);
   const [rowsPerPage, setRowsPerPage] = useState(10);
+  const [campusFilter, setCampusFilter] = useState("");
   const [busy, setBusy] = useState("");
   const [exporting, setExporting] = useState(false);
   /** @type {[Set<string>, function]} */
@@ -128,17 +135,21 @@ export function AcademicProjectResultsPanel({ projectId }) {
   }, [load]);
 
   const participants = data?.participants || [];
+  const filteredParticipants = useMemo(() => {
+    if (!campusFilter) return participants;
+    return participants.filter((row) => row.campus === campusFilter);
+  }, [participants, campusFilter]);
   const paged = useMemo(() => {
     const start = page * rowsPerPage;
-    return participants.slice(start, start + rowsPerPage);
-  }, [participants, page, rowsPerPage]);
+    return filteredParticipants.slice(start, start + rowsPerPage);
+  }, [filteredParticipants, page, rowsPerPage]);
 
   const selectableAttemptIds = useMemo(
     () =>
-      participants
+      filteredParticipants
         .map((row) => row.latestAttempt?.id)
         .filter((id) => typeof id === "string" && id.length > 0),
-    [participants],
+    [filteredParticipants],
   );
 
   const pageAttemptIds = useMemo(
@@ -363,6 +374,31 @@ export function AcademicProjectResultsPanel({ projectId }) {
       {!participants.length ? (
         <p className={BRAND_PAGE_LEAD_CLASS}>No students have enrolled yet.</p>
       ) : (
+        <>
+        <div className="mb-3 flex max-w-xs flex-col gap-2 sm:max-w-sm">
+          <FormControl fullWidth sx={themedTextFieldSx}>
+            <InputLabel id="results-campus-filter">Campus</InputLabel>
+            <Select
+              labelId="results-campus-filter"
+              label="Campus"
+              value={campusFilter}
+              onChange={(e) => {
+                setCampusFilter(String(e.target.value || ""));
+                setPage(0);
+              }}
+            >
+              <MenuItem value="">All campuses</MenuItem>
+              {campusSelectOptions().map((c) => (
+                <MenuItem key={c.value} value={c.value}>
+                  {c.label}
+                </MenuItem>
+              ))}
+            </Select>
+          </FormControl>
+        </div>
+        {!filteredParticipants.length ? (
+          <p className={BRAND_PAGE_LEAD_CLASS}>No students match this campus.</p>
+        ) : (
         <Paper sx={adminOutlinedTableContainerSx}>
           <TableContainer>
             <Table size="small" sx={adminTableSx}>
@@ -378,6 +414,7 @@ export function AcademicProjectResultsPanel({ projectId }) {
                     />
                   </TableCell>
                   <TableCell>Student</TableCell>
+                  <TableCell>Campus</TableCell>
                   <TableCell>Status</TableCell>
                   <TableCell>Where they are</TableCell>
                   <TableCell>Completed</TableCell>
@@ -412,6 +449,7 @@ export function AcademicProjectResultsPanel({ projectId }) {
                           <div className="text-xs text-zinc-500">{row.studentNumber}</div>
                         ) : null}
                       </TableCell>
+                      <TableCell>{row.campusLabel || row.campus || "—"}</TableCell>
                       <TableCell>
                         <StatusChip status={row.status} />
                       </TableCell>
@@ -509,7 +547,7 @@ export function AcademicProjectResultsPanel({ projectId }) {
           </TableContainer>
           <TablePagination
             component="div"
-            count={participants.length}
+            count={filteredParticipants.length}
             page={page}
             onPageChange={(_e, next) => setPage(next)}
             rowsPerPage={rowsPerPage}
@@ -520,6 +558,8 @@ export function AcademicProjectResultsPanel({ projectId }) {
             rowsPerPageOptions={[5, 10, 20, 50]}
           />
         </Paper>
+        )}
+        </>
       )}
 
       <Dialog

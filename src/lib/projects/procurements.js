@@ -41,6 +41,7 @@ export const procurementInclude = {
       requisitionReference: true,
       estimatedTotalValue: true,
       procurementMethod: true,
+      needDescription: true,
       items: {
         orderBy: { lineNumber: "asc" },
         select: {
@@ -232,6 +233,7 @@ export function serializeProcurement(row, opts = {}) {
           title: row.requisition.title,
           status: row.requisition.status,
           requisitionReference: row.requisition.requisitionReference || null,
+          needDescription: row.requisition.needDescription || null,
           estimatedTotalValue:
             row.requisition.estimatedTotalValue?.toString?.() ??
             String(row.requisition.estimatedTotalValue ?? ""),

@@ -1,16 +1,16 @@
 "use client";
 
 import CircularProgress from "@mui/material/CircularProgress";
-import { useAuthSession } from "@/components/providers/auth-session-provider";
 
-export function RoleSwitchOverlay() {
-  const { isRoleSwitching, blockingMessage } = useAuthSession();
-  if (!isRoleSwitching) return null;
+/**
+ * Full-screen wait overlay. Pass `active` from session blocking state.
+ * @param {{ active?: boolean; message?: string }} props
+ */
+export function RoleSwitchOverlay({ active = false, message = "" }) {
+  if (!active) return null;
 
   const label =
-    blockingMessage && blockingMessage.trim()
-      ? blockingMessage
-      : "Please wait…";
+    typeof message === "string" && message.trim() ? message.trim() : "Please wait…";
 
   return (
     <div

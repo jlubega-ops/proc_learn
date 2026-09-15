@@ -18,6 +18,10 @@ import IconButton from "@mui/material/IconButton";
 import Tooltip from "@mui/material/Tooltip";
 import VisibilityRounded from "@mui/icons-material/VisibilityRounded";
 import RefreshRounded from "@mui/icons-material/RefreshRounded";
+import FormControl from "@mui/material/FormControl";
+import InputLabel from "@mui/material/InputLabel";
+import Select from "@mui/material/Select";
+import MenuItem from "@mui/material/MenuItem";
 import {
   DashboardPageIntro,
   BRAND_PAGE_SHELL_CLASS,
@@ -29,9 +33,11 @@ import {
   adminLoadingSpinnerSx,
   adminOutlinedTableContainerSx,
   adminTableSx,
+  themedTextFieldSx,
 } from "@/lib/admin-mui-surfaces";
 import { useToast } from "@/components/providers/toast-provider";
 import { formatDurationClock } from "@/lib/academic/attempt-timer-format";
+import { campusSelectOptions } from "@/lib/campuses";
 
 /**
  * @param {{ projectId: string }} props
@@ -42,6 +48,7 @@ export function AcademicProjectParticipantsPanel({ projectId }) {
   const [data, setData] = useState(/** @type {any} */ (null));
   const [page, setPage] = useState(0);
   const [rowsPerPage, setRowsPerPage] = useState(10);
+  const [campusFilter, setCampusFilter] = useState("");
 
   const load = useCallback(
     async ({ silent } = {}) => {
@@ -78,10 +85,14 @@ export function AcademicProjectParticipantsPanel({ projectId }) {
   }, [load]);
 
   const participants = data?.participants || [];
+  const filteredParticipants = useMemo(() => {
+    if (!campusFilter) return participants;
+    return participants.filter((row) => row.campus === campusFilter);
+  }, [participants, campusFilter]);
   const paged = useMemo(() => {
     const start = page * rowsPerPage;
-    return participants.slice(start, start + rowsPerPage);
-  }, [participants, page, rowsPerPage]);
+    return filteredParticipants.slice(start, start + rowsPerPage);
+  }, [filteredParticipants, page, rowsPerPage]);
 
   if (loading && !data) {
     return (
@@ -145,12 +156,38 @@ export function AcademicProjectParticipantsPanel({ projectId }) {
       {!participants.length ? (
         <p className={BRAND_PAGE_LEAD_CLASS}>No students have enrolled yet.</p>
       ) : (
+        <>
+        <div className="mb-3 flex max-w-xs flex-col gap-2 sm:max-w-sm">
+          <FormControl fullWidth sx={themedTextFieldSx}>
+            <InputLabel id="participants-campus-filter">Campus</InputLabel>
+            <Select
+              labelId="participants-campus-filter"
+              label="Campus"
+              value={campusFilter}
+              onChange={(e) => {
+                setCampusFilter(String(e.target.value || ""));
+                setPage(0);
+              }}
+            >
+              <MenuItem value="">All campuses</MenuItem>
+              {campusSelectOptions().map((c) => (
+                <MenuItem key={c.value} value={c.value}>
+                  {c.label}
+                </MenuItem>
+              ))}
+            </Select>
+          </FormControl>
+        </div>
+        {!filteredParticipants.length ? (
+          <p className={BRAND_PAGE_LEAD_CLASS}>No participants match this campus.</p>
+        ) : (
         <Paper sx={adminOutlinedTableContainerSx}>
           <TableContainer>
             <Table size="small" sx={adminTableSx}>
               <TableHead>
                 <TableRow>
                   <TableCell>Student</TableCell>
+                  <TableCell>Campus</TableCell>
                   <TableCell>Status</TableCell>
                   <TableCell>Stage</TableCell>
                   <TableCell>Time</TableCell>
@@ -178,6 +215,7 @@ export function AcademicProjectParticipantsPanel({ projectId }) {
                         />
                       ) : null}
                     </TableCell>
+                    <TableCell>{row.campusLabel || row.campus || "—"}</TableCell>
                     <TableCell>
                       <StatusChip status={row.status} />
                     </TableCell>
@@ -244,7 +282,7 @@ export function AcademicProjectParticipantsPanel({ projectId }) {
           </TableContainer>
           <TablePagination
             component="div"
-            count={participants.length}
+            count={filteredParticipants.length}
             page={page}
             onPageChange={(_e, next) => setPage(next)}
             rowsPerPage={rowsPerPage}
@@ -255,6 +293,8 @@ export function AcademicProjectParticipantsPanel({ projectId }) {
             rowsPerPageOptions={[5, 10, 20, 50]}
           />
         </Paper>
+        )}
+        </>
       )}
     </div>
   );

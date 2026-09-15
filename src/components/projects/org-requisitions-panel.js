@@ -19,6 +19,7 @@ import AddRounded from "@mui/icons-material/AddRounded";
 import RefreshRounded from "@mui/icons-material/RefreshRounded";
 import VisibilityRounded from "@mui/icons-material/VisibilityRounded";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { useToast } from "@/components/providers/toast-provider";
 import {
   adminCenteredLoadingBoxSx,
@@ -28,12 +29,17 @@ import {
   adminTableSx,
 } from "@/lib/admin-mui-surfaces";
 import { formatMoneyUGX } from "@/lib/money";
+import {
+  clickableTableRowProps,
+  stopRowClick,
+} from "@/lib/projects/clickable-table-row";
 
 /**
  * @param {{ projectId: string }} p
  */
 export function OrgRequisitionsPanel({ projectId }) {
   const { showToast } = useToast();
+  const router = useRouter();
   const [loading, setLoading] = useState(true);
   const [rows, setRows] = useState(/** @type {any[]} */ ([]));
 
@@ -116,39 +122,54 @@ export function OrgRequisitionsPanel({ projectId }) {
               </TableRow>
             </TableHead>
             <TableBody>
-              {rows.map((r) => (
-                <TableRow key={r.id} hover>
-                  <TableCell>
-                    <span className="font-medium">{r.title}</span>
-                  </TableCell>
-                  <TableCell>{r.requisitionReference || "—"}</TableCell>
-                  <TableCell>{formatMoneyUGX(r.estimatedTotalValue)}</TableCell>
-                  <TableCell>
-                    {r.requester?.displayName || "—"}
-                    {r.approvedBy?.displayName ? (
-                      <div className="text-xs opacity-70">
-                        Approved by {r.approvedBy.displayName}
-                      </div>
-                    ) : null}
-                  </TableCell>
-                  <TableCell>
-                    <Chip size="small" color={statusColor(r.status)} label={r.status} />
-                  </TableCell>
-                  <TableCell align="right" sx={{ whiteSpace: "nowrap" }}>
-                    <Tooltip title="Open requisition details">
-                      <IconButton
-                        component={Link}
-                        href={`/projects/${projectId}/requisitions/${r.id}`}
+              {rows.map((r) => {
+                const detailHref = `/projects/${projectId}/requisitions/${r.id}`;
+                return (
+                  <TableRow
+                    key={r.id}
+                    {...clickableTableRowProps({ href: detailHref, router })}
+                  >
+                    <TableCell>
+                      <span className="font-medium">{r.title}</span>
+                    </TableCell>
+                    <TableCell>{r.requisitionReference || "—"}</TableCell>
+                    <TableCell>{formatMoneyUGX(r.estimatedTotalValue)}</TableCell>
+                    <TableCell>
+                      {r.requester?.displayName || "—"}
+                      {r.approvedBy?.displayName ? (
+                        <div className="text-xs opacity-70">
+                          Approved by {r.approvedBy.displayName}
+                        </div>
+                      ) : null}
+                    </TableCell>
+                    <TableCell>
+                      <Chip
                         size="small"
-                        color="primary"
-                        aria-label={`Open requisition ${r.title}`}
-                      >
-                        <VisibilityRounded fontSize="small" />
-                      </IconButton>
-                    </Tooltip>
-                  </TableCell>
-                </TableRow>
-              ))}
+                        color={r.statusColor || statusColor(r.status)}
+                        label={r.statusLabel || r.status}
+                      />
+                    </TableCell>
+                    <TableCell
+                      align="right"
+                      sx={{ whiteSpace: "nowrap" }}
+                      onClick={stopRowClick}
+                      onKeyDown={stopRowClick}
+                    >
+                      <Tooltip title="Open requisition details">
+                        <IconButton
+                          component={Link}
+                          href={detailHref}
+                          size="small"
+                          color="primary"
+                          aria-label={`Open requisition ${r.title}`}
+                        >
+                          <VisibilityRounded fontSize="small" />
+                        </IconButton>
+                      </Tooltip>
+                    </TableCell>
+                  </TableRow>
+                );
+              })}
             </TableBody>
           </Table>
         </TableContainer>

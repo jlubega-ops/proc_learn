@@ -54,7 +54,6 @@ function emptyForm() {
     firstName: "",
     middleName: "",
     lastName: "",
-    email: "",
     projectOrgRoleId: "",
     departmentId: "",
     subunitId: "",
@@ -189,7 +188,12 @@ export function ProjectOrgUsersPanel({ projectId }) {
         });
         return;
       }
-      showToast({ message: "User account created.", severity: "success" });
+      showToast({
+        message: data.loginEmail
+          ? `User account created. Login email: ${data.loginEmail}`
+          : "User account created.",
+        severity: "success",
+      });
       setOpenCreate(false);
       setCreateForm(emptyForm());
       setCreateErrors({});
@@ -205,7 +209,6 @@ export function ProjectOrgUsersPanel({ projectId }) {
       firstName: row.firstName || "",
       middleName: row.middleName || "",
       lastName: row.lastName || "",
-      email: row.email || "",
       projectOrgRoleId: row.role?.id || "",
       departmentId: row.department?.id || "",
       subunitId: row.subunit?.id || "",
@@ -354,15 +357,19 @@ export function ProjectOrgUsersPanel({ projectId }) {
       ) : null}
 
       <Typography variant="body2" sx={{ ...adminMutedTextSx, mb: 2 }}>
-        Click a row or use the view icon to see full account details. Usernames
-        include this project&apos;s code
+        Click a row or use the view icon to see full account details. Login emails are
+        unique organisation addresses on @org.learn (never Gmail), auto-generated in
+        lowercase with this project&apos;s code
         {projectCode ? (
           <>
             {" "}
-            (<span className="font-semibold">{projectCode}</span>)
+            (<span className="font-semibold">{String(projectCode).toLowerCase()}</span>)
           </>
         ) : null}
-        . Your project Admin account is listed first and cannot be edited here.
+        . Exact duplicate full names are rejected — add a middle name if two people share
+        the same name. Password for all learning users is{" "}
+        <span className="font-semibold">password123</span>. Your project Admin account is
+        listed first and cannot be edited here.
       </Typography>
 
       <Box sx={{ position: "relative" }}>
@@ -378,7 +385,7 @@ export function ProjectOrgUsersPanel({ projectId }) {
                 <TableCell>Role</TableCell>
                 <TableCell>Department</TableCell>
                 <TableCell>Subunit</TableCell>
-                <TableCell>Username</TableCell>
+                <TableCell>Login email</TableCell>
                 <TableCell align="right">Actions</TableCell>
               </TableRow>
             </TableHead>
@@ -424,7 +431,7 @@ export function ProjectOrgUsersPanel({ projectId }) {
                     <TableCell>{row.department?.name || "—"}</TableCell>
                     <TableCell>{row.subunit?.name || "—"}</TableCell>
                     <TableCell sx={{ wordBreak: "break-all" }}>
-                      {row.isProjectAdmin ? "—" : row.username || "—"}
+                      {row.isProjectAdmin ? "—" : row.loginEmail || row.username || "—"}
                     </TableCell>
                     <TableCell align="right" onClick={(e) => e.stopPropagation()}>
                       <Box sx={{ display: "inline-flex", gap: 0.25 }}>
@@ -622,7 +629,6 @@ function OrgUserDetailsDialog({ user, projectCode = "", onClose, onEdit }) {
 
   const fields = [
     { label: "Full name", value: formatUserDisplayName(user) },
-    { label: "Email", value: user.email || "—" },
     ...(projectCode ? [{ label: "Project code", value: projectCode }] : []),
     ...(user.isProjectAdmin && user.studentNumber
       ? [{ label: "Student number", value: user.studentNumber }]
@@ -633,9 +639,9 @@ function OrgUserDetailsDialog({ user, projectCode = "", onClose, onEdit }) {
     ...(!user.isProjectAdmin
       ? [
           {
-            label: "Username",
-            value: user.username || "—",
-            copyable: Boolean(user.username),
+            label: "Login email",
+            value: user.loginEmail || user.username || "—",
+            copyable: Boolean(user.loginEmail || user.username),
           },
           {
             label: "Password",
@@ -795,32 +801,22 @@ function OrgUserFormDialog({
             fullWidth
             sx={themedTextFieldSx}
           />
-          <TextField
-            label="Email"
-            type="email"
-            value={form.email}
-            onChange={(e) => {
-              onChange({ email: e.target.value });
-              onClearError("email");
-            }}
-            error={Boolean(errors.email)}
-            helperText={
-              errors.email ||
-              (isCreate
-                ? "Username is built from the email plus this project's code when you save."
-                : undefined)
-            }
-            fullWidth
-            sx={themedTextFieldSx}
-          />
-          {!isCreate && savedUser?.username ? (
+          {!isCreate && (savedUser?.loginEmail || savedUser?.username) ? (
             <TextField
-              label="Username"
-              value={savedUser.username}
+              label="Login email"
+              value={savedUser.loginEmail || savedUser.username}
               fullWidth
               disabled
+              helperText="Auto-generated on create. Use this to sign in (password123)."
               sx={themedTextFieldSx}
             />
+          ) : isCreate ? (
+            <Typography variant="body2" className="sm:col-span-2" sx={adminMutedTextSx}>
+              Login email is generated automatically as a unique @org.learn address (never
+              Gmail) from the name and project code. Exact duplicate full names are rejected —
+              add a middle name if needed. You can copy the login email from the user list
+              afterward.
+            </Typography>
           ) : null}
           <FormControl
             fullWidth

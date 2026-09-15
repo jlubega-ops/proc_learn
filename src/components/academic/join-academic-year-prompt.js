@@ -32,7 +32,6 @@ export function JoinAcademicYearPrompt() {
     ),
   );
   const [enrollmentLabel, setEnrollmentLabel] = useState(/** @type {string | null} */ (null));
-  const [semesterLabel, setSemesterLabel] = useState(/** @type {string | null} */ (null));
 
   const activeRole = session?.activeRole || "";
   const isStudent =
@@ -47,8 +46,6 @@ export function JoinAcademicYearPrompt() {
       const data = await res.json().catch(() => ({}));
       const activeLabel = data?.enrollment?.academicYear?.label || null;
       setEnrollmentLabel(typeof activeLabel === "string" ? activeLabel : null);
-      const semName = data?.semester?.name || null;
-      setSemesterLabel(typeof semName === "string" ? semName : null);
 
       // Student Mode: never show the join dialog.
       if (isStudentMode) {
@@ -139,17 +136,13 @@ export function JoinAcademicYearPrompt() {
       {enrollmentLabel && !open && !isStudentMode ? (
         <div className="mb-3 rounded-lg border border-[color:var(--border-subtle)] bg-[color:var(--nav-active-bg)] px-3 py-2 text-sm text-foreground">
           <p>Academic Year: {enrollmentLabel}</p>
-          {semesterLabel ? (
-            <p className="mt-0.5 text-zinc-600 dark:text-zinc-400">Semester: {semesterLabel}</p>
-          ) : null}
         </div>
       ) : null}
 
-      {/* Student Mode: compact AY/semester line under the Student Mode banner */}
+      {/* Student Mode: compact AY line under the Student Mode banner */}
       {enrollmentLabel && !open && isStudentMode ? (
         <div className="mb-3 text-sm text-zinc-600 dark:text-zinc-400">
           Academic Year: {enrollmentLabel}
-          {semesterLabel ? ` · ${semesterLabel}` : ""}
         </div>
       ) : null}
 

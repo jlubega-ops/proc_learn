@@ -108,3 +108,48 @@ export async function GET(_request, context) {
     closure,
   });
 }
+
+export async function POST(request, context) {
+  const params = await context.params;
+  const projectId = String(params?.id || "").trim();
+  const procurementId = String(params?.procurementId || "").trim();
+  if (!projectId || !procurementId) {
+    return NextResponse.json({ error: "Invalid id." }, { status: 400 });
+  }
+
+  const auth = await authorizeProjectApiAccess(prisma, {
+    projectId,
+    orgPermission: ORG_PERMISSION.VIEW_PROCUREMENTS,
+  });
+  if (!auth.ok || auth.type !== "org") {
+    return NextResponse.json({ error: "Forbidden." }, { status: 403 });
+  }
+
+  let body;
+  try {
+    body = await request.json();
+  } catch {
+    return NextResponse.json({ error: "Invalid request body." }, { status: 400 });
+  }
+
+  if (body?.action !== "save_bid_document") {
+    return NextResponse.json({ error: "Unsupported action." }, { status: 400 });
+  }
+
+  const { saveBidDocumentForProcurement } = await import("@/lib/projects/solicitations");
+  const saved = await saveBidDocumentForProcurement(prisma, {
+    projectId,
+    procurementId,
+    actorOrgUserId: auth.orgUser.id,
+    actorRoleName: auth.orgUser.projectOrgRole?.name || null,
+    body: body.bidDocument || body,
+    pdeName: body.pdeName || null,
+  });
+  if (!saved.ok) {
+    return NextResponse.json(
+      { error: saved.error, fieldErrors: saved.fieldErrors },
+      { status: saved.status || 400 },
+    );
+  }
+  return NextResponse.json(saved);
+}

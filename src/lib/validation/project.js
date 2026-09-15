@@ -163,8 +163,6 @@ export function validateProjectCreateInput({ body, activeRole }) {
   /** @type {string | null} */
   let academicYearId = null;
   /** @type {string | null} */
-  let semesterId = null;
-  /** @type {string | null} */
   let programmeId = null;
 
   if (activeRole !== Role.STUDENT) {
@@ -172,16 +170,11 @@ export function validateProjectCreateInput({ body, activeRole }) {
       typeof body?.academicYearId === "string" && body.academicYearId.trim()
         ? body.academicYearId.trim()
         : null;
-    semesterId =
-      typeof body?.semesterId === "string" && body.semesterId.trim()
-        ? body.semesterId.trim()
-        : null;
     programmeId =
       typeof body?.programmeId === "string" && body.programmeId.trim()
         ? body.programmeId.trim()
         : null;
     if (!academicYearId) errors.academicYearId = "Choose an academic year.";
-    if (!semesterId) errors.semesterId = "Choose a semester.";
     if (!programmeId) errors.programmeId = "Choose a programme.";
   }
 
@@ -205,7 +198,6 @@ export function validateProjectCreateInput({ body, activeRole }) {
       allowEditAfterSubmit,
       isPublished: body?.isPublished === true,
       academicYearId,
-      semesterId,
       programmeId,
     },
   };

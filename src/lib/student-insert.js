@@ -19,6 +19,7 @@ import { ensureEnrollmentFromProfileLabel } from "@/lib/academic/student-enrollm
  *   programmeId: string;
  *   academicYearLabel: string;
  *   yearOfStudy: number;
+ *   campus: import("@prisma/client").Campus;
  *   sex: import("@prisma/client").Sex | null;
  *   profilePhotoUrl?: string | null;
  * }} normalized
@@ -57,6 +58,7 @@ export async function insertPendingStudentUser(db, normalized) {
               registrationNumber: normalized.registrationNumber.slice(0, 128),
               programmeId: normalized.programmeId,
               yearOfStudy: normalized.yearOfStudy,
+              campus: normalized.campus,
               academicYearLabel: normalized.academicYearLabel,
             },
           },

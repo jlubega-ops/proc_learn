@@ -6,7 +6,7 @@
  * - Create: stamp slate when resolveable (budgets.js, procurement-plans.js, requisitions.js, procurements.js)
  * - List: filter current slate OR null (legacy visible); hide other years’ stamped rows
  * - Context: extend getStudentAcademicContext; ensure slate on personal-org ensure + join-year
- * - Audit: ORG_ACADEMIC_SLATE_* events + enrich meta with year/semester/enrollment/slate/project
+ * - Audit: ORG_ACADEMIC_SLATE_* events + enrich meta with year/enrollment/slate/project
  *
  * MUST NOT change: workflow-engine.js, process-catalogue bindings, approval/method/payment/closure rules.
  *

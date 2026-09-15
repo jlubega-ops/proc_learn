@@ -12,6 +12,7 @@ import {
   orgOpsSlateListWhere,
   resolveCurrentOrgSlateId,
 } from "@/lib/academic/org-academic-slate";
+import { mapEntityWorkflowContexts } from "@/lib/projects/workflow-status-presentation";
 
 export const runtime = "nodejs";
 
@@ -58,6 +59,13 @@ export async function GET(request, context) {
     include: requisitionInclude,
   });
 
+  const ctxMap = await mapEntityWorkflowContexts(prisma, {
+    projectId,
+    entityField: "requisitionId",
+    entityIds: rows.map((r) => r.id),
+    viewerOrgUserId: auth.type === "org" ? auth.orgUser.id : null,
+  });
+
   let actorDepartment = null;
   if (auth.type === "org" && auth.orgUser?.departmentId) {
     const dept = await prisma.projectOrgDepartment.findFirst({
@@ -68,7 +76,15 @@ export async function GET(request, context) {
   }
 
   return NextResponse.json({
-    requisitions: rows.map(serializeRequisition),
+    requisitions: rows.map((row) => {
+      const ctx = ctxMap.get(row.id) || {};
+      return serializeRequisition({
+        ...row,
+        workflowStage: ctx.workflowStage || null,
+        lastDecision: ctx.lastDecision || null,
+        viewerHasPendingAction: Boolean(ctx.viewerHasPendingAction),
+      });
+    }),
     total: rows.length,
     canCreate:
       auth.type === "org" &&

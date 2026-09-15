@@ -18,6 +18,7 @@ import {
   resolveSlateIdForOrgCreate,
   withAcademicAuditMeta,
 } from "@/lib/academic/org-academic-slate";
+import { presentOrgWorkflowStatus } from "@/lib/projects/workflow-status-presentation";
 
 /**
  * @param {unknown} value
@@ -137,6 +138,11 @@ export function serializeBudget(row) {
   const lines = Array.isArray(row.lines) ? row.lines.map(serializeBudgetLine) : [];
   const totalApproved = lines.reduce((sum, l) => sum + Number(l.approvedAmount || 0), 0);
   const totalCommitted = lines.reduce((sum, l) => sum + Number(l.committedAmount || 0), 0);
+  const workflowStage = row.workflowStage || null;
+  const presentation = presentBudgetStatus(row.status, workflowStage, {
+    viewerHasPendingAction: Boolean(row.viewerHasPendingAction),
+    lastDecision: row.lastDecision || null,
+  });
   return {
     id: row.id,
     title: row.title,
@@ -144,6 +150,10 @@ export function serializeBudget(row) {
     budgetReference: row.budgetReference || null,
     currency: row.currency || "UGX",
     status: row.status,
+    statusLabel: presentation.label,
+    statusColor: presentation.color,
+    workflowStage,
+    viewerHasPendingAction: Boolean(row.viewerHasPendingAction),
     submittedAt: row.submittedAt || null,
     approvedAt: row.approvedAt,
     createdByOrgUserId: row.createdByOrgUserId || null,
@@ -172,6 +182,80 @@ export function serializeBudget(row) {
     createdAt: row.createdAt,
     updatedAt: row.updatedAt,
   };
+}
+
+/**
+ * Human-readable budget status for chips / banners.
+ * @param {string | null | undefined} status
+ * @param {{ requiredRoleName?: string | null; title?: string | null } | null} [workflowStage]
+ * @param {{
+ *   viewerHasPendingAction?: boolean;
+ *   lastDecision?: { decision?: string | null; actorRoleName?: string | null } | null;
+ * }} [viewer]
+ */
+export function presentBudgetStatus(status, workflowStage = null, viewer = {}) {
+  return presentOrgWorkflowStatus({
+    status,
+    workflowStage,
+    viewerHasPendingAction: viewer.viewerHasPendingAction,
+    lastDecision: viewer.lastDecision,
+  });
+}
+
+/**
+ * Current open workflow step for a budget (any assignee) — for stage status labels.
+ * @param {import("@prisma/client").PrismaClient} prisma
+ * @param {{ projectId: string; budgetId: string }} opts
+ */
+export async function getBudgetWorkflowStage(prisma, opts) {
+  const task = await prisma.projectOrgWorkflowTask.findFirst({
+    where: {
+      projectId: opts.projectId,
+      status: { in: [OrgWorkflowTaskStatus.PENDING, OrgWorkflowTaskStatus.IN_PROGRESS] },
+      instance: {
+        budgetId: opts.budgetId,
+        status: {
+          in: [
+            OrgWorkflowInstanceStatus.ACTIVE,
+            OrgWorkflowInstanceStatus.IN_PROGRESS,
+            OrgWorkflowInstanceStatus.SUSPENDED,
+          ],
+        },
+      },
+    },
+    orderBy: [{ stepNumber: "asc" }, { createdAt: "asc" }],
+    select: {
+      id: true,
+      title: true,
+      requiredRoleName: true,
+      stepNumber: true,
+      status: true,
+    },
+  });
+  if (!task) return null;
+  return {
+    taskId: task.id,
+    title: task.title,
+    requiredRoleName: task.requiredRoleName || null,
+    stepNumber: task.stepNumber,
+    status: task.status,
+  };
+}
+
+/**
+ * @param {import("@prisma/client").PrismaClient} prisma
+ * @param {{ projectId: string; budgetIds: string[]; viewerOrgUserId?: string | null }} opts
+ */
+export async function mapBudgetWorkflowStages(prisma, opts) {
+  const { mapEntityWorkflowContexts } = await import(
+    "@/lib/projects/workflow-status-presentation"
+  );
+  return mapEntityWorkflowContexts(prisma, {
+    projectId: opts.projectId,
+    entityField: "budgetId",
+    entityIds: opts.budgetIds || [],
+    viewerOrgUserId: opts.viewerOrgUserId || null,
+  });
 }
 
 /**
@@ -406,6 +490,200 @@ export async function createBudgetWithLines(prisma, opts) {
   });
 
   return { ok: true, budget: serializeBudget(row) };
+}
+
+/**
+ * Replace draft (or returned) budget header + lines before / after return for correction.
+ * @param {import("@prisma/client").PrismaClient} prisma
+ * @param {{
+ *   projectId: string;
+ *   budgetId: string;
+ *   actorOrgUserId: string;
+ *   body: any;
+ * }} opts
+ */
+export async function updateDraftBudget(prisma, opts) {
+  const existing = await prisma.projectOrgBudget.findFirst({
+    where: { id: opts.budgetId, projectId: opts.projectId },
+    include: { lines: true },
+  });
+  if (!existing) return { ok: false, error: "Budget not found.", status: 404 };
+  if (existing.createdByOrgUserId && existing.createdByOrgUserId !== opts.actorOrgUserId) {
+    return { ok: false, error: "Only the budget creator can edit this draft.", status: 403 };
+  }
+  if (![OrgBudgetStatus.DRAFT, OrgBudgetStatus.RETURNED].includes(existing.status)) {
+    return {
+      ok: false,
+      error: "Only draft or returned budgets can be edited.",
+      status: 400,
+    };
+  }
+
+  const b = opts.body || {};
+  /** @type {Record<string, string>} */
+  const fieldErrors = {};
+  const title = typeof b.title === "string" ? b.title.trim() : "";
+  const description = typeof b.description === "string" ? b.description.trim() || null : null;
+  const linesIn = Array.isArray(b.lines) ? b.lines : [];
+
+  if (!title) fieldErrors.title = "Enter a budget title.";
+  if (linesIn.length === 0) fieldErrors.lines = "Add at least one budget line.";
+
+  /** @type {any[]} */
+  const lineRows = [];
+  const codes = new Set();
+  linesIn.forEach((raw, idx) => {
+    const identity = resolveLineIdentity(raw, idx);
+    const amounts = resolveLineAmounts(raw);
+    const lineDescription =
+      typeof raw?.description === "string" ? raw.description.trim() || null : null;
+    if (!identity.category) {
+      fieldErrors[`lines.${idx}.category`] = "Enter a category.";
+    }
+    if (!amounts.quantity || Number(amounts.quantity) <= 0) {
+      fieldErrors[`lines.${idx}.quantity`] = "Enter a quantity greater than zero.";
+    }
+    if (!amounts.unitOfMeasure) {
+      fieldErrors[`lines.${idx}.unitOfMeasure`] = "Enter a unit.";
+    }
+    if (!amounts.unitCost || Number(amounts.unitCost) <= 0) {
+      fieldErrors[`lines.${idx}.unitCost`] = "Enter a unit cost greater than zero.";
+    }
+    if (!amounts.approvedAmount || Number(amounts.approvedAmount) <= 0) {
+      fieldErrors[`lines.${idx}.approvedAmount`] =
+        "Enter or compute a total amount greater than zero.";
+    }
+    if (!amounts.fundingSource) {
+      fieldErrors[`lines.${idx}.fundingSource`] = "Enter a funding source.";
+    }
+    if (!identity.code || !identity.name || !amounts.approvedAmount) {
+      fieldErrors[`lines.${idx}`] =
+        fieldErrors[`lines.${idx}`] ||
+        "Each line needs category, quantity, unit, unit cost, and total.";
+      return;
+    }
+    const codeKey = identity.code.toUpperCase();
+    if (codes.has(codeKey)) {
+      fieldErrors[`lines.${idx}.code`] = "Duplicate line code in this budget.";
+      return;
+    }
+    codes.add(codeKey);
+    lineRows.push({
+      projectId: opts.projectId,
+      budgetId: existing.id,
+      financialYearId: existing.financialYearId,
+      departmentId: existing.departmentId,
+      code: identity.code,
+      name: identity.name,
+      description: lineDescription,
+      category: identity.category,
+      quantity: amounts.quantity,
+      unitOfMeasure: amounts.unitOfMeasure,
+      unitCost: amounts.unitCost,
+      fundingSource: amounts.fundingSource,
+      approvedAmount: amounts.approvedAmount,
+      committedAmount: new Prisma.Decimal("0.00"),
+      isActive: true,
+    });
+  });
+
+  if (Object.keys(fieldErrors).length) {
+    return { ok: false, fieldErrors, error: "Please fix the highlighted fields.", status: 400 };
+  }
+
+  for (const line of lineRows) {
+    const clash = await prisma.projectOrgBudgetLine.findFirst({
+      where: {
+        projectId: opts.projectId,
+        financialYearId: existing.financialYearId,
+        code: line.code,
+        NOT: { budgetId: existing.id },
+      },
+      select: { id: true },
+    });
+    if (clash) {
+      return {
+        ok: false,
+        error: `Budget line code "${line.code}" already exists for this financial year.`,
+        fieldErrors: { lines: `Code ${line.code} is already used.` },
+        status: 400,
+      };
+    }
+  }
+
+  const updated = await prisma.$transaction(async (tx) => {
+    await tx.projectOrgBudgetLine.deleteMany({ where: { budgetId: existing.id } });
+    return tx.projectOrgBudget.update({
+      where: { id: existing.id },
+      data: {
+        title,
+        description,
+        lines: { create: lineRows },
+      },
+      include: budgetInclude,
+    });
+  });
+
+  await writeAuditLog({
+    eventType: AuditEvent.PROJECT_ORG_BUDGET_UPDATED,
+    actorUserId: null,
+    meta: {
+      projectId: opts.projectId,
+      budgetId: existing.id,
+      actorOrgUserId: opts.actorOrgUserId,
+      status: existing.status,
+      lineCount: lineRows.length,
+    },
+  });
+
+  return { ok: true, budget: serializeBudget(updated) };
+}
+
+/**
+ * Delete a draft budget that has never been submitted.
+ * @param {import("@prisma/client").PrismaClient} prisma
+ * @param {{
+ *   projectId: string;
+ *   budgetId: string;
+ *   actorOrgUserId: string;
+ * }} opts
+ */
+export async function deleteDraftBudget(prisma, opts) {
+  const existing = await prisma.projectOrgBudget.findFirst({
+    where: { id: opts.budgetId, projectId: opts.projectId },
+    select: {
+      id: true,
+      status: true,
+      title: true,
+      createdByOrgUserId: true,
+    },
+  });
+  if (!existing) return { ok: false, error: "Budget not found.", status: 404 };
+  if (existing.createdByOrgUserId && existing.createdByOrgUserId !== opts.actorOrgUserId) {
+    return { ok: false, error: "Only the budget creator can delete this draft.", status: 403 };
+  }
+  if (existing.status !== OrgBudgetStatus.DRAFT) {
+    return {
+      ok: false,
+      error: "Only draft budgets that have not been submitted can be deleted.",
+      status: 400,
+    };
+  }
+
+  await prisma.projectOrgBudget.delete({ where: { id: existing.id } });
+
+  await writeAuditLog({
+    eventType: AuditEvent.PROJECT_ORG_BUDGET_DELETED,
+    actorUserId: null,
+    meta: {
+      projectId: opts.projectId,
+      budgetId: existing.id,
+      title: existing.title,
+      actorOrgUserId: opts.actorOrgUserId,
+    },
+  });
+
+  return { ok: true };
 }
 
 /**

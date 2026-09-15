@@ -5,6 +5,7 @@ import { writeAuditLog, AuditEvent } from "@/lib/audit-log";
 import { prisma } from "@/lib/prisma";
 import { authorizeProjectOrgAdmin } from "@/lib/projects/workspace-access";
 import { toDateInputValue } from "@/lib/financial-year-dates";
+import { validateCommitteeSeatEligibility } from "@/lib/projects/committee-eligibility";
 
 export const runtime = "nodejs";
 
@@ -35,7 +36,7 @@ export async function POST(request, context) {
 
   const committee = await prisma.projectOrgCommittee.findFirst({
     where: { id: committeeId, projectId },
-    select: { id: true, name: true },
+    select: { id: true, name: true, committeeType: true },
   });
   if (!committee) return NextResponse.json({ error: "Committee not found." }, { status: 404 });
 
@@ -66,7 +67,10 @@ export async function POST(request, context) {
 
   const orgUser = await prisma.projectOrgUser.findFirst({
     where: { id: orgUserId, projectId, isProjectAdmin: false },
-    select: { id: true },
+    select: {
+      id: true,
+      projectOrgRole: { select: { name: true } },
+    },
   });
   if (!orgUser) {
     return NextResponse.json(
@@ -74,6 +78,38 @@ export async function POST(request, context) {
         error: "Choose a valid organisation user.",
         fieldErrors: { orgUserId: "Choose a valid organisation user." },
       },
+      { status: 400 },
+    );
+  }
+
+  const otherSeats = await prisma.projectOrgCommitteeMember.findMany({
+    where: {
+      orgUserId,
+      status: OrgCommitteeMembershipStatus.ACTIVE,
+      committee: { projectId, isActive: true, id: { not: committeeId } },
+    },
+    select: { committee: { select: { committeeType: true } } },
+  });
+  const activeContractsSeat = otherSeats.some((s) => s.committee?.committeeType === "CONTRACTS");
+  const activeEvaluationSeat = otherSeats.some(
+    (s) =>
+      s.committee?.committeeType === "EVALUATION" ||
+      s.committee?.committeeType === "NEGOTIATION",
+  );
+
+  const eligibility = validateCommitteeSeatEligibility({
+    committeeType: committee.committeeType,
+    committeeRole,
+    orgRoleName: orgUser.projectOrgRole?.name || "",
+    activeContractsSeat,
+    activeEvaluationSeat,
+  });
+  if (!eligibility.ok) {
+    /** @type {Record<string, string>} */
+    const fe = {};
+    if (eligibility.field) fe[eligibility.field] = eligibility.error;
+    return NextResponse.json(
+      { error: eligibility.error, fieldErrors: fe },
       { status: 400 },
     );
   }
@@ -92,7 +128,7 @@ export async function POST(request, context) {
     });
 
     await writeAuditLog({
-      eventType: AuditEvent.PROJECT_ORG_USER_UPDATED,
+      eventType: AuditEvent.PROJECT_ORG_COMMITTEE_MEMBER_ADDED,
       actorUserId: user.id,
       meta: {
         projectId,

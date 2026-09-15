@@ -1,6 +1,6 @@
-import { isAllowedAcademicYearLabel } from "@/lib/academic-years";
 import { isStudentMubsEmail, isValidStudentNumberDigits } from "@/lib/mubs-email";
 import { parseOptionalMaleFemaleSex } from "@/lib/validation/sex-male-female";
+import { parseCampus } from "@/lib/campuses";
 
 /** @type {Record<string, string>} */
 const HEADER_TO_KEY = {
@@ -29,6 +29,9 @@ const HEADER_TO_KEY = {
   academic_year: "academicYearLabel",
   "year of study": "yearOfStudy",
   yearofstudy: "yearOfStudy",
+  campus: "campus",
+  "campus name": "campus",
+  location: "campus",
   sex: "sex",
   gender: "sex",
 };
@@ -42,6 +45,7 @@ export const STUDENT_IMPORT_REQUIRED_KEYS = [
   "programmeShortName",
   "academicYearLabel",
   "yearOfStudy",
+  "campus",
 ];
 
 /**
@@ -134,7 +138,13 @@ export async function loadStudentBulkImportContext(prisma) {
       .map((s) => String(s).replace(/\D/g, "")),
   );
 
-  return { programmeByShortNorm, dbEmails, dbStudentNumbers };
+  const years = await prisma.academicYear.findMany({
+    select: { label: true, isCurrent: true },
+    orderBy: { label: "desc" },
+  });
+  const academicYearLabels = new Set(years.map((y) => y.label));
+
+  return { programmeByShortNorm, dbEmails, dbStudentNumbers, academicYearLabels };
 }
 
 /**
@@ -163,6 +173,7 @@ export function validateStudentImportDataRow(raw, excelRowNumber, ctx) {
   const academicYearLabel = String(raw.academicYearLabel ?? "").trim();
   const yearRaw = Number(String(raw.yearOfStudy ?? "").trim());
   const yearOfStudy = [1, 2, 3].includes(yearRaw) ? yearRaw : NaN;
+  const campus = parseCampus(raw.campus);
   const sexRaw = String(raw.sex ?? "").trim();
   const sex = parseOptionalMaleFemaleSex(sexRaw || null);
   if (sex === undefined && sexRaw) {
@@ -178,10 +189,13 @@ export function validateStudentImportDataRow(raw, excelRowNumber, ctx) {
   if (!registrationNumber) errors.push("Registration number is required.");
   if (!programmeShort) errors.push("Programme short name is required.");
   if (!academicYearLabel) errors.push("Academic year is required.");
-  else if (!isAllowedAcademicYearLabel(academicYearLabel))
-    errors.push("Academic year is not in the allowed list.");
+  else if (!ctx.academicYearLabels?.has(academicYearLabel))
+    errors.push("Academic year must match one created in Academic setup.");
   if (!Number.isFinite(yearRaw) || ![1, 2, 3].includes(yearOfStudy)) {
     errors.push("Year of study must be 1, 2, or 3.");
+  }
+  if (!campus) {
+    errors.push("Campus is required (Main, Arua, Mbarara, Jinja, or Mbale).");
   }
 
   let programmeId = "";
@@ -226,6 +240,7 @@ export function validateStudentImportDataRow(raw, excelRowNumber, ctx) {
       programmeId,
       academicYearLabel,
       yearOfStudy,
+      campus,
       sex: sex ?? null,
       profilePhotoUrl: null,
     },
@@ -255,6 +270,7 @@ export function validateNormalizedStudentBulkRow(normalized, excelRowNumber, ctx
   const academicYearLabel = String(normalized.academicYearLabel ?? "").trim();
   const yearRaw = Number(normalized.yearOfStudy);
   const yearOfStudy = [1, 2, 3].includes(yearRaw) ? yearRaw : NaN;
+  const campus = parseCampus(normalized.campus);
   const sex = parseOptionalMaleFemaleSex(normalized.sex ?? null);
   if (sex === undefined && normalized.sex != null && String(normalized.sex).trim()) {
     errors.push("Sex must be Male, Female, or empty.");
@@ -270,9 +286,10 @@ export function validateNormalizedStudentBulkRow(normalized, excelRowNumber, ctx
   if (!programmeId) errors.push("Programme is missing.");
   else if (!activeProgrammeIds.has(programmeId)) errors.push("Programme is invalid or inactive.");
   if (!academicYearLabel) errors.push("Academic year is required.");
-  else if (!isAllowedAcademicYearLabel(academicYearLabel))
-    errors.push("Academic year is not in the allowed list.");
+  else if (!ctx.academicYearLabels?.has(academicYearLabel))
+    errors.push("Academic year must match one created in Academic setup.");
   if (![1, 2, 3].includes(yearOfStudy)) errors.push("Year of study must be 1, 2, or 3.");
+  if (!campus) errors.push("Campus is required (Main, Arua, Mbarara, Jinja, or Mbale).");
 
   if (email && ctx.fileEmails.has(email)) errors.push("Duplicate email in this import.");
   if (studentNumber && ctx.fileStudentNumbers.has(studentNumber)) {
@@ -299,6 +316,7 @@ export function validateNormalizedStudentBulkRow(normalized, excelRowNumber, ctx
       programmeId,
       academicYearLabel,
       yearOfStudy,
+      campus,
       sex: sex ?? null,
       profilePhotoUrl: null,
     },

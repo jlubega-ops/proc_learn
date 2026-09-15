@@ -6,6 +6,7 @@ import { prisma } from "@/lib/prisma";
 import { authorizeProjectOrgAdmin } from "@/lib/projects/workspace-access";
 import { authorizeProjectOrgRead } from "@/lib/projects/project-api-auth";
 import { ORG_PERMISSION } from "@/lib/projects/org-role-permissions";
+import { committeeTypeLabel } from "@/lib/projects/committee-eligibility";
 
 export const runtime = "nodejs";
 
@@ -108,14 +109,13 @@ export async function POST(request, context) {
     return NextResponse.json({ error: "Invalid request body." }, { status: 400 });
   }
 
-  const name = typeof body?.name === "string" ? body.name.trim() : "";
   const committeeType = String(body?.committeeType || "").trim();
   const description =
     typeof body?.description === "string" ? body.description.trim() || null : null;
+  const name = TYPE_SET.has(committeeType) ? committeeTypeLabel(committeeType) : "";
 
   /** @type {Record<string, string>} */
   const fieldErrors = {};
-  if (!name) fieldErrors.name = "Enter a committee name.";
   if (!TYPE_SET.has(committeeType)) fieldErrors.committeeType = "Choose a committee type.";
   if (Object.keys(fieldErrors).length) {
     return NextResponse.json(
@@ -136,7 +136,7 @@ export async function POST(request, context) {
     });
 
     await writeAuditLog({
-      eventType: AuditEvent.PROJECT_ORG_DEPARTMENT_CREATED,
+      eventType: AuditEvent.PROJECT_ORG_COMMITTEE_CREATED,
       actorUserId: user.id,
       meta: { projectId, committeeId: row.id, name: row.name, kind: "committee" },
     });
@@ -146,8 +146,8 @@ export async function POST(request, context) {
     if (e?.code === "P2002") {
       return NextResponse.json(
         {
-          error: "A committee with this name already exists.",
-          fieldErrors: { name: "Choose a different name." },
+          error: `A ${name} already exists for this organisation.`,
+          fieldErrors: { committeeType: "This committee type is already created." },
         },
         { status: 400 },
       );

@@ -2,6 +2,7 @@ import { prisma } from "@/lib/prisma";
 import { formatOrgUsername } from "@/lib/projects/org-user-identity";
 import { orgUserPermissions } from "@/lib/projects/org-role-permissions";
 import { formatUserDisplayName } from "@/lib/user-display";
+import { formatCommitteeSeatLabel } from "@/lib/projects/committee-context";
 
 /**
  * @param {string} orgUserId
@@ -41,14 +42,24 @@ export async function buildSessionPayloadForOrgUserId(orgUserId) {
   const theme = orgUser.theme === "dark" ? "dark" : "light";
   const permissions = orgUserPermissions(orgUser.projectOrgRole.name);
 
-  const activeCommittee =
-    orgUser.activeCommittee && orgUser.activeCommittee.isActive !== false
-      ? {
-          id: orgUser.activeCommittee.id,
-          name: orgUser.activeCommittee.name,
-          committeeType: orgUser.activeCommittee.committeeType,
-        }
-      : null;
+  let activeCommittee = null;
+  if (orgUser.activeCommittee && orgUser.activeCommittee.isActive !== false) {
+    const seat = await prisma.projectOrgCommitteeMember.findFirst({
+      where: {
+        orgUserId: orgUser.id,
+        committeeId: orgUser.activeCommittee.id,
+        status: "ACTIVE",
+      },
+      select: { committeeRole: true },
+    });
+    activeCommittee = {
+      id: orgUser.activeCommittee.id,
+      name: orgUser.activeCommittee.name,
+      committeeType: orgUser.activeCommittee.committeeType,
+      committeeRole: seat?.committeeRole || null,
+      committeeRoleLabel: formatCommitteeSeatLabel(seat?.committeeRole),
+    };
+  }
 
   return {
     authenticated: true,

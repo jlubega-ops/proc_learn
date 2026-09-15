@@ -341,6 +341,7 @@ async function upsertStudent(spec, programmeId, academicYearLabel, academicYearI
             registrationNumber: spec.reg,
             programmeId,
             yearOfStudy: spec.yearOfStudy,
+            campus: spec.campus || "MAIN",
             academicYearLabel,
           },
         },
@@ -371,6 +372,7 @@ async function upsertStudent(spec, programmeId, academicYearLabel, academicYearI
           registrationNumber: spec.reg,
           programmeId,
           yearOfStudy: spec.yearOfStudy,
+          campus: spec.campus || "MAIN",
           academicYearLabel,
         },
       });
@@ -381,6 +383,7 @@ async function upsertStudent(spec, programmeId, academicYearLabel, academicYearI
           registrationNumber: spec.reg,
           programmeId,
           yearOfStudy: spec.yearOfStudy,
+          campus: spec.campus || "MAIN",
           academicYearLabel,
         },
       });
@@ -413,7 +416,6 @@ async function upsertStudent(spec, programmeId, academicYearLabel, academicYearI
  *   openAt: Date | null;
  *   closeAt: Date | null;
  *   academicYearId: string;
- *   semesterId: string;
  *   programmeId: string;
  * }} p
  */
@@ -443,7 +445,6 @@ async function upsertDemoProject(p) {
     openAt: p.openAt,
     closeAt: p.closeAt,
     academicYearId: p.academicYearId,
-    semesterId: p.semesterId,
     programmeId: p.programmeId,
   };
   if (existing) {
@@ -1012,11 +1013,11 @@ async function main() {
   await ensureSystemAdmin();
   const programme = await ensureProgramme();
   const academic = await ensureCurrentAcademicContext(prisma);
-  if (!academic.academicYear?.id || !academic.semester?.id) {
-    throw new Error("Could not ensure academic year / semester.");
+  if (!academic.academicYear?.id) {
+    throw new Error("Could not ensure academic year.");
   }
   console.log(
-    `Academic: ${academic.academicYear.label} · ${academic.semester.name} · programme ${programme.shortName}`,
+    `Academic: ${academic.academicYear.label} · programme ${programme.shortName}`,
   );
 
   const examiners = [];
@@ -1086,7 +1087,6 @@ async function main() {
     openAt: openPast,
     closeAt: closeFuture,
     academicYearId: academic.academicYear.id,
-    semesterId: academic.semester.id,
     programmeId: programme.id,
   });
 
@@ -1104,7 +1104,6 @@ async function main() {
     openAt: openPast,
     closeAt: closeFuture,
     academicYearId: academic.academicYear.id,
-    semesterId: academic.semester.id,
     programmeId: programme.id,
   });
 
@@ -1113,7 +1112,7 @@ async function main() {
     name: `${DEMO_TAG} Midterm Procurement Assessment`,
     purpose: ProjectPurpose.ASSESSMENT,
     organizationName: "MUBS Examination Procurement Bureau",
-    description: "Live timed assessment for the current semester (scoring on).",
+    description: "Live timed assessment for the current academic year (scoring on).",
     instructions:
       "<p>You are locked into this organisation until the window closes. Follow the question carefully.</p><ol><li>Set up FY and budget</li><li>Raise a requisition</li><li>Complete micro procurement</li></ol>",
     questionText:
@@ -1124,7 +1123,6 @@ async function main() {
     openAt: openPast,
     closeAt: closeFuture,
     academicYearId: academic.academicYear.id,
-    semesterId: academic.semester.id,
     programmeId: programme.id,
   });
 
@@ -1142,7 +1140,6 @@ async function main() {
     openAt: new Date(now.getTime() - 14 * day),
     closeAt: closePast,
     academicYearId: academic.academicYear.id,
-    semesterId: academic.semester.id,
     programmeId: programme.id,
   });
 
@@ -1160,7 +1157,6 @@ async function main() {
     openAt: openPast,
     closeAt: closeFuture,
     academicYearId: academic.academicYear.id,
-    semesterId: academic.semester.id,
     programmeId: programme.id,
   });
 
@@ -1178,7 +1174,6 @@ async function main() {
     openAt: openPast,
     closeAt: closeFuture,
     academicYearId: academic.academicYear.id,
-    semesterId: academic.semester.id,
     programmeId: programme.id,
   });
 

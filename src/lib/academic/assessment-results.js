@@ -19,6 +19,7 @@ import {
 } from "@/lib/academic/assessment-scoring";
 import { getOrCreateProjectAssessment, serializeAssessmentConfig } from "@/lib/academic/assessment-config";
 import { ensureCurrentAcademicContext } from "@/lib/academic/academic-context";
+import { campusLabel, parseCampus } from "@/lib/campuses";
 
 /**
  * @param {any} grade
@@ -49,7 +50,7 @@ export function serializeGrade(grade, opts = {}) {
  * @param {{
  *   projectId?: string | null;
  *   academicYearId?: string | null;
- *   semesterId?: string | null;
+ *   campus?: string | null;
  *   participation?: 'all' | 'students' | 'demo';
  *   officialOnly?: boolean;
  *   purpose?: string | null;
@@ -61,6 +62,7 @@ export async function listAssessmentResultRows(opts = {}) {
   const db = opts.db || prisma;
   const uni = await ensureCurrentAcademicContext(db);
   const academicYearId = opts.academicYearId || uni.academicYear.id;
+  const campus = parseCampus(opts.campus);
 
   /** @type {any} */
   const attemptWhere = {
@@ -82,13 +84,6 @@ export async function listAssessmentResultRows(opts = {}) {
       },
     ],
   };
-
-  if (opts.semesterId) {
-    attemptWhere.academicSlate = {
-      ...(attemptWhere.academicSlate || {}),
-      semesterId: opts.semesterId,
-    };
-  }
 
   const attempts = await db.projectAttempt.findMany({
     where: attemptWhere,
@@ -135,6 +130,8 @@ export async function listAssessmentResultRows(opts = {}) {
       studentEmail: student.email,
       studentNumber: student.studentProfile?.studentNumber || null,
       programme: student.studentProfile?.programme?.shortName || null,
+      campus: student.studentProfile?.campus || null,
+      campusLabel: campusLabel(student.studentProfile?.campus) || null,
       academicYearId: attempt.studentAcademicEnrollment?.academicYearId || null,
       academicYearLabel: attempt.studentAcademicEnrollment?.academicYear?.label || null,
       participationType,
@@ -146,16 +143,18 @@ export async function listAssessmentResultRows(opts = {}) {
   });
 
   let filtered = rows;
+  if (campus) {
+    filtered = filtered.filter((r) => r.campus === campus);
+  }
   if (opts.officialOnly || opts.participation === "students") {
-    filtered = rows.filter((r) => r.isOfficial);
+    filtered = filtered.filter((r) => r.isOfficial);
   } else if (opts.participation === "demo") {
-    filtered = rows.filter((r) => !r.isOfficial);
+    filtered = filtered.filter((r) => !r.isOfficial);
   }
 
   return {
     academicYearId,
     academicYearLabel: uni.academicYear.label,
-    semesterId: opts.semesterId || uni.semester?.id || null,
     rows: filtered,
   };
 }
@@ -236,7 +235,7 @@ export function computeOfficialResultStats(p) {
  * @param {{
  *   projectId?: string | null;
  *   academicYearId?: string | null;
- *   semesterId?: string | null;
+ *   campus?: string | null;
  *   participation?: 'all' | 'students' | 'demo';
  *   ownerUserId?: string | null;
  *   db?: import("@prisma/client").PrismaClient;
@@ -287,7 +286,7 @@ export async function getExaminerAssessmentResults(opts = {}) {
     filter: {
       academicYearId: allListed.academicYearId,
       academicYearLabel: allListed.academicYearLabel,
-      semesterId: allListed.semesterId,
+      campus: parseCampus(opts.campus) || null,
       participation: opts.participation || "all",
       ownerScoped: Boolean(opts.ownerUserId),
     },
@@ -350,7 +349,6 @@ export async function listStudentOwnResults(opts) {
  * @param {{
  *   projectId?: string | null;
  *   academicYearId?: string | null;
- *   semesterId?: string | null;
  *   actorUserId: string;
  *   ownerUserId?: string | null;
  *   db?: import("@prisma/client").PrismaClient;
@@ -360,7 +358,7 @@ export async function buildOfficialResultsWorkbook(opts) {
   const listed = await listAssessmentResultRows({
     projectId: opts.projectId,
     academicYearId: opts.academicYearId,
-    semesterId: opts.semesterId,
+    campus: opts.campus || null,
     officialOnly: true,
     participation: "students",
     ownerUserId: opts.ownerUserId || null,
@@ -379,6 +377,7 @@ export async function buildOfficialResultsWorkbook(opts) {
     "Student name",
     "Email",
     "Programme",
+    "Campus",
     "Project",
     "Purpose",
     "Academic year",
@@ -399,6 +398,7 @@ export async function buildOfficialResultsWorkbook(opts) {
     r.studentName || "",
     r.studentEmail || "",
     r.programme || "",
+    r.campusLabel || r.campus || "",
     r.projectName || "",
     r.purpose || "",
     r.academicYearLabel || listed.academicYearLabel || "",
@@ -425,7 +425,6 @@ export async function buildOfficialResultsWorkbook(opts) {
     meta: {
       projectId: opts.projectId || null,
       academicYearId: listed.academicYearId,
-      semesterId: listed.semesterId,
       officialRowCount: official.length,
       population: "STUDENT_ONLY",
     },

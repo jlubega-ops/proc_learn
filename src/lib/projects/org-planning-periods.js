@@ -1,10 +1,16 @@
 import { formatPlanningPeriodDuration } from "@/lib/planning-period-duration";
-import { toDateInputValue } from "@/lib/financial-year-dates";
+import {
+  compareUtcCalendarParts,
+  serverUtcTodayParts,
+  toDateInputValue,
+  utcCalendarParts,
+} from "@/lib/financial-year-dates";
 import { OrgPlanningPeriodStatus } from "@prisma/client";
 
 export const planningPeriodSelect = {
   id: true,
   financialYearId: true,
+  label: true,
   startDate: true,
   endDate: true,
   status: true,
@@ -16,32 +22,48 @@ export const planningPeriodSelect = {
 };
 
 /**
- * Date-based planning period status (calendar dates, local midnight ok).
+ * Human label for planning period status chips/tables.
+ * @param {string} status
+ */
+export function planningPeriodStatusLabel(status) {
+  const s = String(status || "").toUpperCase();
+  if (s === OrgPlanningPeriodStatus.OPEN) return "Open";
+  if (s === OrgPlanningPeriodStatus.UPCOMING) return "Upcoming";
+  if (s === OrgPlanningPeriodStatus.CLOSED) return "Ended";
+  return s || "—";
+}
+
+/**
+ * Date-based planning period status using **server** UTC calendar days.
+ * Never use the client's local clock for this.
+ *
  * @param {Date | string | null | undefined} startDate
  * @param {Date | string | null | undefined} endDate
- * @param {Date} [now]
+ * @param {Date} [now] server clock
  */
 export function computePlanningPeriodStatus(startDate, endDate, now = new Date()) {
-  const start = startDate ? new Date(startDate) : null;
-  const end = endDate ? new Date(endDate) : null;
-  if (!start || !end || Number.isNaN(start.getTime()) || Number.isNaN(end.getTime())) {
-    return OrgPlanningPeriodStatus.UPCOMING;
-  }
-  const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
-  const s = new Date(start.getFullYear(), start.getMonth(), start.getDate());
-  const e = new Date(end.getFullYear(), end.getMonth(), end.getDate());
-  if (today < s) return OrgPlanningPeriodStatus.UPCOMING;
-  if (today > e) return OrgPlanningPeriodStatus.CLOSED;
+  const start = utcCalendarParts(startDate);
+  const end = utcCalendarParts(endDate);
+  if (!start || !end) return OrgPlanningPeriodStatus.UPCOMING;
+
+  const today = serverUtcTodayParts(now);
+  if (compareUtcCalendarParts(today, start) < 0) return OrgPlanningPeriodStatus.UPCOMING;
+  if (compareUtcCalendarParts(today, end) > 0) return OrgPlanningPeriodStatus.CLOSED;
   return OrgPlanningPeriodStatus.OPEN;
 }
 
 /**
  * @param {any} row
+ * @param {Date} [now] server clock
  */
-export function serializeProjectOrgPlanningPeriod(row) {
-  const start = row.startDate ? new Date(row.startDate) : null;
-  const end = row.endDate ? new Date(row.endDate) : null;
-  const status = computePlanningPeriodStatus(start, end);
+export function serializeProjectOrgPlanningPeriod(row, now = new Date()) {
+  const startParts = utcCalendarParts(row.startDate);
+  const endParts = utcCalendarParts(row.endDate);
+  const start = startParts ? new Date(startParts.y, startParts.m, startParts.d) : null;
+  const end = endParts ? new Date(endParts.y, endParts.m, endParts.d) : null;
+  const status = computePlanningPeriodStatus(row.startDate, row.endDate, now);
+  const label =
+    typeof row.label === "string" && row.label.trim() ? row.label.trim() : null;
 
   return {
     id: row.id,
@@ -53,10 +75,15 @@ export function serializeProjectOrgPlanningPeriod(row) {
           isActive: row.financialYear.isActive,
         }
       : null,
-    startDate: start ? toDateInputValue(start) : null,
-    endDate: end ? toDateInputValue(end) : null,
+    label,
+    startDate: startParts ? toDateInputValue(row.startDate) : null,
+    endDate: endParts ? toDateInputValue(row.endDate) : null,
+    /** Inclusive duration between start and end (auto). */
     periodLabel: formatPlanningPeriodDuration(start, end),
     status,
+    statusLabel: planningPeriodStatusLabel(status),
+    /** Server UTC calendar date used for status (YYYY-MM-DD). */
+    serverToday: toDateInputValue(now),
     createdAt: row.createdAt,
     updatedAt: row.updatedAt,
   };

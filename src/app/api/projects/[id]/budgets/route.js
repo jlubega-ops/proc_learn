@@ -6,6 +6,7 @@ import {
   budgetInclude,
   createBudgetWithLines,
   listSelectableBudgetLines,
+  mapBudgetWorkflowStages,
   serializeBudget,
   submitBudget,
 } from "@/lib/projects/budgets";
@@ -109,6 +110,12 @@ export async function GET(request, context) {
     include: budgetInclude,
   });
 
+  const stageMap = await mapBudgetWorkflowStages(prisma, {
+    projectId,
+    budgetIds: budgets.map((b) => b.id),
+    viewerOrgUserId: auth.ok && auth.type === "org" ? auth.orgUser.id : null,
+  });
+
   const roleName =
     auth.ok && auth.type === "org" ? auth.orgUser.projectOrgRole?.name || "" : "";
 
@@ -122,7 +129,15 @@ export async function GET(request, context) {
   }
 
   return NextResponse.json({
-    budgets: budgets.map(serializeBudget),
+    budgets: budgets.map((row) => {
+      const ctx = stageMap.get(row.id) || {};
+      return serializeBudget({
+        ...row,
+        workflowStage: ctx.workflowStage || null,
+        lastDecision: ctx.lastDecision || null,
+        viewerHasPendingAction: Boolean(ctx.viewerHasPendingAction),
+      });
+    }),
     total: budgets.length,
     canCreate: auth.ok && auth.type === "org" && canPrepareBudget(roleName),
     canSubmit: auth.ok && auth.type === "org" && canPrepareBudget(roleName),

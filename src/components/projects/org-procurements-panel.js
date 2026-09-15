@@ -19,6 +19,7 @@ import Typography from "@mui/material/Typography";
 import RefreshRounded from "@mui/icons-material/RefreshRounded";
 import VisibilityRounded from "@mui/icons-material/VisibilityRounded";
 import { format, isValid, parseISO } from "date-fns";
+import { useRouter } from "next/navigation";
 import { useToast } from "@/components/providers/toast-provider";
 import {
   adminCenteredLoadingBoxSx,
@@ -28,12 +29,17 @@ import {
   adminTableSx,
 } from "@/lib/admin-mui-surfaces";
 import { formatMoneyUGX } from "@/lib/money";
+import {
+  clickableTableRowProps,
+  stopRowClick,
+} from "@/lib/projects/clickable-table-row";
 
 /**
  * @param {{ projectId: string }} p
  */
 export function OrgProcurementsPanel({ projectId }) {
   const { showToast } = useToast();
+  const router = useRouter();
   const [loading, setLoading] = useState(true);
   const [rows, setRows] = useState(/** @type {any[]} */ ([]));
   const [stats, setStats] = useState(/** @type {Record<string, number>} */ ({}));
@@ -142,7 +148,13 @@ export function OrgProcurementsPanel({ projectId }) {
                   if (isValid(d)) when = format(d, "MMM d, yyyy");
                 }
                 return (
-                  <TableRow key={r.id} hover>
+                  <TableRow
+                    key={r.id}
+                    {...clickableTableRowProps({
+                      href: `/projects/${projectId}/procurements/${r.id}`,
+                      router,
+                    })}
+                  >
                     <TableCell>
                       <span className="font-medium">{r.procurementNumber}</span>
                       <div className="text-xs opacity-70">{when}</div>
@@ -158,7 +170,12 @@ export function OrgProcurementsPanel({ projectId }) {
                     <TableCell>
                       <Chip size="small" color={statusColor(r.status)} label={r.status} />
                     </TableCell>
-                    <TableCell align="right" sx={{ whiteSpace: "nowrap" }}>
+                    <TableCell
+                      align="right"
+                      sx={{ whiteSpace: "nowrap" }}
+                      onClick={stopRowClick}
+                      onKeyDown={stopRowClick}
+                    >
                       <Tooltip title="Open procurement">
                         <IconButton
                           component={Link}

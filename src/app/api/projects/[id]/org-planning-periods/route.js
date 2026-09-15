@@ -14,8 +14,10 @@ import {
   planningPeriodSelect,
   resolveActiveProjectFinancialYear,
   serializeProjectOrgPlanningPeriod,
+  computePlanningPeriodStatus,
 } from "@/lib/projects/org-planning-periods";
 import { validateProjectOrgPlanningPeriodInput } from "@/lib/validation/project-org-planning-period";
+import { toDateInputValue } from "@/lib/financial-year-dates";
 
 export const runtime = "nodejs";
 
@@ -65,7 +67,7 @@ export async function GET(request, context) {
       select: planningPeriodSelect,
     });
     const open = rows
-      .map((row) => serializeProjectOrgPlanningPeriod(row))
+      .map((row) => serializeProjectOrgPlanningPeriod(row, new Date()))
       .filter((p) => p.status === "OPEN");
 
     return NextResponse.json({
@@ -108,9 +110,11 @@ export async function GET(request, context) {
     listActiveProjectFinancialYears(prisma, projectId),
   ]);
 
+  const now = new Date();
   return NextResponse.json({
-    planningPeriods: rows.map((row) => serializeProjectOrgPlanningPeriod(row)),
+    planningPeriods: rows.map((row) => serializeProjectOrgPlanningPeriod(row, now)),
     activeFinancialYears,
+    serverToday: toDateInputValue(now),
     page,
     pageSize,
     total,
@@ -169,12 +173,21 @@ export async function POST(request, context) {
     );
   }
 
+  const now = new Date();
+  const status = computePlanningPeriodStatus(
+    validated.data.startDate,
+    validated.data.endDate,
+    now,
+  );
+
   const row = await prisma.projectOrgPlanningPeriod.create({
     data: {
       projectId,
       financialYearId: financialYear.id,
+      label: validated.data.label,
       startDate: validated.data.startDate,
       endDate: validated.data.endDate,
+      status,
     },
     select: planningPeriodSelect,
   });
@@ -186,12 +199,14 @@ export async function POST(request, context) {
       projectId,
       planningPeriodId: row.id,
       financialYearId: row.financialYearId,
-      periodLabel: serializeProjectOrgPlanningPeriod(row).periodLabel,
+      label: row.label,
+      periodLabel: serializeProjectOrgPlanningPeriod(row, now).periodLabel,
+      status,
     },
   });
 
   return NextResponse.json(
-    { planningPeriod: serializeProjectOrgPlanningPeriod(row) },
+    { planningPeriod: serializeProjectOrgPlanningPeriod(row, now) },
     { status: 201 },
   );
 }

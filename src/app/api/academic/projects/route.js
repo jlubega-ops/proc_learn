@@ -27,5 +27,9 @@ export async function GET(request) {
     purpose,
   });
 
-  return NextResponse.json({ purpose, projects });
+  return NextResponse.json({
+    purpose,
+    projects,
+    serverNow: new Date().toISOString(),
+  });
 }

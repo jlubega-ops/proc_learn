@@ -7,23 +7,32 @@ import Box from "@mui/material/Box";
 import Button from "@mui/material/Button";
 import Chip from "@mui/material/Chip";
 import CircularProgress from "@mui/material/CircularProgress";
+import Dialog from "@mui/material/Dialog";
+import DialogActions from "@mui/material/DialogActions";
+import DialogContent from "@mui/material/DialogContent";
+import DialogContentText from "@mui/material/DialogContentText";
+import DialogTitle from "@mui/material/DialogTitle";
 import MenuItem from "@mui/material/MenuItem";
 import Paper from "@mui/material/Paper";
 import TextField from "@mui/material/TextField";
 import Typography from "@mui/material/Typography";
 import ArrowBackRounded from "@mui/icons-material/ArrowBackRounded";
+import DeleteOutlineRounded from "@mui/icons-material/DeleteOutlineRounded";
+import EditRounded from "@mui/icons-material/EditRounded";
 import RefreshRounded from "@mui/icons-material/RefreshRounded";
 import SendRounded from "@mui/icons-material/SendRounded";
 import { OrgLineItemsTable } from "@/components/projects/org-line-items-table";
 import { useToast } from "@/components/providers/toast-provider";
 import {
   adminCenteredLoadingBoxSx,
+  adminDialogPaperSx,
   adminLoadingSpinnerSx,
   adminMutedTextSx,
   adminOutlinedTableContainerSx,
   themedTextFieldSx,
 } from "@/lib/admin-mui-surfaces";
 import { DEFAULT_CURRENCY } from "@/lib/money";
+import { workflowDecisionButtonLabel } from "@/lib/projects/workflow-status-presentation";
 
 const BUDGET_LINE_COLUMNS = [
   {
@@ -66,6 +75,9 @@ export function OrgBudgetDetailPanel({ projectId, budgetId }) {
   const [pendingTask, setPendingTask] = useState(/** @type {any} */ (null));
   const [history, setHistory] = useState(/** @type {any[]} */ ([]));
   const [canSubmit, setCanSubmit] = useState(false);
+  const [canEditDraft, setCanEditDraft] = useState(false);
+  const [canDeleteDraft, setCanDeleteDraft] = useState(false);
+  const [deleteOpen, setDeleteOpen] = useState(false);
   const [decision, setDecision] = useState("APPROVE");
   const [comment, setComment] = useState("");
 
@@ -88,6 +100,8 @@ export function OrgBudgetDetailPanel({ projectId, budgetId }) {
       setPendingTask(data.pendingTask || null);
       setHistory(Array.isArray(data.workflowHistory) ? data.workflowHistory : []);
       setCanSubmit(Boolean(data.canSubmit));
+      setCanEditDraft(Boolean(data.canEditDraft));
+      setCanDeleteDraft(Boolean(data.canDeleteDraft));
       setDecision("APPROVE");
       setComment("");
     } finally {
@@ -123,6 +137,29 @@ export function OrgBudgetDetailPanel({ projectId, budgetId }) {
     }
   }
 
+  async function deleteDraft() {
+    setBusy(true);
+    try {
+      const res = await fetch(`/api/projects/${projectId}/budgets/${budgetId}`, {
+        method: "DELETE",
+        credentials: "include",
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        showToast({
+          message: typeof data.error === "string" ? data.error : "Could not delete budget.",
+          severity: "error",
+        });
+        return;
+      }
+      showToast({ message: "Draft budget deleted.", severity: "success" });
+      router.push(`/projects/${projectId}/budgets`);
+    } finally {
+      setBusy(false);
+      setDeleteOpen(false);
+    }
+  }
+
   async function submitDecision() {
     if (!pendingTask?.id) return;
     setBusy(true);
@@ -152,13 +189,6 @@ export function OrgBudgetDetailPanel({ projectId, budgetId }) {
     }
   }
 
-  const statusColor = (s) => {
-    if (s === "APPROVED") return "success";
-    if (s === "REJECTED" || s === "CLOSED") return "error";
-    if (s === "RETURNED" || s === "SUBMITTED" || s === "UNDER_REVIEW") return "warning";
-    return "info";
-  };
-
   if (loading) {
     return (
       <Box sx={adminCenteredLoadingBoxSx} aria-busy>
@@ -181,6 +211,9 @@ export function OrgBudgetDetailPanel({ projectId, budgetId }) {
       </Paper>
     );
   }
+
+  const statusLabel = budget.statusLabel || budget.status;
+  const statusColor = budget.statusColor || "info";
 
   return (
     <div className="space-y-4">
@@ -217,8 +250,18 @@ export function OrgBudgetDetailPanel({ projectId, budgetId }) {
                 : ""}
             </Typography>
           </div>
-          <Chip size="small" color={statusColor(budget.status)} label={budget.status} />
+          <Chip size="small" color={statusColor} label={statusLabel} />
         </div>
+
+        {budget.status === "SUBMITTED" || budget.status === "UNDER_REVIEW" ? (
+          <Typography
+            variant="body2"
+            className="mt-3 rounded-lg border border-brand-yellow/50 bg-[color:var(--brand-yellow)]/10 px-3 py-2"
+            role="status"
+          >
+            {statusLabel}. Workflow history below shows who has already acted.
+          </Typography>
+        ) : null}
 
         {budget.description ? (
           <Typography variant="body2" className="mt-3 whitespace-pre-wrap">
@@ -238,8 +281,29 @@ export function OrgBudgetDetailPanel({ projectId, budgetId }) {
           />
         </div>
 
-        {canSubmit && (budget.status === "DRAFT" || budget.status === "RETURNED") ? (
-          <div className="mt-4">
+        <div className="mt-4 flex flex-wrap gap-2">
+          {canEditDraft ? (
+            <Button
+              component={Link}
+              href={`/projects/${projectId}/budgets/${budgetId}/edit`}
+              variant="outlined"
+              startIcon={<EditRounded />}
+            >
+              Edit draft
+            </Button>
+          ) : null}
+          {canDeleteDraft ? (
+            <Button
+              variant="outlined"
+              color="error"
+              startIcon={<DeleteOutlineRounded />}
+              disabled={busy}
+              onClick={() => setDeleteOpen(true)}
+            >
+              Delete draft
+            </Button>
+          ) : null}
+          {canSubmit && (budget.status === "DRAFT" || budget.status === "RETURNED") ? (
             <Button
               variant="contained"
               startIcon={busy ? <CircularProgress size={16} color="inherit" /> : <SendRounded />}
@@ -248,8 +312,8 @@ export function OrgBudgetDetailPanel({ projectId, budgetId }) {
             >
               Submit for review
             </Button>
-          </div>
-        ) : null}
+          ) : null}
+        </div>
       </Paper>
 
       {pendingTask ? (
@@ -293,7 +357,7 @@ export function OrgBudgetDetailPanel({ projectId, budgetId }) {
               onClick={() => void submitDecision()}
               startIcon={busy ? <CircularProgress size={16} color="inherit" /> : null}
             >
-              {busy ? "Saving…" : "Record decision"}
+              {workflowDecisionButtonLabel(decision, { busy })}
             </Button>
           </div>
         </Paper>
@@ -318,6 +382,33 @@ export function OrgBudgetDetailPanel({ projectId, budgetId }) {
           </ul>
         </Paper>
       ) : null}
+
+      <Dialog
+        open={deleteOpen}
+        onClose={() => !busy && setDeleteOpen(false)}
+        slotProps={{ paper: { sx: adminDialogPaperSx } }}
+      >
+        <DialogTitle>Delete draft budget?</DialogTitle>
+        <DialogContent>
+          <DialogContentText>
+            This permanently removes &ldquo;{budget.title}&rdquo;. Only unsubmitted drafts can be
+            deleted.
+          </DialogContentText>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setDeleteOpen(false)} disabled={busy}>
+            Cancel
+          </Button>
+          <Button
+            color="error"
+            variant="contained"
+            onClick={() => void deleteDraft()}
+            disabled={busy}
+          >
+            {busy ? <CircularProgress size={22} color="inherit" /> : "Delete"}
+          </Button>
+        </DialogActions>
+      </Dialog>
     </div>
   );
 }

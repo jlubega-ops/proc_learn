@@ -20,6 +20,7 @@ import { OrgLineItemsTable } from "@/components/projects/org-line-items-table";
 import {
   adminCenteredLoadingBoxSx,
   adminLoadingSpinnerSx,
+  adminMutedTextSx,
   adminOutlinedTableContainerSx,
   themedTextFieldSx,
 } from "@/lib/admin-mui-surfaces";
@@ -34,6 +35,7 @@ import {
   validatePositiveNumber,
 } from "@/lib/money";
 import { ORG_REF_DOC, nextOrgDocumentReference } from "@/lib/projects/org-reference";
+import { usePersistedFormDraft } from "@/hooks/use-persisted-form-draft";
 
 /**
  * @param {{ projectId: string }} p
@@ -69,6 +71,27 @@ export function OrgRequisitionCreateForm({ projectId }) {
     deliveryLocation: "",
     remarks: "",
     items: [{ itemName: "", quantity: "1", unitOfMeasure: "Unit", estimatedUnitPrice: "" }],
+  });
+  const [metaReady, setMetaReady] = useState(false);
+
+  const { serverSyncState, clearDraft } = usePersistedFormDraft({
+    formKey: "requisition:new",
+    values: form,
+    projectId,
+    enabled: metaReady,
+    onHydrated: (payload) => {
+      if (payload && typeof payload === "object" && !Array.isArray(payload)) {
+        setForm((prev) => ({
+          ...prev,
+          .../** @type {typeof form} */ (payload),
+          items:
+            Array.isArray(/** @type {any} */ (payload).items) &&
+            /** @type {any} */ (payload).items.length
+              ? /** @type {any} */ (payload).items
+              : prev.items,
+        }));
+      }
+    },
   });
 
   function emptyReqLine() {
@@ -175,6 +198,7 @@ export function OrgRequisitionCreateForm({ projectId }) {
       }));
     } finally {
       setLoading(false);
+      setMetaReady(true);
     }
   }, [projectId]);
 
@@ -286,6 +310,7 @@ export function OrgRequisitionCreateForm({ projectId }) {
         });
         return;
       }
+      await clearDraft();
       showToast({ message: "Requisition submitted.", severity: "success" });
       router.push(listHref);
     } finally {
@@ -314,8 +339,15 @@ export function OrgRequisitionCreateForm({ projectId }) {
           Back to list
         </Button>
       </div>
-      <Typography variant="subtitle1" sx={{ fontWeight: 600, mb: 2 }}>
+      <Typography variant="subtitle1" sx={{ fontWeight: 600, mb: 0.5 }}>
         New procurement requisition
+      </Typography>
+      <Typography variant="caption" sx={{ ...adminMutedTextSx, display: "block", mb: 2 }}>
+        {serverSyncState === "saving"
+          ? "Saving draft…"
+          : serverSyncState === "saved"
+            ? "Draft saved — you can continue on another device"
+            : "Autosaves as you type (local + server)"}
       </Typography>
       {!canCreateRequisition ? (
         <div className="mb-4 space-y-2 rounded-lg border border-[color:var(--brand-yellow)] bg-[color:var(--surface-elevated)] p-3 text-sm">

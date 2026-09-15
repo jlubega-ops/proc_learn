@@ -20,6 +20,7 @@ import RefreshRounded from "@mui/icons-material/RefreshRounded";
 import SendRounded from "@mui/icons-material/SendRounded";
 import VisibilityRounded from "@mui/icons-material/VisibilityRounded";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { useToast } from "@/components/providers/toast-provider";
 import {
   adminCenteredLoadingBoxSx,
@@ -28,12 +29,17 @@ import {
   adminOutlinedTableContainerSx,
   adminTableSx,
 } from "@/lib/admin-mui-surfaces";
+import {
+  clickableTableRowProps,
+  stopRowClick,
+} from "@/lib/projects/clickable-table-row";
 
 /**
  * @param {{ projectId: string }} p
  */
 export function OrgProcurementPlansPanel({ projectId }) {
   const { showToast } = useToast();
+  const router = useRouter();
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
   const [plans, setPlans] = useState(/** @type {any[]} */ ([]));
@@ -146,64 +152,85 @@ export function OrgProcurementPlansPanel({ projectId }) {
               </TableRow>
             </TableHead>
             <TableBody>
-              {plans.map((p) => (
-                <TableRow key={p.id} hover>
-                  <TableCell>
-                    <span className="font-medium">{p.title}</span>
-                    <div className="text-xs opacity-70">
-                      {(p.items || []).length} item{(p.items || []).length === 1 ? "" : "s"}
-                    </div>
-                  </TableCell>
-                  <TableCell>{p.planReference || "—"}</TableCell>
-                  <TableCell>{p.financialYear?.label || "—"}</TableCell>
-                  <TableCell>{p.department?.name || "—"}</TableCell>
-                  <TableCell>
-                    {p.createdBy?.displayName || "—"}
-                    {p.approvedBy?.displayName ? (
+              {plans.map((p) => {
+                const detailHref = `/projects/${projectId}/procurement-plans/${p.id}`;
+                return (
+                  <TableRow
+                    key={p.id}
+                    {...clickableTableRowProps({ href: detailHref, router })}
+                  >
+                    <TableCell>
+                      <span className="font-medium">{p.title}</span>
                       <div className="text-xs opacity-70">
-                        Approved by {p.approvedBy.displayName}
+                        {(p.items || []).length} item{(p.items || []).length === 1 ? "" : "s"}
+                        {p.isEmergency ? " · Emergency" : ""}
                       </div>
-                    ) : null}
-                  </TableCell>
-                  <TableCell>
-                    <Chip size="small" color={statusColor(p.status)} label={p.status} />
-                  </TableCell>
-                  <TableCell align="right" sx={{ whiteSpace: "nowrap" }}>
-                    <Box sx={{ display: "inline-flex", gap: 0.25, justifyContent: "flex-end" }}>
-                      <Tooltip title="Open plan details">
-                        <IconButton
-                          component={Link}
-                          href={`/projects/${projectId}/procurement-plans/${p.id}`}
-                          size="small"
-                          color="primary"
-                          aria-label={`Open plan ${p.title}`}
-                        >
-                          <VisibilityRounded fontSize="small" />
-                        </IconButton>
-                      </Tooltip>
-                      {canCreate && ["DRAFT", "RETURNED"].includes(p.status) ? (
-                        <Tooltip title="Submit for planning review">
-                          <span>
-                            <IconButton
-                              size="small"
-                              color="info"
-                              aria-label={`Submit plan ${p.title}`}
-                              disabled={busy}
-                              onClick={() => submitPlan(p.id)}
-                            >
-                              {busy ? (
-                                <CircularProgress size={16} />
-                              ) : (
-                                <SendRounded fontSize="small" />
-                              )}
-                            </IconButton>
-                          </span>
-                        </Tooltip>
+                    </TableCell>
+                    <TableCell>{p.planReference || "—"}</TableCell>
+                    <TableCell>{p.financialYear?.label || "—"}</TableCell>
+                    <TableCell>{p.department?.name || "—"}</TableCell>
+                    <TableCell>
+                      {p.createdBy?.displayName || "—"}
+                      {p.approvedBy?.displayName ? (
+                        <div className="text-xs opacity-70">
+                          Approved by {p.approvedBy.displayName}
+                        </div>
                       ) : null}
-                    </Box>
-                  </TableCell>
-                </TableRow>
-              ))}
+                    </TableCell>
+                    <TableCell>
+                      <div className="flex flex-wrap gap-1">
+                        {p.isEmergency ? (
+                          <Chip size="small" color="warning" label="Emergency" />
+                        ) : null}
+                        <Chip
+                          size="small"
+                          color={p.statusColor || statusColor(p.status)}
+                          label={p.statusLabel || p.status}
+                        />
+                      </div>
+                    </TableCell>
+                    <TableCell
+                      align="right"
+                      sx={{ whiteSpace: "nowrap" }}
+                      onClick={stopRowClick}
+                      onKeyDown={stopRowClick}
+                    >
+                      <Box sx={{ display: "inline-flex", gap: 0.25, justifyContent: "flex-end" }}>
+                        <Tooltip title="Open plan details">
+                          <IconButton
+                            component={Link}
+                            href={detailHref}
+                            size="small"
+                            color="primary"
+                            aria-label={`Open plan ${p.title}`}
+                          >
+                            <VisibilityRounded fontSize="small" />
+                          </IconButton>
+                        </Tooltip>
+                        {canCreate && ["DRAFT", "RETURNED"].includes(p.status) ? (
+                          <Tooltip title="Submit for planning review">
+                            <span>
+                              <IconButton
+                                size="small"
+                                color="info"
+                                aria-label={`Submit plan ${p.title}`}
+                                disabled={busy}
+                                onClick={() => submitPlan(p.id)}
+                              >
+                                {busy ? (
+                                  <CircularProgress size={16} />
+                                ) : (
+                                  <SendRounded fontSize="small" />
+                                )}
+                              </IconButton>
+                            </span>
+                          </Tooltip>
+                        ) : null}
+                      </Box>
+                    </TableCell>
+                  </TableRow>
+                );
+              })}
             </TableBody>
           </Table>
         </TableContainer>

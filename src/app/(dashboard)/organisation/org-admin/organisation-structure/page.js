@@ -1,6 +1,6 @@
 import { prisma } from "@/lib/prisma";
 import { requireStudentOrganisation } from "@/lib/projects/require-student-organisation";
-import { OrganisationStructureChart } from "@/components/projects/organisation-structure-chart";
+import { OrganisationStructurePanel } from "@/components/projects/organisation-structure-panel";
 import {
   DashboardPageIntro,
   BRAND_PAGE_SHELL_CLASS,
@@ -25,9 +25,15 @@ export default async function OrganisationStructurePage() {
     <div className={BRAND_PAGE_SHELL_CLASS}>
       <DashboardPageIntro
         title="Organisation structure"
-        description={`Organisation structure for ${title}.`}
+        description={`Arrange departments for ${title} from top to bottom. Create units under Departments, then set parents and order here.`}
       />
-      <OrganisationStructureChart organizationName={project.organizationName || project.name} />
+      <OrganisationStructurePanel
+        projectId={project.id}
+        organizationName={project.organizationName || project.name}
+        projectName={project.name}
+        readOnly={false}
+        departmentsHref="/organisation/org-admin/departments"
+      />
     </div>
   );
 }

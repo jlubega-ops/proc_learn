@@ -270,6 +270,7 @@ export function AdminStudentsBulkImportDialog({ open, onClose, onImported }) {
                     <TableCell>Student #</TableCell>
                     <TableCell>Programme short</TableCell>
                     <TableCell>Year</TableCell>
+                    <TableCell>Campus</TableCell>
                     <TableCell>Academic year</TableCell>
                     <TableCell>Issues</TableCell>
                   </TableRow>
@@ -285,6 +286,7 @@ export function AdminStudentsBulkImportDialog({ open, onClose, onImported }) {
                       <TableCell>{r.preview?.studentNumber}</TableCell>
                       <TableCell>{r.preview?.programmeShortName}</TableCell>
                       <TableCell>{r.preview?.yearOfStudy}</TableCell>
+                      <TableCell>{r.preview?.campus}</TableCell>
                       <TableCell>{r.preview?.academicYearLabel}</TableCell>
                       <TableCell sx={{ maxWidth: 280, whiteSpace: "normal" }}>
                         {r.errors?.length ? (

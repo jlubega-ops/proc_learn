@@ -5,6 +5,7 @@
 export const PROCESS_FLOW_CODES = {
   BUDGETING: "BUDGETING",
   PROCUREMENT_PLANNING: "PROCUREMENT_PLANNING",
+  EMERGENCY_PLANNING: "EMERGENCY_PLANNING",
   PROCUREMENT_REQUISITION: "PROCUREMENT_REQUISITION",
   MICRO_PROCUREMENT: "MICRO_PROCUREMENT",
   QUOTATION_PROCESS: "QUOTATION_PROCESS",
@@ -22,6 +23,7 @@ export const WORKFLOW_TRIGGERS = {
   PLANNING_INITIATED: "PLANNING_INITIATED",
   PLANNING_SUBMITTED: "PLANNING_SUBMITTED",
   PLANNING_APPROVED: "PLANNING_APPROVED",
+  EMERGENCY_PLANNING_SUBMITTED: "EMERGENCY_PLANNING_SUBMITTED",
   REQUISITION_SUBMITTED: "REQUISITION_SUBMITTED",
   REQUISITION_APPROVED: "REQUISITION_APPROVED",
   PROCUREMENT_METHOD_SELECTED: "PROCUREMENT_METHOD_SELECTED",
@@ -40,6 +42,7 @@ export const WORKFLOW_TRIGGERS = {
 export const TRIGGER_TO_PROCESS_CODE = {
   [WORKFLOW_TRIGGERS.BUDGET_SUBMITTED]: PROCESS_FLOW_CODES.BUDGETING,
   [WORKFLOW_TRIGGERS.PLANNING_SUBMITTED]: PROCESS_FLOW_CODES.PROCUREMENT_PLANNING,
+  [WORKFLOW_TRIGGERS.EMERGENCY_PLANNING_SUBMITTED]: PROCESS_FLOW_CODES.EMERGENCY_PLANNING,
   [WORKFLOW_TRIGGERS.REQUISITION_SUBMITTED]: PROCESS_FLOW_CODES.PROCUREMENT_REQUISITION,
   [WORKFLOW_TRIGGERS.MICRO_PROCUREMENT_STARTED]: PROCESS_FLOW_CODES.MICRO_PROCUREMENT,
   [WORKFLOW_TRIGGERS.QUOTATION_STARTED]: PROCESS_FLOW_CODES.QUOTATION_PROCESS,
@@ -91,6 +94,13 @@ export const ENGINE_PROCESS_BINDINGS = [
     triggerKey: WORKFLOW_TRIGGERS.PLANNING_SUBMITTED,
     label: "Procurement plan submitted",
     description: "Starts when a procurement plan is submitted for review.",
+  },
+  {
+    code: PROCESS_FLOW_CODES.EMERGENCY_PLANNING,
+    triggerKey: WORKFLOW_TRIGGERS.EMERGENCY_PLANNING_SUBMITTED,
+    label: "Emergency plan submitted",
+    description:
+      "Starts when an emergency / unplanned procurement plan is submitted (short path, outside annual consolidation).",
   },
   {
     code: PROCESS_FLOW_CODES.PROCUREMENT_REQUISITION,
@@ -177,7 +187,12 @@ export const LEGACY_PROCESS_ALIASES = [
   {
     code: PROCESS_FLOW_CODES.PROCUREMENT_PLANNING,
     triggerKey: WORKFLOW_TRIGGERS.PLANNING_SUBMITTED,
-    legacyNames: ["planning process"],
+    legacyNames: ["planning process", "procurement planning", "procurement planning process"],
+  },
+  {
+    code: PROCESS_FLOW_CODES.EMERGENCY_PLANNING,
+    triggerKey: WORKFLOW_TRIGGERS.EMERGENCY_PLANNING_SUBMITTED,
+    legacyNames: ["emergency planning process", "emergency planning"],
   },
   {
     code: PROCESS_FLOW_CODES.PROCUREMENT_REQUISITION,
@@ -255,6 +270,39 @@ export const BASELINE_PROCESS_TEMPLATES = [
       {
         stepNumber: 5,
         taskDescription: "Approve Consolidated Procurement Plan",
+        roleName: "Accounting Officer",
+        actionKey: "APPROVE",
+      },
+    ],
+  },
+  {
+    code: PROCESS_FLOW_CODES.EMERGENCY_PLANNING,
+    name: "Emergency Planning Process",
+    description:
+      "Short-path approval for an emergency or unplanned procurement plan outside the annual consolidation cycle.",
+    triggerKey: WORKFLOW_TRIGGERS.EMERGENCY_PLANNING_SUBMITTED,
+    steps: [
+      {
+        stepNumber: 1,
+        taskDescription: "Prepare Emergency Procurement Plan",
+        roleName: "User Department Officer",
+        actionKey: "SUBMIT",
+      },
+      {
+        stepNumber: 2,
+        taskDescription: "Review Emergency Procurement Plan",
+        roleName: "Head User Department",
+        actionKey: "APPROVE",
+      },
+      {
+        stepNumber: 3,
+        taskDescription: "Verify Emergency Plan and Funding Context",
+        roleName: "Head PDU",
+        actionKey: "COMPLETE",
+      },
+      {
+        stepNumber: 4,
+        taskDescription: "Approve Emergency Procurement Plan",
         roleName: "Accounting Officer",
         actionKey: "APPROVE",
       },

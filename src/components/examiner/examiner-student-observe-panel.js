@@ -200,9 +200,9 @@ export function ExaminerStudentObservePanel({
           {s.displayName} · {s.email}
           {s.studentNumber ? ` · ${s.studentNumber}` : ""}
           {s.programmeName ? ` · ${s.programmeName}` : ""}
+          {s.campusLabel ? ` · ${s.campusLabel}` : ""}
           {" · "}
           {academic?.enrollment?.academicYear?.label || academic?.currentUniversityYear?.label || "—"}
-          {academic?.semester?.name ? ` · ${academic.semester.name}` : ""}
         </p>
         <div className="mt-4 flex flex-wrap items-end gap-3">
           <TextField

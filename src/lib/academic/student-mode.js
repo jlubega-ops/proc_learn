@@ -77,7 +77,7 @@ export async function ensureDemoStudentModeContext(
   }
 
   let university = await getCurrentAcademicContext(db);
-  if (!university.academicYear?.id || !university.semester?.id) {
+  if (!university.academicYear?.id) {
     university = await ensureCurrentAcademicContext(db);
   }
   if (!university.academicYear?.id) {
@@ -106,7 +106,6 @@ export async function ensureDemoStudentModeContext(
 
   return {
     academicYear: university.academicYear,
-    semester: university.semester,
     enrollment: enrollmentResult.enrollment,
     enrollmentCreated: enrollmentResult.created,
     orgAcademicSlate: slateResult?.slate || null,

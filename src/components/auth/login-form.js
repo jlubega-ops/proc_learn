@@ -45,6 +45,27 @@ const loginMuiTheme = createTheme({
     background: { default: "#fafafa", paper: "#ffffff" },
     text: { primary: "#18181b", secondary: "#52525b" },
   },
+  components: {
+    // Keep in sync with createProcLearnMuiTheme — login uses its own ThemeProvider.
+    MuiTextField: {
+      defaultProps: { size: "small" },
+    },
+    MuiFormControl: {
+      defaultProps: { size: "small" },
+    },
+    MuiInputLabel: {
+      defaultProps: { size: "small" },
+    },
+    MuiSelect: {
+      defaultProps: { size: "small" },
+    },
+    MuiOutlinedInput: {
+      defaultProps: { size: "small" },
+    },
+    MuiInputBase: {
+      defaultProps: { size: "small" },
+    },
+  },
 });
 
 const OAUTH_ERROR_HINTS = {
@@ -252,7 +273,7 @@ export function LoginForm({
                 Sign in to continue
               </h1>
               <p className="mt-1 text-center text-xs leading-snug text-zinc-600 sm:text-[13px]">
-                Use your MUBS school email, organisation username, or{" "}
+                Use your MUBS school email, organisation login email, or{" "}
                 <a
                   href={googleStartHref}
                   className="cursor-pointer font-semibold text-[#008bd0] underline decoration-[#008bd0]/40 underline-offset-2 hover:decoration-[#008bd0]"
@@ -272,7 +293,7 @@ export function LoginForm({
               <TextField
                 id="login-identifier"
                 name="pl_login_identifier"
-                label="School email or organisation username"
+                label="School email or organisation login email"
                 type="text"
                 inputMode="text"
                 autoComplete="off"
@@ -377,7 +398,7 @@ export function LoginForm({
                 disabled={submitting}
                 aria-busy={submitting}
                 title="Sign in with your school email and password"
-                className="flex h-11 shrink-0 cursor-pointer items-center justify-center gap-2 rounded-lg bg-[#008bd0] text-sm font-semibold text-white shadow hover:bg-[#0076b0] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#008bd0] disabled:cursor-wait disabled:opacity-90"
+                className="flex h-10 shrink-0 cursor-pointer items-center justify-center gap-2 rounded-lg bg-[#008bd0] text-sm font-semibold text-white shadow hover:bg-[#0076b0] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#008bd0] disabled:cursor-wait disabled:opacity-90"
               >
                 {submitting ? (
                   <>
@@ -399,7 +420,7 @@ export function LoginForm({
 
             <a
               href={googleStartHref}
-              className="mt-2 flex h-11 shrink-0 cursor-pointer items-center justify-center gap-2 rounded-lg border border-zinc-200 bg-white px-3 text-center text-sm font-semibold text-zinc-800 shadow-sm hover:bg-zinc-50 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#008bd0]"
+              className="mt-2 flex h-10 shrink-0 cursor-pointer items-center justify-center gap-2 rounded-lg border border-zinc-200 bg-white px-3 text-center text-sm font-semibold text-zinc-800 shadow-sm hover:bg-zinc-50 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#008bd0]"
               title="Continue with your school Google account"
             >
               <svg

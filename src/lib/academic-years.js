@@ -1,7 +1,11 @@
 /**
- * Academic year labels for student intake, relative to a calendar reference date.
- * Primary pair for calendar year Y: `(Y-1)/Y` and `Y/(Y+1)`.
- * Three earlier pairs: `(Y-4)/(Y-3)` … `(Y-2)/(Y-1)`.
+ * Academic year label helpers.
+ * Student forms and imports use only years that exist in AcademicYear (admin setup).
+ * Calendar-derived helpers remain for bootstrap when no year exists yet.
+ */
+
+/**
+ * Suggest label for calendar year Y (used only when seeding/bootstrapping).
  * @param {Date} [referenceDate]
  * @returns {{ primary: string[]; extended: string[] }}
  */
@@ -15,7 +19,6 @@ export function getAcademicYearChoices(referenceDate = new Date()) {
 }
 
 /**
- * Same labels as {@link getAcademicYearChoices}, ordered **newest first** (highest start year) for dropdowns.
  * @param {Date} [referenceDate]
  */
 export function getAcademicYearDropdownChoices(referenceDate = new Date()) {
@@ -27,12 +30,21 @@ export function getAcademicYearDropdownChoices(referenceDate = new Date()) {
 }
 
 /**
- * @param {string} label
- * @param {Date} [referenceDate]
+ * Label shape YYYY/YYYY+1 (does not check the database).
+ * @param {unknown} label
+ */
+export function isAcademicYearLabelShape(label) {
+  const t = typeof label === "string" ? label.trim() : "";
+  return /^\d{4}\/\d{4}$/.test(t);
+}
+
+/**
+ * @deprecated Prefer {@link isRegisteredAcademicYearLabel} from academic-context (DB-backed).
+ * Kept for bootstrap-only callers that still need a calendar window check.
  */
 export function isAllowedAcademicYearLabel(label, referenceDate = new Date()) {
   const t = typeof label === "string" ? label.trim() : "";
-  if (!/^\d{4}\/\d{4}$/.test(t)) return false;
+  if (!isAcademicYearLabelShape(t)) return false;
   const allowed = new Set(getAcademicYearChoices(referenceDate).extended);
   return allowed.has(t);
 }

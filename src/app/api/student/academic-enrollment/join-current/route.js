@@ -93,7 +93,6 @@ export async function POST(request) {
             enrollmentId: result.orgAcademicSlate.enrollmentId,
             academicYearId: result.orgAcademicSlate.academicYearId,
             academicYearLabel: result.orgAcademicSlate.academicYear?.label || null,
-            semesterId: result.orgAcademicSlate.semesterId || null,
           },
         });
       } else if (result.orgAcademicSlate?.id && prev) {

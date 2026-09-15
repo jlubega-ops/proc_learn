@@ -125,6 +125,7 @@ async function main() {
             studentNumber: "256700000001",
             registrationNumber: "2026/HD/001",
             yearOfStudy: 1,
+            campus: "MAIN",
             academicYearLabel: "2025/2026",
             programmeId: programme.id,
           },

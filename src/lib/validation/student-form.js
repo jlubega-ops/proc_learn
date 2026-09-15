@@ -1,4 +1,5 @@
 import { isStudentMubsEmail, isValidStudentNumberDigits } from "@/lib/mubs-email";
+import { parseCampus } from "@/lib/campuses";
 
 /**
  * Client-side student account fields (create + edit). Do not rely on HTML `required`.
@@ -11,6 +12,7 @@ import { isStudentMubsEmail, isValidStudentNumberDigits } from "@/lib/mubs-email
  *   registrationNumber: string;
  *   programmeId: string;
  *   academicYearLabel: string;
+ *   campus: string;
  *   sex?: string;
  * }} v
  * @returns {Record<string, string>}
@@ -42,6 +44,10 @@ export function validateStudentAccountForm(v) {
 
   if (!String(v.academicYearLabel ?? "").trim()) {
     errors.academicYearLabel = "Academic year is required.";
+  }
+
+  if (!parseCampus(v.campus)) {
+    errors.campus = "Campus is required.";
   }
 
   const sex = v.sex != null ? String(v.sex).trim().toUpperCase() : "";

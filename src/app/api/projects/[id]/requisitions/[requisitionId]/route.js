@@ -56,6 +56,12 @@ export async function GET(_request, context) {
 
   /** @type {any} */
   let pendingTask = null;
+  /** @type {any} */
+  let workflowStage = null;
+  /** @type {any} */
+  let lastDecision = null;
+  let viewerHasPendingAction = false;
+
   if (auth.type === "org") {
     pendingTask = await prisma.projectOrgWorkflowTask.findFirst({
       where: {
@@ -74,10 +80,56 @@ export async function GET(_request, context) {
         processFlowItem: { select: { actionKey: true } },
       },
     });
+    viewerHasPendingAction = Boolean(pendingTask);
+
+    const openTask = await prisma.projectOrgWorkflowTask.findFirst({
+      where: {
+        projectId,
+        status: { in: ["PENDING", "IN_PROGRESS"] },
+        instance: { requisitionId },
+      },
+      orderBy: [{ stepNumber: "asc" }, { createdAt: "asc" }],
+      select: {
+        id: true,
+        title: true,
+        requiredRoleName: true,
+        status: true,
+        stepNumber: true,
+      },
+    });
+    if (openTask) {
+      workflowStage = {
+        taskId: openTask.id,
+        title: openTask.title,
+        requiredRoleName: openTask.requiredRoleName || null,
+        stepNumber: openTask.stepNumber,
+        status: openTask.status,
+      };
+    }
+
+    const historyFlat = (row.instances || []).flatMap((inst) =>
+      (inst.actions || []).map((a) => ({
+        decision: a.decision,
+        actorRoleName: a.actorRoleName,
+        createdAt: a.createdAt,
+      })),
+    );
+    if (historyFlat.length) {
+      const latest = historyFlat[historyFlat.length - 1];
+      lastDecision = {
+        decision: latest.decision,
+        actorRoleName: latest.actorRoleName || null,
+      };
+    }
   }
 
   return NextResponse.json({
-    requisition: serializeRequisition(row),
+    requisition: serializeRequisition({
+      ...row,
+      workflowStage,
+      lastDecision,
+      viewerHasPendingAction,
+    }),
     pendingTask: pendingTask
       ? {
           ...pendingTask,
@@ -106,19 +158,45 @@ export async function POST(request, context) {
     return NextResponse.json({ error: "Invalid request." }, { status: 400 });
   }
 
+  let body;
+  try {
+    body = await request.json();
+  } catch {
+    return NextResponse.json({ error: "Invalid request body." }, { status: 400 });
+  }
+
+  if (body?.action === "save_form5_part_i" || body?.action === "save_form5_part_ii") {
+    const auth = await authorizeProjectApiAccess(prisma, {
+      projectId,
+      orgPermission: ORG_PERMISSION.VIEW_REQUISITIONS,
+    });
+    if (!auth.ok || auth.type !== "org") {
+      return NextResponse.json({ error: "Forbidden." }, { status: 403 });
+    }
+    const { saveRequisitionForm5 } = await import("@/lib/projects/requisitions");
+    const saved = await saveRequisitionForm5(prisma, {
+      projectId,
+      requisitionId,
+      actorOrgUserId: auth.orgUser.id,
+      part: body.action === "save_form5_part_i" ? "I" : "II",
+      body: body.form5 || body,
+      method: typeof body.procurementMethod === "string" ? body.procurementMethod : null,
+    });
+    if (!saved.ok) {
+      return NextResponse.json(
+        { error: saved.error, fieldErrors: saved.fieldErrors },
+        { status: saved.status || 400 },
+      );
+    }
+    return NextResponse.json(saved);
+  }
+
   const auth = await authorizeProjectApiAccess(prisma, {
     projectId,
     orgPermission: ORG_PERMISSION.CREATE_REQUISITION,
   });
   if (!auth.ok || auth.type !== "org") {
     return NextResponse.json({ error: "Forbidden." }, { status: 403 });
-  }
-
-  let body;
-  try {
-    body = await request.json();
-  } catch {
-    return NextResponse.json({ error: "Invalid request body." }, { status: 400 });
   }
 
   if (body?.action !== "submit") {

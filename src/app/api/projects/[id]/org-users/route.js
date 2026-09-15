@@ -13,7 +13,9 @@ import {
   serializeProjectOrgUser,
 } from "@/lib/projects/org-users";
 import {
-  generateUniqueOrgUnitIdentifier,
+  allocateOrgUserIdentity,
+  findDuplicateOrgDisplayName,
+  formatOrgUsername,
   PROJECT_ORG_LEARN_PASSWORD,
 } from "@/lib/projects/org-user-identity";
 import { hashOrgUserPassword } from "@/lib/projects/org-user-password";
@@ -22,6 +24,7 @@ import { resolveOrgUserDepartmentAssignment } from "@/lib/projects/org-departmen
 import { validateProjectOrgUserInput } from "@/lib/validation/project-org-user";
 
 export const runtime = "nodejs";
+
 
 export async function GET(request, context) {
   const user = await getSessionUser();
@@ -154,7 +157,31 @@ export async function POST(request, context) {
     );
   }
 
-  const unitIdentifier = await generateUniqueOrgUnitIdentifier(prisma, projectId);
+  const nameClash = await findDuplicateOrgDisplayName(prisma, {
+    projectId,
+    firstName: validated.data.firstName,
+    middleName: validated.data.middleName,
+    lastName: validated.data.lastName,
+  });
+  if (nameClash) {
+    return NextResponse.json(
+      {
+        error:
+          "An organisation member with this exact name already exists. Change the middle name or use a distinct full name so accounts stay easy to tell apart. Login emails are always unique.",
+        fieldErrors: {
+          firstName: "This full name is already used in this organisation.",
+          lastName: "This full name is already used in this organisation.",
+        },
+      },
+      { status: 400 },
+    );
+  }
+
+  const unitIdentity = await allocateOrgUserIdentity(prisma, {
+    projectId,
+    firstName: validated.data.firstName,
+    lastName: validated.data.lastName,
+  });
   const passwordHash = await hashOrgUserPassword(PROJECT_ORG_LEARN_PASSWORD);
 
   const row = await prisma.projectOrgUser.create({
@@ -163,11 +190,11 @@ export async function POST(request, context) {
       firstName: validated.data.firstName,
       middleName: validated.data.middleName,
       lastName: validated.data.lastName,
-      email: validated.data.email,
+      email: unitIdentity.email,
       projectOrgRoleId: role.id,
       departmentId: dept.data.departmentId,
       subunitId: dept.data.subunitId,
-      unitIdentifier,
+      unitIdentifier: unitIdentity.unitIdentifier,
       isProjectAdmin: false,
       linkedUserId: null,
       passwordHash,
@@ -187,5 +214,12 @@ export async function POST(request, context) {
     },
   });
 
-  return NextResponse.json({ user: serializeProjectOrgUser(row, null, projectCode) }, { status: 201 });
+  const serialized = serializeProjectOrgUser(row, null, projectCode);
+  return NextResponse.json(
+    {
+      user: serialized,
+      loginEmail: serialized.loginEmail || formatOrgUsername(row.email, projectCode),
+    },
+    { status: 201 },
+  );
 }

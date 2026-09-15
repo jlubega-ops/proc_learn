@@ -7,21 +7,42 @@ import { authorizeProjectOrgAdmin } from "@/lib/projects/workspace-access";
 import { authorizeProjectOrgRead } from "@/lib/projects/project-api-auth";
 import { ORG_PERMISSION } from "@/lib/projects/org-role-permissions";
 import {
+  buildDepartmentTree,
   deptSelect,
+  listProjectOrgDepartmentUnits,
   serializeProjectOrgDepartment,
 } from "@/lib/projects/org-departments";
 import { validateProjectOrgDepartmentInput } from "@/lib/validation/project-org-department";
 
 export const runtime = "nodejs";
 
+/**
+ * @param {import("@prisma/client").PrismaClient} db
+ * @param {string} projectId
+ * @param {string | null} parentId
+ */
+async function nextSiblingSortOrder(db, projectId, parentId) {
+  const agg = await db.projectOrgDepartment.aggregate({
+    where: { projectId, parentId: parentId || null },
+    _max: { sortOrder: true },
+  });
+  return (agg._max.sortOrder ?? -1) + 1;
+}
+
 export async function GET(request, context) {
   const params = await context.params;
   const projectId = String(params?.id || "").trim();
   if (!projectId) return NextResponse.json({ error: "Invalid project id." }, { status: 400 });
 
+  const { searchParams } = new URL(request.url);
+  const view = (searchParams.get("view") || "").trim().toLowerCase();
+  const isStructureView = view === "structure" || view === "flat";
+
   const auth = await authorizeProjectOrgRead(prisma, {
     projectId,
-    orgPermission: ORG_PERMISSION.VIEW_DEPARTMENTS,
+    orgPermission: isStructureView
+      ? ORG_PERMISSION.VIEW_ORG_STRUCTURE
+      : ORG_PERMISSION.VIEW_DEPARTMENTS,
   });
   if (!auth.ok) {
     return NextResponse.json(
@@ -30,7 +51,14 @@ export async function GET(request, context) {
     );
   }
 
-  const { searchParams } = new URL(request.url);
+  if (isStructureView) {
+    const units = await listProjectOrgDepartmentUnits(prisma, projectId);
+    return NextResponse.json({
+      units,
+      tree: buildDepartmentTree(units),
+    });
+  }
+
   const page = Math.max(1, Number(searchParams.get("page") || 1));
   const pageSizeRaw = Number(searchParams.get("pageSize") || 10);
   const pageSize = Math.min(50, Math.max(1, Number.isFinite(pageSizeRaw) ? pageSizeRaw : 10));
@@ -42,13 +70,13 @@ export async function GET(request, context) {
     prisma.projectOrgDepartment.count({ where }),
     prisma.projectOrgDepartment.findMany({
       where,
-      orderBy: [{ name: "asc" }],
+      orderBy: [{ sortOrder: "asc" }, { name: "asc" }],
       skip,
       take: pageSize,
       select: {
         ...deptSelect,
         subunits: {
-          orderBy: [{ name: "asc" }],
+          orderBy: [{ sortOrder: "asc" }, { name: "asc" }],
           select: deptSelect,
         },
       },
@@ -122,6 +150,7 @@ export async function POST(request, context) {
       name: validated.data.name,
       description: validated.data.description,
       isActive: validated.data.isActive,
+      sortOrder: await nextSiblingSortOrder(prisma, projectId, validated.data.parentId),
     },
     select: {
       ...deptSelect,

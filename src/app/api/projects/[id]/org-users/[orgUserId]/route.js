@@ -12,6 +12,7 @@ import {
 } from "@/lib/projects/org-users";
 import { validateProjectOrgUserPatch } from "@/lib/validation/project-org-user";
 import { ensureProjectCode } from "@/lib/projects/project-identity";
+import { findDuplicateOrgDisplayName } from "@/lib/projects/org-user-identity";
 
 export const runtime = "nodejs";
 
@@ -112,6 +113,46 @@ export async function PATCH(request, context) {
     }
     validated.data.departmentId = dept.data.departmentId;
     validated.data.subunitId = dept.data.subunitId;
+  }
+
+  const nextFirst =
+    validated.data.firstName !== undefined
+      ? String(validated.data.firstName)
+      : existing.firstName;
+  const nextMiddle =
+    validated.data.middleName !== undefined
+      ? validated.data.middleName
+      : existing.middleName;
+  const nextLast =
+    validated.data.lastName !== undefined
+      ? String(validated.data.lastName)
+      : existing.lastName;
+
+  if (
+    validated.data.firstName !== undefined ||
+    validated.data.middleName !== undefined ||
+    validated.data.lastName !== undefined
+  ) {
+    const nameClash = await findDuplicateOrgDisplayName(prisma, {
+      projectId,
+      firstName: nextFirst,
+      middleName: nextMiddle,
+      lastName: nextLast,
+      excludeOrgUserId: orgUserId,
+    });
+    if (nameClash) {
+      return NextResponse.json(
+        {
+          error:
+            "An organisation member with this exact name already exists. Change the middle name or use a distinct full name.",
+          fieldErrors: {
+            firstName: "This full name is already used in this organisation.",
+            lastName: "This full name is already used in this organisation.",
+          },
+        },
+        { status: 400 },
+      );
+    }
   }
 
   const row = await prisma.projectOrgUser.update({

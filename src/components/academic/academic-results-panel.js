@@ -44,6 +44,7 @@ import {
   themedTextFieldSx,
 } from "@/lib/admin-mui-surfaces";
 import { useToast } from "@/components/providers/toast-provider";
+import { campusSelectOptions } from "@/lib/campuses";
 import { useAuthSession } from "@/components/providers/auth-session-provider";
 import { ROLE } from "@/lib/roles";
 
@@ -180,6 +181,7 @@ function ExaminerResultsView() {
   const [years, setYears] = useState(/** @type {any[]} */ ([]));
   const [academicYearId, setAcademicYearId] = useState("");
   const [participation, setParticipation] = useState("all");
+  const [campus, setCampus] = useState("");
   const [projectId, setProjectId] = useState(initialProjectId);
   const [projects, setProjects] = useState(/** @type {any[]} */ ([]));
   const [gradeRow, setGradeRow] = useState(/** @type {any} */ (null));
@@ -211,6 +213,7 @@ function ExaminerResultsView() {
       const qs = new URLSearchParams();
       if (academicYearId) qs.set("academicYearId", academicYearId);
       if (projectId) qs.set("projectId", projectId);
+      if (campus) qs.set("campus", campus);
       qs.set("participation", participation);
       const res = await fetch(`/api/academic/results?${qs.toString()}`, {
         credentials: "include",
@@ -231,7 +234,7 @@ function ExaminerResultsView() {
     } finally {
       setLoading(false);
     }
-  }, [academicYearId, participation, projectId, showToast]);
+  }, [academicYearId, participation, projectId, campus, showToast]);
 
   useEffect(() => {
     void load();
@@ -241,6 +244,7 @@ function ExaminerResultsView() {
     const qs = new URLSearchParams();
     if (academicYearId) qs.set("academicYearId", academicYearId);
     if (projectId) qs.set("projectId", projectId);
+    if (campus) qs.set("campus", campus);
     const res = await fetch(`/api/academic/results/export?${qs.toString()}`, {
       credentials: "include",
     });
@@ -357,7 +361,7 @@ function ExaminerResultsView() {
         </div>
       </DashboardPageIntro>
 
-      <div className="mb-4 grid gap-3 sm:grid-cols-3">
+      <div className="mb-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
         <FormControl fullWidth>
           <InputLabel id="ay-filter">Academic year</InputLabel>
           <Select
@@ -371,6 +375,25 @@ function ExaminerResultsView() {
               <MenuItem key={y.id} value={y.id} className="cursor-pointer">
                 {y.label}
                 {y.isCurrent ? " (current)" : ""}
+              </MenuItem>
+            ))}
+          </Select>
+        </FormControl>
+        <FormControl fullWidth>
+          <InputLabel id="campus-filter">Campus</InputLabel>
+          <Select
+            labelId="campus-filter"
+            label="Campus"
+            value={campus}
+            onChange={(e) => setCampus(e.target.value)}
+            className="cursor-pointer"
+          >
+            <MenuItem value="" className="cursor-pointer">
+              All campuses
+            </MenuItem>
+            {campusSelectOptions().map((c) => (
+              <MenuItem key={c.value} value={c.value} className="cursor-pointer">
+                {c.label}
               </MenuItem>
             ))}
           </Select>
@@ -449,6 +472,7 @@ function ExaminerResultsView() {
             <TableHead>
               <TableRow>
                 <TableCell>Student</TableCell>
+                <TableCell>Campus</TableCell>
                 <TableCell>Project</TableCell>
                 <TableCell>Attempt</TableCell>
                 <TableCell>Status</TableCell>
@@ -470,6 +494,7 @@ function ExaminerResultsView() {
                     </div>
                     <div className="text-xs opacity-70">{row.studentNumber || row.studentEmail}</div>
                   </TableCell>
+                  <TableCell>{row.campusLabel || row.campus || "—"}</TableCell>
                   <TableCell>{row.projectName}</TableCell>
                   <TableCell>#{row.attemptNumber}</TableCell>
                   <TableCell>{row.grade?.statusLabel || row.attemptStatus}</TableCell>

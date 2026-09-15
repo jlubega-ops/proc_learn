@@ -23,6 +23,7 @@ import {
   themedTextFieldSx,
 } from "@/lib/admin-mui-surfaces";
 import { formatMoneyAmount } from "@/lib/money";
+import { workflowDecisionButtonLabel } from "@/lib/projects/workflow-status-presentation";
 
 const PLAN_ITEM_COLUMNS = [
   {
@@ -193,16 +194,35 @@ export function OrgProcurementPlanDetailPanel({ projectId, planId }) {
               {plan.planReference ? ` · ${plan.planReference}` : ""}
             </Typography>
             <Typography variant="body2" sx={{ ...adminMutedTextSx, mt: 0.5 }}>
+              Circular sheet:{" "}
+              {plan.sheetType === "CONSULTANCY"
+                ? "Consultancy services"
+                : "Goods, works and non-consultancy services"}
+            </Typography>
+            <Typography variant="body2" sx={{ ...adminMutedTextSx, mt: 0.5 }}>
               Created by {plan.createdBy?.displayName || "—"}
               {plan.approvedBy?.displayName ? ` · Approved by ${plan.approvedBy.displayName}` : ""}
             </Typography>
           </div>
-          <Chip
-            size="small"
-            color={plan.status === "APPROVED" ? "success" : "warning"}
-            label={plan.status}
-          />
+          <div className="flex flex-wrap gap-1">
+            {plan.isEmergency ? (
+              <Chip size="small" color="warning" label="Emergency plan" />
+            ) : (
+              <Chip size="small" color="info" label="Annual plan" />
+            )}
+            <Chip
+              size="small"
+              color={plan.statusColor || (plan.status === "APPROVED" ? "success" : "warning")}
+              label={plan.statusLabel || plan.status}
+            />
+          </div>
         </div>
+
+        <Typography variant="body2" sx={{ ...adminMutedTextSx, mt: 1 }}>
+          {plan.isEmergency
+            ? "Uses the Emergency Planning Process (UD → HOD → Head PDU → AO). Activate that process under Process workflow before submit."
+            : "Uses the annual Procurement Planning Process. Requires an open planning period and that process activated."}
+        </Typography>
 
         <div className="mt-3">
           <OrgLineItemsTable
@@ -237,8 +257,10 @@ export function OrgProcurementPlanDetailPanel({ projectId, planId }) {
           </Typography>
           <Typography variant="body2" sx={{ ...adminMutedTextSx, mb: 2 }}>
             Role: {pendingTask.requiredRoleName}
-            {actionKey ? ` · Action ${actionKey}` : ""}. Flow: HOD → Head PDU → Contracts Officer →
-            Accounting Officer.
+            {actionKey ? ` · Action ${actionKey}` : ""}. Flow:{" "}
+            {plan.isEmergency
+              ? "HOD → Head PDU → Accounting Officer (emergency)."
+              : "HOD → Head PDU → Contracts Officer → Accounting Officer."}
           </Typography>
           <div className="grid gap-3 sm:grid-cols-2">
             <TextField
@@ -270,11 +292,12 @@ export function OrgProcurementPlanDetailPanel({ projectId, planId }) {
           <div className="mt-3">
             <Button
               variant="contained"
+              color={decision === "REJECT" ? "error" : "primary"}
               disabled={busy}
               onClick={() => void submitDecision()}
               startIcon={busy ? <CircularProgress size={16} color="inherit" /> : null}
             >
-              {busy ? "Saving…" : "Record decision"}
+              {workflowDecisionButtonLabel(decision, { busy })}
             </Button>
           </div>
         </Paper>

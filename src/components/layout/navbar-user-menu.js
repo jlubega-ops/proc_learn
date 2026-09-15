@@ -1,7 +1,7 @@
 "use client";
 
-import { useRouter } from "next/navigation";
-import { useEffect, useMemo, useState } from "react";
+import { useRouter, usePathname } from "next/navigation";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import Avatar from "@mui/material/Avatar";
 import Button from "@mui/material/Button";
 import CircularProgress from "@mui/material/CircularProgress";
@@ -28,6 +28,8 @@ import { useToast } from "@/components/providers/toast-provider";
 import { DEFAULT_POST_AUTH_PATH } from "@/lib/appConfig";
 import { ROLE_LABELS } from "@/lib/roles";
 import { adminDialogPaperSx, adminMutedTextSx } from "@/lib/admin-mui-surfaces";
+import { formatCommitteeSeatLabel } from "@/lib/projects/committee-context";
+import { OPEN_COMMITTEE_CONTEXT_EVENT } from "@/components/layout/active-committee-context-banner";
 
 /**
  * @param {string} displayName
@@ -55,6 +57,7 @@ function navbarUserInitials(displayName, email) {
 
 export function NavbarUserMenu() {
   const router = useRouter();
+  const pathname = usePathname();
   const { session, refresh, setSessionBlocking, signOut } = useAuthSession();
   const { showToast } = useToast();
   const [anchor, setAnchor] = useState(null);
@@ -88,9 +91,50 @@ export function NavbarUserMenu() {
     setAvatarImgBroken(false);
   }, [imageUrl]);
 
-  if (!session?.authenticated) return null;
+  const isOrgSession = session?.authenticated && session?.sessionType === "org";
+  const projectIdForCommittee = isOrgSession ? session?.projectId : null;
 
-  const isOrgSession = session.sessionType === "org";
+  const openCommitteeDialog = useCallback(async () => {
+    setAnchor(null);
+    if (!projectIdForCommittee) return;
+    setCommitteeError("");
+    setCommitteeDialogOpen(true);
+    setCommitteeLoading(true);
+    try {
+      const res = await fetch(`/api/projects/${projectIdForCommittee}/my-committee-context`, {
+        credentials: "include",
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        setCommitteeError(
+          typeof data.error === "string" ? data.error : "Could not load committee memberships.",
+        );
+        setCommitteeList([]);
+        setPickedCommittee("");
+        return;
+      }
+      const list = Array.isArray(data.committees) ? data.committees : [];
+      setCommitteeList(list);
+      setPickedCommittee(
+        data.activeCommittee?.id && list.some((c) => c.id === data.activeCommittee.id)
+          ? data.activeCommittee.id
+          : "",
+      );
+    } finally {
+      setCommitteeLoading(false);
+    }
+  }, [projectIdForCommittee]);
+
+  useEffect(() => {
+    if (!projectIdForCommittee) return undefined;
+    const onOpen = () => {
+      void openCommitteeDialog();
+    };
+    window.addEventListener(OPEN_COMMITTEE_CONTEXT_EVENT, onOpen);
+    return () => window.removeEventListener(OPEN_COMMITTEE_CONTEXT_EVENT, onOpen);
+  }, [projectIdForCommittee, openCommitteeDialog]);
+
+  if (!session?.authenticated) return null;
 
   const canSwitch =
     !isOrgSession &&
@@ -134,7 +178,7 @@ export function NavbarUserMenu() {
           : DEFAULT_POST_AUTH_PATH;
       const openingOrganisation =
         nextPath === "/organisation" || nextPath.startsWith("/organisation/");
-      if (openingOrganisation) {
+      if (openingOrganisation && nextPath !== pathname) {
         keepOrganisationBlocking = true;
         setSessionBlocking(true, "Opening your organisation…");
       }
@@ -144,37 +188,6 @@ export function NavbarUserMenu() {
       if (!keepOrganisationBlocking) {
         setSessionBlocking(false);
       }
-    }
-  }
-
-  async function openCommitteeDialog() {
-    closeMenu();
-    if (!session?.projectId) return;
-    setCommitteeError("");
-    setCommitteeDialogOpen(true);
-    setCommitteeLoading(true);
-    try {
-      const res = await fetch(`/api/projects/${session.projectId}/my-committee-context`, {
-        credentials: "include",
-      });
-      const data = await res.json().catch(() => ({}));
-      if (!res.ok) {
-        setCommitteeError(
-          typeof data.error === "string" ? data.error : "Could not load committee memberships.",
-        );
-        setCommitteeList([]);
-        setPickedCommittee("");
-        return;
-      }
-      const list = Array.isArray(data.committees) ? data.committees : [];
-      setCommitteeList(list);
-      setPickedCommittee(
-        data.activeCommittee?.id && list.some((c) => c.id === data.activeCommittee.id)
-          ? data.activeCommittee.id
-          : "",
-      );
-    } finally {
-      setCommitteeLoading(false);
     }
   }
 
@@ -203,10 +216,11 @@ export function NavbarUserMenu() {
       }
       await refresh();
       setCommitteeDialogOpen(false);
+      const active = data.activeCommittee;
       showToast({
-        message: data.activeCommittee
-          ? `Committee context set to ${data.activeCommittee.name}.`
-          : "Committee context cleared. Your organisational role is unchanged.",
+        message: active
+          ? `Switched to ${active.name} (${formatCommitteeSeatLabel(active.committeeRole)}).`
+          : "Back to organisational role only.",
         severity: "success",
       });
     } finally {
@@ -317,11 +331,14 @@ export function NavbarUserMenu() {
               <GroupsRounded fontSize="small" />
             </ListItemIcon>
             <ListItemText
-              primary="Committee context"
+              primary="Switch committee context"
               secondary={
                 session.activeCommittee?.name
-                  ? String(session.activeCommittee.name)
-                  : "None selected"
+                  ? `${session.activeCommittee.name} · ${
+                      session.activeCommittee.committeeRoleLabel ||
+                      formatCommitteeSeatLabel(session.activeCommittee.committeeRole)
+                    }`
+                  : "Org role only"
               }
               slotProps={{
                 primary: { variant: "body2" },
@@ -421,12 +438,13 @@ export function NavbarUserMenu() {
         aria-labelledby="committee-context-title"
         slotProps={{ paper: { sx: adminDialogPaperSx } }}
       >
-        <DialogTitle id="committee-context-title">Committee context</DialogTitle>
+        <DialogTitle id="committee-context-title">Switch committee context</DialogTitle>
         <DialogContent>
           <Typography variant="body2" sx={{ ...adminMutedTextSx, mb: 2 }}>
-            Your organisational role stays {session.orgRoleName || "unchanged"}. Committee
-            context only records which committee hat you are using for evaluation and similar
-            work — it does not grant extra permissions.
+            Your organisational role stays {session.orgRoleName || "unchanged"}. Assign seats under
+            Org Admin → Committees to existing users — do not create separate committee logins.
+            Switching only records which committee hat you are using; it does not grant extra
+            permissions.
           </Typography>
           {committeeLoading ? (
             <div className="flex justify-center py-4" aria-busy="true">
@@ -434,7 +452,8 @@ export function NavbarUserMenu() {
             </div>
           ) : committeeList.length === 0 ? (
             <Typography variant="body2" sx={adminMutedTextSx}>
-              You are not an active member of any committee in this organisation.
+              You are not an active member of any committee in this organisation. Ask Org Admin to
+              add your account to a committee seat.
             </Typography>
           ) : (
             <RadioGroup
@@ -451,7 +470,7 @@ export function NavbarUserMenu() {
                   key={c.id}
                   value={c.id}
                   control={<Radio size="small" />}
-                  label={`${c.name} — ${String(c.committeeRole || "Member").replace(/_/g, " ")}`}
+                  label={`Switch to ${c.name} — ${formatCommitteeSeatLabel(c.committeeRole)}`}
                 />
               ))}
             </RadioGroup>
@@ -481,7 +500,7 @@ export function NavbarUserMenu() {
                 }
               : {})}
           >
-            {committeeBusy ? "Saving…" : "Apply"}
+            {committeeBusy ? "Switching…" : "Switch"}
           </Button>
         </DialogActions>
       </Dialog>

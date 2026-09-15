@@ -1,0 +1,1458 @@
+
+This is a manual operation of the system, testing  how  a  real  procurement
+officer would and see whether the system forces  the  correct  sequence  and
+procurement process.
+
+We test three complete procurements in the same organisation:
+
+   1. Micro procurement — urgent/simple low-value office equipment.
+
+   2. Quotation procurement — laptops/computers.
+
+   3. Tender procurement — university network infrastructure.
+
+This will exercise different branches and prove  that  the  system  supports
+multiple procurements at the same time, rather than treating procurement  as
+one continuous transaction.
+
+Process flows in the system
+
+|Process name                     |Description                         |
+|Budgeting Process                |Department budget preparation,      |
+|                                 |review, finance consolidation, and  |
+|                                 |Accounting Officer approval.        |
+|Contract Process                 |Tracks contract approval, signature,|
+|                                 |and issuance for the Tender path.   |
+|Evaluation Process               |Tracks committee evaluation of      |
+|                                 |offers/bids through to approval of  |
+|                                 |the evaluation report.              |
+|Invoice Process                  |Tracks certification and            |
+|                                 |verification of a supplier invoice. |
+|LPO Process                      |Tracks Local Purchase Order approval|
+|                                 |and issuance for the Quotation path.|
+|Micro Procurement Process        |Raise, verify, confirm budget,      |
+|                                 |approve, issue a purchase           |
+|                                 |instruction, then delivery, invoice,|
+|                                 |payment and closure for micro       |
+|                                 |procurement.                        |
+|Payment Process                  |Tracks approval and settlement of a |
+|                                 |payment against a verified invoice. |
+|Post-Qualification Process       |Tracks verification of the          |
+|                                 |recommended supplier's registration,|
+|                                 |tax compliance, and experience      |
+|                                 |before award.                       |
+|Procurement Planning Process     |Departmental preparation, review,   |
+|                                 |consolidation, and approval of the  |
+|                                 |procurement plan.                   |
+|Procurement Requisition Process  |Create and approve a procurement    |
+|                                 |requisition with plan and funding   |
+|                                 |verification.                       |
+
+
+Organisation Roles
+
+|Organization      |Simulated ICT/system administrator. Configures    |
+|Administrator     |organisation structure, users, and workflows — no |
+|Required          |procurement approval authority by default.        |
+|User Department   |Prepares departmental procurement plans and       |
+|Officer           |requisitions.                                     |
+|Head User         |Reviews and endorses departmental plans and       |
+|Department        |requisitions.                                     |
+|Procurement       |Manages procurement processes and verifies plan   |
+|Officer           |availability.                                     |
+|Head PDU          |Heads the Procurement and Disposal Unit; verifies |
+|                  |funding and consolidates plans.                   |
+|Contracts Officer |Reviews consolidated procurement plans and        |
+|                  |contract documentation.                           |
+|Finance/Budget    |Reviews and consolidates department budget        |
+|Officer           |requirements before Accounting Officer approval.  |
+|Accounting Officer|Final organisational approval authority for       |
+|                  |budgets, plans and requisitions.                  |
+
+
+The Procurement Process Master Flow with  real  scenario example
+
+PART 1 — MASTER TEST ORGANISATION
+
+Use one organisation:
+
+Lubega Juma Organization
+
+FY: 2026/2027
+
+Planning period: 01 July 2026 – 30 June 2027
+
+Create these departments:
+
+|Department                                             |Code          |
+|ICT Department                                         |ICT           |
+|Finance Department                                     |FIN           |
+|Procurement & Disposal Unit                            |PDU           |
+|Administration                                         |ADMIN         |
+
+
+You  can  keep  the  actual  PDU  as  a  department/unit  even  though  your
+application also represents PDU functions through roles.
+
+PART 2 — CREATE THE USERS
+
+Use these users throughout the test.
+
+|User                  |Department     |Role                           |
+|John Okello           |ICT            |User Department Officer        |
+|Mary Namusoke         |ICT            |Head User Department           |
+|Peter Mugisha         |PDU            |Procurement Officer            |
+|David Kato            |PDU            |Head PDU                       |
+|Helen Achieng         |Finance        |Finance/Budget Officer         |
+|Grace Nakato          |PDU            |Contracts Officer              |
+|Sarah Nansubuga       |Finance        |Accounting Officer             |
+
+
+Then create committee users.
+
+Evaluation Committee
+
+|User                 |Committee Role                                  |
+|Alice A              |Chairperson                                     |
+|Bob B                |Member                                          |
+|Carol C              |Secretary                                       |
+
+
+Assign them to the Evaluation Committee.
+
+Inspection/Acceptance Committee
+
+|User                   |Committee Role                               |
+|Daniel D               |Chairperson                                  |
+|Eva E                  |Member                                       |
+|Frank F                |Secretary                                    |
+
+
+Assign them to the Inspection/Acceptance Committee.
+
+For your simulator, this is  particularly  useful  because  the  procurement
+legislation/source material treats evaluation as a committee function,  with
+a minimum of three members in the public-procurement model.
+
+PART 3 — ADMIN CONFIGURATION
+
+Login as: Organization Administrator
+
+Remember: this is  your  system  configuration  role,  not  the  person  who
+automatically approves procurement.
+
+This distinction is important  and  your  current  implementation  correctly
+separates the administrator from operational approval.
+
+Step 1 — FY
+
+Create: 2026/2027
+
+Dates: 01/07/2026 → 30/06/2027
+
+Step 2 — Planning Period
+
+Create: 2026/2027 Annual Procurement Planning Period
+
+FY: 2026/2027
+
+Start: 01/07/2026
+
+End: 30/06/2027
+
+The planning period should be OPEN.
+
+PART 4 — ACTIVATE PROCESSES
+
+For this test, activate:
+
+    • Budgeting
+    • Procurement Planning
+    • Emergency planning process
+    • Procurement Requisition
+    • Micro Procurement
+    • Quotation
+    • Tender process
+    • Evaluation
+    • Post Qualification
+    • LPO
+    • Contract
+    • Invoice
+    • Payment
+Do not interpret activation as starting a procurement.
+
+Activation simply says:
+
+"This process is available for this organisation."
+
+A real procurement only  starts  when  an  appropriate  event  occurs.  Your
+implementation already follows this principle.
+
+PART 5 — CREATE THE BUDGET
+
+Now log out of Admin.
+
+This is important.: The administrator  should  not  create  the  operational
+department budget merely because they configured the organisation.
+
+Login as: John Okello — User Department Officer
+
+Go to: Budgets → New Budget
+
+Create: Budget
+
+Title: ICT Department 2026/2027 Procurement Budget
+
+Financial Year: 2026/2027
+
+Department: ICT Department
+
+Add budget lines.
+
+Budget Line 1
+
+Computer Equipment
+
+Amount:
+
+UGX 100,000,000
+
+Budget Line 2
+
+Office Equipment
+
+Amount:
+
+UGX 20,000,000
+
+Budget Line 3
+
+Network Infrastructure
+
+Amount:
+
+UGX 150,000,000
+
+Submit the budget.
+
+PART 6 — BUDGET APPROVAL
+
+Now log in as:
+
+Mary — Head User Department
+
+You should see a task.
+
+Review:
+
+    • Department
+    • FY
+    • Budget lines
+    • Amounts
+    • Justification
+Approve/endorse.
+
+Log in as: Helen — Finance/Budget Officer
+
+Review the financial information.
+
+Confirm that:
+
+Computer Equipment = UGX 100,000,000
+
+Office Equipment = UGX 20,000,000
+
+Network Infrastructure = UGX 150,000,000
+
+Approve/verify.
+
+
+
+Finally:
+
+Sarah — Accounting Officer
+
+Review and approve the budget.
+
+Now the budget becomes:
+
+APPROVED
+
+Only  now  should  those  budget  lines  become  available  for  procurement
+planning/requisition.
+
+This is an important control  because  procurement  requirements  should  be
+documented and funding confirmed before procurement proceeds.
+
+
+
+PART 7 — CREATE ONE PROCUREMENT PLAN WITH MULTIPLE REQUIREMENTS
+
+This is where you test your requirement that:
+
+One department can have multiple procurements.
+
+Login as: John — User Department Officer
+
+Create: ICT Department Procurement Plan 2026/2027
+
+Add these items.
+
+PLAN ITEM 1 — LAPTOPS
+
+Description: Supply of business  laptops  for  academic  and  administrative
+staff
+
+Quantity: 20
+
+Unit: Each
+
+Estimated unit price: UGX 3,500,000
+
+Total: UGX 70,000,000
+
+Budget line: Computer Equipment
+
+
+
+PLAN ITEM 2 — DESKTOP COMPUTERS
+
+Description: Supply of desktop computers for ICT laboratories
+
+Quantity: 15
+
+Unit: Each
+
+Estimated unit price: UGX 2,500,000
+
+Total: UGX 37,500,000
+
+Budget line: Computer Equipment
+
+
+
+PLAN ITEM 3 — NETWORK EQUIPMENT
+
+Description: Supply and installation of managed network  switches,  wireless
+access points and related network equipment
+
+Quantity: 1 Lot
+
+Estimated value: UGX 120,000,000
+
+Budget line: Network Infrastructure
+
+
+
+PLAN ITEM 4 — OFFICE CHAIRS
+
+Description: Supply of ergonomic office chairs for ICT staff
+
+Quantity: 30
+
+Unit: Each
+
+Estimated unit price: UGX 400,000
+
+Total: UGX 12,000,000
+
+Budget line: Office Equipment
+
+
+
+Submit the plan.
+
+This is  also  an  important  real-world  concept:  requirements  should  be
+planned  rationally  and   aggregated   where   appropriate,   rather   than
+artificially splitting procurement to avoid the appropriate method.
+
+therefore, do not create four separate plans simply because  you  want  four
+procurements. One plan can contain many planned requirements.
+
+PART 8 — PLAN APPROVAL
+
+Login — Mary
+
+Head User Department
+
+Review the ICT procurement plan.
+
+Approve.
+
+
+
+Login — David
+
+Head PDU
+
+Consolidate/review the plan.
+
+Confirm:
+
+    • requirement
+    • estimated value
+    • budget
+    • procurement timing
+    • procurement method/category where applicable
+
+
+Login — Grace
+
+Contracts Officer
+
+Review the consolidated plan.
+
+
+
+Login — Sarah
+
+Accounting Officer
+
+Approve.
+
+The plan should now show:
+
+APPROVED
+
+Now we are ready to create individual procurement requisitions.
+
+
+
+NOW THE REAL TEST BEGINS
+
+You have four planned requirements.
+
+We will create three different procurement cases.
+
+
+
+                       SCENARIO 1 — MICRO PROCUREMENT
+
+Procurement: Office Chairs
+
+Use: 30 ergonomic office chairs
+
+Estimated value: UGX 12,000,000
+
+The purpose is to exercise your Micro path.
+
+Revision required
+
+STEP 1 — Create requisition
+
+Login: John — User Department Officer
+
+Go to: New Requisition
+
+Fill: Procurement title
+
+Procurement of 30 Ergonomic Office Chairs for ICT Department
+
+FY: 2026/2027
+
+Procurement Plan: ICT Department Procurement Plan 2026/2027
+
+Plan Item: Supply of ergonomic office chairs for ICT staff
+
+Budget Line: Office Equipment
+
+Category: Office Furniture / Equipment
+
+Required by: 30 September 2026
+
+Justification:  Existing ICT office chairs are worn and inadequate  for  the
+current staffing level. The procurement  is  required  to  provide  suitable
+working facilities for ICT personnel.
+
+Requirement description: Supply of 30 ergonomic office chairs  suitable  for
+full-time office use, with  adjustable  height,  back  support  and  durable
+construction.
+
+Delivery location: ICT Department, Lubega Juma Organization
+
+Line item
+
+|Item                                 |Qty   |Unit   |Unit Price      |
+|Ergonomic office chair               |30    |Each   |400,000         |
+
+
+Total: UGX 12,000,000
+
+Submit.
+
+
+
+STEP 2 — HOD
+
+Login: Mary — Head User Department
+
+Open: My Tasks
+
+She should see the requisition.
+
+Review:
+    • Requirement
+    • Quantity
+    • Estimated cost
+    • Justification
+    • Budget
+    • Procurement plan
+Approve.
+
+STEP 3 — PROCUREMENT OFFICER
+
+Login: Peter — Procurement Officer
+
+Verify: Is the requirement in the approved procurement plan?
+
+Yes.
+
+Is there sufficient budget?
+
+Yes.
+
+Approve/verify.
+
+
+
+STEP 4 — HEAD PDU
+
+Login: David — Head PDU
+
+Verify funding/requirement.
+
+Approve.
+
+
+
+STEP 5 — ACCOUNTING OFFICER
+
+Login:  Sarah — Accounting Officer
+
+Review the requisition.
+
+Approve.
+
+
+
+STEP 6 — SELECT METHOD
+
+Login: Peter — Procurement Officer
+
+You should now have:
+
+Select Procurement Method
+
+Select: MICRO
+
+This should create something similar to:
+
+PROC-2026-0001
+
+Title:
+
+Procurement of 30 Ergonomic Office Chairs for ICT Department
+
+
+
+STEP 7 — MICRO PROCUREMENT
+
+Now follow the Micro workflow.
+
+John — User Department
+
+Confirm requirement.
+
+Mary — Head User Department
+
+Verify/endorse.
+
+Peter — Procurement Officer
+
+Confirm budget/method.
+
+Sarah — Accounting Officer
+
+Approve.
+
+Peter — Procurement Officer
+
+Issue: Purchase Instruction
+
+Enter supplier.
+
+Example:
+
+Supplier
+
+Kampala Office Solutions Ltd.
+
+Supplier contact:
+
+sales@kampalaofficesolutions.example
+
+Quotation/reference:
+
+KOS/Q/2026/081
+
+Agreed price:
+
+UGX 11,700,000
+
+
+
+STEP 8 — DELIVERY
+
+Supplier delivers.
+
+Do not immediately mark the procurement complete.
+
+Record: Delivery date: 25/09/2026
+
+Quantity ordered: 30
+
+Quantity delivered: 30
+
+Quantity accepted: 30
+
+Quantity rejected: 0
+
+
+
+STEP 9 — INSPECTION
+
+Switch into the: Inspection/Acceptance Committee
+
+Use:
+
+|Daniel                            |Chairperson                       |
+|Eva                               |Member                            |
+|Frank                             |Secretary                         |
+
+
+
+
+Inspect:
+
+    • quantity
+    • physical condition
+    • specifications
+    • conformity
+Record:
+
+Accepted: 30
+Rejected:  0
+
+Committee conclusion:
+
+Goods conform to the approved requirement and are accepted.
+
+
+
+STEP 10 — INVOICE
+
+Supplier invoice: KOS-INV-2026-0925
+
+Amount: UGX 11,700,000
+
+Login: John
+
+Receive invoice.
+
+Then: Verify Delivery
+
+Mary: Certify Invoice
+
+Grace: Verify Invoice
+
+Sarah: Approve Payment
+
+Payment: UGX 11,700,000
+
+
+
+STEP 11 — CLOSE
+
+Payment must be settled.
+
+Then procurement should become:
+
+READY_FOR_CLOSURE
+
+Then close.
+
+Expected final state:
+
+CLOSED
+
+N outstanding invoice, no outstanding payment, no unresolved task,  and  the
+delivery/inspection records exist. Your  current  implementation  explicitly
+implements these closure gates
+
+                     SCENARIO 2 — QUOTATION PROCUREMENT
+
+Now test another procurement from the same ICT department.
+
+This proves your system supports multiple simultaneous procurement cases.
+
+Procurement
+
+20 Business Laptops
+
+Estimated: 20 × UGX 3,500,000
+
+Total: UGX 70,000,000
+
+We do not modify the first procurement.
+
+
+
+STEP 1 — NEW REQUISITION
+
+Login: John — User Department Officer
+
+Create: Procurement of 20 Business Laptops for ICT Staff
+
+Plan: ICT Procurement Plan 2026/2027
+
+Plan item: Supply of business laptops
+
+Budget: Computer Equipment
+
+Quantity: 20
+
+Unit: Each
+
+Estimated unit price: UGX 3,500,000
+
+Estimated total: UGX 70,000,000
+
+Required by: 31 October 2026
+
+Requirement: Supply of 20 business laptops  with  minimum  Core  i5/Ryzen  5
+equivalent processor, 16GB RAM, 512GB SSD, Wi-Fi, webcam and minimum  three-
+year warranty.
+
+Delivery: ICT Department
+
+Submit.
+
+
+
+STEP 2 — APPROVAL CHAIN
+
+Run: John → submit
+
+Mary → approve
+
+Peter → verify procurement plan
+
+David → verify funding
+
+Sarah → approve
+
+Then: Peter → Select Method
+
+Select: QUOTATION
+
+System creates: PROC-2026-0002
+
+
+
+STEP 3 — RFQ
+
+Login: Peter — Procurement Officer
+
+Prepare RFQ.
+
+Example suppliers:
+
+Supplier 1
+
+Kampala Computers Ltd.
+
+Supplier 2
+
+Uganda Tech Supplies Ltd.
+
+Supplier 3
+
+East Africa Systems Ltd.
+
+The RFQ should contain the same requirement so  suppliers  can  be  compared
+fairly.
+
+[pic]
+
+STEP 4 — REVIEW RFQ
+
+Peter prepares.
+
+Then: David — Head PDU
+
+reviews.
+
+Then: Grace — Contracts Officer
+
+approves.
+
+Only then should the RFQs be issued.
+
+
+
+STEP 5 — ISSUE RFQs
+
+Peter issues the RFQ to the three suppliers.
+
+Record: Issue date: 05/10/2026
+
+Closing date: 12/10/2026
+
+
+
+STEP 6 — RECEIVE QUOTATIONS
+
+Enter three offers.
+
+Kampala Computers
+
+UGX 72,000,000
+
+Uganda Tech Supplies
+
+UGX 68,500,000
+
+East Africa Systems
+
+UGX 71,000,000
+
+Do not simply put one supplier.
+
+The purpose of the simulator is to teach students that procurement  involves
+competing offers and evaluation.
+
+
+
+STEP 7 — CLOSE/LOCK SUBMISSION
+
+At the deadline:
+
+Peter → Close/Lock Quotation Submission
+
+After this:
+
+No new quotation should be accepted.
+
+Test this deliberately.
+
+Try adding another quotation.
+
+The system should reject it with a clear message.
+
+This is one of the important additions you recently implemented.
+
+
+
+STEP 8 — OPEN QUOTATIONS
+
+Peter opens the received quotations.
+
+The system should preserve:
+    • supplier
+    • submitted amount
+    • submission time
+    • quotation reference
+    • status
+
+
+STEP 9 — EVALUATION COMMITTEE
+
+Create/use: Evaluation Committee
+
+Members:
+    • Alice — Chair
+    • Bob — Member
+    • Carol — Secretary
+The procurement officer  should  not  simply  act  as  all  three  committee
+members.
+
+Switch into the committee context.
+
+Technical evaluation
+
+Evaluate:
+
+|Supplier                                        |Technical            |
+|Kampala Computers                               |Pass                 |
+|Uganda Tech Supplies                            |Pass                 |
+|East Africa Systems                             |Pass                 |
+
+
+Then financial evaluation.
+
+|Supplier                                     |Price                  |
+|Kampala Computers                            |72,000,000             |
+|Uganda Tech Supplies                         |68,500,000             |
+|East Africa Systems                          |71,000,000             |
+
+
+Recommended supplier: Uganda Tech Supplies Ltd.
+
+Recommendation: Award  to  Uganda  Tech  Supplies  Ltd.  at  UGX  68,500,000
+subject to required approvals and verification.
+
+
+
+STEP 10 — EVALUATION REPORT
+
+Committee chair submits.
+
+Secretary records.
+
+The system should show:
+
+Alice — Evaluation Committee — Chairperson
+
+rather than merely: Alice
+
+This is exactly why your recent role/committee timeline work matters.
+
+
+
+STEP 11 — POST-QUALIFICATION
+
+If this procurement is configured to require it, run:
+
+Peter
+
+Verify:
+    • supplier registration
+    • tax compliance
+    • experience
+    • references
+Example:
+
+Tax compliant: YES
+Registration: VERIFIED
+Experience: VERIFIED
+References: SATISFACTORY
+Submit post-qualification report.
+
+
+STEP 12 — AWARD
+
+The appropriate approval authority reviews the evaluation recommendation.
+
+Award: Uganda Tech Supplies Ltd.
+
+Amount: UGX 68,500,000
+
+Record the award decision.
+
+
+
+STEP 13 — LPO
+
+Run: LPO Process
+
+Peter: Generate LPO
+
+David: Review LPO
+
+Sarah: Approve LPO
+
+Peter: Issue LPO
+
+Supplier: Confirm acceptance
+
+LPO: LPO-2026-0042
+
+Amount: UGX 68,500,000
+
+
+
+STEP 14 — DELIVERY
+
+Now deliberately test partial delivery.
+
+Supplier delivers: 12 laptops
+
+instead of 20.
+
+Record:
+
+|Item               |Ordered                |Delivered                 |
+|Laptop             |20                     |12                        |
+
+
+Do not close the procurement.
+
+The system should show: Partial delivery
+
+Outstanding:8 laptops
+
+
+
+STEP 15 — INSPECTION
+
+Inspection committee inspects the 12.
+
+Suppose:  11  accepted
+1 rejected
+
+
+
+
+
+Record:
+
+|Quantity                          |Result                             |
+|11                                |Accepted                           |
+|1                                 |Rejected                           |
+
+
+Now the system should know:
+
+8 units outstanding + 1 rejected
+
+Do not allow full completion yet.
+
+
+
+STEP 16 — SECOND DELIVERY
+
+Supplier delivers: 9 laptops
+
+Inspection: 9 accepted
+
+Now totals become:
+
+20 ordered
+20 accepted
+
+The procurement can progress.
+
+
+
+STEP 17 — INVOICE
+
+Supplier sends invoice: UGX 68,500,000
+
+John receives.
+
+Mary certifies.
+
+Grace verifies.
+
+Sarah approves payment.
+
+
+
+STEP 18 — PAYMENT
+
+Record: Amount: UGX 68,500,000
+
+Payment reference: PAY-2026-1098
+
+Status: SETTLED
+
+
+
+STEP 19 — CLOSE
+
+Procurement: READY_FOR_CLOSURE
+
+Then: CLOSED
+
+You have now proven:
+
+Plan → Requisition →  Quotation  →  Multiple  suppliers  →  Lock  →  Open  →
+Evaluation → Award → LPO  →  Partial  delivery  →  Inspection  →  Invoice  →
+Payment → Closure
+
+                       SCENARIO 3 — TENDER PROCUREMENT
+
+Now test your largest/most complex branch.
+
+Procurement
+
+Supply and Installation of Network Infrastructure.
+
+Estimated value: UGX 120,000,000
+
+Plan: ICT Procurement Plan 2026/2027
+
+
+
+STEP 1 — REQUISITION
+
+Login: John — User Department Officer
+
+Create:  Supply  and  Installation  of  Network   Infrastructure   for   ICT
+Department
+
+Requirement: Supply and installation of managed network  switches,  wireless
+access  points,   network   racks,   structured   cabling   and   associated
+configuration services for the organisation's ICT network.
+
+Estimated: UGX 120,000,000
+
+Submit.
+
+
+
+STEP 2 — APPROVAL
+
+Run: John → submit
+
+Mary → approve
+
+Peter → verify plan
+
+David → verify funding
+
+Sarah → approve
+
+
+
+STEP 3 — METHOD
+
+Peter selects: TENDER
+
+System creates: PROC-2026-0003
+
+[pic]
+
+STEP 4 — TENDER DOCUMENT
+
+Peter prepares tender documents.
+
+They should contain things such as:
+
+Technical requirements
+    • managed switches
+    • minimum port requirements
+    • VLAN support
+    • PoE where required
+    • wireless access points
+    • installation
+    • configuration
+    • warranty
+    • support
+    • training
+Delivery requirements
+
+ICT Department
+
+Evaluation requirements
+
+Technical compliance + financial evaluation.
+
+
+
+STEP 5 — REVIEW
+
+Peter prepares.
+
+David: Head PDU
+
+reviews.
+
+Grace: Contracts Officer
+
+reviews/approves according to your configured workflow.
+
+
+
+STEP 6 — ADVERTISE
+
+Peter: Advertise Tender
+
+Example: Tender Reference: LJO/ICT/2026/001
+
+Submission deadline: 30 November 2026
+
+
+
+STEP 7 — RECEIVE BIDS
+
+Enter three bidders.
+
+Bidder A
+
+Uganda Network Systems Ltd.
+
+Bid: UGX 118,000,000
+
+Bidder B
+
+East Africa ICT Solutions Ltd.
+
+Bid: UGX 109,500,000
+
+Bidder C
+
+Kampala Infrastructure Ltd.
+
+Bid: UGX 125,000,000
+
+
+
+STEP 8 — CLOSE TENDER
+
+Peter: Close Tender Submission
+
+Then test the restriction: Try submitting another bid.
+
+Expected: Rejected — tender submission is closed.
+
+This is an important negative test.
+
+
+
+STEP 9 — OPEN BIDS
+
+Peter: Open Bids
+
+The system should record:
+    • bidder
+    • amount
+    • submission
+    • opening information
+    • time
+    • status
+
+
+STEP 10 — FORWARD FOR EVALUATION
+
+Peter/Head PDU performs: Forward Bids for Evaluation
+
+Now evaluation begins.
+
+
+
+STEP 11 — EVALUATION COMMITTEE
+
+Switch to: Evaluation Committee
+
+Members:
+    • Alice — Chair
+    • Bob — Member
+    • Carol — Secretary
+Preliminary evaluation
+
+|Bidder                                               |Eligible       |
+|Uganda Network Systems                               |YES            |
+|East Africa ICT Solutions                            |YES            |
+|Kampala Infrastructure                               |YES            |
+
+
+Technical evaluation
+
+Suppose:
+
+|Bidder                                            |Technical         |
+|Uganda Network Systems                            |PASS              |
+|East Africa ICT Solutions                         |PASS              |
+|Kampala Infrastructure                            |FAIL              |
+
+
+Then financial evaluation occurs only for technically acceptable bidders.
+
+|Bidder                                        |Price                  |
+|Uganda Network Systems                        |118,000,000            |
+|East Africa ICT Solutions                     |109,500,000            |
+
+
+Recommendation: East Africa ICT Solutions Ltd.
+
+[pic]
+
+STEP 12 — POST QUALIFICATION
+
+Because this is  a  more  complex  procurement,  we  use  post-qualification
+process.
+
+Peter verifies:
+    • company registration
+    • tax compliance
+    • similar assignments
+    • references
+    • technical capacity
+    • personnel
+    • equipment/resources
+
+
+Example: Registration — VERIFIED
+
+Tax — VERIFIED
+
+Experience — VERIFIED
+
+References — SATISFACTORY
+
+Technical capacity — VERIFIED
+
+
+
+STEP 13 — AWARD
+
+Award: East Africa ICT Solutions Ltd.
+
+Amount: UGX 109,500,000
+
+
+
+STEP 14 — CONTRACT
+
+Because this is the Tender path, use:
+
+Contract
+
+rather than LPO as the main downstream instrument.
+
+Create: Contract No. LJO/ICT/NET/2026/001
+
+Value: UGX 109,500,000
+
+Start: 01/01/2027
+
+End: 31/03/2027
+
+Scope: Supply, installation,  configuration  and  commissioning  of  network
+infrastructure.
+
+
+
+STEP 15 — CONTRACT SIGNING
+
+Run the configured contract approval/signing flow.
+
+Do not allow delivery to be treated  as  complete  before  the  contract  is
+established where your workflow requires the contract.
+
+
+
+STEP 16 — DELIVERY
+
+Now test multi-line delivery.
+
+Supplier delivers:
+
+|Item                                           |Ordered               |
+|Managed switches                               |20                    |
+|Wireless APs                                   |40                    |
+|Network racks                                  |5                     |
+|Structured cabling                             |1 Lot                 |
+
+
+First delivery:
+
+|Item                                         |Delivered               |
+|Managed switches                             |20                      |
+|Wireless APs                                 |20                      |
+|Network racks                                |5                       |
+|Structured cabling                           |0                       |
+
+
+The system should show:
+
+PARTIALLY DELIVERED
+
+
+
+STEP 17 — INSPECTION
+
+Inspection committee:
+
+Daniel — Chair
+Eva — Member
+Frank — Secretary
+
+Inspect the delivered equipment.
+
+Example:
+
+20 switches — accepted
+
+20 APs — accepted
+
+5 racks — accepted
+
+
+
+STEP 18 — SECOND DELIVERY
+
+Supplier delivers remaining: 20 APs
+
+and: structured cabling
+
+Inspection accepts them.
+
+Now:
+
+Delivery = COMPLETE
+
+
+
+STEP 19 — INVOICE
+
+Supplier submits: INV-EA-2027-031
+
+Amount: UGX 109,500,000
+
+John: Receive invoice
+
+Mary: Certify invoice
+
+Grace: Verify invoice
+
+Sarah: Approve payment
+
+
+
+STEP 20 — PAYMENT
+
+Payment: UGX 109,500,000
+
+Payment reference: PAY-2027-0048
+
+Status: SETTLED
+
+
+
+STEP 21 — CLOSURE
+
+Check:
+    • Requisition approved
+    • Method selected
+    • Tender completed
+    • Evaluation completed
+    • Post qualification completed
+    • Award completed
+    • Contract completed
+    • Delivery completed
+    • Inspection completed
+    • Invoice settled
+    • Payment settled
+    • No open workflow tasks
+    • No unresolved rejection/return
+    • No outstanding balance
+
+
+Then: READY FOR CLOSURE
+
+Then: CLOSED
+
+
+
+
+
+
+
+
+
+
+
+
+

@@ -146,7 +146,7 @@ export async function buildSessionPayloadForUserId(userId) {
         }
       }
 
-      // Student Mode (staff): auto-ensure current AY / semester / demo enrollment / slate.
+      // Student Mode (staff): auto-ensure current AY / demo enrollment / slate.
       if (isStudentMode({ grantedRoles: g, activeRole: active })) {
         const participationType = resolveParticipationType({
           grantedRoles: g,

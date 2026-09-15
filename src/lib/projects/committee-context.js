@@ -6,7 +6,22 @@ import { writeAuditLog, AuditEvent } from "@/lib/audit-log";
  * which hat the actor is wearing when multiple committee memberships exist).
  * Stored on ProjectOrgUser.activeCommitteeId (nullable — most users belong to zero
  * or one active committee, so this is optional context, never a hard requirement).
+ *
+ * Committee seats are hats on existing ProjectOrgUser rows — do not create separate
+ * logins just to sit on a committee.
  */
+
+/**
+ * @param {unknown} role
+ */
+export function formatCommitteeSeatLabel(role) {
+  const raw = String(role || "").trim();
+  if (!raw) return "Member";
+  return raw
+    .replace(/_/g, " ")
+    .toLowerCase()
+    .replace(/\b\w/g, (c) => c.toUpperCase());
+}
 
 /**
  * @param {import("@prisma/client").PrismaClient} prisma

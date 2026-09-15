@@ -23,14 +23,12 @@ import { formatUserDisplayName } from "@/lib/user-display";
  */
 export async function StudentDashboardHome({ user, personalOrgName = null }) {
   let ayLabel = null;
-  let semesterName = null;
   let enrolled = false;
   let joinNeeded = false;
 
   try {
     const ctx = await getStudentAcademicContext(user.id);
     ayLabel = ctx.academicYear?.label || ctx.enrollment?.academicYear?.label || null;
-    semesterName = ctx.semester?.name || null;
     enrolled = Boolean(ctx.enrolledInCurrentYear);
     joinNeeded = Boolean(ctx.joinPrompt);
   } catch {
@@ -47,13 +45,11 @@ export async function StudentDashboardHome({ user, personalOrgName = null }) {
         title={`Welcome, ${displayName}`}
         description={`Your ${APP_NAME} home. Choose organisation practice or academic work from your examiner.`}
       >
-        {(ayLabel || semesterName) && (
+        {ayLabel ? (
           <p className="mt-3 text-sm text-zinc-600 dark:text-zinc-400">
-            {ayLabel ? <>Academic Year: {ayLabel}</> : null}
-            {ayLabel && semesterName ? " · " : null}
-            {semesterName ? <>{semesterName}</> : null}
+            Academic Year: {ayLabel}
           </p>
-        )}
+        ) : null}
       </DashboardPageIntro>
 
       {joinNeeded ? (

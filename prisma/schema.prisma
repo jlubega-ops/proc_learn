@@ -18,6 +18,15 @@ enum Sex {
   FEMALE
 }
 
+/// Physical campus where the student studies (MUBS).
+enum Campus {
+  MAIN
+  ARUA
+  MBARARA
+  JINJA
+  MBALE
+}
+
 enum UserAccountStatus {
   PENDING_ACTIVATION
   ACTIVE
@@ -438,37 +447,12 @@ model AcademicYear {
   createdAt   DateTime @default(now()) @map("created_at")
   updatedAt   DateTime @updatedAt @map("updated_at")
 
-  semesters    Semester[]
-  classCohorts ClassCohort[]
-  enrollments  StudentAcademicEnrollment[]
-  orgSlates    OrgAcademicSlate[]
-  projects     Project[]
+  enrollments StudentAcademicEnrollment[]
+  orgSlates   OrgAcademicSlate[]
+  projects    Project[]
 
   @@index([isCurrent])
   @@map("academic_year")
-}
-
-/// Semester within an academic year. At most one semester is active globally.
-model Semester {
-  id             String       @id @default(uuid())
-  academicYearId String       @map("academic_year_id")
-  academicYear   AcademicYear @relation(fields: [academicYearId], references: [id], onDelete: Restrict)
-  /// Display name e.g. "Semester 1".
-  name           String       @db.VarChar(64)
-  startDate      DateTime     @map("start_date") @db.Date
-  endDate        DateTime     @map("end_date") @db.Date
-  /// Exactly one active globally; enforced in application service.
-  isActive       Boolean      @default(false) @map("is_active")
-  createdAt      DateTime     @default(now()) @map("created_at")
-  updatedAt      DateTime     @updatedAt @map("updated_at")
-
-  classCohorts ClassCohort[]
-  orgSlates    OrgAcademicSlate[]
-  projects     Project[]
-
-  @@index([academicYearId, name])
-  @@index([isActive])
-  @@map("semester")
 }
 
 /// Thin course catalogue for academic filtering (not org simulation).
@@ -483,32 +467,8 @@ model Course {
   createdAt   DateTime   @default(now()) @map("created_at")
   updatedAt   DateTime   @updatedAt @map("updated_at")
 
-  classCohorts ClassCohort[]
-
   @@index([isActive, name])
   @@map("course")
-}
-
-/// Class / cohort section under a course for an academic year.
-model ClassCohort {
-  id             String        @id @default(uuid())
-  courseId       String        @map("course_id")
-  course         Course        @relation(fields: [courseId], references: [id], onDelete: Cascade)
-  academicYearId String        @map("academic_year_id")
-  academicYear   AcademicYear  @relation(fields: [academicYearId], references: [id], onDelete: Restrict)
-  semesterId     String?       @map("semester_id")
-  semester       Semester?     @relation(fields: [semesterId], references: [id], onDelete: SetNull)
-  name           String        @db.VarChar(128)
-  code           String?       @db.VarChar(32)
-  isActive       Boolean       @default(true) @map("is_active")
-  createdAt      DateTime      @default(now()) @map("created_at")
-  updatedAt      DateTime      @updatedAt @map("updated_at")
-
-  enrollments StudentAcademicEnrollment[]
-
-  @@index([courseId, academicYearId])
-  @@index([academicYearId, isActive])
-  @@map("class_cohort")
 }
 
 model StudentProfile {
@@ -520,6 +480,8 @@ model StudentProfile {
   programmeId        String    @map("programme_id")
   programme          Programme @relation(fields: [programmeId], references: [id], onDelete: Restrict)
   yearOfStudy        Int       @default(3) @map("year_of_study")
+  /// Campus the student is attached to (Main, Arua, Mbarara, Jinja, Mbale).
+  campus             Campus    @default(MAIN)
   /// Compatibility denormalized label (admin forms/filters). Authoritative year participation is
   /// `StudentAcademicEnrollment` — keep this field in sync when enrollments change; do not treat it
   /// as long-term source of truth.
@@ -528,6 +490,7 @@ model StudentProfile {
   createdAt DateTime @default(now()) @map("created_at")
   updatedAt DateTime @updatedAt @map("updated_at")
 
+  @@index([campus])
   @@map("student_profile")
 }
 
@@ -542,8 +505,6 @@ model StudentAcademicEnrollment {
   academicYear      AcademicYear               @relation(fields: [academicYearId], references: [id], onDelete: Restrict)
   status            AcademicEnrollmentStatus   @default(ACTIVE)
   participationType AcademicParticipationType  @default(STUDENT) @map("participation_type")
-  classCohortId     String?                    @map("class_cohort_id")
-  classCohort       ClassCohort?               @relation(fields: [classCohortId], references: [id], onDelete: SetNull)
   joinedAt          DateTime                   @default(now()) @map("joined_at")
   /// Set when the enrollment becomes HISTORICAL (e.g. student joins a newer year).
   endedAt           DateTime?                  @map("ended_at")
@@ -571,9 +532,6 @@ model OrgAcademicSlate {
   enrollment     StudentAcademicEnrollment @relation(fields: [enrollmentId], references: [id], onDelete: Cascade)
   academicYearId String                 @map("academic_year_id")
   academicYear   AcademicYear           @relation(fields: [academicYearId], references: [id], onDelete: Restrict)
-  /// Optional snapshot of university semester when the slate was opened / last ensured.
-  semesterId     String?                @map("semester_id")
-  semester       Semester?              @relation(fields: [semesterId], references: [id], onDelete: SetNull)
   status         OrgAcademicSlateStatus @default(CURRENT)
   openedAt       DateTime               @default(now()) @map("opened_at")
   closedAt       DateTime?              @map("closed_at")
@@ -708,8 +666,6 @@ model Project {
   /// Academic context for Practice / Assessment projects (examiner-created).
   academicYearId     String?           @map("academic_year_id")
   academicYear       AcademicYear?     @relation(fields: [academicYearId], references: [id], onDelete: SetNull)
-  semesterId         String?           @map("semester_id")
-  semester           Semester?         @relation(fields: [semesterId], references: [id], onDelete: SetNull)
   programmeId        String?           @map("programme_id")
   programme          Programme?        @relation(fields: [programmeId], references: [id], onDelete: SetNull)
   createdAt          DateTime          @default(now()) @map("created_at")
@@ -733,6 +689,7 @@ model Project {
   orgWorkflowTasks        ProjectOrgWorkflowTask[]
   orgWorkflowActions      ProjectOrgWorkflowAction[]
   orgAcademicSlates       OrgAcademicSlate[]
+  orgFormDrafts           ProjectOrgFormDraft[]
   assessment              ProjectAssessment?
   workspaceAttempts       ProjectAttempt[] @relation("AttemptWorkspace")
   activeOrgForUsers       UserSettings[]   @relation("UserActiveOrg")
@@ -744,7 +701,6 @@ model Project {
   @@index([creatorRole, purpose, isPublished])
   @@index([visibility, isPublished])
   @@index([academicYearId, programmeId])
-  @@index([semesterId])
   @@map("project")
 }
 
@@ -930,6 +886,8 @@ model ProjectOrgDepartment {
   unitType    OrgUnitType            @default(DEPARTMENT) @map("unit_type")
   description String?                @db.VarChar(512)
   isActive    Boolean                @default(true) @map("is_active")
+  /// Sibling order within the same parent (top → bottom on Organisation Structure).
+  sortOrder   Int                    @default(0) @map("sort_order")
   createdAt   DateTime               @default(now()) @map("created_at")
   updatedAt   DateTime               @updatedAt @map("updated_at")
 
@@ -943,6 +901,7 @@ model ProjectOrgDepartment {
 
   @@index([projectId, code])
   @@index([projectId, parentId, isActive])
+  @@index([projectId, parentId, sortOrder])
   @@map("project_org_department")
 }
 
@@ -957,7 +916,7 @@ model ProjectOrgUser {
   isProjectAdmin   Boolean               @default(false) @map("is_project_admin")
   /// Platform user id when this row represents the project owner.
   linkedUserId     String?               @map("linked_user_id") @db.VarChar(36)
-  /// Short immutable code that distinguishes duplicate emails within this project.
+  /// Short immutable code that keeps login emails unique when display names match.
   unitIdentifier   String?               @map("unit_identifier") @db.VarChar(16)
   departmentId     String?               @map("department_id")
   department       ProjectOrgDepartment? @relation("OrgUserDepartment", fields: [departmentId], references: [id], onDelete: SetNull)
@@ -992,15 +951,42 @@ model ProjectOrgUser {
   invoicesCreated            ProjectOrgInvoice[]             @relation("InvoiceCreator")
   paymentsApproved           ProjectOrgPayment[]             @relation("PaymentApprover")
   orgNotifications           ProjectOrgNotification[]
+  formDrafts                 ProjectOrgFormDraft[]
   /// Committee currently "active" for this user's session (evaluation/PQ report authoring context).
   activeCommitteeId          String?                         @map("active_committee_id")
   activeCommittee            ProjectOrgCommittee?            @relation("OrgUserActiveCommittee", fields: [activeCommitteeId], references: [id], onDelete: SetNull)
 
   @@unique([projectId, unitIdentifier])
+  @@unique([projectId, email])
   @@unique([projectId, linkedUserId])
   @@index([projectId, isProjectAdmin, createdAt])
   @@index([projectId, departmentId])
+  @@index([projectId, firstName, lastName])
   @@map("project_org_user")
+}
+
+/// Debounced in-progress form payloads (cross-device resume). One row per actor + form key.
+model ProjectOrgFormDraft {
+  id             String          @id @default(uuid())
+  projectId      String          @map("project_id")
+  project        Project         @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  /// `org:<orgUserId>` or `user:<platformUserId>` — avoids MySQL NULL-unique pitfalls.
+  actorScope     String          @map("actor_scope") @db.VarChar(80)
+  orgUserId      String?         @map("org_user_id")
+  orgUser        ProjectOrgUser? @relation(fields: [orgUserId], references: [id], onDelete: Cascade)
+  platformUserId String?         @map("platform_user_id") @db.VarChar(36)
+  /// Stable form id, e.g. `procurement-plan:new`, `form5:I:<requisitionId>`.
+  formKey        String          @map("form_key") @db.VarChar(160)
+  payload        Json
+  /// Approximate UTF-8 size for quotas / abuse guards.
+  payloadBytes   Int             @default(0) @map("payload_bytes")
+  createdAt      DateTime        @default(now()) @map("created_at")
+  updatedAt      DateTime        @updatedAt @map("updated_at")
+
+  @@unique([projectId, actorScope, formKey])
+  @@index([projectId, orgUserId, updatedAt])
+  @@index([projectId, platformUserId, updatedAt])
+  @@map("project_org_form_draft")
 }
 
 /// Financial year inside a student project organisation.
@@ -1037,9 +1023,11 @@ model ProjectOrgPlanningPeriod {
   project         Project                 @relation(fields: [projectId], references: [id], onDelete: Cascade)
   financialYearId String                  @map("financial_year_id")
   financialYear   ProjectOrgFinancialYear @relation(fields: [financialYearId], references: [id], onDelete: Restrict)
+  /// Optional display name (e.g. "Annual planning 2026/2027").
+  label           String?                 @db.VarChar(128)
   startDate       DateTime                @map("start_date") @db.Date
   endDate         DateTime                @map("end_date") @db.Date
-  /// Cached administrative status; date-based computation may override display.
+  /// Cached administrative status; list/detail APIs recompute from server calendar dates.
   status          OrgPlanningPeriodStatus @default(UPCOMING)
   createdAt       DateTime                @default(now()) @map("created_at")
   updatedAt       DateTime                @updatedAt @map("updated_at")
@@ -1237,6 +1225,10 @@ model ProjectOrgProcurementPlan {
   /// Human-readable plan reference e.g. ICT-PP-2026-001
   planReference          String?                     @map("plan_reference") @db.VarChar(64)
   title                  String                      @db.VarChar(255)
+  /// Circular 1/2024 sheet: GOODS_WORKS_NON_CONSULTANCY | CONSULTANCY
+  sheetType              String                      @default("GOODS_WORKS_NON_CONSULTANCY") @map("sheet_type") @db.VarChar(48)
+  /// True = emergency / unplanned plan (uses Emergency Planning Process).
+  isEmergency            Boolean                     @default(false) @map("is_emergency")
   status                 OrgProcurementPlanStatus    @default(DRAFT)
   /// When set, this plan is an organisation-level consolidation of department plans.
   isConsolidated         Boolean                     @default(false) @map("is_consolidated")
@@ -1287,6 +1279,8 @@ model ProjectOrgProcurementPlanItem {
   priority                  String?                   @db.VarChar(32)
   justification             String?                   @db.Text
   remarks                   String?                   @db.Text
+  /// Circular 1/2024 teaching columns (currency, multi-year, method, reservation, milestones, …).
+  circularFields            Json?                     @map("circular_fields")
   createdAt                 DateTime                  @default(now()) @map("created_at")
   updatedAt                 DateTime                  @updatedAt @map("updated_at")
 
@@ -1327,6 +1321,12 @@ model ProjectOrgRequisition {
   estimatedTotalValue   Decimal                        @map("estimated_total_value") @db.Decimal(18, 2)
   status                OrgRequisitionStatus           @default(DRAFT)
   procurementMethod     OrgProcurementMethod?          @map("procurement_method")
+  /// PPDA Form 5 Part I snapshot (Fill-and-submit teaching form).
+  form5PartI            Json?                          @map("form5_part_i")
+  /// PPDA Form 5 Part II snapshot (method packet; CC gate deferred).
+  form5PartII           Json?                          @map("form5_part_ii")
+  form5PartIAt          DateTime?                      @map("form5_part_i_at")
+  form5PartIIAt         DateTime?                      @map("form5_part_ii_at")
   submittedAt           DateTime?                      @map("submitted_at")
   approvedAt            DateTime?                      @map("approved_at")
   approvedByOrgUserId   String?                        @map("approved_by_org_user_id")
@@ -1478,6 +1478,9 @@ model ProjectOrgSolicitation {
   solicitationType OrgSolicitationType   @map("solicitation_type")
   title            String                @db.VarChar(255)
   status           OrgSolicitationStatus @default(DRAFT)
+  /// Educational bid / RFQ document filled in-app.
+  bidDocument      Json?                 @map("bid_document")
+  bidDocumentAt    DateTime?             @map("bid_document_at")
   issueDate        DateTime?             @map("issue_date")
   closingDate      DateTime?             @map("closing_date")
   openedAt         DateTime?             @map("opened_at")

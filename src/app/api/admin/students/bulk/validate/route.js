@@ -100,6 +100,7 @@ export async function POST(request) {
         programmeShortName: raw.programmeShortName,
         academicYearLabel: raw.academicYearLabel,
         yearOfStudy: raw.yearOfStudy,
+        campus: raw.campus,
         sex: raw.sex,
       },
       errors: result.errors,

@@ -1,4 +1,8 @@
 import { normalizeEmail } from "@/lib/validation/email";
+import {
+  isBlockedPublicEmailDomain,
+  isOrgLearnEmail,
+} from "@/lib/projects/org-user-identity";
 
 /**
  * @param {unknown} value
@@ -8,15 +12,19 @@ function cleanText(value) {
 }
 
 /**
+ * Organisation learning emails only (@org.learn) — never public providers.
  * @param {unknown} email
  */
 export function isWellFormedOrgEmail(email) {
-  const v = cleanText(email);
+  const v = cleanText(email).toLowerCase();
   if (!v || v.length > 255) return false;
+  if (isBlockedPublicEmailDomain(v)) return false;
+  if (!isOrgLearnEmail(v)) return false;
   return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(v);
 }
 
 /**
+ * Create payload — email is allocated server-side (not collected on the form).
  * @param {unknown} body
  * @returns {{
  *   ok: true;
@@ -24,7 +32,6 @@ export function isWellFormedOrgEmail(email) {
  *     firstName: string;
  *     middleName: string | null;
  *     lastName: string;
- *     email: string;
  *     projectOrgRoleId: string;
  *     departmentId: string;
  *     subunitId: string | null;
@@ -42,7 +49,6 @@ export function validateProjectOrgUserInput(body) {
       ? null
       : cleanText(middleNameRaw) || null;
   const lastName = cleanText(body?.lastName);
-  const email = normalizeEmail(body?.email);
   const projectOrgRoleId = cleanText(body?.projectOrgRoleId);
   const departmentId = cleanText(body?.departmentId);
   const subunitIdRaw = body?.subunitId;
@@ -61,9 +67,6 @@ export function validateProjectOrgUserInput(body) {
   if (!lastName) errors.lastName = "Last name is required.";
   else if (lastName.length > 100) errors.lastName = "Last name is too long.";
 
-  if (!email) errors.email = "Email is required.";
-  else if (!isWellFormedOrgEmail(email)) errors.email = "Enter a valid email address.";
-
   if (!projectOrgRoleId) errors.projectOrgRoleId = "Role is required.";
   if (!departmentId) errors.departmentId = "Department is required.";
 
@@ -74,7 +77,6 @@ export function validateProjectOrgUserInput(body) {
       firstName,
       middleName,
       lastName,
-      email,
       projectOrgRoleId,
       departmentId,
       subunitId,
@@ -83,6 +85,7 @@ export function validateProjectOrgUserInput(body) {
 }
 
 /**
+ * Patch payload — login email is not editable (auto-generated on create).
  * @param {unknown} body
  */
 export function validateProjectOrgUserPatch(body) {
@@ -114,11 +117,9 @@ export function validateProjectOrgUserPatch(body) {
     else data.lastName = lastName;
   }
 
-  if (body?.email !== undefined) {
-    const email = normalizeEmail(body.email);
-    if (!email) errors.email = "Email is required.";
-    else if (!isWellFormedOrgEmail(email)) errors.email = "Enter a valid email address.";
-    else data.email = email;
+  // Ignore client email — login email is system-generated and stable.
+  if (body?.email !== undefined && normalizeEmail(body.email)) {
+    // no-op: keep identity stable after create
   }
 
   if (body?.projectOrgRoleId !== undefined) {

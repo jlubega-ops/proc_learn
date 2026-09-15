@@ -63,6 +63,29 @@ export function createProcLearnMuiTheme(mode) {
       fontFamily: "var(--font-geist-sans), Segoe UI, Roboto, Helvetica, Arial, sans-serif",
     },
     components: {
+      // App-wide compact fields (current + future). Prefer omitting `size` so these defaults apply;
+      // do not set size="medium" on new TextField / Select / FormControl unless intentionally oversized.
+      MuiTextField: {
+        defaultProps: { size: "small" },
+      },
+      MuiFormControl: {
+        defaultProps: { size: "small" },
+      },
+      MuiInputLabel: {
+        defaultProps: { size: "small" },
+      },
+      MuiSelect: {
+        defaultProps: { size: "small" },
+      },
+      MuiOutlinedInput: {
+        defaultProps: { size: "small" },
+      },
+      MuiInputBase: {
+        defaultProps: { size: "small" },
+      },
+      MuiAutocomplete: {
+        defaultProps: { size: "small" },
+      },
       MuiButton: {
         styleOverrides: {
           root: { textTransform: "none", fontWeight: 600 },

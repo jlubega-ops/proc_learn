@@ -44,6 +44,9 @@ function resolveAdoptionCode(flow) {
   }
   // Heuristic for near-matches that were educational duplicates
   if (name === "planning process") return PROCESS_FLOW_CODES.PROCUREMENT_PLANNING;
+  if (name === "emergency planning process" || name === "emergency planning") {
+    return PROCESS_FLOW_CODES.EMERGENCY_PLANNING;
+  }
   if (name === "budgeting process") return PROCESS_FLOW_CODES.BUDGETING;
   if (name === "requisition process") return PROCESS_FLOW_CODES.PROCUREMENT_REQUISITION;
   if (name === "micro procurement process") return PROCESS_FLOW_CODES.MICRO_PROCUREMENT;

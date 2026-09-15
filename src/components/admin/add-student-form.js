@@ -12,6 +12,7 @@ import { validateStudentAccountForm } from "@/lib/validation/student-form";
 import { themedTextFieldSx } from "@/lib/admin-mui-surfaces";
 import { useToast } from "@/components/providers/toast-provider";
 import { useRouter } from "next/navigation";
+import { campusSelectOptions } from "@/lib/campuses";
 
 function copyForToast(raw) {
   const t = String(raw ?? "")
@@ -31,7 +32,9 @@ export function AddStudentForm({ afterCreatePath = "/students/manage" }) {
   const [programmes, setProgrammes] = useState(
     /** @type {{ id: string; name: string; defaultYearOfStudy?: number }[]} */ ([]),
   );
-  const [academicYears, setAcademicYears] = useState(/** @type {string[]} */ ([]));
+  const [academicYears, setAcademicYears] = useState(
+    /** @type {string[]} */ ([]),
+  );
 
   const [email, setEmail] = useState("");
   const [snSynced, setSnSynced] = useState(true);
@@ -46,6 +49,7 @@ export function AddStudentForm({ afterCreatePath = "/students/manage" }) {
   const [programmeId, setProgrammeId] = useState("");
   const [yearOfStudy, setYearOfStudy] = useState("3");
   const [academicYearLabel, setAcademicYearLabel] = useState("");
+  const [campus, setCampus] = useState("");
 
   /** @type {[Record<string, string>, import("react").Dispatch<import("react").SetStateAction<Record<string, string>>>]} */
   const [errors, setErrors] = useState({});
@@ -80,13 +84,18 @@ export function AddStudentForm({ afterCreatePath = "/students/manage" }) {
       const pData = await pRes.json().catch(() => ({}));
       const yData = await yRes.json().catch(() => ({}));
       if (cancelled) return;
-      if (pRes.ok && Array.isArray(pData.programmes)) setProgrammes(pData.programmes);
-      if (yRes.ok && Array.isArray(yData.extended)) {
+      if (pRes.ok && Array.isArray(pData.programmes))
+        setProgrammes(pData.programmes);
+      if (yRes.ok && Array.isArray(yData.labels) && yData.labels.length) {
+        setAcademicYears(yData.labels);
+        setAcademicYearLabel(
+          (prev) => prev || yData.currentLabel || yData.labels[0] || "",
+        );
+      } else if (yRes.ok && Array.isArray(yData.extended)) {
         setAcademicYears(yData.extended);
-        const primary = yData.primary;
-        if (Array.isArray(primary) && primary[0]) {
-          setAcademicYearLabel((prev) => prev || primary[0]);
-        }
+        setAcademicYearLabel(
+          (prev) => prev || yData.currentLabel || yData.extended[0] || "",
+        );
       }
     })();
     return () => {
@@ -97,7 +106,11 @@ export function AddStudentForm({ afterCreatePath = "/students/manage" }) {
   useEffect(() => {
     if (!programmeId) return;
     const p = programmes.find((x) => x.id === programmeId);
-    if (p && typeof p.defaultYearOfStudy === "number" && [1, 2, 3].includes(p.defaultYearOfStudy)) {
+    if (
+      p &&
+      typeof p.defaultYearOfStudy === "number" &&
+      [1, 2, 3].includes(p.defaultYearOfStudy)
+    ) {
       setYearOfStudy(String(p.defaultYearOfStudy));
     }
   }, [programmeId, programmes]);
@@ -113,6 +126,7 @@ export function AddStudentForm({ afterCreatePath = "/students/manage" }) {
       registrationNumber,
       programmeId,
       academicYearLabel,
+      campus,
       sex,
     });
     setErrors(next);
@@ -144,19 +158,25 @@ export function AddStudentForm({ afterCreatePath = "/students/manage" }) {
           programmeId,
           yearOfStudy: Number(yearOfStudy),
           academicYearLabel,
+          campus,
         }),
       });
       const data = await res.json().catch(() => ({}));
       if (!res.ok) {
         showToast({
           message:
-            typeof data.error === "string" ? copyForToast(data.error) : copyForToast("could not create student."),
+            typeof data.error === "string"
+              ? copyForToast(data.error)
+              : copyForToast("could not create student."),
           severity: "error",
           duration: 8000,
         });
         return;
       }
-      showToast({ message: "Student created. Activation email sent.", severity: "success" });
+      showToast({
+        message: "Student created. Activation email sent.",
+        severity: "success",
+      });
       router.push(afterCreatePath);
     } finally {
       setBusy(false);
@@ -176,9 +196,15 @@ export function AddStudentForm({ afterCreatePath = "/students/manage" }) {
       onSubmit={submit}
       className="flex w-full max-w-3xl flex-col gap-3 rounded-xl border border-zinc-200 bg-background p-4 dark:border-zinc-800 sm:gap-4 sm:p-5"
     >
-      <Typography variant="body2" sx={{ color: "color-mix(in oklab, var(--foreground) 72%, transparent)" }}>
-        School email must be <strong>digits@mubs.ac.ug</strong>. The student number is filled from the
-        email digits; you can change it if it should differ.
+      <Typography
+        variant="body2"
+        sx={{
+          color: "color-mix(in oklab, var(--foreground) 72%, transparent)",
+        }}
+      >
+        School email must be <strong>digits@mubs.ac.ug</strong>. The student
+        number is filled from the email digits; you can change it if it should
+        differ.
       </Typography>
 
       <Typography variant="subtitle2" sx={sectionTitleSx}>
@@ -215,7 +241,9 @@ export function AddStudentForm({ afterCreatePath = "/students/manage" }) {
           }}
           slotProps={{ htmlInput: { inputMode: "numeric" } }}
           error={Boolean(errors.studentNumber)}
-          helperText={errors.studentNumber || "Digits only; may differ from email."}
+          helperText={
+            errors.studentNumber || "Digits only; may differ from email."
+          }
           fullWidth
           sx={themedTextFieldSx}
         />
@@ -293,7 +321,7 @@ export function AddStudentForm({ afterCreatePath = "/students/manage" }) {
       <Typography variant="subtitle2" sx={sectionTitleSx}>
         Programme & study
       </Typography>
-      <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
         <TextField
           select
           label="Programme"
@@ -321,6 +349,31 @@ export function AddStudentForm({ afterCreatePath = "/students/manage" }) {
         </TextField>
         <TextField
           select
+          label="Campus"
+          value={campus}
+          onChange={(e) => {
+            setCampus(e.target.value);
+            setErrors((p) => {
+              const { campus: _c, ...r } = p;
+              return r;
+            });
+          }}
+          error={Boolean(errors.campus)}
+          helperText={errors.campus || "Where the student studies"}
+          fullWidth
+          sx={themedTextFieldSx}
+        >
+          <MenuItem value="" disabled>
+            Select campus
+          </MenuItem>
+          {campusSelectOptions().map((c) => (
+            <MenuItem key={c.value} value={c.value}>
+              {c.label}
+            </MenuItem>
+          ))}
+        </TextField>
+        <TextField
+          select
           label="Year of study"
           value={yearOfStudy}
           onChange={(e) => setYearOfStudy(e.target.value)}
@@ -343,7 +396,12 @@ export function AddStudentForm({ afterCreatePath = "/students/manage" }) {
             });
           }}
           error={Boolean(errors.academicYearLabel)}
-          helperText={errors.academicYearLabel}
+          helperText={
+            errors.academicYearLabel ||
+            (academicYears.length
+              ? ""
+              : "Create an academic year under Academic setup first")
+          }
           fullWidth
           sx={themedTextFieldSx}
         >
@@ -386,8 +444,17 @@ export function AddStudentForm({ afterCreatePath = "/students/manage" }) {
       </div>
 
       <div className="flex flex-col gap-2 pt-1 sm:flex-row sm:justify-end">
-        <Button type="submit" variant="contained" disabled={busy} className="w-full sm:w-auto">
-          {busy ? <CircularProgress size={22} color="inherit" /> : "Create student"}
+        <Button
+          type="submit"
+          variant="contained"
+          disabled={busy}
+          className="w-full sm:w-auto"
+        >
+          {busy ? (
+            <CircularProgress size={22} color="inherit" />
+          ) : (
+            "Create student"
+          )}
         </Button>
       </div>
     </form>

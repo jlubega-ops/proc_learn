@@ -13,7 +13,7 @@ import { buildSessionPayloadForUserId } from "@/lib/auth/session-payload";
 
 /**
  * Switch effective (active) role. Permanent grants are unchanged.
- * Entering Student Mode auto-ensures current AY / semester / demo enrollment / slate.
+ * Entering Student Mode auto-ensures current AY / demo enrollment / slate.
  *
  * @param {{
  *   userId: string;
@@ -109,8 +109,6 @@ export async function switchActiveRole(opts) {
       academicYearId: demoContext?.academicYear?.id || university.academicYear?.id || null,
       academicYearLabel:
         demoContext?.academicYear?.label || university.academicYear?.label || null,
-      semesterId: demoContext?.semester?.id || university.semester?.id || null,
-      semesterName: demoContext?.semester?.name || university.semester?.name || null,
       enrollmentId: demoContext?.enrollment?.id || null,
       orgAcademicSlateId: demoContext?.orgAcademicSlate?.id || null,
       projectId: demoContext?.projectId || null,

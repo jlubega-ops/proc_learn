@@ -8,20 +8,20 @@ import {
 export const runtime = "nodejs";
 
 /**
- * Current university academic year + active semester.
+ * Current university academic year.
  * Authenticated users only.
  *
- * Bootstrap note (Phase 1, unchanged in Phase 2): if the database has no current year /
- * active semester, `ensureCurrentAcademicContext` may seed one for empty/dev DBs.
+ * Bootstrap note: if the database has no current year,
+ * `ensureCurrentAcademicContext` may seed one for empty/dev DBs.
  * That behaviour is development/bootstrap only — production academic years must be created
- * via System Admin → Academic setup. Phase 2 does not expand automatic year creation.
+ * via System Admin → Academic setup.
  */
 export async function GET() {
   const user = await getSessionUser();
   if (!user) return NextResponse.json({ error: "Unauthorized." }, { status: 401 });
 
   let context = await getCurrentAcademicContext();
-  if (!context.academicYear || !context.semester) {
+  if (!context.academicYear) {
     context = await ensureCurrentAcademicContext();
   }
   return NextResponse.json(context);

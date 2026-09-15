@@ -25,7 +25,7 @@ export default async function OrganisationCommitteesPage() {
     <div className={BRAND_PAGE_SHELL_CLASS}>
       <DashboardPageIntro
         title="Committees"
-        description={`Manage committees and memberships for ${title}. Committee roles are separate from organisation roles.`}
+        description={`Assign existing organisation users for ${title} to committee seats (chair, member, secretary). One person keeps their org role and can switch into a seat when needed — do not create separate committee-only logins.`}
       />
       <ProjectOrgCommitteesPanel projectId={project.id} />
     </div>

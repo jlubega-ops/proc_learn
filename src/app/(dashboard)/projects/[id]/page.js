@@ -4,6 +4,8 @@ import { getProjectWorkspacePageContext } from "@/lib/projects/project-page-cont
 import { prisma } from "@/lib/prisma";
 import { formatUserDisplayName } from "@/lib/user-display";
 import { sanitizeRichHtml } from "@/lib/sanitize-rich-html";
+import { OrgPendingTasksCard } from "@/components/projects/org-pending-tasks-card";
+import { BRAND_CARD_CLASS } from "@/lib/brand-ui";
 
 export const metadata = {
   title: "Project details",
@@ -28,43 +30,41 @@ export default async function ProjectDetailsPage({ params }) {
   }
 
   if (ctx.viewer === "org") {
+    const displayName = formatUserDisplayName(ctx.orgUser);
+    const roleName = ctx.orgUser.projectOrgRole?.name || "Organisation role";
+    const departmentName = ctx.orgUser.department?.name || null;
+    const showAssignmentBadges = Boolean(project.isAttemptOrg);
+
     return (
       <div className="w-full space-y-4">
-        <div className="rounded-xl border border-zinc-200 bg-white p-4 dark:border-zinc-800 dark:bg-zinc-900">
+        <div className={`${BRAND_CARD_CLASS} p-4 sm:p-5`}>
           <h1 className="text-xl font-semibold text-zinc-900 dark:text-white">
             {project.organizationName || project.name}
           </h1>
-          <p className="mt-1 text-sm text-zinc-600 dark:text-zinc-400">
-            Signed in as{" "}
-            <span className="font-semibold text-[#008bd0]">
-              {ctx.orgUser.projectOrgRole?.name}
-            </span>
-            {ctx.orgUser.department?.name
-              ? ` · ${ctx.orgUser.department.name}`
-              : ""}
-          </p>
-          <div className="mt-3 flex flex-wrap items-center gap-2">
-            <Chip size="small" label={purposeLabel(project.purpose)} color={purposeColor(project.purpose)} />
-            <Chip size="small" label={project.status} color={statusColor(project.status)} />
-            <Chip size="small" label="Published" color="success" />
-          </div>
-        </div>
-
-        <div className="rounded-xl border border-zinc-200 bg-white p-4 dark:border-zinc-800 dark:bg-zinc-900">
-          <h2 className="text-base font-semibold text-zinc-900 dark:text-white">About this project</h2>
-          <p className="mt-2 whitespace-pre-wrap text-sm text-zinc-700 dark:text-zinc-300">
-            {project.description || "—"}
-          </p>
-        </div>
-
-        <div className="rounded-xl border border-zinc-200 bg-white p-4 dark:border-zinc-800 dark:bg-zinc-900">
-          <h2 className="text-base font-semibold text-zinc-900 dark:text-white">Your account</h2>
           <p className="mt-2 text-sm text-zinc-700 dark:text-zinc-300">
-            {formatUserDisplayName(ctx.orgUser)} — use{" "}
-            <span className="font-semibold">My account</span> in the sidebar for full details and the
-            pages your role can open.
+            <span className="font-semibold text-primary">{displayName || "Organisation user"}</span>
+            {" · "}
+            <span className="font-semibold text-primary">{roleName}</span>
+            {departmentName ? ` · ${departmentName}` : ""}
           </p>
+          {showAssignmentBadges ? (
+            <div className="mt-3 flex flex-wrap items-center gap-2">
+              <Chip
+                size="small"
+                label={purposeLabel(project.purpose)}
+                color={purposeColor(project.purpose)}
+              />
+              <Chip size="small" label={project.status} color={statusColor(project.status)} />
+              <Chip
+                size="small"
+                label={project.isPublished ? "Published" : "Not published"}
+                color={project.isPublished ? "success" : "warning"}
+              />
+            </div>
+          ) : null}
         </div>
+
+        <OrgPendingTasksCard projectId={id} />
       </div>
     );
   }

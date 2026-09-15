@@ -14,6 +14,7 @@ import {
   isOfficialStudentParticipation,
   observationDemoBadge,
 } from "@/lib/academic/examiner-observation-access";
+import { campusLabel, parseCampus } from "@/lib/campuses";
 import { budgetInclude, serializeBudget } from "@/lib/projects/budgets";
 import {
   procurementPlanInclude,
@@ -83,28 +84,6 @@ export async function getExaminerStudentObservation(studentUserId, opts = {}) {
   const participationType = enrollment?.participationType || null;
   const demoBadge = observationDemoBadge(participationType);
   const official = isOfficialStudentParticipation(participationType);
-
-  // Resolve semester for the enrollment year (active preferred)
-  let semester = university.semester;
-  if (enrollment?.academicYearId) {
-    const activeSem = await db.semester.findFirst({
-      where: { academicYearId: enrollment.academicYearId, isActive: true },
-    });
-    const anySem = activeSem
-      ? activeSem
-      : await db.semester.findFirst({
-          where: { academicYearId: enrollment.academicYearId },
-          orderBy: { startDate: "asc" },
-        });
-    semester = anySem
-      ? {
-          id: anySem.id,
-          name: anySem.name,
-          isActive: anySem.isActive,
-          academicYearId: anySem.academicYearId,
-        }
-      : null;
-  }
 
   const org = Object.prototype.hasOwnProperty.call(opts, "orgProjectId")
     ? opts.orgProjectId
@@ -272,6 +251,8 @@ export async function getExaminerStudentObservation(studentUserId, opts = {}) {
       programmeName: user.studentProfile?.programme?.name || null,
       programmeShortName: user.studentProfile?.programme?.shortName || null,
       yearOfStudy: user.studentProfile?.yearOfStudy || null,
+      campus: user.studentProfile?.campus || null,
+      campusLabel: campusLabel(user.studentProfile?.campus) || null,
       lastLoginAt: user.lastLoginAt,
       hasStudentProfile: Boolean(user.studentProfile),
     },
@@ -297,13 +278,6 @@ export async function getExaminerStudentObservation(studentUserId, opts = {}) {
                   isCurrent: enrollment.academicYear.isCurrent,
                 }
               : null,
-          }
-        : null,
-      semester: semester
-        ? {
-            id: semester.id,
-            name: semester.name,
-            isActive: semester.isActive,
           }
         : null,
       availableYears: years,
@@ -432,7 +406,7 @@ async function loadObservationWorkDossier(db, projectId) {
  * @param {{
  *   q?: string;
  *   academicYearId?: string | null;
- *   semesterId?: string | null;
+ *   campus?: string | null;
  *   participation?: 'all' | 'students' | 'demo';
  *   page?: number;
  *   pageSize?: number;
@@ -443,6 +417,7 @@ export async function listExaminerObservationStudents(opts = {}) {
   const db = opts.db || prisma;
   const university = await getCurrentAcademicContext(db);
   const yearId = opts.academicYearId || university.academicYear?.id || null;
+  const campus = parseCampus(opts.campus);
   const participation = opts.participation || "all";
   const q = (opts.q || "").trim();
   const page = Math.max(1, Number(opts.page) || 1);
@@ -465,6 +440,10 @@ export async function listExaminerObservationStudents(opts = {}) {
     };
   }
 
+  if (campus) {
+    where.user = { studentProfile: { is: { campus } } };
+  }
+
   const enrollments = await db.studentAcademicEnrollment.findMany({
     where,
     include: {
@@ -484,7 +463,9 @@ export async function listExaminerObservationStudents(opts = {}) {
   if (participation !== "demo") {
     profileOnly = await db.user.findMany({
       where: {
-        studentProfile: { isNot: null },
+        studentProfile: campus
+          ? { is: { campus } }
+          : { isNot: null },
         academicEnrollments: yearId
           ? { none: { academicYearId: yearId } }
           : { none: { status: AcademicEnrollmentStatus.ACTIVE } },
@@ -494,7 +475,7 @@ export async function listExaminerObservationStudents(opts = {}) {
                 { email: { contains: q } },
                 { firstName: { contains: q } },
                 { lastName: { contains: q } },
-                { studentProfile: { studentNumber: { contains: q } } },
+                { studentProfile: { is: { studentNumber: { contains: q } } } },
               ],
             }
           : {}),
@@ -509,6 +490,7 @@ export async function listExaminerObservationStudents(opts = {}) {
 
   const fromEnrollments = enrollments
     .filter((e) => {
+      if (campus && e.user?.studentProfile?.campus !== campus) return false;
       if (!q) return true;
       const u = e.user;
       const hay = [
@@ -558,34 +540,12 @@ export async function listExaminerObservationStudents(opts = {}) {
     take: 12,
     select: { id: true, label: true, isCurrent: true },
   });
-  const semesters = yearId
-    ? await db.semester.findMany({
-        where: { academicYearId: yearId },
-        orderBy: { startDate: "asc" },
-        select: { id: true, name: true, isActive: true, academicYearId: true },
-      })
-    : [];
-  const selectedSemester =
-    (opts.semesterId && semesters.find((s) => s.id === opts.semesterId)) ||
-    semesters.find((s) => s.isActive) ||
-    university.semester ||
-    null;
 
   return {
     academicYear: yearId
       ? years.find((y) => y.id === yearId) || university.academicYear
       : university.academicYear,
-    semester: selectedSemester
-      ? {
-          id: selectedSemester.id,
-          name: selectedSemester.name,
-          isActive: selectedSemester.isActive,
-        }
-      : university.semester
-        ? { id: university.semester.id, name: university.semester.name, isActive: true }
-        : null,
     availableYears: years,
-    availableSemesters: semesters,
     page,
     pageSize,
     total,
@@ -607,6 +567,8 @@ function serializeObservationRow(user, enrollment) {
     studentNumber: user.studentProfile?.studentNumber || null,
     programmeShortName: user.studentProfile?.programme?.shortName || null,
     programmeName: user.studentProfile?.programme?.name || null,
+    campus: user.studentProfile?.campus || null,
+    campusLabel: campusLabel(user.studentProfile?.campus) || null,
     enrollmentStatus: enrollment?.status || null,
     participationType,
     demoBadge: badge,

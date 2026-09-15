@@ -20,6 +20,7 @@ import {
   resolveSlateIdForOrgCreate,
   withAcademicAuditMeta,
 } from "@/lib/academic/org-academic-slate";
+import { presentOrgWorkflowStatus } from "@/lib/projects/workflow-status-presentation";
 
 /**
  * @param {unknown} value
@@ -96,6 +97,7 @@ export function serializePlanItem(item) {
     priority: item.priority || null,
     justification: item.justification || null,
     remarks: item.remarks || null,
+    circularFields: item.circularFields || null,
   };
 }
 
@@ -108,11 +110,23 @@ export function serializeProcurementPlan(row) {
   const periodStatus = row.planningPeriod
     ? computePlanningPeriodStatus(row.planningPeriod.startDate, row.planningPeriod.endDate)
     : null;
+  const presentation = presentOrgWorkflowStatus({
+    status: row.status,
+    workflowStage: row.workflowStage || null,
+    viewerHasPendingAction: Boolean(row.viewerHasPendingAction),
+    lastDecision: row.lastDecision || null,
+  });
   return {
     id: row.id,
     title: row.title,
     planReference: row.planReference || null,
+    sheetType: row.sheetType || "GOODS_WORKS_NON_CONSULTANCY",
+    isEmergency: Boolean(row.isEmergency),
     status: row.status,
+    statusLabel: presentation.label,
+    statusColor: presentation.color,
+    workflowStage: row.workflowStage || null,
+    viewerHasPendingAction: Boolean(row.viewerHasPendingAction),
     submittedAt: row.submittedAt,
     approvedAt: row.approvedAt,
     financialYear: row.financialYear
@@ -166,7 +180,7 @@ export function serializeProcurementPlan(row) {
  * @param {any[]} itemsIn
  * @param {string} financialYearId
  */
-async function validateAndBuildPlanItems(prisma, projectId, itemsIn, financialYearId) {
+async function validateAndBuildPlanItems(prisma, projectId, itemsIn, financialYearId, sheetType) {
   /** @type {Record<string, string>} */
   const fieldErrors = {};
   /** @type {any[]} */
@@ -177,6 +191,8 @@ async function validateAndBuildPlanItems(prisma, projectId, itemsIn, financialYe
     fieldErrors.items = "Add at least one plan item.";
     return { fieldErrors, itemRows, total };
   }
+
+  const { normalizeCircularPlanItemFields } = await import("@/lib/projects/ppda-forms");
 
   for (let idx = 0; idx < itemsIn.length; idx += 1) {
     const raw = itemsIn[idx];
@@ -232,6 +248,8 @@ async function validateAndBuildPlanItems(prisma, projectId, itemsIn, financialYe
         `Planned amount exceeds remaining budget on ${budgetLine.code} (${available.toFixed(2)}).`;
     }
 
+    const circularFields = normalizeCircularPlanItemFields(raw, sheetType);
+
     itemRows.push({
       itemNumber: idx + 1,
       title,
@@ -252,6 +270,7 @@ async function validateAndBuildPlanItems(prisma, projectId, itemsIn, financialYe
       justification:
         typeof raw?.justification === "string" ? raw.justification.trim() || null : null,
       remarks: typeof raw?.remarks === "string" ? raw.remarks.trim() || null : null,
+      circularFields,
     });
   }
 
@@ -283,6 +302,10 @@ export async function createOrUpdateProcurementPlanDraft(prisma, opts) {
   const financialYearId = typeof b.financialYearId === "string" ? b.financialYearId.trim() : "";
   const planningPeriodId =
     typeof b.planningPeriodId === "string" ? b.planningPeriodId.trim() || null : null;
+  const sheetTypeRaw = typeof b.sheetType === "string" ? b.sheetType.trim() : "";
+  const sheetType =
+    sheetTypeRaw === "CONSULTANCY" ? "CONSULTANCY" : "GOODS_WORKS_NON_CONSULTANCY";
+  const isEmergency = Boolean(b.isEmergency);
 
   if (!title) fieldErrors.title = "Enter a plan title.";
   if (!financialYearId) fieldErrors.financialYearId = "Choose a financial year.";
@@ -318,7 +341,7 @@ export async function createOrUpdateProcurementPlanDraft(prisma, opts) {
       fieldErrors.planningPeriodId = "Choose a valid planning period.";
     } else if (fy && planningPeriod.financialYearId !== fy.id) {
       fieldErrors.planningPeriodId = "Planning period must belong to the selected financial year.";
-    } else {
+    } else if (!isEmergency) {
       const status = computePlanningPeriodStatus(
         planningPeriod.startDate,
         planningPeriod.endDate,
@@ -327,7 +350,7 @@ export async function createOrUpdateProcurementPlanDraft(prisma, opts) {
         fieldErrors.planningPeriodId = "Planning period must be open to create or edit plans.";
       }
     }
-  } else {
+  } else if (!isEmergency) {
     fieldErrors.planningPeriodId = "Choose a planning period.";
   }
 
@@ -341,7 +364,9 @@ export async function createOrUpdateProcurementPlanDraft(prisma, opts) {
       {
         deptCode: dept.code,
         deptName: dept.name,
-        docType: ORG_REF_DOC.PROCUREMENT_PLAN,
+        docType: isEmergency
+          ? ORG_REF_DOC.EMERGENCY_PROCUREMENT_PLAN
+          : ORG_REF_DOC.PROCUREMENT_PLAN,
         fyLabel: fy.label,
       },
     );
@@ -364,6 +389,7 @@ export async function createOrUpdateProcurementPlanDraft(prisma, opts) {
     opts.projectId,
     Array.isArray(b.items) ? b.items : [],
     financialYearId,
+    sheetType,
   );
   Object.assign(fieldErrors, built.fieldErrors);
 
@@ -394,6 +420,8 @@ export async function createOrUpdateProcurementPlanDraft(prisma, opts) {
       data: {
         title,
         planReference,
+        sheetType,
+        isEmergency,
         financialYearId,
         planningPeriodId: planningPeriod?.id || null,
         departmentId: opts.departmentId,
@@ -408,6 +436,8 @@ export async function createOrUpdateProcurementPlanDraft(prisma, opts) {
         projectId: opts.projectId,
         title,
         planReference,
+        sheetType,
+        isEmergency,
         financialYearId,
         planningPeriodId: planningPeriod?.id || null,
         departmentId: opts.departmentId,
@@ -469,20 +499,24 @@ export async function submitProcurementPlan(prisma, opts) {
   if (!row.items?.length) {
     return { ok: false, error: "Add plan items before submitting.", status: 400 };
   }
-  if (!row.planningPeriodId || !row.planningPeriod) {
-    return { ok: false, error: "A planning period is required.", status: 400 };
-  }
-  const periodStatus = computePlanningPeriodStatus(
-    row.planningPeriod.startDate,
-    row.planningPeriod.endDate,
-  );
-  if (periodStatus !== "OPEN") {
-    return {
-      ok: false,
-      error: "Cannot submit a plan while the planning period is not open.",
-      code: "PLANNING_PERIOD_CLOSED",
-      status: 400,
-    };
+
+  const isEmergency = Boolean(row.isEmergency);
+  if (!isEmergency) {
+    if (!row.planningPeriodId || !row.planningPeriod) {
+      return { ok: false, error: "A planning period is required.", status: 400 };
+    }
+    const periodStatus = computePlanningPeriodStatus(
+      row.planningPeriod.startDate,
+      row.planningPeriod.endDate,
+    );
+    if (periodStatus !== "OPEN") {
+      return {
+        ok: false,
+        error: "Cannot submit a plan while the planning period is not open.",
+        code: "PLANNING_PERIOD_CLOSED",
+        status: 400,
+      };
+    }
   }
 
   await prisma.projectOrgWorkflowInstance.updateMany({
@@ -508,7 +542,9 @@ export async function submitProcurementPlan(prisma, opts) {
 
   const started = await startWorkflowFromTrigger(prisma, {
     projectId: opts.projectId,
-    triggerKey: WORKFLOW_TRIGGERS.PLANNING_SUBMITTED,
+    triggerKey: isEmergency
+      ? WORKFLOW_TRIGGERS.EMERGENCY_PLANNING_SUBMITTED
+      : WORKFLOW_TRIGGERS.PLANNING_SUBMITTED,
     entityType: "procurement_plan",
     entityId: row.id,
     procurementPlanId: row.id,
@@ -543,6 +579,7 @@ export async function submitProcurementPlan(prisma, opts) {
     meta: {
       projectId: opts.projectId,
       planId: row.id,
+      isEmergency,
       actorOrgUserId: opts.actorOrgUserId,
       actorRoleName: opts.actorRoleName,
       departmentId: row.departmentId,

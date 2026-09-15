@@ -22,7 +22,7 @@ export async function GET(request) {
   const url = new URL(request.url);
   const projectId = url.searchParams.get("projectId")?.trim() || null;
   const academicYearId = url.searchParams.get("academicYearId")?.trim() || null;
-  const semesterId = url.searchParams.get("semesterId")?.trim() || null;
+  const campus = url.searchParams.get("campus")?.trim() || null;
 
   if (projectId) {
     const project = await prisma.project.findUnique({ where: { id: projectId } });
@@ -42,7 +42,7 @@ export async function GET(request) {
   const { buffer, filename } = await buildOfficialResultsWorkbook({
     projectId,
     academicYearId,
-    semesterId,
+    campus,
     actorUserId: user.id,
     ownerUserId,
   });

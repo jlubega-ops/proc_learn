@@ -2,7 +2,7 @@ import { headers } from "next/headers";
 import { prisma } from "@/lib/prisma";
 import { safeNextPath } from "@/lib/auth/safe-next-path";
 import { getProjectWorkspacePageContext } from "@/lib/projects/project-page-context";
-import { OrganisationStructureChart } from "@/components/projects/organisation-structure-chart";
+import { OrganisationStructurePanel } from "@/components/projects/organisation-structure-panel";
 
 export default async function ProjectOrganisationStructurePage({ params }) {
   const p = await params;
@@ -16,18 +16,10 @@ export default async function ProjectOrganisationStructurePage({ params }) {
     requirePlatformOrgAdmin: true,
   });
 
-  const [project, departments] = await Promise.all([
-    prisma.project.findUnique({
-      where: { id },
-      select: { id: true, name: true, organizationName: true },
-    }),
-    prisma.projectOrgDepartment.findMany({
-      where: { projectId: id, parentId: null },
-      select: { id: true, name: true },
-      orderBy: { name: "asc" },
-      take: 24,
-    }),
-  ]);
+  const project = await prisma.project.findUnique({
+    where: { id },
+    select: { id: true, name: true, organizationName: true },
+  });
 
   if (!project) {
     const { notFound } = await import("next/navigation");
@@ -44,18 +36,18 @@ export default async function ProjectOrganisationStructurePage({ params }) {
           Organisation structure
         </h1>
         <p className="mt-2 text-sm text-zinc-600 dark:text-zinc-300">
-          {ctx.readOnly ? "View" : "Manage"} how{" "}
-          <span className="font-semibold text-foreground">{orgDisplayName}</span> is arranged for
-          procurement learning. The chart below reflects the standard governance model for this
-          workspace; departments you create appear under user departments.
+          {ctx.readOnly ? "View" : "Arrange"} how{" "}
+          <span className="font-semibold text-foreground">{orgDisplayName}</span> is organised
+          from top to bottom. Create units under Departments, then set parents and order here.
         </p>
       </div>
 
-      <OrganisationStructureChart
+      <OrganisationStructurePanel
+        projectId={project.id}
         organizationName={project.organizationName}
         projectName={project.name}
-        departments={departments}
         readOnly={ctx.readOnly}
+        departmentsHref={`/projects/${project.id}/org-admin/departments`}
       />
     </div>
   );

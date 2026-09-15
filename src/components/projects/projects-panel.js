@@ -39,7 +39,7 @@ import ContentCopyRounded from "@mui/icons-material/ContentCopyRounded";
 import AutorenewRounded from "@mui/icons-material/AutorenewRounded";
 import SettingsRounded from "@mui/icons-material/SettingsRounded";
 import dynamic from "next/dynamic";
-import { useRouter, useSearchParams } from "next/navigation";
+import { useRouter, usePathname, useSearchParams } from "next/navigation";
 import { format, isValid, parseISO } from "date-fns";
 import { useToast } from "@/components/providers/toast-provider";
 import { useAuthSession } from "@/components/providers/auth-session-provider";
@@ -58,6 +58,7 @@ import {
   dateTimeInputConstraints,
   validateDateTimeRange,
 } from "@/lib/validation/date-range";
+import { computeWindowOpenState, parseServerInstantMs } from "@/lib/server-clock";
 
 const STUDENT_FILTERS = [
   { value: "all", label: "All" },
@@ -128,13 +129,12 @@ function statusChipColor(status) {
   return "default";
 }
 
-function openState(row) {
-  const now = Date.now();
-  const openAt = row?.openAt ? new Date(row.openAt).getTime() : null;
-  const closeAt = row?.closeAt ? new Date(row.closeAt).getTime() : null;
-  if (openAt && now < openAt) return "NOT_YET";
-  if (closeAt && now > closeAt) return "CLOSED";
-  return "OPEN";
+function openState(row, serverNowMs) {
+  const nowMs =
+    typeof serverNowMs === "number" && Number.isFinite(serverNowMs)
+      ? serverNowMs
+      : parseServerInstantMs(row?.serverNow) ?? Date.now();
+  return computeWindowOpenState(row, nowMs);
 }
 
 function openStateLabel(state) {
@@ -177,7 +177,6 @@ function defaultForm() {
     enrollmentAccessKey: "",
     isPublished: false,
     academicYearId: "",
-    semesterId: "",
     programmeId: "",
   };
 }
@@ -247,9 +246,6 @@ function validateClientForm(activeRole, form) {
     if (!String(form.academicYearId || "").trim()) {
       errors.academicYearId = "Choose an academic year.";
     }
-    if (!String(form.semesterId || "").trim()) {
-      errors.semesterId = "Choose a semester.";
-    }
     if (!String(form.programmeId || "").trim()) {
       errors.programmeId = "Choose a programme.";
     }
@@ -270,10 +266,13 @@ export function ProjectsPanel() {
   const filterOptions = STUDENT_FILTERS;
   const staffPurposeFilters = STAFF_PURPOSE_FILTERS;
   const searchParams = useSearchParams();
+  const router = useRouter();
+  const pathname = usePathname();
 
   const [loading, setLoading] = useState(true);
   const [refetching, setRefetching] = useState(false);
   const [rows, setRows] = useState([]);
+  const [serverNowMs, setServerNowMs] = useState(/** @type {number | null} */ (null));
   const [page, setPage] = useState(0);
   const [rowsPerPage, setRowsPerPage] = useState(10);
   const [total, setTotal] = useState(0);
@@ -283,10 +282,8 @@ export function ProjectsPanel() {
   const [staffStatus, setStaffStatus] = useState("all");
   const [openStatus, setOpenStatus] = useState("open");
   const [filterAcademicYearId, setFilterAcademicYearId] = useState("");
-  const [filterSemesterId, setFilterSemesterId] = useState("");
   const [filterProgrammeId, setFilterProgrammeId] = useState("");
   const [academicYears, setAcademicYears] = useState(/** @type {any[]} */ ([]));
-  const [semesters, setSemesters] = useState(/** @type {any[]} */ ([]));
   const [programmes, setProgrammes] = useState(/** @type {any[]} */ ([]));
   const [metaReady, setMetaReady] = useState(false);
 
@@ -313,7 +310,6 @@ export function ProjectsPanel() {
   const [instructionsEditorReady, setInstructionsEditorReady] = useState(false);
   const [questionEditorReady, setQuestionEditorReady] = useState(false);
   const hasLoadedRef = useRef(false);
-  const router = useRouter();
 
   const tinyApiKey = process.env.NEXT_PUBLIC_TINYMCE_API_KEY || "";
   const projectDateConstraints = useMemo(
@@ -353,7 +349,6 @@ export function ProjectsPanel() {
           qp.set("purpose", staffPurpose);
           qp.set("status", staffStatus);
           if (filterAcademicYearId) qp.set("academicYearId", filterAcademicYearId);
-          if (filterSemesterId) qp.set("semesterId", filterSemesterId);
           if (filterProgrammeId) qp.set("programmeId", filterProgrammeId);
         }
         qp.set("openStatus", openStatus);
@@ -370,6 +365,8 @@ export function ProjectsPanel() {
         }
         setRows(Array.isArray(data.projects) ? data.projects : []);
         setTotal(Number(data.total || 0));
+        const synced = parseServerInstantMs(data.serverNow);
+        setServerNowMs(synced);
         hasLoadedRef.current = true;
       } finally {
         if (silent) setRefetching(false);
@@ -387,7 +384,6 @@ export function ProjectsPanel() {
       staffStatus,
       openStatus,
       filterAcademicYearId,
-      filterSemesterId,
       filterProgrammeId,
       showToast,
     ],
@@ -422,54 +418,6 @@ export function ProjectsPanel() {
       cancelled = true;
     };
   }, [isExaminerLike]);
-
-  useEffect(() => {
-    if (!isExaminerLike || !filterAcademicYearId) {
-      setSemesters([]);
-      return undefined;
-    }
-    let cancelled = false;
-    (async () => {
-      const res = await fetch(
-        `/api/admin/semesters?academicYearId=${encodeURIComponent(filterAcademicYearId)}`,
-        { credentials: "include" },
-      );
-      const json = await res.json().catch(() => ({}));
-      if (cancelled) return;
-      const list = Array.isArray(json.semesters) ? json.semesters : [];
-      setSemesters(list);
-      const active = list.find((s) => s.isActive) || list[0] || null;
-      setFilterSemesterId((prev) => {
-        if (prev && list.some((s) => s.id === prev)) return prev;
-        return active?.id || "";
-      });
-    })();
-    return () => {
-      cancelled = true;
-    };
-  }, [isExaminerLike, filterAcademicYearId]);
-
-  useEffect(() => {
-    if (!isExaminerLike || !form.academicYearId || !openEditor) return undefined;
-    let cancelled = false;
-    (async () => {
-      const res = await fetch(
-        `/api/admin/semesters?academicYearId=${encodeURIComponent(form.academicYearId)}`,
-        { credentials: "include" },
-      );
-      const json = await res.json().catch(() => ({}));
-      if (cancelled) return;
-      const list = Array.isArray(json.semesters) ? json.semesters : [];
-      setSemesters((prev) => {
-        const byId = new Map(prev.map((s) => [s.id, s]));
-        for (const s of list) byId.set(s.id, s);
-        return [...byId.values()];
-      });
-    })();
-    return () => {
-      cancelled = true;
-    };
-  }, [isExaminerLike, form.academicYearId, openEditor]);
 
   useEffect(() => {
     if (sessionLoading) return;
@@ -509,8 +457,6 @@ export function ProjectsPanel() {
     setIsDuplicateDraft(false);
     const currentYear = academicYears.find((y) => y.isCurrent) || academicYears[0];
     const yearId = currentYear?.id || filterAcademicYearId || "";
-    const yearSemesters = semesters.filter((s) => s.academicYearId === yearId);
-    const activeSem = yearSemesters.find((s) => s.isActive) || yearSemesters[0];
     const defaultProgramme =
       programmes.find((p) => p.id === filterProgrammeId) ||
       programmes.find((p) => p.shortName === "GEN") ||
@@ -522,7 +468,6 @@ export function ProjectsPanel() {
       isPublished: isStudent,
       enrollmentAccessKey: isStudent ? "" : generateEnrollmentAccessKey(),
       academicYearId: yearId,
-      semesterId: activeSem?.id || filterSemesterId || "",
       programmeId: defaultProgramme?.id || "",
     });
     setFieldErrors({});
@@ -553,7 +498,6 @@ export function ProjectsPanel() {
       enrollmentAccessKey: row.enrollmentKey || "",
       isPublished: Boolean(row.isPublished),
       academicYearId: row.academicYearId || row.academicYear?.id || "",
-      semesterId: row.semesterId || row.semester?.id || "",
       programmeId: row.programmeId || row.programme?.id || "",
     });
     setFieldErrors({});
@@ -584,7 +528,6 @@ export function ProjectsPanel() {
       enrollmentAccessKey: generateEnrollmentAccessKey(),
       isPublished: false,
       academicYearId: row.academicYearId || row.academicYear?.id || filterAcademicYearId || "",
-      semesterId: row.semesterId || row.semester?.id || filterSemesterId || "",
       programmeId: row.programmeId || row.programme?.id || filterProgrammeId || "",
     });
     setFieldErrors({});
@@ -614,7 +557,6 @@ export function ProjectsPanel() {
         questionFileUrl: String(form.questionFileUrl || "").trim(),
         enrollmentAccessKey: String(form.enrollmentAccessKey || "").trim().toUpperCase(),
         academicYearId: String(form.academicYearId || "").trim(),
-        semesterId: String(form.semesterId || "").trim(),
         programmeId: String(form.programmeId || "").trim(),
         duration:
           formRole !== "STUDENT" &&
@@ -724,14 +666,18 @@ export function ProjectsPanel() {
 
   const enterProjectWorkspace = useCallback(
     (projectId, opts = /** @type {{ organization?: boolean }} */ ({})) => {
+      const href = `/projects/${projectId}`;
+      if (pathname === href || String(pathname || "").startsWith(`${href}/`)) {
+        return;
+      }
       const asOrg = opts.organization !== false && isStudent;
       setSessionBlocking(
         true,
         asOrg ? "Entering organization…" : "Opening project…",
       );
-      router.push(`/projects/${projectId}`);
+      router.push(href);
     },
-    [isStudent, router, setSessionBlocking],
+    [isStudent, pathname, router, setSessionBlocking],
   );
 
   const handleProjectOpen = (row) => {
@@ -774,12 +720,12 @@ export function ProjectsPanel() {
   };
 
   const canStudentEnroll = (row) => {
-    const state = openState(row);
+    const state = openState(row, serverNowMs);
     return state !== "CLOSED";
   };
 
   const canStudentStart = (row) => {
-    const state = openState(row);
+    const state = openState(row, serverNowMs);
     return state === "OPEN";
   };
 
@@ -1033,7 +979,6 @@ export function ProjectsPanel() {
                 value={filterAcademicYearId}
                 onChange={(e) => {
                   setFilterAcademicYearId(String(e.target.value || ""));
-                  setFilterSemesterId("");
                   setPage(0);
                 }}
               >
@@ -1043,28 +988,6 @@ export function ProjectsPanel() {
                     {y.isCurrent ? " (current)" : ""}
                   </MenuItem>
                 ))}
-              </Select>
-            </FormControl>
-            <FormControl size="small" className="w-full sm:w-40" sx={themedTextFieldSx}>
-              <InputLabel id="filter-sem-label">Semester</InputLabel>
-              <Select
-                labelId="filter-sem-label"
-                label="Semester"
-                value={filterSemesterId}
-                onChange={(e) => {
-                  setFilterSemesterId(String(e.target.value || ""));
-                  setPage(0);
-                }}
-              >
-                <MenuItem value="">All</MenuItem>
-                {semesters
-                  .filter((s) => !filterAcademicYearId || s.academicYearId === filterAcademicYearId)
-                  .map((s) => (
-                    <MenuItem key={s.id} value={s.id}>
-                      {s.name}
-                      {s.isActive ? " (active)" : ""}
-                    </MenuItem>
-                  ))}
               </Select>
             </FormControl>
             <FormControl size="small" className="w-full sm:w-44" sx={themedTextFieldSx}>
@@ -1126,7 +1049,7 @@ export function ProjectsPanel() {
             <TableBody>
               {rows.map((row) => {
                 const enrollmentStatus = enrollmentStatusForRow(row);
-                const oState = openState(row);
+                const oState = openState(row, serverNowMs);
                 return (
                   <TableRow key={row.id} hover>
                     <TableCell>
@@ -1336,7 +1259,7 @@ export function ProjectsPanel() {
             sx={themedTextFieldSx}
           />
           {isExaminerLike ? (
-            <div className="grid grid-cols-1 gap-3 md:grid-cols-3">
+            <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
               <FormControl fullWidth margin="dense" sx={themedTextFieldSx} error={Boolean(fieldErrors.academicYearId)}>
                 <InputLabel id="form-ay-label">Academic year</InputLabel>
                 <Select
@@ -1344,13 +1267,9 @@ export function ProjectsPanel() {
                   label="Academic year"
                   value={form.academicYearId}
                   onChange={(e) => {
-                    const yearId = String(e.target.value || "");
-                    const yearSemesters = semesters.filter((s) => s.academicYearId === yearId);
-                    const activeSem = yearSemesters.find((s) => s.isActive) || yearSemesters[0];
                     setForm((prev) => ({
                       ...prev,
-                      academicYearId: yearId,
-                      semesterId: activeSem?.id || "",
+                      academicYearId: String(e.target.value || ""),
                     }));
                   }}
                 >
@@ -1363,27 +1282,6 @@ export function ProjectsPanel() {
                 </Select>
                 {fieldErrors.academicYearId ? (
                   <p className="mt-1 text-xs text-red-600">{fieldErrors.academicYearId}</p>
-                ) : null}
-              </FormControl>
-              <FormControl fullWidth margin="dense" sx={themedTextFieldSx} error={Boolean(fieldErrors.semesterId)}>
-                <InputLabel id="form-sem-label">Semester</InputLabel>
-                <Select
-                  labelId="form-sem-label"
-                  label="Semester"
-                  value={form.semesterId}
-                  onChange={(e) => setForm((prev) => ({ ...prev, semesterId: e.target.value }))}
-                >
-                  {semesters
-                    .filter((s) => !form.academicYearId || s.academicYearId === form.academicYearId)
-                    .map((s) => (
-                      <MenuItem key={s.id} value={s.id}>
-                        {s.name}
-                        {s.isActive ? " (active)" : ""}
-                      </MenuItem>
-                    ))}
-                </Select>
-                {fieldErrors.semesterId ? (
-                  <p className="mt-1 text-xs text-red-600">{fieldErrors.semesterId}</p>
                 ) : null}
               </FormControl>
               <FormControl fullWidth margin="dense" sx={themedTextFieldSx} error={Boolean(fieldErrors.programmeId)}>
@@ -1835,16 +1733,16 @@ export function ProjectsPanel() {
               </Typography>
               <Typography variant="body2" sx={adminMutedTextSx}>
                 Status: {studentProjectDialog.status} · Open:{" "}
-                {openStateLabel(openState(studentProjectDialog))} · Duration:{" "}
+                {openStateLabel(openState(studentProjectDialog, serverNowMs))} · Duration:{" "}
                 {formatDuration(studentProjectDialog.durationSeconds)}
               </Typography>
               {studentProjectDialog.ownerUserId !== session?.userId &&
-              openState(studentProjectDialog) === "CLOSED" ? (
+              openState(studentProjectDialog, serverNowMs) === "CLOSED" ? (
                 <Typography variant="body2" color="error">
                   This project is closed. You cannot enroll or start it.
                 </Typography>
               ) : null}
-              {openState(studentProjectDialog) === "NOT_YET" ? (
+              {openState(studentProjectDialog, serverNowMs) === "NOT_YET" ? (
                 <Typography variant="body2" color="error">
                   This project is not yet open. Start becomes available at open time.
                 </Typography>

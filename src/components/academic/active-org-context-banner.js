@@ -14,6 +14,7 @@ import { ROLE } from "@/lib/roles";
 import { formatCountdownParts } from "@/lib/academic/attempt-timer-format";
 import { adminDialogPaperSx } from "@/lib/admin-mui-surfaces";
 import { BRAND_PAGE_LEAD_CLASS } from "@/lib/brand-ui";
+import { useServerSyncedCountdown } from "@/hooks/use-server-synced-countdown";
 
 /**
  * Sticky bar below the navbar while a student is in a Practice/Assessment organisation.
@@ -26,12 +27,12 @@ export function ActiveOrgContextBanner() {
   const [busy, setBusy] = useState(false);
   const [submitOpen, setSubmitOpen] = useState(false);
   const [timer, setTimer] = useState(/** @type {any} */ (null));
-  const [deadlineMs, setDeadlineMs] = useState(/** @type {number | null} */ (null));
-  const [tickLeft, setTickLeft] = useState(/** @type {number | null} */ (null));
   const [projectName, setProjectName] = useState("");
   const [attemptId, setAttemptId] = useState(/** @type {string | null} */ (null));
   const [academicProjectId, setAcademicProjectId] = useState(/** @type {string | null} */ (null));
   const [purpose, setPurpose] = useState(/** @type {string | null} */ (null));
+
+  const { remainingSeconds: tickLeft, expired: tickExpired } = useServerSyncedCountdown(timer);
 
   const isStudent = session?.authenticated && session?.activeRole === ROLE.STUDENT;
   const kind = session?.orgContext;
@@ -49,15 +50,6 @@ export function ActiveOrgContextBanner() {
       data.academicProject?.id || session?.activeAttempt?.academicProjectId || null,
     );
     setPurpose(data.academicProject?.purpose || session?.activeAttempt?.purpose || kind);
-    if (data.timer?.deadlineAt) {
-      const ms = new Date(data.timer.deadlineAt).getTime();
-      setDeadlineMs(Number.isFinite(ms) ? ms : null);
-    } else if (typeof data.timer?.remainingSeconds === "number") {
-      setDeadlineMs(Date.now() + data.timer.remainingSeconds * 1000);
-    } else {
-      setDeadlineMs(null);
-      setTickLeft(null);
-    }
     if (data.autoExpired) {
       showToast({
         message: "Time expired. Your attempt was submitted automatically.",
@@ -91,19 +83,6 @@ export function ActiveOrgContextBanner() {
     return () => window.clearInterval(id);
   }, [isStudent, session?.isStudentMode, inAttemptOrg, poll]);
 
-  useEffect(() => {
-    if (deadlineMs == null) {
-      setTickLeft(null);
-      return undefined;
-    }
-    const tick = () => {
-      setTickLeft(Math.max(0, Math.floor((deadlineMs - Date.now()) / 1000)));
-    };
-    tick();
-    const id = window.setInterval(tick, 1000);
-    return () => window.clearInterval(id);
-  }, [deadlineMs]);
-
   async function submitAttempt() {
     if (!academicProjectId || !attemptId) return;
     setBusy(true);
@@ -135,7 +114,7 @@ export function ActiveOrgContextBanner() {
   const orgName = session?.activeOrgName || "this organisation";
   const remaining = tickLeft ?? timer?.remainingSeconds;
   const hasTimer = timer?.mode !== "NONE" && remaining != null;
-  const expired = Boolean(timer?.expired) || (hasTimer && remaining === 0);
+  const expired = tickExpired || Boolean(timer?.expired) || (hasTimer && remaining === 0);
   const urgent = hasTimer && !expired && remaining != null && remaining <= 5 * 60;
   const parts = hasTimer ? formatCountdownParts(remaining) : null;
   const canSubmit = Boolean(attemptId && academicProjectId);

@@ -4,6 +4,7 @@ import { getSessionUser, sessionActiveRole } from "@/lib/api/get-session-user";
 import { canManageStudents } from "@/lib/api/student-scope";
 import { formatUserDisplayName } from "@/lib/user-display";
 import { prisma } from "@/lib/prisma";
+import { campusLabel } from "@/lib/campuses";
 
 export const runtime = "nodejs";
 
@@ -29,6 +30,8 @@ function serializeStudent(u) {
     programmeShortName: sp?.programme?.shortName ?? null,
     academicYearLabel: sp?.academicYearLabel ?? null,
     yearOfStudy: sp?.yearOfStudy ?? null,
+    campus: sp?.campus ?? null,
+    campusLabel: campusLabel(sp?.campus) ?? null,
     suspendedReason: u.suspendedReason,
     activatedAt: u.activatedAt?.toISOString() ?? null,
     canResendActivation:
@@ -47,6 +50,7 @@ export async function GET(request) {
   const q = (searchParams.get("q") || "").trim();
   const programmeId = (searchParams.get("programmeId") || "").trim();
   const academicYear = (searchParams.get("academicYear") || "").trim();
+  const campus = (searchParams.get("campus") || "").trim().toUpperCase();
 
   /** @type {import("@prisma/client").Prisma.UserWhereInput[]} */
   const andParts = [{ studentProfile: { isNot: null } }];
@@ -55,6 +59,9 @@ export async function GET(request) {
   }
   if (academicYear) {
     andParts.push({ studentProfile: { academicYearLabel: academicYear } });
+  }
+  if (campus && ["MAIN", "ARUA", "MBARARA", "JINJA", "MBALE"].includes(campus)) {
+    andParts.push({ studentProfile: { campus } });
   }
   if (q) {
     andParts.push({

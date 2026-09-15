@@ -63,6 +63,11 @@ export async function GET(_request, context) {
   /** @type {any[]} */
   let workflowHistory = [];
   let canSubmit = false;
+  /** @type {any} */
+  let workflowStage = null;
+  /** @type {any} */
+  let lastDecision = null;
+  let viewerHasPendingAction = false;
 
   if (auth.type === "org") {
     const orgUserId = auth.orgUser.id;
@@ -76,7 +81,7 @@ export async function GET(_request, context) {
       where: {
         projectId,
         procurementPlanId: planId,
-        status: { in: ["ACTIVE", "IN_PROGRESS", "SUSPENDED"] },
+        status: { in: ["ACTIVE", "IN_PROGRESS", "SUSPENDED", "COMPLETED", "CANCELLED"] },
       },
       orderBy: { createdAt: "desc" },
       select: {
@@ -96,6 +101,41 @@ export async function GET(_request, context) {
       },
     });
     workflowHistory = instance?.actions || [];
+    const latestAction = workflowHistory.length
+      ? workflowHistory[workflowHistory.length - 1]
+      : null;
+    if (latestAction) {
+      lastDecision = {
+        decision: latestAction.decision,
+        actorRoleName: latestAction.actorRoleName || null,
+      };
+    }
+
+    const openTask = await prisma.projectOrgWorkflowTask.findFirst({
+      where: {
+        projectId,
+        status: { in: ["PENDING", "IN_PROGRESS"] },
+        instance: { procurementPlanId: planId },
+      },
+      orderBy: [{ stepNumber: "asc" }, { createdAt: "asc" }],
+      select: {
+        id: true,
+        title: true,
+        requiredRoleName: true,
+        status: true,
+        stepNumber: true,
+        assigneeOrgUserId: true,
+      },
+    });
+    if (openTask) {
+      workflowStage = {
+        taskId: openTask.id,
+        title: openTask.title,
+        requiredRoleName: openTask.requiredRoleName || null,
+        stepNumber: openTask.stepNumber,
+        status: openTask.status,
+      };
+    }
 
     pendingTask = await prisma.projectOrgWorkflowTask.findFirst({
       where: {
@@ -114,10 +154,16 @@ export async function GET(_request, context) {
         processFlowItem: { select: { actionKey: true } },
       },
     });
+    viewerHasPendingAction = Boolean(pendingTask);
   }
 
   return NextResponse.json({
-    plan: serializeProcurementPlan(row),
+    plan: serializeProcurementPlan({
+      ...row,
+      workflowStage,
+      lastDecision,
+      viewerHasPendingAction,
+    }),
     pendingTask: pendingTask
       ? {
           ...pendingTask,

@@ -23,14 +23,14 @@ export function validateLoginFields(values) {
 
   if (isOrgLoginIdentifier(identifier)) {
     if (!String(identifier).trim()) {
-      errors.identifier = "organisation username is required.";
+      errors.identifier = "organisation login email is required.";
     }
   } else {
     const schoolErr = schoolEmailFieldError(identifier);
     if (schoolErr) {
       errors.identifier =
-        String(identifier).includes("_") && String(identifier).toUpperCase().includes("ORG-")
-          ? "Enter the organisation username exactly as shown (e.g. john_ORG-AB12CD@example.com)."
+        String(identifier).includes("_") && String(identifier).toLowerCase().includes("org-")
+          ? "Enter the organisation login email exactly as shown (lowercase, e.g. john.doe.ab12c_org-xxxxxx@org.learn)."
           : schoolErr;
     }
   }

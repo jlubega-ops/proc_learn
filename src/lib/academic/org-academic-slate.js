@@ -6,11 +6,7 @@
  */
 import { OrgAcademicSlateStatus, Prisma } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
-import {
-  getCurrentAcademicContext,
-  serializeAcademicYear,
-  serializeSemester,
-} from "@/lib/academic/academic-context";
+import { serializeAcademicYear } from "@/lib/academic/academic-context";
 import { getActiveEnrollment } from "@/lib/academic/student-enrollment";
 import { findStudentPersonalOrg } from "@/lib/projects/student-personal-org";
 
@@ -24,12 +20,10 @@ export function serializeOrgAcademicSlate(row) {
     projectId: row.projectId,
     enrollmentId: row.enrollmentId,
     academicYearId: row.academicYearId,
-    semesterId: row.semesterId || null,
     status: row.status,
     openedAt: row.openedAt,
     closedAt: row.closedAt || null,
     academicYear: row.academicYear ? serializeAcademicYear(row.academicYear) : undefined,
-    semester: row.semester ? serializeSemester(row.semester) : undefined,
     createdAt: row.createdAt,
     updatedAt: row.updatedAt,
   };
@@ -60,8 +54,6 @@ export function withAcademicAuditMeta(meta, slate) {
     academicEnrollmentId: slate.enrollmentId,
     academicYearId: slate.academicYearId,
     academicYearLabel: slate.academicYear?.label || null,
-    semesterId: slate.semesterId || null,
-    semesterName: slate.semester?.name || null,
     projectId: meta.projectId ?? slate.projectId,
   };
 }
@@ -116,20 +108,13 @@ async function markOtherSlatesHistorical(tx, projectId, exceptSlateId) {
  *   projectId: string;
  *   enrollmentId: string;
  *   academicYearId: string;
- *   semesterId?: string | null;
  * }} opts
  */
 export async function ensureOrgAcademicSlate(db, opts) {
-  const university = await getCurrentAcademicContext(prisma);
-  const semesterId =
-    opts.semesterId !== undefined
-      ? opts.semesterId
-      : university.semester?.id || null;
-
   const run = async (/** @type {import("@prisma/client").Prisma.TransactionClient} */ tx) => {
     const existing = await tx.orgAcademicSlate.findFirst({
       where: { projectId: opts.projectId, enrollmentId: opts.enrollmentId },
-      include: { academicYear: true, semester: true },
+      include: { academicYear: true },
     });
 
     await markOtherSlatesHistorical(tx, opts.projectId, existing?.id);
@@ -141,13 +126,12 @@ export async function ensureOrgAcademicSlate(db, opts) {
           status: OrgAcademicSlateStatus.CURRENT,
           closedAt: null,
           academicYearId: opts.academicYearId,
-          semesterId,
           openedAt:
             existing.status === OrgAcademicSlateStatus.CURRENT
               ? existing.openedAt
               : new Date(),
         },
-        include: { academicYear: true, semester: true },
+        include: { academicYear: true },
       });
       return {
         slate: updated,
@@ -162,17 +146,16 @@ export async function ensureOrgAcademicSlate(db, opts) {
           projectId: opts.projectId,
           enrollmentId: opts.enrollmentId,
           academicYearId: opts.academicYearId,
-          semesterId,
           status: OrgAcademicSlateStatus.CURRENT,
         },
-        include: { academicYear: true, semester: true },
+        include: { academicYear: true },
       });
       return { slate: created, created: true, alreadyCurrent: false };
     } catch (e) {
       if (e instanceof Prisma.PrismaClientKnownRequestError && e.code === "P2002") {
         const again = await tx.orgAcademicSlate.findFirst({
           where: { projectId: opts.projectId, enrollmentId: opts.enrollmentId },
-          include: { academicYear: true, semester: true },
+          include: { academicYear: true },
         });
         if (!again) throw e;
         await markOtherSlatesHistorical(tx, opts.projectId, again.id);
@@ -181,9 +164,9 @@ export async function ensureOrgAcademicSlate(db, opts) {
           data: {
             status: OrgAcademicSlateStatus.CURRENT,
             closedAt: null,
-            semesterId,
+            academicYearId: opts.academicYearId,
           },
-          include: { academicYear: true, semester: true },
+          include: { academicYear: true },
         });
         return { slate: updated, created: false, alreadyCurrent: true };
       }
@@ -252,7 +235,7 @@ export async function resolveCurrentOrgSlateId(db = prisma, projectId) {
 export async function resolveCurrentOrgSlate(db = prisma, projectId) {
   return db.orgAcademicSlate.findFirst({
     where: { projectId, status: OrgAcademicSlateStatus.CURRENT },
-    include: { academicYear: true, semester: true },
+    include: { academicYear: true },
   });
 }
 

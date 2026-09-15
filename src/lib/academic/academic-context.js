@@ -23,24 +23,6 @@ export function serializeAcademicYear(row) {
 /**
  * @param {any} row
  */
-export function serializeSemester(row) {
-  if (!row) return null;
-  return {
-    id: row.id,
-    academicYearId: row.academicYearId,
-    name: row.name,
-    startDate: toDateInputValue(row.startDate),
-    endDate: toDateInputValue(row.endDate),
-    isActive: Boolean(row.isActive),
-    academicYear: row.academicYear ? serializeAcademicYear(row.academicYear) : undefined,
-    createdAt: row.createdAt,
-    updatedAt: row.updatedAt,
-  };
-}
-
-/**
- * @param {any} row
- */
 export function serializeCourse(row) {
   if (!row) return null;
   return {
@@ -63,57 +45,56 @@ export function serializeCourse(row) {
 }
 
 /**
- * @param {any} row
+ * Academic years configured by system admin (newest label first).
+ * @param {import("@prisma/client").PrismaClient} [db]
  */
-export function serializeClassCohort(row) {
-  if (!row) return null;
-  return {
-    id: row.id,
-    courseId: row.courseId,
-    academicYearId: row.academicYearId,
-    semesterId: row.semesterId || null,
-    name: row.name,
-    code: row.code || null,
-    isActive: Boolean(row.isActive),
-    course: row.course ? serializeCourse(row.course) : undefined,
-    academicYear: row.academicYear ? serializeAcademicYear(row.academicYear) : undefined,
-    semester: row.semester ? serializeSemester(row.semester) : undefined,
-    createdAt: row.createdAt,
-    updatedAt: row.updatedAt,
-  };
+export async function listConfiguredAcademicYears(db = prisma) {
+  const rows = await db.academicYear.findMany({
+    orderBy: { label: "desc" },
+  });
+  return rows.map(serializeAcademicYear);
 }
 
 /**
- * Authoritative current university academic context.
+ * True when the label exists in AcademicYear (admin-created).
+ * @param {unknown} label
+ * @param {import("@prisma/client").PrismaClient} [db]
+ */
+export async function isRegisteredAcademicYearLabel(label, db = prisma) {
+  const t = typeof label === "string" ? label.trim() : "";
+  if (!t) return false;
+  const row = await db.academicYear.findUnique({
+    where: { label: t },
+    select: { id: true },
+  });
+  return Boolean(row);
+}
+
+/**
+ * Authoritative current university academic context (Academic Year only).
  * @param {import("@prisma/client").PrismaClient} [db]
  */
 export async function getCurrentAcademicContext(db = prisma) {
   const academicYear = await db.academicYear.findFirst({
     where: { isCurrent: true },
   });
-  const semester = await db.semester.findFirst({
-    where: { isActive: true },
-    include: { academicYear: true },
-  });
   return {
     academicYear: serializeAcademicYear(academicYear),
-    semester: serializeSemester(semester),
   };
 }
 
 /**
- * Ensure at least one current academic year + active semester (dev seed / bootstrap).
+ * Ensure at least one current academic year (dev seed / bootstrap).
  * @param {import("@prisma/client").PrismaClient} [db]
  */
 export async function ensureCurrentAcademicContext(db = prisma) {
   const existing = await getCurrentAcademicContext(db);
-  if (existing.academicYear && existing.semester) return existing;
+  if (existing.academicYear) return existing;
 
   const { primary } = getAcademicYearDropdownChoices();
   const label = primary[0] || `${new Date().getFullYear()}/${new Date().getFullYear() + 1}`;
   const [startY] = label.split("/").map((x) => Number(x));
   const startDate = new Date(Date.UTC(startY, 7, 1));
-  const midDate = new Date(Date.UTC(startY + 1, 0, 15));
   const endDate = new Date(Date.UTC(startY + 1, 6, 31));
 
   let year = await db.academicYear.findUnique({ where: { label } });
@@ -135,38 +116,8 @@ export async function ensureCurrentAcademicContext(db = prisma) {
     });
   }
 
-  let semester = await db.semester.findFirst({
-    where: { academicYearId: year.id, name: "Semester 1" },
-  });
-  if (!semester) {
-    await db.semester.updateMany({ data: { isActive: false } });
-    semester = await db.semester.create({
-      data: {
-        academicYearId: year.id,
-        name: "Semester 1",
-        startDate,
-        endDate: midDate,
-        isActive: true,
-      },
-      include: { academicYear: true },
-    });
-  } else if (!semester.isActive) {
-    await db.semester.updateMany({ data: { isActive: false } });
-    semester = await db.semester.update({
-      where: { id: semester.id },
-      data: { isActive: true },
-      include: { academicYear: true },
-    });
-  } else {
-    semester = await db.semester.findUnique({
-      where: { id: semester.id },
-      include: { academicYear: true },
-    });
-  }
-
   return {
     academicYear: serializeAcademicYear(year),
-    semester: serializeSemester(semester),
   };
 }
 
@@ -221,22 +172,6 @@ export async function setCurrentAcademicYear(db, academicYearId) {
     return tx.academicYear.update({
       where: { id: academicYearId },
       data: { isCurrent: true },
-    });
-  });
-}
-
-/**
- * Activate this semester and deactivate all others (transaction).
- * @param {import("@prisma/client").PrismaClient} db
- * @param {string} semesterId
- */
-export async function activateSemester(db, semesterId) {
-  return db.$transaction(async (tx) => {
-    await tx.semester.updateMany({ data: { isActive: false } });
-    return tx.semester.update({
-      where: { id: semesterId },
-      data: { isActive: true },
-      include: { academicYear: true },
     });
   });
 }

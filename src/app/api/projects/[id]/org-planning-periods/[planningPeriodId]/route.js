@@ -5,6 +5,7 @@ import { writeAuditLog, AuditEvent } from "@/lib/audit-log";
 import { prisma } from "@/lib/prisma";
 import { authorizeProjectOrgAdmin } from "@/lib/projects/workspace-access";
 import {
+  computePlanningPeriodStatus,
   planningPeriodSelect,
   resolveActiveProjectFinancialYear,
   serializeProjectOrgPlanningPeriod,
@@ -59,6 +60,7 @@ export async function PATCH(request, context) {
   const validated = validateProjectOrgPlanningPeriodPatch(body, {
     current: {
       financialYearId: existing.financialYearId,
+      label: existing.label,
       startDate: new Date(existing.startDate),
       endDate: new Date(existing.endDate),
     },
@@ -88,6 +90,19 @@ export async function PATCH(request, context) {
     validated.data.financialYearId = financialYear.id;
   }
 
+  const nextStart =
+    validated.data.startDate !== undefined
+      ? validated.data.startDate
+      : existing.startDate;
+  const nextEnd =
+    validated.data.endDate !== undefined ? validated.data.endDate : existing.endDate;
+  const now = new Date();
+  validated.data.status = computePlanningPeriodStatus(
+    /** @type {Date} */ (nextStart),
+    /** @type {Date} */ (nextEnd),
+    now,
+  );
+
   const row = await prisma.projectOrgPlanningPeriod.update({
     where: { id: planningPeriodId },
     data: validated.data,
@@ -101,11 +116,13 @@ export async function PATCH(request, context) {
       projectId,
       planningPeriodId: row.id,
       financialYearId: row.financialYearId,
-      periodLabel: serializeProjectOrgPlanningPeriod(row).periodLabel,
+      label: row.label,
+      periodLabel: serializeProjectOrgPlanningPeriod(row, now).periodLabel,
+      status: row.status,
     },
   });
 
-  return NextResponse.json({ planningPeriod: serializeProjectOrgPlanningPeriod(row) });
+  return NextResponse.json({ planningPeriod: serializeProjectOrgPlanningPeriod(row, now) });
 }
 
 export async function DELETE(_request, context) {

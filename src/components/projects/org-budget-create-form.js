@@ -19,6 +19,7 @@ import { OrgLineItemsTable } from "@/components/projects/org-line-items-table";
 import {
   adminCenteredLoadingBoxSx,
   adminLoadingSpinnerSx,
+  adminMutedTextSx,
   adminOutlinedTableContainerSx,
   themedTextFieldSx,
 } from "@/lib/admin-mui-surfaces";
@@ -32,6 +33,7 @@ import {
   validatePositiveNumber,
 } from "@/lib/money";
 import { ORG_REF_DOC, nextOrgDocumentReference } from "@/lib/projects/org-reference";
+import { usePersistedFormDraft } from "@/hooks/use-persisted-form-draft";
 
 function emptyLine() {
   return {
@@ -47,12 +49,13 @@ function emptyLine() {
 }
 
 /**
- * @param {{ projectId: string }} p
+ * @param {{ projectId: string; budgetId?: string }} p
  */
-export function OrgBudgetCreateForm({ projectId }) {
+export function OrgBudgetCreateForm({ projectId, budgetId = "" }) {
   const { showToast } = useToast();
   const router = useRouter();
   const listHref = `/projects/${projectId}/budgets`;
+  const isEdit = Boolean(String(budgetId || "").trim());
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
   const [canCreate, setCanCreate] = useState(false);
@@ -71,18 +74,48 @@ export function OrgBudgetCreateForm({ projectId }) {
     financialYearId: "",
     lines: [emptyLine()],
   });
+  const [metaReady, setMetaReady] = useState(false);
 
   const departmentLabel = actorDepartment?.name || "Your department";
+
+  const { serverSyncState, clearDraft } = usePersistedFormDraft({
+    formKey: isEdit ? `budget:edit:${budgetId}` : "budget:new",
+    values: form,
+    projectId,
+    enabled: metaReady && canCreate && !isEdit,
+    onHydrated: (payload) => {
+      if (isEdit) return;
+      if (payload && typeof payload === "object" && !Array.isArray(payload)) {
+        setForm((prev) => ({
+          ...prev,
+          .../** @type {typeof form} */ (payload),
+          lines:
+            Array.isArray(/** @type {any} */ (payload).lines) &&
+            /** @type {any} */ (payload).lines.length
+              ? /** @type {any} */ (payload).lines
+              : prev.lines,
+        }));
+      }
+    },
+  });
 
   const load = useCallback(async () => {
     setLoading(true);
     try {
-      const [bRes, yRes] = await Promise.all([
+      const requests = [
         fetch(`/api/projects/${projectId}/budgets`, { credentials: "include" }),
         fetch(`/api/projects/${projectId}/org-financial-years?selectable=1`, {
           credentials: "include",
         }),
-      ]);
+      ];
+      if (isEdit) {
+        requests.push(
+          fetch(`/api/projects/${projectId}/budgets/${budgetId}`, {
+            credentials: "include",
+          }),
+        );
+      }
+      const [bRes, yRes, detailRes] = await Promise.all(requests);
       const bData = await bRes.json().catch(() => ({}));
       const yData = await yRes.json().catch(() => ({}));
       if (!bRes.ok) {
@@ -101,6 +134,66 @@ export function OrgBudgetCreateForm({ projectId }) {
       const nextYears = Array.isArray(yData.financialYears) ? yData.financialYears : [];
       setYears(nextYears);
       setFyEmptyMessage(typeof yData.message === "string" ? yData.message : null);
+
+      if (isEdit && detailRes) {
+        const dData = await detailRes.json().catch(() => ({}));
+        if (!detailRes.ok) {
+          showToast({
+            message: typeof dData.error === "string" ? dData.error : "Could not load budget.",
+            severity: "error",
+          });
+          setCanCreate(false);
+          return;
+        }
+        if (!dData.canEditDraft) {
+          showToast({
+            message: "This budget can no longer be edited.",
+            severity: "error",
+          });
+          setCanCreate(false);
+          return;
+        }
+        const budget = dData.budget || {};
+        let editYears = nextYears;
+        if (
+          budget.financialYear?.id &&
+          !editYears.some((y) => y.id === budget.financialYear.id)
+        ) {
+          editYears = [budget.financialYear, ...editYears];
+        }
+        setYears(editYears);
+        setForm({
+          title: budget.title || "",
+          budgetReference: budget.budgetReference || "",
+          description: budget.description || "",
+          financialYearId: budget.financialYearId || budget.financialYear?.id || "",
+          lines:
+            Array.isArray(budget.lines) && budget.lines.length
+              ? budget.lines.map((line) => ({
+                  category: line.category || line.name || "",
+                  description: line.description || "",
+                  quantity:
+                    line.quantity != null
+                      ? formatMoneyAmount(line.quantity) || String(line.quantity)
+                      : "1",
+                  unitOfMeasure: line.unitOfMeasure || "Lot",
+                  unitCost:
+                    line.unitCost != null
+                      ? formatMoneyAmount(line.unitCost) || String(line.unitCost)
+                      : "",
+                  approvedAmount:
+                    line.approvedAmount != null
+                      ? formatMoneyAmount(line.approvedAmount) || String(line.approvedAmount)
+                      : "",
+                  fundingSource: line.fundingSource || "",
+                  totalManual: true,
+                }))
+              : [emptyLine()],
+        });
+        setMetaReady(true);
+        return;
+      }
+
       const firstFyId = nextYears[0]?.id || "";
       const firstFyLabel = nextYears[0]?.label || "";
       const autoRef =
@@ -117,16 +210,18 @@ export function OrgBudgetCreateForm({ projectId }) {
         financialYearId: firstFyId,
         budgetReference: autoRef || f.budgetReference,
       }));
+      setMetaReady(true);
     } finally {
       setLoading(false);
     }
-  }, [projectId, showToast]);
+  }, [projectId, budgetId, isEdit, showToast]);
 
   useEffect(() => {
     void load();
   }, [load]);
 
   function applyReferenceForFy(financialYearId) {
+    if (isEdit) return;
     const fy = years.find((y) => y.id === financialYearId);
     if (!fy?.label || !actorDepartment) return;
     const next = nextOrgDocumentReference(existingRefs, {
@@ -213,39 +308,58 @@ export function OrgBudgetCreateForm({ projectId }) {
     }
     setBusy(true);
     try {
-      const res = await fetch(`/api/projects/${projectId}/budgets`, {
-        method: "POST",
-        credentials: "include",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          title: form.title.trim(),
-          budgetReference: form.budgetReference.trim(),
-          description: form.description.trim() || null,
-          financialYearId: form.financialYearId,
-          lines: form.lines.map((line) => ({
-            category: line.category.trim(),
-            description: line.description.trim(),
-            quantity: parseMoneyInput(line.quantity),
-            unitOfMeasure: line.unitOfMeasure.trim(),
-            unitCost: parseMoneyInput(line.unitCost),
-            approvedAmount: parseMoneyInput(line.approvedAmount),
-            fundingSource: line.fundingSource.trim(),
-          })),
-        }),
-      });
+      const payload = {
+        title: form.title.trim(),
+        description: form.description.trim() || null,
+        lines: form.lines.map((line) => ({
+          category: line.category.trim(),
+          description: line.description.trim(),
+          quantity: parseMoneyInput(line.quantity),
+          unitOfMeasure: line.unitOfMeasure.trim(),
+          unitCost: parseMoneyInput(line.unitCost),
+          approvedAmount: parseMoneyInput(line.approvedAmount),
+          fundingSource: line.fundingSource.trim(),
+        })),
+      };
+      const res = isEdit
+        ? await fetch(`/api/projects/${projectId}/budgets/${budgetId}`, {
+            method: "PATCH",
+            credentials: "include",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ action: "updateDraft", ...payload }),
+          })
+        : await fetch(`/api/projects/${projectId}/budgets`, {
+            method: "POST",
+            credentials: "include",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              ...payload,
+              budgetReference: form.budgetReference.trim(),
+              financialYearId: form.financialYearId,
+            }),
+          });
       const data = await res.json().catch(() => ({}));
       if (!res.ok) {
         if (data.fieldErrors && typeof data.fieldErrors === "object") {
           setFieldErrors(data.fieldErrors);
         }
         showToast({
-          message: typeof data.error === "string" ? data.error : "Could not create budget.",
+          message:
+            typeof data.error === "string"
+              ? data.error
+              : isEdit
+                ? "Could not update budget."
+                : "Could not create budget.",
           severity: "error",
         });
         return;
       }
-      showToast({ message: "Department budget draft saved.", severity: "success" });
-      router.push(listHref);
+      showToast({
+        message: isEdit ? "Budget draft updated." : "Department budget draft saved.",
+        severity: "success",
+      });
+      if (!isEdit) await clearDraft();
+      router.push(isEdit ? `/projects/${projectId}/budgets/${budgetId}` : listHref);
     } finally {
       setBusy(false);
     }
@@ -277,7 +391,9 @@ export function OrgBudgetCreateForm({ projectId }) {
     return (
       <Paper variant="outlined" sx={{ p: 2, ...adminOutlinedTableContainerSx }}>
         <Typography sx={{ mb: 2 }}>
-          You cannot create a department budget with your current role.
+          {isEdit
+            ? "You cannot edit this department budget with your current role or status."
+            : "You cannot create a department budget with your current role."}
         </Typography>
         <Button component={Link} href={listHref} startIcon={<ArrowBackRounded />} variant="outlined">
           Back to budgets
@@ -300,8 +416,17 @@ export function OrgBudgetCreateForm({ projectId }) {
         </Button>
       </div>
       <Typography variant="subtitle1" sx={{ fontWeight: 600, mb: 2 }}>
-        Prepare department budget requirement
+        {isEdit ? "Edit department budget draft" : "Prepare department budget requirement"}
       </Typography>
+      {!isEdit ? (
+        <Typography variant="caption" sx={{ ...adminMutedTextSx, display: "block", mb: 2 }}>
+          {serverSyncState === "saving"
+            ? "Saving draft…"
+            : serverSyncState === "saved"
+              ? "Draft saved — you can continue on another device"
+              : "Autosaves as you type (local + server)"}
+        </Typography>
+      ) : null}
       <form className="grid gap-3 sm:grid-cols-2" onSubmit={createBudget} noValidate>
         <TextField
           label="Title"
@@ -325,6 +450,7 @@ export function OrgBudgetCreateForm({ projectId }) {
           label="Budget reference"
           value={form.budgetReference}
           onChange={(e) => {
+            if (isEdit) return;
             setForm((f) => ({ ...f, budgetReference: e.target.value }));
             setFieldErrors((fe) => {
               const n = { ...fe };
@@ -333,10 +459,13 @@ export function OrgBudgetCreateForm({ projectId }) {
             });
           }}
           fullWidth
+          disabled={isEdit}
           error={Boolean(fieldErrors.budgetReference)}
           helperText={
             fieldErrors.budgetReference ||
-            "Auto-generated as DEPT-BUD-YYYY-SEQ; you may edit"
+            (isEdit
+              ? "Reference is fixed after the draft is created"
+              : "Auto-generated as DEPT-BUD-YYYY-SEQ; you may edit")
           }
           sx={themedTextFieldSx}
           placeholder="ICT-BUD-2026-001"
@@ -344,6 +473,7 @@ export function OrgBudgetCreateForm({ projectId }) {
         <ActiveFinancialYearSelect
           value={form.financialYearId}
           onChange={(financialYearId) => {
+            if (isEdit) return;
             setForm((f) => ({ ...f, financialYearId }));
             setFieldErrors((fe) => {
               const n = { ...fe };
@@ -355,7 +485,11 @@ export function OrgBudgetCreateForm({ projectId }) {
           years={years}
           emptyMessage={fyEmptyMessage}
           error={Boolean(fieldErrors.financialYearId)}
-          helperText={fieldErrors.financialYearId || undefined}
+          helperText={
+            fieldErrors.financialYearId ||
+            (isEdit ? "Financial year is fixed after the draft is created" : undefined)
+          }
+          disabled={isEdit}
         />
         <TextField
           label="Department"
@@ -522,10 +656,10 @@ export function OrgBudgetCreateForm({ projectId }) {
           <Button
             type="submit"
             variant="contained"
-            disabled={busy || years.length === 0}
+            disabled={busy || (!isEdit && years.length === 0)}
             startIcon={busy ? <CircularProgress size={16} color="inherit" /> : <AddRounded />}
           >
-            Save draft
+            {isEdit ? "Save changes" : "Save draft"}
           </Button>
         </div>
       </form>

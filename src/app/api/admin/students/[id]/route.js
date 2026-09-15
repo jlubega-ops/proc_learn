@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { getSessionUser, sessionActiveRole } from "@/lib/api/get-session-user";
 import { canManageStudents } from "@/lib/api/student-scope";
-import { isAllowedAcademicYearLabel } from "@/lib/academic-years";
+import { isRegisteredAcademicYearLabel } from "@/lib/academic/academic-context";
 import { isStudentMubsEmail, isValidStudentNumberDigits } from "@/lib/mubs-email";
 import { parseOptionalMaleFemaleSex } from "@/lib/validation/sex-male-female";
 import { normalizeProfilePhotoInput } from "@/lib/profile-photo-url";
@@ -10,6 +10,8 @@ import { notifyAllSystemAdmins } from "@/lib/notify-system-admins";
 import { formatUserDisplayName } from "@/lib/user-display";
 import { prisma } from "@/lib/prisma";
 import { ensureEnrollmentFromProfileLabel } from "@/lib/academic/student-enrollment";
+import { parseCampus } from "@/lib/campuses";
+import { deleteProjectsOwnedByUser } from "@/lib/projects/purge-project-data";
 
 export const runtime = "nodejs";
 
@@ -108,9 +110,24 @@ export async function PATCH(request, ctx) {
   const academicYearLabel =
     typeof body?.academicYearLabel === "string" ? body.academicYearLabel.trim() : undefined;
   const yearRaw = body?.yearOfStudy !== undefined ? Number(body.yearOfStudy) : undefined;
+  const campusRaw = body?.campus !== undefined ? body.campus : undefined;
+  const campus =
+    campusRaw === undefined ? undefined : parseCampus(campusRaw);
 
-  if (academicYearLabel !== undefined && !isAllowedAcademicYearLabel(academicYearLabel)) {
-    return NextResponse.json({ error: "Invalid academic year." }, { status: 400 });
+  if (
+    academicYearLabel !== undefined &&
+    !(await isRegisteredAcademicYearLabel(academicYearLabel))
+  ) {
+    return NextResponse.json(
+      { error: "Choose an academic year from Academic setup." },
+      { status: 400 },
+    );
+  }
+  if (campusRaw !== undefined && !campus) {
+    return NextResponse.json(
+      { error: "Campus must be Main, Arua, Mbarara, Jinja, or Mbale." },
+      { status: 400 },
+    );
   }
 
   if (programmeId !== undefined) {
@@ -137,6 +154,7 @@ export async function PATCH(request, ctx) {
   }
   if (programmeId !== undefined) spData.programmeId = programmeId;
   if (academicYearLabel !== undefined) spData.academicYearLabel = academicYearLabel;
+  if (campus !== undefined) spData.campus = campus;
   if (yearRaw !== undefined) {
     if (![1, 2, 3].includes(yearRaw)) {
       return NextResponse.json({ error: "Year of study must be 1, 2, or 3." }, { status: 400 });
@@ -198,7 +216,7 @@ export async function PATCH(request, ctx) {
 /**
  * @param {{ params: Promise<{ id: string }> }} ctx
  */
-export async function DELETE(_request, ctx) {
+export async function DELETE(request, ctx) {
   const actor = await getSessionUser();
   const active = sessionActiveRole(actor);
   if (!actor || !canManageStudents(active)) {
@@ -208,6 +226,22 @@ export async function DELETE(_request, ctx) {
   const { id } = await ctx.params;
   if (!id) {
     return NextResponse.json({ error: "Missing id." }, { status: 400 });
+  }
+
+  let body = {};
+  try {
+    body = await request.json();
+  } catch {
+    body = {};
+  }
+  if (String(body?.confirmText || "").trim() !== "DELETE") {
+    return NextResponse.json(
+      {
+        error:
+          'Deletion not confirmed. Type "DELETE" in all caps to permanently remove this student and related data.',
+      },
+      { status: 400 },
+    );
   }
 
   const existing = await prisma.user.findUnique({
@@ -221,7 +255,10 @@ export async function DELETE(_request, ctx) {
   const label = formatUserDisplayName(existing);
   const em = existing.email;
 
-  await prisma.user.delete({ where: { id } });
+  await prisma.$transaction(async (tx) => {
+    await deleteProjectsOwnedByUser(tx, id);
+    await tx.user.delete({ where: { id } });
+  });
 
   await writeAuditLog({
     eventType: AuditEvent.STUDENT_DELETED,

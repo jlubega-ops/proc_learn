@@ -38,7 +38,7 @@ export default async function ProjectOrgMemberAccountPage({ params }) {
             <dd className="mt-0.5 text-zinc-900 dark:text-white">{displayName || "—"}</dd>
           </div>
           <div>
-            <dt className="font-semibold text-zinc-500 dark:text-zinc-400">Username</dt>
+            <dt className="font-semibold text-zinc-500 dark:text-zinc-400">Login email</dt>
             <dd className="mt-0.5 break-all font-mono text-zinc-900 dark:text-white">
               {username || "—"}
             </dd>

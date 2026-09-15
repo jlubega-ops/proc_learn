@@ -23,6 +23,7 @@ import {
 } from "@/lib/projects/student-active-org";
 import { ensureCurrentOrgSlateForProject } from "@/lib/academic/org-academic-slate";
 import { getActiveEnrollment } from "@/lib/academic/student-enrollment";
+import { campusLabel } from "@/lib/campuses";
 import { deriveOrganisationProcurementProgress } from "@/lib/projects/derive-org-progress";
 import { OBSERVATION_STAGE_LABELS } from "@/lib/projects/derive-org-progress";
 import { getOrCreateProjectAssessment, computeLiveProcessScore } from "@/lib/academic/assessment-evaluate";
@@ -897,6 +898,8 @@ export async function listAcademicProjectParticipants(opts) {
       email: e.student.email,
       studentNumber: e.student.studentProfile?.studentNumber || null,
       programme: e.student.studentProfile?.programme?.shortName || null,
+      campus: e.student.studentProfile?.campus || null,
+      campusLabel: campusLabel(e.student.studentProfile?.campus) || null,
       academicYearLabel: e.student.academicEnrollments?.[0]?.academicYear?.label || null,
       participationType,
       enrolledAt: e.enrolledAt,

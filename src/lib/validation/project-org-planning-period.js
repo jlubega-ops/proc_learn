@@ -8,6 +8,16 @@ function cleanText(value) {
 }
 
 /**
+ * @param {unknown} raw
+ * @returns {string | null}
+ */
+function optionalLabel(raw) {
+  if (raw === undefined || raw === null) return null;
+  const label = cleanText(raw);
+  return label || null;
+}
+
+/**
  * @param {unknown} body
  */
 export function validateProjectOrgPlanningPeriodInput(body) {
@@ -16,6 +26,9 @@ export function validateProjectOrgPlanningPeriodInput(body) {
 
   const financialYearId = cleanText(body?.financialYearId);
   if (!financialYearId) errors.financialYearId = "Financial year is required.";
+
+  const label = optionalLabel(body?.label);
+  if (label && label.length > 128) errors.label = "Label is too long.";
 
   const range = validateStartEndDateRange(body?.startDate, body?.endDate);
   Object.assign(errors, range.errors);
@@ -29,6 +42,7 @@ export function validateProjectOrgPlanningPeriodInput(body) {
     ok: true,
     data: {
       financialYearId,
+      label,
       startDate: range.startDate,
       endDate: range.endDate,
     },
@@ -40,6 +54,7 @@ export function validateProjectOrgPlanningPeriodInput(body) {
  * @param {{
  *   current?: {
  *     financialYearId: string;
+ *     label?: string | null;
  *     startDate: Date;
  *     endDate: Date;
  *   };
@@ -56,6 +71,12 @@ export function validateProjectOrgPlanningPeriodPatch(body, opts = {}) {
     const financialYearId = cleanText(body.financialYearId);
     if (!financialYearId) errors.financialYearId = "Financial year is required.";
     else data.financialYearId = financialYearId;
+  }
+
+  if (body?.label !== undefined) {
+    const label = optionalLabel(body.label);
+    if (label && label.length > 128) errors.label = "Label is too long.";
+    else data.label = label;
   }
 
   const startProvided = body?.startDate !== undefined;

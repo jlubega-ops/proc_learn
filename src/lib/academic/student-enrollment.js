@@ -11,7 +11,7 @@
  * - Service: at most one ACTIVE enrollment per user (others become HISTORICAL on join).
  *
  * Bootstrap / seeding:
- * - Phase 1 `GET /api/meta/academic-context` may seed a current year+semester in empty DBs
+ * - Phase 1 `GET /api/meta/academic-context` may seed a current year in empty DBs
  *   (dev/bootstrap only). Phase 2 does not expand that. Production should create Academic Years
  *   via System Admin Academic setup — do not auto-create university years in student joins beyond
  *   finding existing current year or provisioning years that match an admin-set profile label.
@@ -39,7 +39,6 @@ export function serializeEnrollment(row) {
     academicYearId: row.academicYearId,
     status: row.status,
     participationType: row.participationType,
-    classCohortId: row.classCohortId || null,
     joinedAt: row.joinedAt,
     endedAt: row.endedAt || null,
     academicYear: row.academicYear ? serializeAcademicYear(row.academicYear) : undefined,
@@ -129,7 +128,6 @@ async function withDeadlockRetry(fn, attempts = 5) {
  *   userId: string;
  *   academicYearId: string;
  *   participationType?: import("@prisma/client").AcademicParticipationType;
- *   classCohortId?: string | null;
  *   syncProfileLabel?: boolean;
  * }} opts
  */
@@ -179,7 +177,6 @@ export async function ensureActiveEnrollment(db, opts) {
           participationType,
           endedAt: null,
           joinedAt: existing.status === AcademicEnrollmentStatus.ACTIVE ? existing.joinedAt : new Date(),
-          ...(opts.classCohortId !== undefined ? { classCohortId: opts.classCohortId } : {}),
         },
         include: { academicYear: true },
       });
@@ -191,7 +188,6 @@ export async function ensureActiveEnrollment(db, opts) {
           academicYearId: opts.academicYearId,
           status: AcademicEnrollmentStatus.ACTIVE,
           participationType,
-          classCohortId: opts.classCohortId ?? null,
         },
         include: { academicYear: true },
       });
@@ -275,7 +271,7 @@ export async function getActiveEnrollment(db = prisma, userId) {
 }
 
 /**
- * Student-facing academic context: university current AY/semester + enrollment + join prompt.
+ * Student-facing academic context: university current AY + enrollment + join prompt.
  * Demo Student Mode auto-ensures current year context (no join prompt).
  *
  * @param {string} userId
@@ -304,7 +300,6 @@ export async function getStudentAcademicContext(userId, db = prisma) {
     const enrollments = await listEnrollmentsForUser(db, userId);
     return {
       academicYear: demo.academicYear,
-      semester: demo.semester,
       enrollment: serializeEnrollment(demo.enrollment),
       enrollments,
       enrolledInCurrentYear: true,
@@ -359,7 +354,6 @@ export async function getStudentAcademicContext(userId, db = prisma) {
 
   return {
     academicYear: university.academicYear,
-    semester: university.semester,
     enrollment: serializeEnrollment(active),
     enrollments,
     enrolledInCurrentYear,
@@ -415,7 +409,6 @@ export async function joinCurrentAcademicYear(userId, meta = {}, db = prisma) {
     return {
       enrollment: serializeEnrollment(result.enrollment),
       academicYear: university.academicYear,
-      semester: university.semester,
       created: result.created,
       reactivated: result.reactivated,
       alreadyActive: result.alreadyActive,
@@ -441,7 +434,6 @@ export async function joinCurrentAcademicYear(userId, meta = {}, db = prisma) {
       return {
         enrollment: serializeEnrollment(result.enrollment),
         academicYear: university.academicYear,
-        semester: university.semester,
         created: result.created,
         reactivated: result.reactivated,
         alreadyActive: result.alreadyActive,

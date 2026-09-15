@@ -178,9 +178,9 @@ export function ProjectOrgBudgetsPanel({ projectId, readOnly = true }) {
 
   const statusColor = (s) => {
     if (s === "APPROVED") return "success";
-    if (s === "SUBMITTED") return "info";
-    if (s === "CLOSED") return "default";
-    return "warning";
+    if (s === "REJECTED" || s === "CLOSED") return "error";
+    if (s === "RETURNED" || s === "SUBMITTED" || s === "UNDER_REVIEW") return "warning";
+    return "info";
   };
 
   if (loading) {
@@ -280,7 +280,11 @@ export function ProjectOrgBudgetsPanel({ projectId, readOnly = true }) {
                 >
                   <div className="flex flex-wrap items-center gap-2">
                     <span className="font-semibold">{b.title}</span>
-                    <Chip size="small" color={statusColor(b.status)} label={b.status} />
+                    <Chip
+                      size="small"
+                      color={b.statusColor || statusColor(b.status)}
+                      label={b.statusLabel || b.status}
+                    />
                     <span className="text-sm text-zinc-500">
                       {b.financialYear?.label}
                       {b.department?.name ? ` · ${b.department.name}` : ""}
@@ -303,7 +307,11 @@ export function ProjectOrgBudgetsPanel({ projectId, readOnly = true }) {
             {detail.budget.title}
           </Typography>
           <div className="mb-3 flex flex-wrap gap-2">
-            <Chip size="small" color={statusColor(detail.budget.status)} label={detail.budget.status} />
+            <Chip
+              size="small"
+              color={detail.budget.statusColor || statusColor(detail.budget.status)}
+              label={detail.budget.statusLabel || detail.budget.status}
+            />
             {detail.budget.status === "APPROVED" ? (
               <Button
                 size="small"

@@ -64,6 +64,7 @@ export async function buildProjectGradesWorkbook(opts) {
     "Student name",
     "Email",
     "Programme",
+    "Campus",
     "Academic year",
     "Status",
     "Attempt #",
@@ -112,6 +113,7 @@ export async function buildProjectGradesWorkbook(opts) {
       row.displayName || "",
       row.email || "",
       row.programme || "",
+      row.campusLabel || row.campus || "",
       row.academicYearLabel || "",
       row.status?.label || "",
       attempt?.attemptNumber ?? "",
@@ -169,6 +171,7 @@ export async function buildProjectGradesWorkbook(opts) {
       "Student number",
       "Student name",
       "Email",
+      "Campus",
       ...processCodes.map((code) => processLabels.get(code) || code),
       "Score",
       "Total marks",
@@ -180,6 +183,7 @@ export async function buildProjectGradesWorkbook(opts) {
         row.studentNumber || "",
         row.displayName || "",
         row.email || "",
+        row.campusLabel || row.campus || "",
         ...processCodes.map((code) => {
           const proc = byCode.get(code);
           if (!proc) return "";

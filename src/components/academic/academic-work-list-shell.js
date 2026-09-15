@@ -16,7 +16,6 @@ import { BRAND_BTN_PRIMARY_CLASS, BRAND_CARD_CLASS, BRAND_SECTION_TITLE_CLASS } 
  *   emptyTitle: string;
  *   emptyBody: string;
  *   academicYearLabel?: string | null;
- *   semesterName?: string | null;
  *   enrolled?: boolean;
  * }} props
  */
@@ -26,18 +25,15 @@ export function AcademicWorkListShell({
   emptyTitle,
   emptyBody,
   academicYearLabel = null,
-  semesterName = null,
   enrolled = false,
 }) {
   return (
     <div className={BRAND_PAGE_SHELL_CLASS}>
       <DashboardPageIntro hero title={title} description={description}>
-        {academicYearLabel || semesterName ? (
+        {academicYearLabel ? (
           <p className={`mt-3 text-sm text-zinc-600 dark:text-zinc-400`}>
-            {academicYearLabel ? <>Academic Year: {academicYearLabel}</> : null}
-            {academicYearLabel && semesterName ? " · " : null}
-            {semesterName ? <>Semester: {semesterName}</> : null}
-            {!enrolled && academicYearLabel ? (
+            Academic Year: {academicYearLabel}
+            {!enrolled ? (
               <span className="ml-2 text-brand-red">Not enrolled in the current year yet.</span>
             ) : null}
           </p>

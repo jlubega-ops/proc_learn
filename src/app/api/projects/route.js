@@ -77,7 +77,6 @@ export async function GET(request) {
   const status = String(searchParams.get("status") || "all").toLowerCase();
   const openStatus = String(searchParams.get("openStatus") || "all").toLowerCase();
   const academicYearId = String(searchParams.get("academicYearId") || "").trim();
-  const semesterId = String(searchParams.get("semesterId") || "").trim();
   const programmeId = String(searchParams.get("programmeId") || "").trim();
   const page = Math.max(1, Number(searchParams.get("page") || 1));
   const pageSizeRaw = Number(searchParams.get("pageSize") || 10);
@@ -92,7 +91,6 @@ export async function GET(request) {
     activeRole === Role.EXAMINER || activeRole === Role.SYSTEM_ADMIN
       ? {
           ...(academicYearId ? { academicYearId } : {}),
-          ...(semesterId ? { semesterId } : {}),
           ...(programmeId ? { programmeId } : {}),
         }
       : {};
@@ -188,7 +186,6 @@ export async function GET(request) {
             owner: { select: { id: true, firstName: true, lastName: true, email: true } },
             enrollments: true,
             academicYear: { select: { id: true, label: true, isCurrent: true } },
-            semester: { select: { id: true, name: true, isActive: true } },
             programme: { select: { id: true, name: true, shortName: true } },
           }
         : { owner: { select: { id: true, firstName: true, lastName: true, email: true } } };
@@ -215,6 +212,7 @@ export async function GET(request) {
 
   return NextResponse.json({
     projects,
+    serverNow: new Date().toISOString(),
     page,
     pageSize,
     total,
@@ -253,19 +251,15 @@ export async function POST(request) {
   const data = validated.data;
 
   if ([Role.EXAMINER, Role.SYSTEM_ADMIN].includes(activeRole)) {
-    const [year, semester, programme] = await Promise.all([
+    const [year, programme] = await Promise.all([
       data.academicYearId
         ? prisma.academicYear.findUnique({ where: { id: data.academicYearId } })
         : null,
-      data.semesterId ? prisma.semester.findUnique({ where: { id: data.semesterId } }) : null,
       data.programmeId ? prisma.programme.findUnique({ where: { id: data.programmeId } }) : null,
     ]);
     /** @type {Record<string, string>} */
     const fieldErrors = {};
     if (!year) fieldErrors.academicYearId = "Choose a valid academic year.";
-    if (!semester || (year && semester.academicYearId !== year.id)) {
-      fieldErrors.semesterId = "Choose a semester for the selected academic year.";
-    }
     if (!programme || !programme.isActive) fieldErrors.programmeId = "Choose an active programme.";
     if (Object.keys(fieldErrors).length) {
       return NextResponse.json(
@@ -306,7 +300,6 @@ export async function POST(request) {
       academicYearId: [Role.EXAMINER, Role.SYSTEM_ADMIN].includes(activeRole)
         ? data.academicYearId
         : null,
-      semesterId: [Role.EXAMINER, Role.SYSTEM_ADMIN].includes(activeRole) ? data.semesterId : null,
       programmeId: [Role.EXAMINER, Role.SYSTEM_ADMIN].includes(activeRole)
         ? data.programmeId
         : null,

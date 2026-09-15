@@ -12,7 +12,7 @@
  * Catalogue behaviour (always):
  *   - Upsert organisation roles from CORE_ORG_ROLE_DEFINITIONS
  *   - Upsert engine process workflows + steps from BASELINE_PROCESS_TEMPLATES
- *   - Ensure a default Programme (GEN) and current Academic Year / Semester 1
+ *   - Ensure a default Programme (GEN) and current Academic Year
  *
  * Optional flags:
  *   --wipe-runtime   Delete all workflow instances/tasks/actions (destructive)
@@ -82,6 +82,9 @@ function resolveAdoptionCode(flow) {
     if (alias.legacyNames.includes(name)) return alias.code;
   }
   if (name === "planning process") return PROCESS_FLOW_CODES.PROCUREMENT_PLANNING;
+  if (name === "emergency planning process" || name === "emergency planning") {
+    return PROCESS_FLOW_CODES.EMERGENCY_PLANNING;
+  }
   if (name === "budgeting process") return PROCESS_FLOW_CODES.BUDGETING;
   if (name === "requisition process") return PROCESS_FLOW_CODES.PROCUREMENT_REQUISITION;
   if (name === "micro procurement process") return PROCESS_FLOW_CODES.MICRO_PROCUREMENT;
@@ -388,7 +391,6 @@ async function printSummary() {
 
   console.log("\n=== Academic context ===");
   console.log(`Year: ${ay.academicYear?.label || "—"} (current)`);
-  console.log(`Semester: ${ay.semester?.name || "—"} (active)`);
 
   console.log("\n=== System roles note ===");
   console.log(
@@ -405,7 +407,7 @@ async function main() {
   await ensureSystemAdmin();
   await ensureDefaultProgramme();
   await ensureCurrentAcademicContext(prisma);
-  console.log("Academic year / semester ensured.");
+  console.log("Academic year ensured.");
 
   await refreshOrganisationRoles();
   await refreshProcessWorkflows();

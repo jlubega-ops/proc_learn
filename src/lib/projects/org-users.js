@@ -32,8 +32,8 @@ const orgUserInclude = {
  */
 export function serializeProjectOrgUser(row, studentNumber = null, projectCode = null) {
   const unitIdentifier = row.unitIdentifier || null;
-  const code = String(projectCode || "").trim().toUpperCase();
-  const username =
+  const code = String(projectCode || "").trim();
+  const loginEmail =
     !row.isProjectAdmin && code ? formatOrgUsername(row.email, code) : null;
 
   return {
@@ -41,9 +41,13 @@ export function serializeProjectOrgUser(row, studentNumber = null, projectCode =
     firstName: row.firstName,
     middleName: row.middleName,
     lastName: row.lastName,
+    /** Stored base email (synthetic). Prefer loginEmail for sign-in copy. */
     email: row.email,
+    /** Project-scoped login identifier (lowercase). Same as former username. */
+    loginEmail,
+    /** @deprecated use loginEmail */
+    username: loginEmail,
     unitIdentifier,
-    username,
     password: !row.isProjectAdmin ? PROJECT_ORG_LEARN_PASSWORD : null,
     isProjectAdmin: row.isProjectAdmin,
     linkedUserId: row.linkedUserId,

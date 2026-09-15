@@ -46,6 +46,7 @@ import { validateStudentAccountForm } from "@/lib/validation/student-form";
 import { BRAND_BTN_PRIMARY_CLASS } from "@/lib/brand-ui";
 import { AdminStudentsBulkImportDialog } from "@/components/admin/admin-students-bulk-import-dialog";
 import { useToast } from "@/components/providers/toast-provider";
+import { campusSelectOptions, campusLabel } from "@/lib/campuses";
 
 /**
  * @typedef {{
@@ -62,6 +63,8 @@ import { useToast } from "@/components/providers/toast-provider";
  *   programmeShortName: string | null;
  *   academicYearLabel: string | null;
  *   yearOfStudy: number | null;
+ *   campus: string | null;
+ *   campusLabel: string | null;
  *   sex: string | null;
  *   accountStatus: string;
  *   suspendedReason: string | null;
@@ -98,8 +101,10 @@ export function AdminStudentsPanel() {
   const [q, setQ] = useState("");
   const [programmeId, setProgrammeId] = useState("");
   const [academicYear, setAcademicYear] = useState("");
+  const [campusFilter, setCampusFilter] = useState("");
   const [editRow, setEditRow] = useState(/** @type {StudentRow | null} */ (null));
   const [delRow, setDelRow] = useState(/** @type {StudentRow | null} */ (null));
+  const [deleteConfirmText, setDeleteConfirmText] = useState("");
   const [reasonOpen, setReasonOpen] = useState(
     /** @type {{ title: string; text: string } | null} */ (null),
   );
@@ -121,6 +126,7 @@ export function AdminStudentsPanel() {
   const [progId, setProgId] = useState("");
   const [yearOfStudy, setYearOfStudy] = useState("3");
   const [acadLabel, setAcadLabel] = useState("");
+  const [campus, setCampus] = useState("");
   const [sex, setSex] = useState("");
   const [snSynced, setSnSynced] = useState(true);
   /** @type {[Record<string, string>, import("react").Dispatch<import("react").SetStateAction<Record<string, string>>>]} */
@@ -136,9 +142,12 @@ export function AdminStudentsPanel() {
     const pData = await pRes.json().catch(() => ({}));
     const yData = await yRes.json().catch(() => ({}));
     if (pRes.ok && Array.isArray(pData.programmes)) setProgrammes(pData.programmes);
-    if (yRes.ok && Array.isArray(yData.extended)) {
+    if (yRes.ok && Array.isArray(yData.labels) && yData.labels.length) {
+      setAcademicYears(yData.labels);
+      setAcadLabel((prev) => prev || yData.currentLabel || yData.labels[0] || "");
+    } else if (yRes.ok && Array.isArray(yData.extended)) {
       setAcademicYears(yData.extended);
-      setAcadLabel((prev) => prev || (Array.isArray(yData.primary) ? yData.primary[0] : "") || "");
+      setAcadLabel((prev) => prev || yData.currentLabel || yData.extended[0] || "");
     }
   }, []);
 
@@ -152,6 +161,7 @@ export function AdminStudentsPanel() {
         if (deferredSearch) params.set("q", deferredSearch);
         if (programmeId) params.set("programmeId", programmeId);
         if (academicYear) params.set("academicYear", academicYear);
+        if (campusFilter) params.set("campus", campusFilter);
         const res = await fetch(`/api/admin/students?${params.toString()}`, {
           credentials: "include",
         });
@@ -170,7 +180,7 @@ export function AdminStudentsPanel() {
         else setLoading(false);
       }
     },
-    [deferredSearch, programmeId, academicYear, showToast],
+    [deferredSearch, programmeId, academicYear, campusFilter, showToast],
   );
 
   useEffect(() => {
@@ -197,6 +207,7 @@ export function AdminStudentsPanel() {
     setProgId(row.programmeId || "");
     setYearOfStudy(String(row.yearOfStudy ?? 3));
     setAcadLabel(row.academicYearLabel || "");
+    setCampus(row.campus || "");
   }
 
   async function saveEdit() {
@@ -210,6 +221,7 @@ export function AdminStudentsPanel() {
       registrationNumber,
       programmeId: progId,
       academicYearLabel: acadLabel,
+      campus,
       sex,
     });
     setFieldErrors(next);
@@ -239,6 +251,7 @@ export function AdminStudentsPanel() {
           programmeId: progId,
           yearOfStudy: Number(yearOfStudy),
           academicYearLabel: acadLabel,
+          campus,
         }),
       });
       const data = await res.json().catch(() => ({}));
@@ -339,11 +352,20 @@ export function AdminStudentsPanel() {
 
   async function confirmDelete() {
     if (!delRow) return;
+    if (deleteConfirmText.trim() !== "DELETE") {
+      showToast({
+        message: 'Type DELETE in all caps to confirm.',
+        severity: "error",
+      });
+      return;
+    }
     setSaving(true);
     try {
       const res = await fetch(`/api/admin/students/${delRow.id}`, {
         method: "DELETE",
         credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ confirmText: deleteConfirmText.trim() }),
       });
       const data = await res.json().catch(() => ({}));
       if (!res.ok) {
@@ -355,6 +377,7 @@ export function AdminStudentsPanel() {
       }
       showToast({ message: "Student removed.", severity: "success" });
       setDelRow(null);
+      setDeleteConfirmText("");
       await loadStudents({ silent: true });
     } finally {
       setSaving(false);
@@ -402,6 +425,21 @@ export function AdminStudentsPanel() {
             </MenuItem>
           ))}
         </TextField>
+        <TextField
+          select
+          size="small"
+          label="Campus"
+          value={campusFilter}
+          onChange={(e) => setCampusFilter(e.target.value)}
+          sx={{ ...themedTextFieldSx, minWidth: 140 }}
+        >
+          <MenuItem value="">All campuses</MenuItem>
+          {campusSelectOptions().map((c) => (
+            <MenuItem key={c.value} value={c.value}>
+              {c.label}
+            </MenuItem>
+          ))}
+        </TextField>
         <Button variant="outlined" onClick={() => void loadStudents({ silent: true })}>
           Refresh
         </Button>
@@ -441,6 +479,7 @@ export function AdminStudentsPanel() {
                 <TableCell>Email</TableCell>
                 <TableCell>Student #</TableCell>
                 <TableCell>Programme</TableCell>
+                <TableCell>Campus</TableCell>
                 <TableCell>Year</TableCell>
                 <TableCell>Academic year</TableCell>
                 <TableCell>Status</TableCell>
@@ -469,6 +508,7 @@ export function AdminStudentsPanel() {
                       "—"
                     )}
                   </TableCell>
+                  <TableCell>{row.campusLabel || campusLabel(row.campus) || "—"}</TableCell>
                   <TableCell>{row.yearOfStudy}</TableCell>
                   <TableCell>{row.academicYearLabel}</TableCell>
                   <TableCell>
@@ -539,7 +579,10 @@ export function AdminStudentsPanel() {
                           color="error"
                           aria-label="Delete student"
                           disabled={refetching}
-                          onClick={() => setDelRow(row)}
+                          onClick={() => {
+                            setDeleteConfirmText("");
+                            setDelRow(row);
+                          }}
                         >
                           <DeleteOutlineRounded fontSize="small" />
                         </IconButton>
@@ -762,6 +805,28 @@ export function AdminStudentsPanel() {
             </TextField>
             <TextField
               select
+              label="Campus"
+              value={campus}
+              onChange={(e) => {
+                setCampus(e.target.value);
+                setFieldErrors((p) => {
+                  const { campus: _c, ...r } = p;
+                  return r;
+                });
+              }}
+              error={Boolean(fieldErrors.campus)}
+              helperText={fieldErrors.campus}
+              fullWidth
+              sx={themedTextFieldSx}
+            >
+              {campusSelectOptions().map((c) => (
+                <MenuItem key={c.value} value={c.value}>
+                  {c.label}
+                </MenuItem>
+              ))}
+            </TextField>
+            <TextField
+              select
               label="Year of study"
               value={yearOfStudy}
               onChange={(e) => setYearOfStudy(e.target.value)}
@@ -772,29 +837,29 @@ export function AdminStudentsPanel() {
               <MenuItem value="2">2</MenuItem>
               <MenuItem value="3">3</MenuItem>
             </TextField>
-            <TextField
-              select
-              label="Academic year"
-              value={acadLabel}
-              onChange={(e) => {
-                setAcadLabel(e.target.value);
-                setFieldErrors((p) => {
-                  const { academicYearLabel: _a, ...r } = p;
-                  return r;
-                });
-              }}
-              error={Boolean(fieldErrors.academicYearLabel)}
-              helperText={fieldErrors.academicYearLabel}
-              fullWidth
-              sx={themedTextFieldSx}
-            >
-              {academicYears.map((y) => (
-                <MenuItem key={y} value={y}>
-                  {y}
-                </MenuItem>
-              ))}
-            </TextField>
           </div>
+          <TextField
+            select
+            label="Academic year"
+            value={acadLabel}
+            onChange={(e) => {
+              setAcadLabel(e.target.value);
+              setFieldErrors((p) => {
+                const { academicYearLabel: _a, ...r } = p;
+                return r;
+              });
+            }}
+            error={Boolean(fieldErrors.academicYearLabel)}
+            helperText={fieldErrors.academicYearLabel}
+            fullWidth
+            sx={themedTextFieldSx}
+          >
+            {academicYears.map((y) => (
+              <MenuItem key={y} value={y}>
+                {y}
+              </MenuItem>
+            ))}
+          </TextField>
         </DialogContent>
         <DialogActions>
           <Button onClick={() => !saving && setEditRow(null)} disabled={saving}>
@@ -808,22 +873,48 @@ export function AdminStudentsPanel() {
 
       <Dialog
         open={Boolean(delRow)}
-        onClose={() => !saving && setDelRow(null)}
+        onClose={() => {
+          if (saving) return;
+          setDelRow(null);
+          setDeleteConfirmText("");
+        }}
+        fullWidth
+        maxWidth="sm"
         slotProps={{ paper: { sx: adminDialogPaperSx } }}
       >
         <DialogTitle>Delete student {delRow?.email}?</DialogTitle>
         <DialogContent>
-          <Typography>This permanently removes the student account and profile.</Typography>
+          <Typography className="mb-3">
+            This permanently removes the student account, profile, organisations, and related
+            procurement learning data. This cannot be undone.
+          </Typography>
+          <TextField
+            autoFocus
+            margin="dense"
+            label='Type DELETE to confirm'
+            fullWidth
+            value={deleteConfirmText}
+            onChange={(e) => setDeleteConfirmText(e.target.value)}
+            sx={themedTextFieldSx}
+            helperText="Related projects and organisation records are deleted with the account."
+          />
         </DialogContent>
         <DialogActions>
-          <Button onClick={() => setDelRow(null)} disabled={saving}>
+          <Button
+            onClick={() => {
+              setDelRow(null);
+              setDeleteConfirmText("");
+            }}
+            disabled={saving}
+          >
             Cancel
           </Button>
           <Button
             color="error"
             variant="contained"
             onClick={() => void confirmDelete()}
-            disabled={saving}
+            disabled={saving || deleteConfirmText.trim() !== "DELETE"}
+            className="cursor-pointer disabled:cursor-not-allowed"
           >
             {saving ? <CircularProgress size={22} color="inherit" aria-hidden /> : "Delete"}
           </Button>

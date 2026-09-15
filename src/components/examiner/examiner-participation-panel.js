@@ -35,6 +35,7 @@ import {
   themedTextFieldSx,
 } from "@/lib/admin-mui-surfaces";
 import { useToast } from "@/components/providers/toast-provider";
+import { campusSelectOptions } from "@/lib/campuses";
 
 /**
  * Examiner roster: students + personal organisation + current procurement stage.
@@ -47,7 +48,7 @@ export function ExaminerParticipationPanel() {
   const [q, setQ] = useState("");
   const [search, setSearch] = useState("");
   const [yearId, setYearId] = useState("");
-  const [semesterId, setSemesterId] = useState("");
+  const [campus, setCampus] = useState("");
   const [participation, setParticipation] = useState("all");
   const [page, setPage] = useState(0);
   const [pageSize, setPageSize] = useState(20);
@@ -58,7 +59,7 @@ export function ExaminerParticipationPanel() {
       const qs = new URLSearchParams();
       if (search.trim()) qs.set("q", search.trim());
       if (yearId) qs.set("academicYearId", yearId);
-      if (semesterId) qs.set("semesterId", semesterId);
+      if (campus) qs.set("campus", campus);
       qs.set("participation", participation);
       qs.set("page", String(page + 1));
       qs.set("pageSize", String(pageSize));
@@ -76,11 +77,10 @@ export function ExaminerParticipationPanel() {
       }
       setData(json);
       if (!yearId && json?.academicYear?.id) setYearId(json.academicYear.id);
-      if (!semesterId && json?.semester?.id) setSemesterId(json.semester.id);
     } finally {
       setLoading(false);
     }
-  }, [search, yearId, semesterId, participation, page, pageSize, showToast]);
+  }, [search, yearId, campus, participation, page, pageSize, showToast]);
 
   useEffect(() => {
     void load();
@@ -104,7 +104,6 @@ export function ExaminerParticipationPanel() {
             value={yearId}
             onChange={(e) => {
               setYearId(e.target.value);
-              setSemesterId("");
               setPage(0);
             }}
             sx={themedTextFieldSx}
@@ -119,19 +118,18 @@ export function ExaminerParticipationPanel() {
           <TextField
             select
             size="small"
-            label="Semester"
-            value={semesterId}
+            label="Campus"
+            value={campus}
             onChange={(e) => {
-              setSemesterId(e.target.value);
+              setCampus(e.target.value);
               setPage(0);
             }}
             sx={themedTextFieldSx}
-            helperText="Defaults to the active semester"
           >
-            {(data?.availableSemesters || []).map((s) => (
-              <MenuItem key={s.id} value={s.id}>
-                {s.name}
-                {s.isActive ? " (active)" : ""}
+            <MenuItem value="">All campuses</MenuItem>
+            {campusSelectOptions().map((c) => (
+              <MenuItem key={c.value} value={c.value}>
+                {c.label}
               </MenuItem>
             ))}
           </TextField>
@@ -223,6 +221,9 @@ export function ExaminerParticipationPanel() {
                       <div className="text-xs opacity-70">{row.email}</div>
                       {row.studentNumber ? (
                         <div className="text-xs opacity-70">{row.studentNumber}</div>
+                      ) : null}
+                      {row.campusLabel ? (
+                        <div className="text-xs opacity-70">Campus: {row.campusLabel}</div>
                       ) : null}
                       {row.demoBadge ? (
                         <Chip size="small" color="warning" className="mt-1" label={row.demoBadge.label} />

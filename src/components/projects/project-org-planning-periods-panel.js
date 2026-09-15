@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import Box from "@mui/material/Box";
 import Button from "@mui/material/Button";
+import Chip from "@mui/material/Chip";
 import CircularProgress from "@mui/material/CircularProgress";
 import Dialog from "@mui/material/Dialog";
 import DialogActions from "@mui/material/DialogActions";
@@ -28,7 +29,6 @@ import AddRounded from "@mui/icons-material/AddRounded";
 import DeleteOutlineRounded from "@mui/icons-material/DeleteOutlineRounded";
 import EditRounded from "@mui/icons-material/EditRounded";
 import RefreshRounded from "@mui/icons-material/RefreshRounded";
-import { format, parseISO } from "date-fns";
 import { useToast } from "@/components/providers/toast-provider";
 import {
   adminCenteredLoadingBoxSx,
@@ -41,7 +41,7 @@ import {
   themedTextFieldSx,
 } from "@/lib/admin-mui-surfaces";
 import { formatPlanningPeriodDuration } from "@/lib/planning-period-duration";
-import { parseDateInputValue } from "@/lib/financial-year-dates";
+import { formatCalendarDateLabel, parseDateInputValue } from "@/lib/financial-year-dates";
 import {
   calendarDateInputConstraints,
   mergeCalendarDateRangeErrors,
@@ -52,17 +52,25 @@ import {
 } from "@/lib/validation/project-org-planning-period";
 
 function emptyForm() {
-  return { financialYearId: "", startDate: "", endDate: "" };
+  return { financialYearId: "", label: "", startDate: "", endDate: "" };
 }
 
 /**
  * @param {unknown} value
  */
 function fmtTableDate(value) {
-  if (!value) return "—";
-  const d = typeof value === "string" ? parseISO(value) : new Date(value);
-  if (Number.isNaN(d.getTime())) return "—";
-  return format(d, "MMM d, yyyy");
+  return formatCalendarDateLabel(value);
+}
+
+/**
+ * @param {string | null | undefined} status
+ */
+function statusChipColor(status) {
+  const s = String(status || "").toUpperCase();
+  if (s === "OPEN") return "info";
+  if (s === "UPCOMING") return "warning";
+  if (s === "CLOSED") return "error";
+  return "default";
 }
 
 /**
@@ -72,7 +80,13 @@ function computePeriodLabel(form) {
   const start = parseDateInputValue(form.startDate);
   const end = parseDateInputValue(form.endDate);
   if (!start || !end) return "—";
-  return formatPlanningPeriodDuration(start, end);
+  const startLocal = new Date(
+    start.getUTCFullYear(),
+    start.getUTCMonth(),
+    start.getUTCDate(),
+  );
+  const endLocal = new Date(end.getUTCFullYear(), end.getUTCMonth(), end.getUTCDate());
+  return formatPlanningPeriodDuration(startLocal, endLocal);
 }
 
 /**
@@ -183,6 +197,7 @@ export function ProjectOrgPlanningPeriodsPanel({ projectId, readOnly = false }) 
     setEditRow(row);
     setEditForm({
       financialYearId: row.financialYearId || "",
+      label: row.label || "",
       startDate: row.startDate || "",
       endDate: row.endDate || "",
     });
@@ -310,8 +325,9 @@ export function ProjectOrgPlanningPeriodsPanel({ projectId, readOnly = false }) 
         </Typography>
       ) : (
         <Typography variant="body2" sx={{ ...adminMutedTextSx, mb: 2 }}>
-          Choose an active financial year and a date range. The planning period length is calculated
-          automatically and cannot be edited.
+          Choose an active financial year and a date range. Status (Upcoming / Open / Ended) is
+          calculated on the server from those dates. An optional label helps learners recognise the
+          period.
         </Typography>
       )}
 
@@ -320,17 +336,19 @@ export function ProjectOrgPlanningPeriodsPanel({ projectId, readOnly = false }) 
           <Table size="small" sx={adminTableSx}>
             <TableHead>
               <TableRow>
+                <TableCell>Label</TableCell>
                 <TableCell>Financial year</TableCell>
-                <TableCell>Planning period</TableCell>
+                <TableCell>Duration</TableCell>
                 <TableCell>Start</TableCell>
                 <TableCell>End</TableCell>
+                <TableCell>Status</TableCell>
                 {!readOnly ? <TableCell align="right">Actions</TableCell> : null}
               </TableRow>
             </TableHead>
             <TableBody>
               {rows.length === 0 ? (
                 <TableRow>
-                  <TableCell colSpan={readOnly ? 4 : 5} align="center" sx={{ py: 5 }}>
+                  <TableCell colSpan={readOnly ? 6 : 7} align="center" sx={{ py: 5 }}>
                     <Typography variant="body2" sx={adminMutedTextSx}>
                       No planning periods yet.
                     </Typography>
@@ -339,10 +357,18 @@ export function ProjectOrgPlanningPeriodsPanel({ projectId, readOnly = false }) 
               ) : (
                 rows.map((row) => (
                   <TableRow key={row.id} hover>
+                    <TableCell>{row.label || "—"}</TableCell>
                     <TableCell>{row.financialYear?.label || "—"}</TableCell>
                     <TableCell>{row.periodLabel || "—"}</TableCell>
                     <TableCell>{fmtTableDate(row.startDate)}</TableCell>
                     <TableCell>{fmtTableDate(row.endDate)}</TableCell>
+                    <TableCell>
+                      <Chip
+                        size="small"
+                        label={row.statusLabel || row.status || "—"}
+                        color={statusChipColor(row.status)}
+                      />
+                    </TableCell>
                     {!readOnly ? (
                       <TableCell align="right">
                         <Box sx={{ display: "inline-flex", gap: 0.25 }}>
@@ -580,6 +606,21 @@ function PlanningPeriodFormDialog({
           </FormControl>
 
           <TextField
+            label="Label (optional)"
+            value={form.label}
+            onChange={(e) => {
+              onChange({ label: e.target.value });
+              onClearError("label");
+            }}
+            error={Boolean(errors.label)}
+            helperText={
+              errors.label || 'e.g. "Annual planning 2026/2027". Leave blank if not needed.'
+            }
+            fullWidth
+            sx={themedTextFieldSx}
+          />
+
+          <TextField
             label="Start date"
             type="date"
             value={form.startDate}
@@ -615,11 +656,11 @@ function PlanningPeriodFormDialog({
             sx={themedTextFieldSx}
           />
           <TextField
-            label="Planning period"
+            label="Duration"
             value={periodLabel}
             disabled
             fullWidth
-            helperText="Calculated from the start and end dates."
+            helperText="Calculated from the start and end dates. Status is set on the server."
             sx={themedTextFieldSx}
           />
         </Box>

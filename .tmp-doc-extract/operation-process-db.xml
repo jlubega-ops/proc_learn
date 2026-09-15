@@ -1,0 +1,4528 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!DOCTYPE book PUBLIC "-//OASIS//DTD DocBook XML V4.1.2//EN"
+	"http://www.oasis-open.org/docbook/xml/4.1.2/docbookx.dtd">
+
+<book lang='en_US'>
+
+ <bookinfo>
+
+  <author>
+<surname>Juma Lubega</surname>
+  </author>
+<date>2026-09-11</date>
+ </bookinfo>
+
+ <chapter>
+<title/>
+  <para>
+This is a manual operation of the system, testing how a real procurement officer would and see whether the system forces the correct sequence and procurement process.
+  </para>
+
+  <para>
+We test <emphasis role='bold'>three complete procurements in the same organisation</emphasis>:
+  </para>
+
+  <orderedlist numeration='arabic'>
+
+   <listitem>
+
+    <para>
+<emphasis role='bold'>Micro procurement</emphasis> — urgent/simple low-value office equipment.
+    </para>
+
+   </listitem>
+
+   <listitem>
+
+    <para>
+<emphasis role='bold'>Quotation procurement</emphasis> — laptops/computers.
+    </para>
+
+   </listitem>
+
+   <listitem>
+
+    <para>
+<emphasis role='bold'>Tender procurement</emphasis> — university network infrastructure.
+    </para>
+
+   </listitem>
+
+  </orderedlist>
+
+  <para>
+This will exercise different branches and prove that the system supports <emphasis role='bold'>multiple procurements at the same time</emphasis>, rather than treating procurement as one continuous transaction.
+  </para>
+
+  <para>
+<emphasis role='bold'>Process flows in the system</emphasis>
+  </para>
+
+  <para>
+
+   <informaltable frame='none' colsep='0' rowsep='0'>
+
+    <tgroup cols='2'>
+
+     <colspec colwidth='216.10pt'/>
+
+     <colspec colwidth='234.90pt'/>
+
+     <tbody>
+
+      <row>
+
+       <entry>
+Process name
+       </entry>
+
+       <entry>
+Description
+       </entry>
+
+      </row>
+
+      <row>
+
+       <entry>
+Budgeting Process
+       </entry>
+
+       <entry>
+Department budget preparation, review, finance consolidation, and Accounting Officer approval.
+       </entry>
+
+      </row>
+
+      <row>
+
+       <entry>
+Contract Process
+       </entry>
+
+       <entry>
+Tracks contract approval, signature, and issuance for the Tender path.
+       </entry>
+
+      </row>
+
+      <row>
+
+       <entry>
+Evaluation Process
+       </entry>
+
+       <entry>
+Tracks committee evaluation of offers/bids through to approval of the evaluation report.
+       </entry>
+
+      </row>
+
+      <row>
+
+       <entry>
+Invoice Process
+       </entry>
+
+       <entry>
+Tracks certification and verification of a supplier invoice.
+       </entry>
+
+      </row>
+
+      <row>
+
+       <entry>
+LPO Process
+       </entry>
+
+       <entry>
+Tracks Local Purchase Order approval and issuance for the Quotation path.
+       </entry>
+
+      </row>
+
+      <row>
+
+       <entry>
+Micro Procurement Process
+       </entry>
+
+       <entry>
+Raise, verify, confirm budget, approve, issue a purchase instruction, then delivery, invoice, payment and closure for micro procurement.
+       </entry>
+
+      </row>
+
+      <row>
+
+       <entry>
+Payment Process
+       </entry>
+
+       <entry>
+Tracks approval and settlement of a payment against a verified invoice.
+       </entry>
+
+      </row>
+
+      <row>
+
+       <entry>
+Post-Qualification Process
+       </entry>
+
+       <entry>
+Tracks verification of the recommended supplier's registration, tax compliance, and experience before award.
+       </entry>
+
+      </row>
+
+      <row>
+
+       <entry>
+Procurement Planning Process
+       </entry>
+
+       <entry>
+Departmental preparation, review, consolidation, and approval of the procurement plan.
+       </entry>
+
+      </row>
+
+      <row>
+
+       <entry>
+Procurement Requisition Process
+       </entry>
+
+       <entry>
+Create and approve a procurement requisition with plan and funding verification.
+       </entry>
+
+      </row>
+
+     </tbody>
+
+    </tgroup>
+
+   </informaltable>
+
+  </para>
+
+  <para>
+Organisation Roles
+  </para>
+
+  <para>
+
+   <informaltable frame='none' colsep='0' rowsep='0'>
+
+    <tgroup cols='2'>
+
+     <colspec colwidth='124.30pt'/>
+
+     <colspec colwidth='326.70pt'/>
+
+     <tbody>
+
+      <row>
+
+       <entry>
+Organization Administrator
+Required
+       </entry>
+
+       <entry>
+Simulated ICT/system administrator. Configures organisation structure, users, and workflows — no procurement approval authority by default.
+       </entry>
+
+      </row>
+
+      <row>
+
+       <entry>
+User Department Officer
+       </entry>
+
+       <entry>
+Prepares departmental procurement plans and requisitions.
+       </entry>
+
+      </row>
+
+      <row>
+
+       <entry>
+Head User Department
+       </entry>
+
+       <entry>
+Reviews and endorses departmental plans and requisitions.
+       </entry>
+
+      </row>
+
+      <row>
+
+       <entry>
+Procurement Officer
+       </entry>
+
+       <entry>
+Manages procurement processes and verifies plan availability.
+       </entry>
+
+      </row>
+
+      <row>
+
+       <entry>
+Head PDU
+       </entry>
+
+       <entry>
+Heads the Procurement and Disposal Unit; verifies funding and consolidates plans.
+       </entry>
+
+      </row>
+
+      <row>
+
+       <entry>
+Contracts Officer
+       </entry>
+
+       <entry>
+Reviews consolidated procurement plans and contract documentation.
+       </entry>
+
+      </row>
+
+      <row>
+
+       <entry>
+Finance/Budget Officer
+       </entry>
+
+       <entry>
+Reviews and consolidates department budget requirements before Accounting Officer approval.
+       </entry>
+
+      </row>
+
+      <row>
+
+       <entry>
+Accounting Officer
+       </entry>
+
+       <entry>
+Final organisational approval authority for budgets, plans and requisitions.
+       </entry>
+
+      </row>
+
+     </tbody>
+
+    </tgroup>
+
+   </informaltable>
+
+  </para>
+
+  <para>
+<emphasis role='bold'>The Procurement Process Master Flow with  real  scenario example</emphasis>
+  </para>
+
+  <para>
+<emphasis role='bold'>PART 1 — MASTER TEST ORGANISATION</emphasis>
+  </para>
+
+  <para>
+Use one organisation:
+  </para>
+
+  <para>
+<emphasis role='bold'>Lubega Juma Organization</emphasis>
+  </para>
+
+  <para>
+FY: <emphasis role='bold'>2026/2027</emphasis>
+  </para>
+
+  <para>
+Planning period: <emphasis role='bold'>01 July 2026 – 30 June 2027</emphasis>
+  </para>
+
+  <para>
+Create these departments:
+  </para>
+
+  <para>
+
+   <informaltable frame='none' colsep='0' rowsep='0'>
+
+    <tgroup cols='2'>
+
+     <colspec colwidth='357.35pt'/>
+
+     <colspec colwidth='93.95pt'/>
+
+     <tbody>
+
+      <row>
+
+       <entry>
+Department
+       </entry>
+
+       <entry>
+Code
+       </entry>
+
+      </row>
+
+      <row>
+
+       <entry>
+ICT Department
+       </entry>
+
+       <entry>
+ICT
+       </entry>
+
+      </row>
+
+      <row>
+
+       <entry>
+Finance Department
+       </entry>
+
+       <entry>
+FIN
+       </entry>
+
+      </row>
+
+      <row>
+
+       <entry>
+Procurement &amp; Disposal Unit
+       </entry>
+
+       <entry>
+PDU
+       </entry>
+
+      </row>
+
+      <row>
+
+       <entry>
+Administration
+       </entry>
+
+       <entry>
+ADMIN
+       </entry>
+
+      </row>
+
+     </tbody>
+
+    </tgroup>
+
+   </informaltable>
+
+  </para>
+
+  <para>
+You can keep the actual PDU as a department/unit even though your application also represents PDU functions through roles.
+  </para>
+
+  <para>
+<emphasis role='bold'>PART 2 — CREATE THE USERS</emphasis>
+  </para>
+
+  <para>
+Use these users throughout the test.
+  </para>
+
+  <para>
+
+   <informaltable frame='none' colsep='0' rowsep='0'>
+
+    <tgroup cols='3'>
+
+     <colspec colwidth='144.10pt'/>
+
+     <colspec colwidth='104.10pt'/>
+
+     <colspec colwidth='203.10pt'/>
+
+     <tbody>
+
+      <row>
+
+       <entry>
+User
+       </entry>
+
+       <entry>
+Department
+       </entry>
+
+       <entry>
+Role
+       </entry>
+
+      </row>
+
+      <row>
+
+       <entry>
+John Okello
+       </entry>
+
+       <entry>
+ICT
+       </entry>
+
+       <entry>
+User Department Officer
+       </entry>
+
+      </row>
+
+      <row>
+
+       <entry>
+Mary Namusoke
+       </entry>
+
+       <entry>
+ICT
+       </entry>
+
+       <entry>
+Head User Department
+       </entry>
+
+      </row>
+
+      <row>
+
+       <entry>
+Peter Mugisha
+       </entry>
+
+       <entry>
+PDU
+       </entry>
+
+       <entry>
+Procurement Officer
+       </entry>
+
+      </row>
+
+      <row>
+
+       <entry>
+David Kato
+       </entry>
+
+       <entry>
+PDU
+       </entry>
+
+       <entry>
+Head PDU
+       </entry>
+
+      </row>
+
+      <row>
+
+       <entry>
+Helen Achieng
+       </entry>
+
+       <entry>
+Finance
+       </entry>
+
+       <entry>
+Finance/Budget Officer
+       </entry>
+
+      </row>
+
+      <row>
+
+       <entry>
+Grace Nakato
+       </entry>
+
+       <entry>
+PDU
+       </entry>
+
+       <entry>
+Contracts Officer
+       </entry>
+
+      </row>
+
+      <row>
+
+       <entry>
+Sarah Nansubuga
+       </entry>
+
+       <entry>
+Finance
+       </entry>
+
+       <entry>
+Accounting Officer
+       </entry>
+
+      </row>
+
+     </tbody>
+
+    </tgroup>
+
+   </informaltable>
+
+  </para>
+
+  <para>
+Then create committee users.
+  </para>
+
+  <para>
+<emphasis role='bold'>Evaluation Committee</emphasis>
+  </para>
+
+  <para>
+
+   <informaltable frame='none' colsep='0' rowsep='0'>
+
+    <tgroup cols='2'>
+
+     <colspec colwidth='138.95pt'/>
+
+     <colspec colwidth='312.35pt'/>
+
+     <tbody>
+
+      <row>
+
+       <entry>
+User
+       </entry>
+
+       <entry>
+Committee Role
+       </entry>
+
+      </row>
+
+      <row>
+
+       <entry>
+Alice A
+       </entry>
+
+       <entry>
+Chairperson
+       </entry>
+
+      </row>
+
+      <row>
+
+       <entry>
+Bob B
+       </entry>
+
+       <entry>
+Member
+       </entry>
+
+      </row>
+
+      <row>
+
+       <entry>
+Carol C
+       </entry>
+
+       <entry>
+Secretary
+       </entry>
+
+      </row>
+
+     </tbody>
+
+    </tgroup>
+
+   </informaltable>
+
+  </para>
+
+  <para>
+Assign them to the <emphasis role='bold'>Evaluation Committee</emphasis>.
+  </para>
+
+  <para>
+<emphasis role='bold'>Inspection/Acceptance Committee</emphasis>
+  </para>
+
+  <para>
+
+   <informaltable frame='none' colsep='0' rowsep='0'>
+
+    <tgroup cols='2'>
+
+     <colspec colwidth='155.75pt'/>
+
+     <colspec colwidth='295.55pt'/>
+
+     <tbody>
+
+      <row>
+
+       <entry>
+User
+       </entry>
+
+       <entry>
+Committee Role
+       </entry>
+
+      </row>
+
+      <row>
+
+       <entry>
+Daniel D
+       </entry>
+
+       <entry>
+Chairperson
+       </entry>
+
+      </row>
+
+      <row>
+
+       <entry>
+Eva E
+       </entry>
+
+       <entry>
+Member
+       </entry>
+
+      </row>
+
+      <row>
+
+       <entry>
+Frank F
+       </entry>
+
+       <entry>
+Secretary
+       </entry>
+
+      </row>
+
+     </tbody>
+
+    </tgroup>
+
+   </informaltable>
+
+  </para>
+
+  <para>
+Assign them to the <emphasis role='bold'>Inspection/Acceptance Committee</emphasis>.
+  </para>
+
+  <para>
+For your simulator, this is particularly useful because the procurement legislation/source material treats evaluation as a committee function, with a minimum of three members in the public-procurement model.
+  </para>
+
+  <para>
+<emphasis role='bold'>PART 3 — ADMIN CONFIGURATION</emphasis>
+  </para>
+
+  <para>
+Login as: <emphasis role='bold'>Organization Administrator</emphasis>
+  </para>
+
+  <para>
+Remember: this is your <emphasis role='bold'>system configuration role</emphasis>, not the person who automatically approves procurement.
+  </para>
+
+  <para>
+This distinction is important and your current implementation correctly separates the administrator from operational approval.
+  </para>
+
+  <para>
+<emphasis role='bold'>Step 1 — FY</emphasis>
+  </para>
+
+  <para>
+<emphasis role='bold'>Create</emphasis>: 2026/2027
+  </para>
+
+  <para>
+<emphasis role='bold'>Dates</emphasis>: 01/07/2026 → 30/06/2027
+  </para>
+
+  <para>
+<emphasis role='bold'>Step 2 — Planning Period</emphasis>
+  </para>
+
+  <para>
+Create: 2026/2027 Annual Procurement Planning Period
+  </para>
+
+  <para>
+<emphasis role='bold'>FY:</emphasis> 2026/2027
+  </para>
+
+  <para>
+<emphasis role='bold'>Start</emphasis>: 01/07/2026
+  </para>
+
+  <para>
+<emphasis role='bold'>End:</emphasis> 30/06/2027
+  </para>
+
+  <para>
+The planning period should be <emphasis role='bold'>OPEN</emphasis>.
+  </para>
+
+  <para>
+<emphasis role='bold'>PART 4 — ACTIVATE PROCESSES</emphasis>
+  </para>
+
+  <para>
+For this test, activate:
+  </para>
+
+  <itemizedlist mark='bullet'>
+
+   <listitem>
+
+    <para>
+Budgeting
+    </para>
+
+   </listitem>
+
+   <listitem>
+
+    <para>
+Procurement Planning
+    </para>
+
+   </listitem>
+
+   <listitem>
+
+    <para>
+Emergency planning process
+    </para>
+
+   </listitem>
+
+   <listitem>
+
+    <para>
+Procurement Requisition
+    </para>
+
+   </listitem>
+
+   <listitem>
+
+    <para>
+Micro Procurement
+    </para>
+
+   </listitem>
+
+   <listitem>
+
+    <para>
+Quotation
+    </para>
+
+   </listitem>
+
+   <listitem>
+
+    <para>
+Tender process
+    </para>
+
+   </listitem>
+
+   <listitem>
+
+    <para>
+Evaluation
+    </para>
+
+   </listitem>
+
+   <listitem>
+
+    <para>
+Post Qualification
+    </para>
+
+   </listitem>
+
+   <listitem>
+
+    <para>
+LPO
+    </para>
+
+   </listitem>
+
+   <listitem>
+
+    <para>
+Contract
+    </para>
+
+   </listitem>
+
+   <listitem>
+
+    <para>
+Invoice
+    </para>
+
+   </listitem>
+
+   <listitem>
+
+    <para>
+Payment
+    </para>
+
+   </listitem>
+
+  </itemizedlist>
+
+  <para>
+Do <emphasis role='bold'>not</emphasis> interpret activation as starting a procurement.
+  </para>
+
+  <para>
+Activation simply says:
+  </para>
+
+  <para>
+"This process is available for this organisation."
+  </para>
+
+  <para>
+A real procurement only starts when an appropriate event occurs. Your implementation already follows this principle.
+  </para>
+
+  <para>
+<emphasis role='bold'>PART 5 — CREATE THE BUDGET</emphasis>
+  </para>
+
+  <para>
+Now <emphasis role='bold'>log out of Admin</emphasis>.
+  </para>
+
+  <para>
+This is important.: The administrator should <emphasis role='bold'>not</emphasis> create the operational department budget merely because they configured the organisation.
+  </para>
+
+  <para>
+Login as: <emphasis role='bold'>John Okello — User Department Officer</emphasis>
+  </para>
+
+  <para>
+Go to: <emphasis role='bold'>Budgets → New Budget</emphasis>
+  </para>
+
+  <para>
+Create: <emphasis role='bold'>Budget</emphasis>
+  </para>
+
+  <para>
+<emphasis role='bold'>Title: </emphasis>ICT Department 2026/2027 Procurement Budget
+  </para>
+
+  <para>
+<emphasis role='bold'>Financial Year: </emphasis>2026/2027
+  </para>
+
+  <para>
+<emphasis role='bold'>Department: </emphasis>ICT Department
+  </para>
+
+  <para>
+Add budget lines.
+  </para>
+
+  <para>
+<emphasis role='bold'>Budget Line 1</emphasis>
+  </para>
+
+  <para>
+Computer Equipment
+  </para>
+
+  <para>
+Amount:
+  </para>
+
+  <para>
+UGX 100,000,000
+  </para>
+
+  <para>
+<emphasis role='bold'>Budget Line 2</emphasis>
+  </para>
+
+  <para>
+Office Equipment
+  </para>
+
+  <para>
+Amount:
+  </para>
+
+  <para>
+UGX 20,000,000
+  </para>
+
+  <para>
+<emphasis role='bold'>Budget Line 3</emphasis>
+  </para>
+
+  <para>
+Network Infrastructure
+  </para>
+
+  <para>
+Amount:
+  </para>
+
+  <para>
+UGX 150,000,000
+  </para>
+
+  <para>
+Submit the budget.
+  </para>
+
+  <para>
+<emphasis role='bold'>PART 6 — BUDGET APPROVAL</emphasis>
+  </para>
+
+  <para>
+Now log in as:
+  </para>
+
+  <para>
+<emphasis role='bold'>Mary — Head User Department</emphasis>
+  </para>
+
+  <para>
+You should see a task.
+  </para>
+
+  <para>
+Review:
+  </para>
+
+  <itemizedlist mark='bullet'>
+
+   <listitem>
+
+    <para>
+Department
+    </para>
+
+   </listitem>
+
+   <listitem>
+
+    <para>
+FY
+    </para>
+
+   </listitem>
+
+   <listitem>
+
+    <para>
+Budget lines
+    </para>
+
+   </listitem>
+
+   <listitem>
+
+    <para>
+Amounts
+    </para>
+
+   </listitem>
+
+   <listitem>
+
+    <para>
+Justification
+    </para>
+
+   </listitem>
+
+  </itemizedlist>
+
+  <para>
+Approve/endorse.
+  </para>
+
+  <para>
+
+  </para>
+
+  <para>
+Log in as: <emphasis role='bold'>Helen — Finance/Budget Officer</emphasis>
+  </para>
+
+  <para>
+Review the financial information.
+  </para>
+
+  <para>
+Confirm that:
+  </para>
+
+  <para>
+Computer Equipment = UGX 100,000,000
+  </para>
+
+  <para>
+Office Equipment = UGX 20,000,000
+  </para>
+
+  <para>
+Network Infrastructure = UGX 150,000,000
+  </para>
+
+  <para>
+Approve/verify.
+  </para>
+
+  <para>
+
+  </para>
+
+  <para>
+Finally:
+  </para>
+
+  <para>
+<emphasis role='bold'>Sarah — Accounting Officer</emphasis>
+  </para>
+
+  <para>
+Review and approve the budget.
+  </para>
+
+  <para>
+Now the budget becomes:
+  </para>
+
+  <para>
+<emphasis role='bold'>APPROVED</emphasis>
+  </para>
+
+  <para>
+Only now should those budget lines become available for procurement planning/requisition.
+  </para>
+
+  <para>
+This is an important control because procurement requirements should be documented and funding confirmed before procurement proceeds.
+  </para>
+
+  <para>
+
+  </para>
+
+  <para>
+<emphasis role='bold'>PART 7 — CREATE ONE PROCUREMENT PLAN WITH MULTIPLE REQUIREMENTS</emphasis>
+  </para>
+
+  <para>
+This is where you test your requirement that:
+  </para>
+
+  <para>
+<emphasis role='bold'>One department can have multiple procurements.</emphasis>
+  </para>
+
+  <para>
+Login as: <emphasis role='bold'>John — User Department Officer</emphasis>
+  </para>
+
+  <para>
+Create: ICT Department Procurement Plan 2026/2027
+  </para>
+
+  <para>
+Add these items.
+  </para>
+
+  <para>
+<emphasis role='bold'>PLAN ITEM 1 — LAPTOPS</emphasis>
+  </para>
+
+  <para>
+Description: Supply of business laptops for academic and administrative staff
+  </para>
+
+  <para>
+Quantity: 20
+  </para>
+
+  <para>
+Unit: Each
+  </para>
+
+  <para>
+Estimated unit price: UGX 3,500,000
+  </para>
+
+  <para>
+Total: <emphasis role='bold'>UGX 70,000,000</emphasis>
+  </para>
+
+  <para>
+Budget line: Computer Equipment
+  </para>
+
+  <para>
+
+  </para>
+
+  <para>
+<emphasis role='bold'>PLAN ITEM 2 — DESKTOP COMPUTERS</emphasis>
+  </para>
+
+  <para>
+Description: Supply of desktop computers for ICT laboratories
+  </para>
+
+  <para>
+Quantity: 15
+  </para>
+
+  <para>
+Unit: Each
+  </para>
+
+  <para>
+Estimated unit price: UGX 2,500,000
+  </para>
+
+  <para>
+Total: <emphasis role='bold'>UGX 37,500,000</emphasis>
+  </para>
+
+  <para>
+Budget line: Computer Equipment
+  </para>
+
+  <para>
+
+  </para>
+
+  <para>
+<emphasis role='bold'>PLAN ITEM 3 — NETWORK EQUIPMENT</emphasis>
+  </para>
+
+  <para>
+Description: Supply and installation of managed network switches, wireless access points and related network equipment
+  </para>
+
+  <para>
+Quantity: 1 Lot
+  </para>
+
+  <para>
+Estimated value: <emphasis role='bold'>UGX 120,000,000</emphasis>
+  </para>
+
+  <para>
+Budget line: Network Infrastructure
+  </para>
+
+  <para>
+
+  </para>
+
+  <para>
+<emphasis role='bold'>PLAN ITEM 4 — OFFICE CHAIRS</emphasis>
+  </para>
+
+  <para>
+Description: Supply of ergonomic office chairs for ICT staff
+  </para>
+
+  <para>
+Quantity: 30
+  </para>
+
+  <para>
+Unit: Each
+  </para>
+
+  <para>
+Estimated unit price: UGX 400,000
+  </para>
+
+  <para>
+Total: <emphasis role='bold'>UGX 12,000,000</emphasis>
+  </para>
+
+  <para>
+Budget line: Office Equipment
+  </para>
+
+  <para>
+
+  </para>
+
+  <para>
+<emphasis role='bold'>Submit the plan.</emphasis>
+  </para>
+
+  <para>
+This is also an important real-world concept: requirements should be planned rationally and aggregated where appropriate, rather than artificially splitting procurement to avoid the appropriate method.
+  </para>
+
+  <para>
+therefore, <emphasis role='bold'>do not create four separate plans simply because you want four procurements</emphasis>. One plan can contain many planned requirements.
+  </para>
+
+  <para>
+<emphasis role='bold'>PART 8 — PLAN APPROVAL</emphasis>
+  </para>
+
+  <para>
+<emphasis role='bold'>Login — Mary</emphasis>
+  </para>
+
+  <para>
+Head User Department
+  </para>
+
+  <para>
+Review the ICT procurement plan.
+  </para>
+
+  <para>
+Approve.
+  </para>
+
+  <para>
+
+  </para>
+
+  <para>
+<emphasis role='bold'>Login — David</emphasis>
+  </para>
+
+  <para>
+Head PDU
+  </para>
+
+  <para>
+Consolidate/review the plan.
+  </para>
+
+  <para>
+Confirm:
+  </para>
+
+  <itemizedlist mark='bullet'>
+
+   <listitem>
+
+    <para>
+requirement
+    </para>
+
+   </listitem>
+
+   <listitem>
+
+    <para>
+estimated value
+    </para>
+
+   </listitem>
+
+   <listitem>
+
+    <para>
+budget
+    </para>
+
+   </listitem>
+
+   <listitem>
+
+    <para>
+procurement timing
+    </para>
+
+   </listitem>
+
+   <listitem>
+
+    <para>
+procurement method/category where applicable
+    </para>
+
+   </listitem>
+
+  </itemizedlist>
+
+  <para>
+
+  </para>
+
+  <para>
+<emphasis role='bold'>Login — Grace</emphasis>
+  </para>
+
+  <para>
+Contracts Officer
+  </para>
+
+  <para>
+Review the consolidated plan.
+  </para>
+
+  <para>
+
+  </para>
+
+  <para>
+<emphasis role='bold'>Login — Sarah</emphasis>
+  </para>
+
+  <para>
+Accounting Officer
+  </para>
+
+  <para>
+Approve.
+  </para>
+
+  <para>
+The plan should now show:
+  </para>
+
+  <para>
+<emphasis role='bold'>APPROVED</emphasis>
+  </para>
+
+  <para>
+Now we are ready to create <emphasis role='bold'>individual procurement requisitions</emphasis>.
+  </para>
+
+  <para>
+
+  </para>
+
+  <para>
+<emphasis role='bold'>NOW THE REAL TEST BEGINS</emphasis>
+  </para>
+
+  <para>
+You have four planned requirements.
+  </para>
+
+  <para>
+We will create <emphasis role='bold'>three different procurement cases</emphasis>.
+  </para>
+
+  <para>
+
+  </para>
+
+  <para>
+<emphasis role='bold'>SCENARIO 1 — MICRO PROCUREMENT</emphasis>
+  </para>
+
+  <para>
+<emphasis role='bold'>Procurement: Office Chairs</emphasis>
+  </para>
+
+  <para>
+Use: <emphasis role='bold'>30 ergonomic office chairs</emphasis>
+  </para>
+
+  <para>
+Estimated value: UGX 12,000,000
+  </para>
+
+  <para>
+The purpose is to exercise your Micro path.
+  </para>
+
+  <para>
+Revision required
+  </para>
+
+  <para>
+<emphasis role='bold'>STEP 1 — Create requisition</emphasis>
+  </para>
+
+  <para>
+Login: <emphasis role='bold'>John — User Department Officer</emphasis>
+  </para>
+
+  <para>
+Go to: New Requisition
+  </para>
+
+  <para>
+Fill: <emphasis role='bold'>Procurement title</emphasis>
+  </para>
+
+  <para>
+Procurement of 30 Ergonomic Office Chairs for ICT Department
+  </para>
+
+  <para>
+<emphasis role='bold'>FY: </emphasis>2026/2027
+  </para>
+
+  <para>
+<emphasis role='bold'>Procurement Plan: </emphasis>ICT Department Procurement Plan 2026/2027
+  </para>
+
+  <para>
+<emphasis role='bold'>Plan Item: </emphasis>Supply of ergonomic office chairs for ICT staff
+  </para>
+
+  <para>
+<emphasis role='bold'>Budget Line: </emphasis>Office Equipment
+  </para>
+
+  <para>
+<emphasis role='bold'>Category: </emphasis>Office Furniture / Equipment
+  </para>
+
+  <para>
+<emphasis role='bold'>Required by: </emphasis>30 September 2026
+  </para>
+
+  <para>
+<emphasis role='bold'>Justification:  </emphasis>Existing ICT office chairs are worn and inadequate for the current staffing level. The procurement is required to provide suitable working facilities for ICT personnel.
+  </para>
+
+  <para>
+<emphasis role='bold'>Requirement description: </emphasis>Supply of 30 ergonomic office chairs suitable for full-time office use, with adjustable height, back support and durable construction.
+  </para>
+
+  <para>
+<emphasis role='bold'>Delivery location: </emphasis>ICT Department, Lubega Juma Organization
+  </para>
+
+  <para>
+<emphasis role='bold'>Line item</emphasis>
+  </para>
+
+  <para>
+
+   <informaltable frame='none' colsep='0' rowsep='0'>
+
+    <tgroup cols='4'>
+
+     <colspec colwidth='241.20pt'/>
+
+     <colspec colwidth='44.10pt'/>
+
+     <colspec colwidth='54.30pt'/>
+
+     <colspec colwidth='111.70pt'/>
+
+     <tbody>
+
+      <row>
+
+       <entry>
+Item
+       </entry>
+
+       <entry>
+Qty
+       </entry>
+
+       <entry>
+Unit
+       </entry>
+
+       <entry>
+Unit Price
+       </entry>
+
+      </row>
+
+      <row>
+
+       <entry>
+Ergonomic office chair
+       </entry>
+
+       <entry>
+30
+       </entry>
+
+       <entry>
+Each
+       </entry>
+
+       <entry>
+400,000
+       </entry>
+
+      </row>
+
+     </tbody>
+
+    </tgroup>
+
+   </informaltable>
+
+  </para>
+
+  <para>
+Total: <emphasis role='bold'>UGX 12,000,000</emphasis>
+  </para>
+
+  <para>
+Submit.
+  </para>
+
+  <para>
+
+  </para>
+
+  <para>
+<emphasis role='bold'>STEP 2 — HOD</emphasis>
+  </para>
+
+  <para>
+Login: <emphasis role='bold'>Mary — Head User Department</emphasis>
+  </para>
+
+  <para>
+Open: My Tasks
+  </para>
+
+  <para>
+She should see the requisition.
+  </para>
+
+  <para>
+Review:
+  </para>
+
+  <itemizedlist mark='bullet'>
+
+   <listitem>
+
+    <para>
+Requirement
+    </para>
+
+   </listitem>
+
+   <listitem>
+
+    <para>
+Quantity
+    </para>
+
+   </listitem>
+
+   <listitem>
+
+    <para>
+Estimated cost
+    </para>
+
+   </listitem>
+
+   <listitem>
+
+    <para>
+Justification
+    </para>
+
+   </listitem>
+
+   <listitem>
+
+    <para>
+Budget
+    </para>
+
+   </listitem>
+
+   <listitem>
+
+    <para>
+Procurement plan
+    </para>
+
+   </listitem>
+
+  </itemizedlist>
+
+  <para>
+Approve.
+  </para>
+
+  <para>
+<emphasis role='bold'>STEP 3 — PROCUREMENT OFFICER</emphasis>
+  </para>
+
+  <para>
+Login: <emphasis role='bold'>Peter — Procurement Officer</emphasis>
+  </para>
+
+  <para>
+Verify: Is the requirement in the approved procurement plan?
+  </para>
+
+  <para>
+Yes.
+  </para>
+
+  <para>
+Is there sufficient budget?
+  </para>
+
+  <para>
+Yes.
+  </para>
+
+  <para>
+Approve/verify.
+  </para>
+
+  <para>
+
+  </para>
+
+  <para>
+<emphasis role='bold'>STEP 4 — HEAD PDU</emphasis>
+  </para>
+
+  <para>
+Login: <emphasis role='bold'>David — Head PDU</emphasis>
+  </para>
+
+  <para>
+Verify funding/requirement.
+  </para>
+
+  <para>
+Approve.
+  </para>
+
+  <para>
+
+  </para>
+
+  <para>
+<emphasis role='bold'>STEP 5 — ACCOUNTING OFFICER</emphasis>
+  </para>
+
+  <para>
+Login:  <emphasis role='bold'>Sarah — Accounting Officer</emphasis>
+  </para>
+
+  <para>
+Review the requisition.
+  </para>
+
+  <para>
+Approve.
+  </para>
+
+  <para>
+
+  </para>
+
+  <para>
+<emphasis role='bold'>STEP 6 — SELECT METHOD</emphasis>
+  </para>
+
+  <para>
+Login: <emphasis role='bold'>Peter — Procurement Officer</emphasis>
+  </para>
+
+  <para>
+You should now have:
+  </para>
+
+  <para>
+<emphasis role='bold'>Select Procurement Method</emphasis>
+  </para>
+
+  <para>
+Select: <emphasis role='bold'>MICRO</emphasis>
+  </para>
+
+  <para>
+This should create something similar to:
+  </para>
+
+  <para>
+<emphasis role='bold'>PROC-2026-0001</emphasis>
+  </para>
+
+  <para>
+Title:
+  </para>
+
+  <para>
+Procurement of 30 Ergonomic Office Chairs for ICT Department
+  </para>
+
+  <para>
+
+  </para>
+
+  <para>
+<emphasis role='bold'>STEP 7 — MICRO PROCUREMENT</emphasis>
+  </para>
+
+  <para>
+Now follow the Micro workflow.
+  </para>
+
+  <para>
+<emphasis role='bold'>John — User Department</emphasis>
+  </para>
+
+  <para>
+Confirm requirement.
+  </para>
+
+  <para>
+<emphasis role='bold'>Mary — Head User Department</emphasis>
+  </para>
+
+  <para>
+Verify/endorse.
+  </para>
+
+  <para>
+<emphasis role='bold'>Peter — Procurement Officer</emphasis>
+  </para>
+
+  <para>
+Confirm budget/method.
+  </para>
+
+  <para>
+<emphasis role='bold'>Sarah — Accounting Officer</emphasis>
+  </para>
+
+  <para>
+Approve.
+  </para>
+
+  <para>
+<emphasis role='bold'>Peter — Procurement Officer</emphasis>
+  </para>
+
+  <para>
+Issue: <emphasis role='bold'>Purchase Instruction</emphasis>
+  </para>
+
+  <para>
+Enter supplier.
+  </para>
+
+  <para>
+Example:
+  </para>
+
+  <para>
+<emphasis role='bold'>Supplier</emphasis>
+  </para>
+
+  <para>
+Kampala Office Solutions Ltd.
+  </para>
+
+  <para>
+Supplier contact:
+  </para>
+
+  <para>
+sales@kampalaofficesolutions.example
+  </para>
+
+  <para>
+Quotation/reference:
+  </para>
+
+  <para>
+KOS/Q/2026/081
+  </para>
+
+  <para>
+Agreed price:
+  </para>
+
+  <para>
+UGX 11,700,000
+  </para>
+
+  <para>
+
+  </para>
+
+  <para>
+<emphasis role='bold'>STEP 8 — DELIVERY</emphasis>
+  </para>
+
+  <para>
+Supplier delivers.
+  </para>
+
+  <para>
+Do <emphasis role='bold'>not</emphasis> immediately mark the procurement complete.
+  </para>
+
+  <para>
+Record: Delivery date: 25/09/2026
+  </para>
+
+  <para>
+Quantity ordered: 30
+  </para>
+
+  <para>
+Quantity delivered: 30
+  </para>
+
+  <para>
+Quantity accepted: 30
+  </para>
+
+  <para>
+Quantity rejected: 0
+  </para>
+
+  <para>
+
+  </para>
+
+  <para>
+<emphasis role='bold'>STEP 9 — INSPECTION</emphasis>
+  </para>
+
+  <para>
+Switch into the: <emphasis role='bold'>Inspection/Acceptance Committee</emphasis>
+  </para>
+
+  <para>
+Use:
+  </para>
+
+  <para>
+
+   <informaltable frame='none' colsep='0' rowsep='0'>
+
+    <tgroup cols='2'>
+
+     <colspec colwidth='225.40pt'/>
+
+     <colspec colwidth='225.40pt'/>
+
+     <tbody>
+
+      <row>
+
+       <entry>
+Daniel
+       </entry>
+
+       <entry>
+Chairperson
+       </entry>
+
+      </row>
+
+      <row>
+
+       <entry>
+Eva
+       </entry>
+
+       <entry>
+Member
+       </entry>
+
+      </row>
+
+      <row>
+
+       <entry>
+Frank
+       </entry>
+
+       <entry>
+Secretary
+       </entry>
+
+      </row>
+
+     </tbody>
+
+    </tgroup>
+
+   </informaltable>
+
+  </para>
+
+  <para>
+
+  </para>
+
+  <para>
+Inspect:
+  </para>
+
+  <itemizedlist mark='bullet'>
+
+   <listitem>
+
+    <para>
+quantity
+    </para>
+
+   </listitem>
+
+   <listitem>
+
+    <para>
+physical condition
+    </para>
+
+   </listitem>
+
+   <listitem>
+
+    <para>
+specifications
+    </para>
+
+   </listitem>
+
+   <listitem>
+
+    <para>
+conformity
+    </para>
+
+   </listitem>
+
+  </itemizedlist>
+
+  <para>
+Record:
+  </para>
+
+  <para>
+Accepted: 30Rejected:  0
+  </para>
+
+  <para>
+Committee conclusion:
+  </para>
+
+  <para>
+Goods conform to the approved requirement and are accepted.
+  </para>
+
+  <para>
+
+  </para>
+
+  <para>
+<emphasis role='bold'>STEP 10 — INVOICE</emphasis>
+  </para>
+
+  <para>
+Supplier invoice: KOS-INV-2026-0925
+  </para>
+
+  <para>
+Amount: UGX 11,700,000
+  </para>
+
+  <para>
+Login: John
+  </para>
+
+  <para>
+Receive invoice.
+  </para>
+
+  <para>
+Then: Verify Delivery
+  </para>
+
+  <para>
+Mary: Certify Invoice
+  </para>
+
+  <para>
+Grace: Verify Invoice
+  </para>
+
+  <para>
+Sarah: Approve Payment
+  </para>
+
+  <para>
+Payment: UGX 11,700,000
+  </para>
+
+  <para>
+
+  </para>
+
+  <para>
+<emphasis role='bold'>STEP 11 — CLOSE</emphasis>
+  </para>
+
+  <para>
+Payment must be settled.
+  </para>
+
+  <para>
+Then procurement should become:
+  </para>
+
+  <para>
+<emphasis role='bold'>READY_FOR_CLOSURE</emphasis>
+  </para>
+
+  <para>
+Then close.
+  </para>
+
+  <para>
+Expected final state:
+  </para>
+
+  <para>
+<emphasis role='bold'>CLOSED</emphasis>
+  </para>
+
+  <para>
+N outstanding invoice, no outstanding payment, no unresolved task, and the delivery/inspection records exist. Your current implementation explicitly implements these closure gates
+  </para>
+
+  <para>
+<emphasis role='bold'>SCENARIO 2 — QUOTATION PROCUREMENT</emphasis>
+  </para>
+
+  <para>
+Now test another procurement <emphasis role='bold'>from the same ICT department</emphasis>.
+  </para>
+
+  <para>
+This proves your system supports multiple simultaneous procurement cases.
+  </para>
+
+  <para>
+<emphasis role='bold'>Procurement</emphasis>
+  </para>
+
+  <para>
+<emphasis role='bold'>20 Business Laptops</emphasis>
+  </para>
+
+  <para>
+Estimated: 20 × UGX 3,500,000
+  </para>
+
+  <para>
+Total: <emphasis role='bold'>UGX 70,000,000</emphasis>
+  </para>
+
+  <para>
+We do not modify the first procurement.
+  </para>
+
+  <para>
+
+  </para>
+
+  <para>
+<emphasis role='bold'>STEP 1 — NEW REQUISITION</emphasis>
+  </para>
+
+  <para>
+Login: John — User Department Officer
+  </para>
+
+  <para>
+Create: Procurement of 20 Business Laptops for ICT Staff
+  </para>
+
+  <para>
+Plan: ICT Procurement Plan 2026/2027
+  </para>
+
+  <para>
+Plan item: Supply of business laptops
+  </para>
+
+  <para>
+Budget: Computer Equipment
+  </para>
+
+  <para>
+Quantity: 20
+  </para>
+
+  <para>
+Unit: Each
+  </para>
+
+  <para>
+Estimated unit price: UGX 3,500,000
+  </para>
+
+  <para>
+Estimated total: <emphasis role='bold'>UGX 70,000,000</emphasis>
+  </para>
+
+  <para>
+Required by: 31 October 2026
+  </para>
+
+  <para>
+Requirement: Supply of 20 business laptops with minimum Core i5/Ryzen 5 equivalent processor, 16GB RAM, 512GB SSD, Wi-Fi, webcam and minimum three-year warranty.
+  </para>
+
+  <para>
+Delivery: ICT Department
+  </para>
+
+  <para>
+Submit.
+  </para>
+
+  <para>
+
+  </para>
+
+  <para>
+<emphasis role='bold'>STEP 2 — APPROVAL CHAIN</emphasis>
+  </para>
+
+  <para>
+Run: <emphasis role='bold'>John </emphasis>→ submit
+  </para>
+
+  <para>
+<emphasis role='bold'>Mary </emphasis>→ approve
+  </para>
+
+  <para>
+<emphasis role='bold'>Peter </emphasis>→ verify procurement plan
+  </para>
+
+  <para>
+<emphasis role='bold'>David </emphasis>→ verify funding
+  </para>
+
+  <para>
+<emphasis role='bold'>Sarah </emphasis>→ approve
+  </para>
+
+  <para>
+Then: <emphasis role='bold'>Peter </emphasis>→ Select Method
+  </para>
+
+  <para>
+Select: <emphasis role='bold'>QUOTATION</emphasis>
+  </para>
+
+  <para>
+System creates: <emphasis role='bold'>PROC-2026-0002</emphasis>
+  </para>
+
+  <para>
+
+  </para>
+
+  <para>
+<emphasis role='bold'>STEP 3 — RFQ</emphasis>
+  </para>
+
+  <para>
+Login: Peter — Procurement Officer
+  </para>
+
+  <para>
+Prepare RFQ.
+  </para>
+
+  <para>
+Example suppliers:
+  </para>
+
+  <para>
+<emphasis role='bold'>Supplier 1</emphasis>
+  </para>
+
+  <para>
+Kampala Computers Ltd.
+  </para>
+
+  <para>
+<emphasis role='bold'>Supplier 2</emphasis>
+  </para>
+
+  <para>
+Uganda Tech Supplies Ltd.
+  </para>
+
+  <para>
+<emphasis role='bold'>Supplier 3</emphasis>
+  </para>
+
+  <para>
+East Africa Systems Ltd.
+  </para>
+
+  <para>
+The RFQ should contain the same requirement so suppliers can be compared fairly.
+  </para>
+
+  <para>
+[pic]
+  </para>
+
+  <para>
+<emphasis role='bold'>STEP 4 — REVIEW RFQ</emphasis>
+  </para>
+
+  <para>
+Peter prepares.
+  </para>
+
+  <para>
+Then: <emphasis role='bold'>David — Head PDU</emphasis>
+  </para>
+
+  <para>
+reviews.
+  </para>
+
+  <para>
+Then: <emphasis role='bold'>Grace — Contracts Officer</emphasis>
+  </para>
+
+  <para>
+approves.
+  </para>
+
+  <para>
+Only then should the RFQs be issued.
+  </para>
+
+  <para>
+
+  </para>
+
+  <para>
+<emphasis role='bold'>STEP 5 — ISSUE RFQs</emphasis>
+  </para>
+
+  <para>
+Peter issues the RFQ to the three suppliers.
+  </para>
+
+  <para>
+Record: Issue date: 05/10/2026
+  </para>
+
+  <para>
+Closing date: 12/10/2026
+  </para>
+
+  <para>
+
+  </para>
+
+  <para>
+<emphasis role='bold'>STEP 6 — RECEIVE QUOTATIONS</emphasis>
+  </para>
+
+  <para>
+Enter three offers.
+  </para>
+
+  <para>
+<emphasis role='bold'>Kampala Computers</emphasis>
+  </para>
+
+  <para>
+UGX 72,000,000
+  </para>
+
+  <para>
+<emphasis role='bold'>Uganda Tech Supplies</emphasis>
+  </para>
+
+  <para>
+UGX 68,500,000
+  </para>
+
+  <para>
+<emphasis role='bold'>East Africa Systems</emphasis>
+  </para>
+
+  <para>
+UGX 71,000,000
+  </para>
+
+  <para>
+Do not simply put one supplier.
+  </para>
+
+  <para>
+The purpose of the simulator is to teach students that procurement involves competing offers and evaluation.
+  </para>
+
+  <para>
+
+  </para>
+
+  <para>
+<emphasis role='bold'>STEP 7 — CLOSE/LOCK SUBMISSION</emphasis>
+  </para>
+
+  <para>
+At the deadline:
+  </para>
+
+  <para>
+Peter → Close/Lock Quotation Submission
+  </para>
+
+  <para>
+After this:
+  </para>
+
+  <para>
+<emphasis role='bold'>No new quotation should be accepted.</emphasis>
+  </para>
+
+  <para>
+Test this deliberately.
+  </para>
+
+  <para>
+Try adding another quotation.
+  </para>
+
+  <para>
+The system should reject it with a clear message.
+  </para>
+
+  <para>
+This is one of the important additions you recently implemented.
+  </para>
+
+  <para>
+
+  </para>
+
+  <para>
+<emphasis role='bold'>STEP 8 — OPEN QUOTATIONS</emphasis>
+  </para>
+
+  <para>
+Peter opens the received quotations.
+  </para>
+
+  <para>
+The system should preserve:
+  </para>
+
+  <itemizedlist mark='bullet'>
+
+   <listitem>
+
+    <para>
+supplier
+    </para>
+
+   </listitem>
+
+   <listitem>
+
+    <para>
+submitted amount
+    </para>
+
+   </listitem>
+
+   <listitem>
+
+    <para>
+submission time
+    </para>
+
+   </listitem>
+
+   <listitem>
+
+    <para>
+quotation reference
+    </para>
+
+   </listitem>
+
+   <listitem>
+
+    <para>
+status
+    </para>
+
+   </listitem>
+
+  </itemizedlist>
+
+  <para>
+
+  </para>
+
+  <para>
+<emphasis role='bold'>STEP 9 — EVALUATION COMMITTEE</emphasis>
+  </para>
+
+  <para>
+Create/use: Evaluation Committee
+  </para>
+
+  <para>
+Members:
+  </para>
+
+  <itemizedlist mark='bullet'>
+
+   <listitem>
+
+    <para>
+Alice — Chair
+    </para>
+
+   </listitem>
+
+   <listitem>
+
+    <para>
+Bob — Member
+    </para>
+
+   </listitem>
+
+   <listitem>
+
+    <para>
+Carol — Secretary
+    </para>
+
+   </listitem>
+
+  </itemizedlist>
+
+  <para>
+The procurement officer should not simply act as all three committee members.
+  </para>
+
+  <para>
+Switch into the committee context.
+  </para>
+
+  <para>
+<emphasis role='bold'>Technical evaluation</emphasis>
+  </para>
+
+  <para>
+Evaluate:
+  </para>
+
+  <para>
+
+   <informaltable frame='none' colsep='0' rowsep='0'>
+
+    <tgroup cols='2'>
+
+     <colspec colwidth='312.35pt'/>
+
+     <colspec colwidth='138.95pt'/>
+
+     <tbody>
+
+      <row>
+
+       <entry>
+Supplier
+       </entry>
+
+       <entry>
+Technical
+       </entry>
+
+      </row>
+
+      <row>
+
+       <entry>
+Kampala Computers
+       </entry>
+
+       <entry>
+Pass
+       </entry>
+
+      </row>
+
+      <row>
+
+       <entry>
+Uganda Tech Supplies
+       </entry>
+
+       <entry>
+Pass
+       </entry>
+
+      </row>
+
+      <row>
+
+       <entry>
+East Africa Systems
+       </entry>
+
+       <entry>
+Pass
+       </entry>
+
+      </row>
+
+     </tbody>
+
+    </tgroup>
+
+   </informaltable>
+
+  </para>
+
+  <para>
+Then financial evaluation.
+  </para>
+
+  <para>
+
+   <informaltable frame='none' colsep='0' rowsep='0'>
+
+    <tgroup cols='2'>
+
+     <colspec colwidth='294.80pt'/>
+
+     <colspec colwidth='156.50pt'/>
+
+     <tbody>
+
+      <row>
+
+       <entry>
+Supplier
+       </entry>
+
+       <entry>
+Price
+       </entry>
+
+      </row>
+
+      <row>
+
+       <entry>
+Kampala Computers
+       </entry>
+
+       <entry>
+72,000,000
+       </entry>
+
+      </row>
+
+      <row>
+
+       <entry>
+Uganda Tech Supplies
+       </entry>
+
+       <entry>
+68,500,000
+       </entry>
+
+      </row>
+
+      <row>
+
+       <entry>
+East Africa Systems
+       </entry>
+
+       <entry>
+71,000,000
+       </entry>
+
+      </row>
+
+     </tbody>
+
+    </tgroup>
+
+   </informaltable>
+
+  </para>
+
+  <para>
+Recommended supplier: Uganda Tech Supplies Ltd.
+  </para>
+
+  <para>
+Recommendation: Award to Uganda Tech Supplies Ltd. at UGX 68,500,000 subject to required approvals and verification.
+  </para>
+
+  <para>
+
+  </para>
+
+  <para>
+<emphasis role='bold'>STEP 10 — EVALUATION REPORT</emphasis>
+  </para>
+
+  <para>
+Committee chair submits.
+  </para>
+
+  <para>
+Secretary records.
+  </para>
+
+  <para>
+The system should show:
+  </para>
+
+  <para>
+Alice — Evaluation Committee — Chairperson
+  </para>
+
+  <para>
+rather than merely: Alice
+  </para>
+
+  <para>
+This is exactly why your recent role/committee timeline work matters.
+  </para>
+
+  <para>
+
+  </para>
+
+  <para>
+<emphasis role='bold'>STEP 11 — POST-QUALIFICATION</emphasis>
+  </para>
+
+  <para>
+If this procurement is configured to require it, run:
+  </para>
+
+  <para>
+<emphasis role='bold'>Peter</emphasis>
+  </para>
+
+  <para>
+Verify:
+  </para>
+
+  <itemizedlist mark='bullet'>
+
+   <listitem>
+
+    <para>
+supplier registration
+    </para>
+
+   </listitem>
+
+   <listitem>
+
+    <para>
+tax compliance
+    </para>
+
+   </listitem>
+
+   <listitem>
+
+    <para>
+experience
+    </para>
+
+   </listitem>
+
+   <listitem>
+
+    <para>
+references
+    </para>
+
+   </listitem>
+
+  </itemizedlist>
+
+  <para>
+Example:
+  </para>
+
+  <para>
+Tax compliant: YES
+  </para>
+
+  <para>
+Registration: VERIFIED
+  </para>
+
+  <para>
+Experience: VERIFIED
+  </para>
+
+  <para>
+References: SATISFACTORY
+  </para>
+
+  <para>
+Submit post-qualification report.
+  </para>
+
+  <para>
+
+  </para>
+
+  <para>
+<emphasis role='bold'>STEP 12 — AWARD</emphasis>
+  </para>
+
+  <para>
+The appropriate approval authority reviews the evaluation recommendation.
+  </para>
+
+  <para>
+Award: Uganda Tech Supplies Ltd.
+  </para>
+
+  <para>
+Amount: <emphasis role='bold'>UGX 68,500,000</emphasis>
+  </para>
+
+  <para>
+Record the award decision.
+  </para>
+
+  <para>
+
+  </para>
+
+  <para>
+<emphasis role='bold'>STEP 13 — LPO</emphasis>
+  </para>
+
+  <para>
+Run: <emphasis role='bold'>LPO Process</emphasis>
+  </para>
+
+  <para>
+Peter: Generate LPO
+  </para>
+
+  <para>
+David: Review LPO
+  </para>
+
+  <para>
+Sarah: Approve LPO
+  </para>
+
+  <para>
+Peter: Issue LPO
+  </para>
+
+  <para>
+Supplier: Confirm acceptance
+  </para>
+
+  <para>
+LPO: LPO-2026-0042
+  </para>
+
+  <para>
+Amount: UGX 68,500,000
+  </para>
+
+  <para>
+
+  </para>
+
+  <para>
+<emphasis role='bold'>STEP 14 — DELIVERY</emphasis>
+  </para>
+
+  <para>
+Now deliberately test <emphasis role='bold'>partial delivery</emphasis>.
+  </para>
+
+  <para>
+Supplier delivers: 12 laptops
+  </para>
+
+  <para>
+instead of 20.
+  </para>
+
+  <para>
+Record:
+  </para>
+
+  <para>
+
+   <informaltable frame='none' colsep='0' rowsep='0'>
+
+    <tgroup cols='3'>
+
+     <colspec colwidth='125.15pt'/>
+
+     <colspec colwidth='151.50pt'/>
+
+     <colspec colwidth='174.65pt'/>
+
+     <tbody>
+
+      <row>
+
+       <entry>
+Item
+       </entry>
+
+       <entry>
+Ordered
+       </entry>
+
+       <entry>
+Delivered
+       </entry>
+
+      </row>
+
+      <row>
+
+       <entry>
+Laptop
+       </entry>
+
+       <entry>
+20
+       </entry>
+
+       <entry>
+12
+       </entry>
+
+      </row>
+
+     </tbody>
+
+    </tgroup>
+
+   </informaltable>
+
+  </para>
+
+  <para>
+Do <emphasis role='bold'>not</emphasis> close the procurement.
+  </para>
+
+  <para>
+The system should show: Partial delivery
+  </para>
+
+  <para>
+Outstanding:8 laptops
+  </para>
+
+  <para>
+
+  </para>
+
+  <para>
+<emphasis role='bold'>STEP 15 — INSPECTION</emphasis>
+  </para>
+
+  <para>
+Inspection committee inspects the 12.
+  </para>
+
+  <para>
+Suppose:  11  accepted1 rejected
+  </para>
+
+  <para>
+
+  </para>
+
+  <para>
+
+  </para>
+
+  <para>
+Record:
+  </para>
+
+  <para>
+
+   <informaltable frame='none' colsep='0' rowsep='0'>
+
+    <tgroup cols='2'>
+
+     <colspec colwidth='221.55pt'/>
+
+     <colspec colwidth='229.75pt'/>
+
+     <tbody>
+
+      <row>
+
+       <entry>
+Quantity
+       </entry>
+
+       <entry>
+Result
+       </entry>
+
+      </row>
+
+      <row>
+
+       <entry>
+11
+       </entry>
+
+       <entry>
+Accepted
+       </entry>
+
+      </row>
+
+      <row>
+
+       <entry>
+1
+       </entry>
+
+       <entry>
+Rejected
+       </entry>
+
+      </row>
+
+     </tbody>
+
+    </tgroup>
+
+   </informaltable>
+
+  </para>
+
+  <para>
+Now the system should know:
+  </para>
+
+  <para>
+8 units outstanding + 1 rejected
+  </para>
+
+  <para>
+Do not allow full completion yet.
+  </para>
+
+  <para>
+
+  </para>
+
+  <para>
+<emphasis role='bold'>STEP 16 — SECOND DELIVERY</emphasis>
+  </para>
+
+  <para>
+Supplier delivers: 9 laptops
+  </para>
+
+  <para>
+Inspection: 9 accepted
+  </para>
+
+  <para>
+Now totals become:
+  </para>
+
+  <para>
+20 ordered20 accepted
+  </para>
+
+  <para>
+The procurement can progress.
+  </para>
+
+  <para>
+
+  </para>
+
+  <para>
+<emphasis role='bold'>STEP 17 — INVOICE</emphasis>
+  </para>
+
+  <para>
+Supplier sends invoice: UGX 68,500,000
+  </para>
+
+  <para>
+John receives.
+  </para>
+
+  <para>
+Mary certifies.
+  </para>
+
+  <para>
+Grace verifies.
+  </para>
+
+  <para>
+Sarah approves payment.
+  </para>
+
+  <para>
+
+  </para>
+
+  <para>
+<emphasis role='bold'>STEP 18 — PAYMENT</emphasis>
+  </para>
+
+  <para>
+Record: Amount: UGX 68,500,000
+  </para>
+
+  <para>
+Payment reference: PAY-2026-1098
+  </para>
+
+  <para>
+Status: SETTLED
+  </para>
+
+  <para>
+
+  </para>
+
+  <para>
+<emphasis role='bold'>STEP 19 — CLOSE</emphasis>
+  </para>
+
+  <para>
+Procurement: READY_FOR_CLOSURE
+  </para>
+
+  <para>
+Then: CLOSED
+  </para>
+
+  <para>
+You have now proven:
+  </para>
+
+  <para>
+<emphasis role='bold'>Plan → Requisition → Quotation → Multiple suppliers → Lock → Open → Evaluation → Award → LPO → Partial delivery → Inspection → Invoice → Payment → Closure</emphasis>
+  </para>
+
+  <para>
+<emphasis role='bold'>SCENARIO 3 — TENDER PROCUREMENT</emphasis>
+  </para>
+
+  <para>
+Now test your largest/most complex branch.
+  </para>
+
+  <para>
+<emphasis role='bold'>Procurement</emphasis>
+  </para>
+
+  <para>
+<emphasis role='bold'>Supply and Installation of Network Infrastructure.</emphasis>
+  </para>
+
+  <para>
+Estimated value: <emphasis role='bold'>UGX 120,000,000</emphasis>
+  </para>
+
+  <para>
+Plan: ICT Procurement Plan 2026/2027
+  </para>
+
+  <para>
+
+  </para>
+
+  <para>
+<emphasis role='bold'>STEP 1 — REQUISITION</emphasis>
+  </para>
+
+  <para>
+Login: John — User Department Officer
+  </para>
+
+  <para>
+Create: Supply and Installation of Network Infrastructure for ICT Department
+  </para>
+
+  <para>
+Requirement: Supply and installation of managed network switches, wireless access points, network racks, structured cabling and associated configuration services for the organisation's ICT network.
+  </para>
+
+  <para>
+Estimated: <emphasis role='bold'>UGX 120,000,000</emphasis>
+  </para>
+
+  <para>
+Submit.
+  </para>
+
+  <para>
+
+  </para>
+
+  <para>
+<emphasis role='bold'>STEP 2 — APPROVAL</emphasis>
+  </para>
+
+  <para>
+Run: <emphasis role='bold'>John </emphasis>→ submit
+  </para>
+
+  <para>
+<emphasis role='bold'>Mary </emphasis>→ approve
+  </para>
+
+  <para>
+<emphasis role='bold'>Peter </emphasis>→ verify plan
+  </para>
+
+  <para>
+<emphasis role='bold'>David </emphasis>→ verify funding
+  </para>
+
+  <para>
+<emphasis role='bold'>Sarah </emphasis>→ approve
+  </para>
+
+  <para>
+
+  </para>
+
+  <para>
+<emphasis role='bold'>STEP 3 — METHOD</emphasis>
+  </para>
+
+  <para>
+Peter selects: <emphasis role='bold'>TENDER</emphasis>
+  </para>
+
+  <para>
+System creates: <emphasis role='bold'>PROC-2026-0003</emphasis>
+  </para>
+
+  <para>
+[pic]
+  </para>
+
+  <para>
+<emphasis role='bold'>STEP 4 — TENDER DOCUMENT</emphasis>
+  </para>
+
+  <para>
+Peter prepares tender documents.
+  </para>
+
+  <para>
+They should contain things such as:
+  </para>
+
+  <para>
+<emphasis role='bold'>Technical requirements</emphasis>
+  </para>
+
+  <itemizedlist mark='bullet'>
+
+   <listitem>
+
+    <para>
+managed switches
+    </para>
+
+   </listitem>
+
+   <listitem>
+
+    <para>
+minimum port requirements
+    </para>
+
+   </listitem>
+
+   <listitem>
+
+    <para>
+VLAN support
+    </para>
+
+   </listitem>
+
+   <listitem>
+
+    <para>
+PoE where required
+    </para>
+
+   </listitem>
+
+   <listitem>
+
+    <para>
+wireless access points
+    </para>
+
+   </listitem>
+
+   <listitem>
+
+    <para>
+installation
+    </para>
+
+   </listitem>
+
+   <listitem>
+
+    <para>
+configuration
+    </para>
+
+   </listitem>
+
+   <listitem>
+
+    <para>
+warranty
+    </para>
+
+   </listitem>
+
+   <listitem>
+
+    <para>
+support
+    </para>
+
+   </listitem>
+
+   <listitem>
+
+    <para>
+training
+    </para>
+
+   </listitem>
+
+  </itemizedlist>
+
+  <para>
+<emphasis role='bold'>Delivery requirements</emphasis>
+  </para>
+
+  <para>
+ICT Department
+  </para>
+
+  <para>
+<emphasis role='bold'>Evaluation requirements</emphasis>
+  </para>
+
+  <para>
+Technical compliance + financial evaluation.
+  </para>
+
+  <para>
+
+  </para>
+
+  <para>
+<emphasis role='bold'>STEP 5 — REVIEW</emphasis>
+  </para>
+
+  <para>
+Peter prepares.
+  </para>
+
+  <para>
+David: Head PDU
+  </para>
+
+  <para>
+reviews.
+  </para>
+
+  <para>
+Grace: Contracts Officer
+  </para>
+
+  <para>
+reviews/approves according to your configured workflow.
+  </para>
+
+  <para>
+
+  </para>
+
+  <para>
+<emphasis role='bold'>STEP 6 — ADVERTISE</emphasis>
+  </para>
+
+  <para>
+Peter: Advertise Tender
+  </para>
+
+  <para>
+Example: Tender Reference: LJO/ICT/2026/001
+  </para>
+
+  <para>
+Submission deadline: 30 November 2026
+  </para>
+
+  <para>
+
+  </para>
+
+  <para>
+<emphasis role='bold'>STEP 7 — RECEIVE BIDS</emphasis>
+  </para>
+
+  <para>
+Enter three bidders.
+  </para>
+
+  <para>
+<emphasis role='bold'>Bidder A</emphasis>
+  </para>
+
+  <para>
+Uganda Network Systems Ltd.
+  </para>
+
+  <para>
+Bid: UGX 118,000,000
+  </para>
+
+  <para>
+<emphasis role='bold'>Bidder B</emphasis>
+  </para>
+
+  <para>
+East Africa ICT Solutions Ltd.
+  </para>
+
+  <para>
+Bid: UGX 109,500,000
+  </para>
+
+  <para>
+<emphasis role='bold'>Bidder C</emphasis>
+  </para>
+
+  <para>
+Kampala Infrastructure Ltd.
+  </para>
+
+  <para>
+Bid: UGX 125,000,000
+  </para>
+
+  <para>
+
+  </para>
+
+  <para>
+<emphasis role='bold'>STEP 8 — CLOSE TENDER</emphasis>
+  </para>
+
+  <para>
+Peter: Close Tender Submission
+  </para>
+
+  <para>
+Then test the restriction: Try submitting another bid.
+  </para>
+
+  <para>
+Expected: <emphasis role='bold'>Rejected — tender submission is closed.</emphasis>
+  </para>
+
+  <para>
+This is an important negative test.
+  </para>
+
+  <para>
+
+  </para>
+
+  <para>
+<emphasis role='bold'>STEP 9 — OPEN BIDS</emphasis>
+  </para>
+
+  <para>
+Peter: Open Bids
+  </para>
+
+  <para>
+The system should record:
+  </para>
+
+  <itemizedlist mark='bullet'>
+
+   <listitem>
+
+    <para>
+bidder
+    </para>
+
+   </listitem>
+
+   <listitem>
+
+    <para>
+amount
+    </para>
+
+   </listitem>
+
+   <listitem>
+
+    <para>
+submission
+    </para>
+
+   </listitem>
+
+   <listitem>
+
+    <para>
+opening information
+    </para>
+
+   </listitem>
+
+   <listitem>
+
+    <para>
+time
+    </para>
+
+   </listitem>
+
+   <listitem>
+
+    <para>
+status
+    </para>
+
+   </listitem>
+
+  </itemizedlist>
+
+  <para>
+
+  </para>
+
+  <para>
+<emphasis role='bold'>STEP 10 — FORWARD FOR EVALUATION</emphasis>
+  </para>
+
+  <para>
+Peter/Head PDU performs: Forward Bids for Evaluation
+  </para>
+
+  <para>
+Now evaluation begins.
+  </para>
+
+  <para>
+
+  </para>
+
+  <para>
+<emphasis role='bold'>STEP 11 — EVALUATION COMMITTEE</emphasis>
+  </para>
+
+  <para>
+Switch to: Evaluation Committee
+  </para>
+
+  <para>
+Members:
+  </para>
+
+  <itemizedlist mark='bullet'>
+
+   <listitem>
+
+    <para>
+Alice — Chair
+    </para>
+
+   </listitem>
+
+   <listitem>
+
+    <para>
+Bob — Member
+    </para>
+
+   </listitem>
+
+   <listitem>
+
+    <para>
+Carol — Secretary
+    </para>
+
+   </listitem>
+
+  </itemizedlist>
+
+  <para>
+<emphasis role='bold'>Preliminary evaluation</emphasis>
+  </para>
+
+  <para>
+
+   <informaltable frame='none' colsep='0' rowsep='0'>
+
+    <tgroup cols='2'>
+
+     <colspec colwidth='346.65pt'/>
+
+     <colspec colwidth='104.65pt'/>
+
+     <tbody>
+
+      <row>
+
+       <entry>
+Bidder
+       </entry>
+
+       <entry>
+Eligible
+       </entry>
+
+      </row>
+
+      <row>
+
+       <entry>
+Uganda Network Systems
+       </entry>
+
+       <entry>
+YES
+       </entry>
+
+      </row>
+
+      <row>
+
+       <entry>
+East Africa ICT Solutions
+       </entry>
+
+       <entry>
+YES
+       </entry>
+
+      </row>
+
+      <row>
+
+       <entry>
+Kampala Infrastructure
+       </entry>
+
+       <entry>
+YES
+       </entry>
+
+      </row>
+
+     </tbody>
+
+    </tgroup>
+
+   </informaltable>
+
+  </para>
+
+  <para>
+<emphasis role='bold'>Technical evaluation</emphasis>
+  </para>
+
+  <para>
+Suppose:
+  </para>
+
+  <para>
+
+   <informaltable frame='none' colsep='0' rowsep='0'>
+
+    <tgroup cols='2'>
+
+     <colspec colwidth='327.05pt'/>
+
+     <colspec colwidth='124.25pt'/>
+
+     <tbody>
+
+      <row>
+
+       <entry>
+Bidder
+       </entry>
+
+       <entry>
+Technical
+       </entry>
+
+      </row>
+
+      <row>
+
+       <entry>
+Uganda Network Systems
+       </entry>
+
+       <entry>
+PASS
+       </entry>
+
+      </row>
+
+      <row>
+
+       <entry>
+East Africa ICT Solutions
+       </entry>
+
+       <entry>
+PASS
+       </entry>
+
+      </row>
+
+      <row>
+
+       <entry>
+Kampala Infrastructure
+       </entry>
+
+       <entry>
+FAIL
+       </entry>
+
+      </row>
+
+     </tbody>
+
+    </tgroup>
+
+   </informaltable>
+
+  </para>
+
+  <para>
+Then financial evaluation occurs only for technically acceptable bidders.
+  </para>
+
+  <para>
+
+   <informaltable frame='none' colsep='0' rowsep='0'>
+
+    <tgroup cols='2'>
+
+     <colspec colwidth='300.70pt'/>
+
+     <colspec colwidth='150.60pt'/>
+
+     <tbody>
+
+      <row>
+
+       <entry>
+Bidder
+       </entry>
+
+       <entry>
+Price
+       </entry>
+
+      </row>
+
+      <row>
+
+       <entry>
+Uganda Network Systems
+       </entry>
+
+       <entry>
+118,000,000
+       </entry>
+
+      </row>
+
+      <row>
+
+       <entry>
+East Africa ICT Solutions
+       </entry>
+
+       <entry>
+109,500,000
+       </entry>
+
+      </row>
+
+     </tbody>
+
+    </tgroup>
+
+   </informaltable>
+
+  </para>
+
+  <para>
+Recommendation: East Africa ICT Solutions Ltd.
+  </para>
+
+  <para>
+[pic]
+  </para>
+
+  <para>
+<emphasis role='bold'>STEP 12 — POST QUALIFICATION</emphasis>
+  </para>
+
+  <para>
+Because this is a more complex procurement, we use post-qualification process.
+  </para>
+
+  <para>
+Peter verifies:
+  </para>
+
+  <itemizedlist mark='bullet'>
+
+   <listitem>
+
+    <para>
+company registration
+    </para>
+
+   </listitem>
+
+   <listitem>
+
+    <para>
+tax compliance
+    </para>
+
+   </listitem>
+
+   <listitem>
+
+    <para>
+similar assignments
+    </para>
+
+   </listitem>
+
+   <listitem>
+
+    <para>
+references
+    </para>
+
+   </listitem>
+
+   <listitem>
+
+    <para>
+technical capacity
+    </para>
+
+   </listitem>
+
+   <listitem>
+
+    <para>
+personnel
+    </para>
+
+   </listitem>
+
+   <listitem>
+
+    <para>
+equipment/resources
+    </para>
+
+   </listitem>
+
+  </itemizedlist>
+
+  <para>
+
+  </para>
+
+  <para>
+Example: Registration — VERIFIED
+  </para>
+
+  <para>
+Tax — VERIFIED
+  </para>
+
+  <para>
+Experience — VERIFIED
+  </para>
+
+  <para>
+References — SATISFACTORY
+  </para>
+
+  <para>
+Technical capacity — VERIFIED
+  </para>
+
+  <para>
+
+  </para>
+
+  <para>
+<emphasis role='bold'>STEP 13 — AWARD</emphasis>
+  </para>
+
+  <para>
+Award: East Africa ICT Solutions Ltd.
+  </para>
+
+  <para>
+Amount: <emphasis role='bold'>UGX 109,500,000</emphasis>
+  </para>
+
+  <para>
+
+  </para>
+
+  <para>
+<emphasis role='bold'>STEP 14 — CONTRACT</emphasis>
+  </para>
+
+  <para>
+Because this is the Tender path, use:
+  </para>
+
+  <para>
+<emphasis role='bold'>Contract</emphasis>
+  </para>
+
+  <para>
+rather than LPO as the main downstream instrument.
+  </para>
+
+  <para>
+Create: Contract No. LJO/ICT/NET/2026/001
+  </para>
+
+  <para>
+Value: <emphasis role='bold'>UGX 109,500,000</emphasis>
+  </para>
+
+  <para>
+Start: 01/01/2027
+  </para>
+
+  <para>
+End: 31/03/2027
+  </para>
+
+  <para>
+Scope: Supply, installation, configuration and commissioning of network infrastructure.
+  </para>
+
+  <para>
+
+  </para>
+
+  <para>
+<emphasis role='bold'>STEP 15 — CONTRACT SIGNING</emphasis>
+  </para>
+
+  <para>
+Run the configured contract approval/signing flow.
+  </para>
+
+  <para>
+Do not allow delivery to be treated as complete before the contract is established where your workflow requires the contract.
+  </para>
+
+  <para>
+
+  </para>
+
+  <para>
+<emphasis role='bold'>STEP 16 — DELIVERY</emphasis>
+  </para>
+
+  <para>
+Now test <emphasis role='bold'>multi-line delivery</emphasis>.
+  </para>
+
+  <para>
+Supplier delivers:
+  </para>
+
+  <para>
+
+   <informaltable frame='none' colsep='0' rowsep='0'>
+
+    <tgroup cols='2'>
+
+     <colspec colwidth='307.15pt'/>
+
+     <colspec colwidth='144.15pt'/>
+
+     <tbody>
+
+      <row>
+
+       <entry>
+Item
+       </entry>
+
+       <entry>
+Ordered
+       </entry>
+
+      </row>
+
+      <row>
+
+       <entry>
+Managed switches
+       </entry>
+
+       <entry>
+20
+       </entry>
+
+      </row>
+
+      <row>
+
+       <entry>
+Wireless APs
+       </entry>
+
+       <entry>
+40
+       </entry>
+
+      </row>
+
+      <row>
+
+       <entry>
+Network racks
+       </entry>
+
+       <entry>
+5
+       </entry>
+
+      </row>
+
+      <row>
+
+       <entry>
+Structured cabling
+       </entry>
+
+       <entry>
+1 Lot
+       </entry>
+
+      </row>
+
+     </tbody>
+
+    </tgroup>
+
+   </informaltable>
+
+  </para>
+
+  <para>
+First delivery:
+  </para>
+
+  <para>
+
+   <informaltable frame='none' colsep='0' rowsep='0'>
+
+    <tgroup cols='2'>
+
+     <colspec colwidth='293.20pt'/>
+
+     <colspec colwidth='158.10pt'/>
+
+     <tbody>
+
+      <row>
+
+       <entry>
+Item
+       </entry>
+
+       <entry>
+Delivered
+       </entry>
+
+      </row>
+
+      <row>
+
+       <entry>
+Managed switches
+       </entry>
+
+       <entry>
+20
+       </entry>
+
+      </row>
+
+      <row>
+
+       <entry>
+Wireless APs
+       </entry>
+
+       <entry>
+20
+       </entry>
+
+      </row>
+
+      <row>
+
+       <entry>
+Network racks
+       </entry>
+
+       <entry>
+5
+       </entry>
+
+      </row>
+
+      <row>
+
+       <entry>
+Structured cabling
+       </entry>
+
+       <entry>
+0
+       </entry>
+
+      </row>
+
+     </tbody>
+
+    </tgroup>
+
+   </informaltable>
+
+  </para>
+
+  <para>
+The system should show:
+  </para>
+
+  <para>
+<emphasis role='bold'>PARTIALLY DELIVERED</emphasis>
+  </para>
+
+  <para>
+
+  </para>
+
+  <para>
+<emphasis role='bold'>STEP 17 — INSPECTION</emphasis>
+  </para>
+
+  <para>
+Inspection committee:
+  </para>
+
+  <para>
+Daniel — ChairEva — MemberFrank — Secretary
+  </para>
+
+  <para>
+Inspect the delivered equipment.
+  </para>
+
+  <para>
+Example:
+  </para>
+
+  <para>
+20 switches — accepted
+  </para>
+
+  <para>
+20 APs — accepted
+  </para>
+
+  <para>
+5 racks — accepted
+  </para>
+
+  <para>
+
+  </para>
+
+  <para>
+<emphasis role='bold'>STEP 18 — SECOND DELIVERY</emphasis>
+  </para>
+
+  <para>
+Supplier delivers remaining: 20 APs
+  </para>
+
+  <para>
+and: structured cabling
+  </para>
+
+  <para>
+Inspection accepts them.
+  </para>
+
+  <para>
+Now:
+  </para>
+
+  <para>
+Delivery = COMPLETE
+  </para>
+
+  <para>
+
+  </para>
+
+  <para>
+<emphasis role='bold'>STEP 19 — INVOICE</emphasis>
+  </para>
+
+  <para>
+Supplier submits: INV-EA-2027-031
+  </para>
+
+  <para>
+Amount: UGX 109,500,000
+  </para>
+
+  <para>
+John: Receive invoice
+  </para>
+
+  <para>
+Mary: Certify invoice
+  </para>
+
+  <para>
+Grace: Verify invoice
+  </para>
+
+  <para>
+Sarah: Approve payment
+  </para>
+
+  <para>
+
+  </para>
+
+  <para>
+<emphasis role='bold'>STEP 20 — PAYMENT</emphasis>
+  </para>
+
+  <para>
+Payment: UGX 109,500,000
+  </para>
+
+  <para>
+Payment reference: PAY-2027-0048
+  </para>
+
+  <para>
+Status: SETTLED
+  </para>
+
+  <para>
+
+  </para>
+
+  <para>
+<emphasis role='bold'>STEP 21 — CLOSURE</emphasis>
+  </para>
+
+  <para>
+Check:
+  </para>
+
+  <itemizedlist mark='bullet'>
+
+   <listitem>
+
+    <para>
+Requisition approved
+    </para>
+
+   </listitem>
+
+   <listitem>
+
+    <para>
+Method selected
+    </para>
+
+   </listitem>
+
+   <listitem>
+
+    <para>
+Tender completed
+    </para>
+
+   </listitem>
+
+   <listitem>
+
+    <para>
+Evaluation completed
+    </para>
+
+   </listitem>
+
+   <listitem>
+
+    <para>
+Post qualification completed
+    </para>
+
+   </listitem>
+
+   <listitem>
+
+    <para>
+Award completed
+    </para>
+
+   </listitem>
+
+   <listitem>
+
+    <para>
+Contract completed
+    </para>
+
+   </listitem>
+
+   <listitem>
+
+    <para>
+Delivery completed
+    </para>
+
+   </listitem>
+
+   <listitem>
+
+    <para>
+Inspection completed
+    </para>
+
+   </listitem>
+
+   <listitem>
+
+    <para>
+Invoice settled
+    </para>
+
+   </listitem>
+
+   <listitem>
+
+    <para>
+Payment settled
+    </para>
+
+   </listitem>
+
+   <listitem>
+
+    <para>
+No open workflow tasks
+    </para>
+
+   </listitem>
+
+   <listitem>
+
+    <para>
+No unresolved rejection/return
+    </para>
+
+   </listitem>
+
+   <listitem>
+
+    <para>
+No outstanding balance
+    </para>
+
+   </listitem>
+
+  </itemizedlist>
+
+  <para>
+
+  </para>
+
+  <para>
+Then: <emphasis role='bold'>READY FOR CLOSURE</emphasis>
+  </para>
+
+  <para>
+Then: <emphasis role='bold'>CLOSED</emphasis>
+  </para>
+
+  <para>
+
+  </para>
+
+  <para>
+
+  </para>
+
+  <para>
+
+  </para>
+
+  <para>
+
+  </para>
+
+  <para>
+
+  </para>
+
+  <para>
+
+  </para>
+
+ </chapter>
+
+</book>

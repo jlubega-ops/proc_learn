@@ -2,7 +2,6 @@ import { NextResponse } from "next/server";
 import * as XLSX from "xlsx";
 import { getSessionUser, sessionActiveRole } from "@/lib/api/get-session-user";
 import { canManageStudents } from "@/lib/api/student-scope";
-import { getAcademicYearChoices } from "@/lib/academic-years";
 import { prisma } from "@/lib/prisma";
 
 export const runtime = "nodejs";
@@ -19,8 +18,14 @@ export async function GET() {
     orderBy: { name: "asc" },
   });
   const short = programme?.shortName?.trim() || "SHORT";
-  const { primary } = getAcademicYearChoices();
-  const academicYear = primary[0] || "2025/2026";
+  const currentYear = await prisma.academicYear.findFirst({
+    where: { isCurrent: true },
+    orderBy: { label: "desc" },
+  });
+  const fallbackYear = await prisma.academicYear.findFirst({
+    orderBy: { label: "desc" },
+  });
+  const academicYear = currentYear?.label || fallbackYear?.label || "";
 
   const headers = [
     "Email",
@@ -32,6 +37,7 @@ export async function GET() {
     "Programme short name",
     "Academic year",
     "Year of study",
+    "Campus",
     "Sex",
   ];
   const sample = [
@@ -44,6 +50,7 @@ export async function GET() {
     short,
     academicYear,
     "3",
+    "Main",
     "Female",
   ];
 
@@ -59,6 +66,7 @@ export async function GET() {
     { wch: 22 },
     { wch: 14 },
     { wch: 14 },
+    { wch: 12 },
     { wch: 10 },
   ];
   XLSX.utils.book_append_sheet(wb, ws, "Students");

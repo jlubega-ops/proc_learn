@@ -18,6 +18,7 @@ import Typography from "@mui/material/Typography";
 import RefreshRounded from "@mui/icons-material/RefreshRounded";
 import VisibilityRounded from "@mui/icons-material/VisibilityRounded";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { format, isValid, parseISO } from "date-fns";
 import { useToast } from "@/components/providers/toast-provider";
 import {
@@ -27,6 +28,10 @@ import {
   adminOutlinedTableContainerSx,
   adminTableSx,
 } from "@/lib/admin-mui-surfaces";
+import {
+  clickableTableRowProps,
+  stopRowClick,
+} from "@/lib/projects/clickable-table-row";
 
 /**
  * @param {string | Date | null | undefined} value
@@ -53,6 +58,7 @@ function entityLabel(task) {
  */
 export function OrgTasksPanel({ projectId }) {
   const { showToast } = useToast();
+  const router = useRouter();
   const [loading, setLoading] = useState(true);
   const [tasks, setTasks] = useState(/** @type {any[]} */ ([]));
 
@@ -119,8 +125,16 @@ export function OrgTasksPanel({ projectId }) {
             <TableBody>
               {tasks.map((task) => {
                 const entity = entityLabel(task);
+                const detailHref = task.detailHref || "";
                 return (
-                  <TableRow key={task.id} hover>
+                  <TableRow
+                    key={task.id}
+                    {...clickableTableRowProps({
+                      href: detailHref,
+                      router,
+                      disabled: !detailHref,
+                    })}
+                  >
                     <TableCell>
                       <span className="font-medium">{task.title}</span>
                     </TableCell>
@@ -141,15 +155,20 @@ export function OrgTasksPanel({ projectId }) {
                       )}
                     </TableCell>
                     <TableCell>
-                      <Chip size="small" label={task.status} color="warning" />
+                      <Chip size="small" label="Pending your action" color="warning" />
                     </TableCell>
                     <TableCell>{formatWhen(task.createdAt)}</TableCell>
-                    <TableCell align="right" sx={{ whiteSpace: "nowrap" }}>
-                      {task.detailHref ? (
+                    <TableCell
+                      align="right"
+                      sx={{ whiteSpace: "nowrap" }}
+                      onClick={stopRowClick}
+                      onKeyDown={stopRowClick}
+                    >
+                      {detailHref ? (
                         <Tooltip title="Open record to review or approve">
                           <IconButton
                             component={Link}
-                            href={task.detailHref}
+                            href={detailHref}
                             size="small"
                             color="primary"
                             aria-label={`Open ${entity.title}`}

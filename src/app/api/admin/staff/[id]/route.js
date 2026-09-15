@@ -9,6 +9,7 @@ import { notifyAllSystemAdmins } from "@/lib/notify-system-admins";
 import { formatUserDisplayName } from "@/lib/user-display";
 import { prisma } from "@/lib/prisma";
 import { parseOptionalMaleFemaleSex } from "@/lib/validation/sex-male-female";
+import { deleteProjectsOwnedByUser } from "@/lib/projects/purge-project-data";
 
 export const runtime = "nodejs";
 
@@ -144,7 +145,7 @@ export async function PATCH(request, ctx) {
 /**
  * @param {{ params: Promise<{ id: string }> }} ctx
  */
-export async function DELETE(_request, ctx) {
+export async function DELETE(request, ctx) {
   const actor = await getSessionUser();
   if (!actor || !canManageStaffUsers(sessionActiveRole(actor))) {
     return NextResponse.json({ error: "Forbidden." }, { status: 403 });
@@ -158,6 +159,22 @@ export async function DELETE(_request, ctx) {
     );
   }
 
+  let body = {};
+  try {
+    body = await request.json();
+  } catch {
+    body = {};
+  }
+  if (String(body?.confirmText || "").trim() !== "DELETE") {
+    return NextResponse.json(
+      {
+        error:
+          'Deletion not confirmed. Type "DELETE" in all caps to permanently remove this account and related data.',
+      },
+      { status: 400 },
+    );
+  }
+
   const check = await assertStaffUser(id);
   if ("error" in check) {
     return NextResponse.json({ error: check.error }, { status: check.status });
@@ -166,7 +183,10 @@ export async function DELETE(_request, ctx) {
   const em = check.user.email;
   const label = formatUserDisplayName(check.user);
 
-  await prisma.user.delete({ where: { id } });
+  await prisma.$transaction(async (tx) => {
+    await deleteProjectsOwnedByUser(tx, id);
+    await tx.user.delete({ where: { id } });
+  });
 
   await writeAuditLog({
     eventType: AuditEvent.STAFF_USER_DELETED,

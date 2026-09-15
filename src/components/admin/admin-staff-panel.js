@@ -93,6 +93,7 @@ export function AdminStaffPanel() {
   const [suspendReason, setSuspendReason] = useState("");
   const [editRow, setEditRow] = useState(/** @type {StaffRow | null} */ (null));
   const [delRow, setDelRow] = useState(/** @type {StaffRow | null} */ (null));
+  const [deleteConfirmText, setDeleteConfirmText] = useState("");
   const [firstName, setFirstName] = useState("");
   const [lastName, setLastName] = useState("");
   const [middleName, setMiddleName] = useState("");
@@ -187,11 +188,20 @@ export function AdminStaffPanel() {
 
   async function confirmDelete() {
     if (!delRow) return;
+    if (deleteConfirmText.trim() !== "DELETE") {
+      showToast({
+        message: "Type DELETE in all caps to confirm.",
+        severity: "error",
+      });
+      return;
+    }
     setSaving(true);
     try {
       const res = await fetch(`/api/admin/staff/${delRow.id}`, {
         method: "DELETE",
         credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ confirmText: deleteConfirmText.trim() }),
       });
       const data = await res.json().catch(() => ({}));
       if (!res.ok) {
@@ -203,6 +213,7 @@ export function AdminStaffPanel() {
       }
       showToast({ message: "Staff user deleted.", severity: "success" });
       setDelRow(null);
+      setDeleteConfirmText("");
       await load({ silent: true });
     } finally {
       setSaving(false);
@@ -383,7 +394,10 @@ export function AdminStaffPanel() {
                         size="small"
                         color="error"
                         aria-label="Delete staff user"
-                        onClick={() => setDelRow(row)}
+                        onClick={() => {
+                          setDeleteConfirmText("");
+                          setDelRow(row);
+                        }}
                       >
                         <DeleteOutlineRounded fontSize="small" />
                       </IconButton>
@@ -526,22 +540,48 @@ export function AdminStaffPanel() {
 
       <Dialog
         open={Boolean(delRow)}
-        onClose={() => !saving && setDelRow(null)}
+        onClose={() => {
+          if (saving) return;
+          setDelRow(null);
+          setDeleteConfirmText("");
+        }}
+        fullWidth
+        maxWidth="sm"
         slotProps={{ paper: { sx: adminDialogPaperSx } }}
       >
         <DialogTitle>Delete {delRow?.email}?</DialogTitle>
         <DialogContent>
-          <Typography>This permanently removes the staff account and cannot be undone.</Typography>
+          <Typography className="mb-3">
+            This permanently removes the staff account and any projects they own, including
+            organisation and procurement learning data. This cannot be undone.
+          </Typography>
+          <TextField
+            autoFocus
+            margin="dense"
+            label="Type DELETE to confirm"
+            fullWidth
+            value={deleteConfirmText}
+            onChange={(e) => setDeleteConfirmText(e.target.value)}
+            sx={themedTextFieldSx}
+            helperText="Related projects and organisation records are deleted with the account."
+          />
         </DialogContent>
         <DialogActions>
-          <Button onClick={() => setDelRow(null)} disabled={saving}>
+          <Button
+            onClick={() => {
+              setDelRow(null);
+              setDeleteConfirmText("");
+            }}
+            disabled={saving}
+          >
             Cancel
           </Button>
           <Button
             color="error"
             variant="contained"
             onClick={() => void confirmDelete()}
-            disabled={saving}
+            disabled={saving || deleteConfirmText.trim() !== "DELETE"}
+            className="cursor-pointer disabled:cursor-not-allowed"
           >
             {saving ? <CircularProgress size={22} color="inherit" aria-hidden /> : "Delete"}
           </Button>

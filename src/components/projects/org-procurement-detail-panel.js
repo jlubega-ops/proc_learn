@@ -11,9 +11,11 @@ import Paper from "@mui/material/Paper";
 import TextField from "@mui/material/TextField";
 import Typography from "@mui/material/Typography";
 import ArrowBackRounded from "@mui/icons-material/ArrowBackRounded";
+import DescriptionRounded from "@mui/icons-material/DescriptionRounded";
 import RefreshRounded from "@mui/icons-material/RefreshRounded";
 import { format, isValid, parseISO } from "date-fns";
 import { useToast } from "@/components/providers/toast-provider";
+import { OrgBidDocumentFillDialog } from "@/components/projects/org-bid-document-fill-dialog";
 import {
   adminCenteredLoadingBoxSx,
   adminLoadingSpinnerSx,
@@ -22,6 +24,7 @@ import {
   themedTextFieldSx,
 } from "@/lib/admin-mui-surfaces";
 import { formatMoneyUGX } from "@/lib/money";
+import { workflowDecisionButtonLabel } from "@/lib/projects/workflow-status-presentation";
 
 /**
  * @param {{ projectId: string; procurementId: string }} p
@@ -56,6 +59,7 @@ export function OrgProcurementDetailPanel({ projectId, procurementId }) {
   const [committees, setCommittees] = useState(/** @type {any[]} */ ([]));
   const [rejectReason, setRejectReason] = useState("");
   const [cancelAwardReason, setCancelAwardReason] = useState("");
+  const [bidDialogOpen, setBidDialogOpen] = useState(false);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -433,11 +437,12 @@ export function OrgProcurementDetailPanel({ projectId, procurementId }) {
           <div className="mt-3">
             <Button
               variant="contained"
+              color={decision === "REJECT" ? "error" : "primary"}
               disabled={busy}
               onClick={() => void submitDecision()}
               startIcon={busy ? <CircularProgress size={16} color="inherit" /> : null}
             >
-              {busy ? "Saving…" : "Record decision"}
+              {workflowDecisionButtonLabel(decision, { busy })}
             </Button>
           </div>
         </Paper>
@@ -472,9 +477,31 @@ export function OrgProcurementDetailPanel({ projectId, procurementId }) {
                 {(s.invites || []).length
                   ? ` · ${s.invites.length} invited`
                   : ""}
+                {s.bidDocumentAt
+                  ? ` · bid/RFQ filled ${String(s.bidDocumentAt).slice(0, 10)}`
+                  : ""}
               </li>
             ))}
           </ul>
+        </Paper>
+      ) : null}
+
+      {row.procurementMethod === "QUOTATION" || row.procurementMethod === "TENDER" ? (
+        <Paper variant="outlined" sx={{ p: 2, ...adminOutlinedTableContainerSx }}>
+          <Typography variant="subtitle1" sx={{ fontWeight: 600, mb: 1 }}>
+            Bid / RFQ document (teaching)
+          </Typography>
+          <Typography variant="body2" sx={{ ...adminMutedTextSx, mb: 2 }}>
+            Fill the educational bid or request-for-quotations packet in-app. Saving creates a draft
+            solicitation if needed. Download PDF unlocks when required fields are complete.
+          </Typography>
+          <Button
+            variant="contained"
+            startIcon={<DescriptionRounded />}
+            onClick={() => setBidDialogOpen(true)}
+          >
+            {solicitations[0]?.bidDocument ? "Edit bid / RFQ document" : "Fill bid / RFQ document"}
+          </Button>
         </Paper>
       ) : null}
 
@@ -1283,6 +1310,17 @@ export function OrgProcurementDetailPanel({ projectId, procurementId }) {
           </ul>
         )}
       </Paper>
+      {bidDialogOpen && row ? (
+        <OrgBidDocumentFillDialog
+          open
+          projectId={projectId}
+          procurement={row}
+          onClose={() => setBidDialogOpen(false)}
+          onSaved={() => {
+            void load();
+          }}
+        />
+      ) : null}
     </div>
   );
 }

@@ -1,5 +1,10 @@
 import { canManageProjectOrgUsers } from "@/lib/projects/org-users";
-import { toDateInputValue } from "@/lib/financial-year-dates";
+import {
+  compareUtcCalendarParts,
+  serverUtcTodayParts,
+  toDateInputValue,
+  utcCalendarParts,
+} from "@/lib/financial-year-dates";
 
 export { canManageProjectOrgUsers as canManageProjectOrgFinancialYears };
 
@@ -15,21 +20,19 @@ export const financialYearSelect = {
 };
 
 /**
- * Calendar-date check: today must fall within [startDate, endDate] inclusive.
+ * Calendar-date check: server UTC today must fall within [startDate, endDate] inclusive.
  * @param {Date | string | null | undefined} startDate
  * @param {Date | string | null | undefined} endDate
- * @param {Date} [now]
+ * @param {Date} [now] server clock
  */
 export function isFinancialYearCurrentlyValid(startDate, endDate, now = new Date()) {
-  const start = startDate ? new Date(startDate) : null;
-  const end = endDate ? new Date(endDate) : null;
-  if (!start || !end || Number.isNaN(start.getTime()) || Number.isNaN(end.getTime())) {
-    return false;
-  }
-  const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
-  const s = new Date(start.getFullYear(), start.getMonth(), start.getDate());
-  const e = new Date(end.getFullYear(), end.getMonth(), end.getDate());
-  return today >= s && today <= e;
+  const start = utcCalendarParts(startDate);
+  const end = utcCalendarParts(endDate);
+  if (!start || !end) return false;
+  const today = serverUtcTodayParts(now);
+  return (
+    compareUtcCalendarParts(today, start) >= 0 && compareUtcCalendarParts(today, end) <= 0
+  );
 }
 
 /**

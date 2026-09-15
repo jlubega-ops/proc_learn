@@ -13,6 +13,7 @@ import Typography from "@mui/material/Typography";
 import AddRounded from "@mui/icons-material/AddRounded";
 import ArrowBackRounded from "@mui/icons-material/ArrowBackRounded";
 import DeleteOutlineRounded from "@mui/icons-material/DeleteOutlineRounded";
+import DownloadRounded from "@mui/icons-material/DownloadRounded";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useToast } from "@/components/providers/toast-provider";
@@ -21,6 +22,7 @@ import { ActiveFinancialYearSelect } from "@/components/projects/active-financia
 import {
   adminCenteredLoadingBoxSx,
   adminLoadingSpinnerSx,
+  adminMutedTextSx,
   adminOutlinedTableContainerSx,
   themedTextFieldSx,
 } from "@/lib/admin-mui-surfaces";
@@ -33,6 +35,18 @@ import {
   validatePositiveNumber,
 } from "@/lib/money";
 import { ORG_REF_DOC, nextOrgDocumentReference } from "@/lib/projects/org-reference";
+import {
+  PLAN_SHEET_TYPE,
+  PLAN_SHEET_TYPE_LABELS,
+  PPDA_CONTRACT_TYPE_OPTIONS,
+  PPDA_PLAN_METHOD_OPTIONS,
+  PPDA_RESERVATION_SCHEME_OPTIONS,
+  PPDA_YES_NO,
+  circularPlanItemToHtml,
+  downloadPdfReference,
+  normalizeCircularPlanItemFields,
+} from "@/lib/projects/ppda-forms";
+import { usePersistedFormDraft } from "@/hooks/use-persisted-form-draft";
 
 function emptyItem() {
   return {
@@ -46,6 +60,32 @@ function emptyItem() {
     expectedProcurementPeriod: "Q1",
     priority: "Normal",
     justification: "",
+    currency: "UGX",
+    sourceOfFunding: "",
+    plannedProcurementMethod: "",
+    contractType: "",
+    prequalification: "",
+    applyReservationScheme: "",
+    reservationSchemeDetail: "",
+    multiYearCurrentCost: "",
+    multiYearCompletionYears: "",
+    multiYearPaidUpSum: "",
+    multiYearPendingSum: "",
+    multiYearPendingTime: "",
+    bidInvitationDate: "",
+    bidClosingOpeningDate: "",
+    evaluationReportApprovalDate: "",
+    awardNotificationDate: "",
+    contractSigningDate: "",
+    completionDate: "",
+    eoiInvitationDate: "",
+    eoiClosingOpeningDate: "",
+    eoiShortlistApprovalDate: "",
+    proposalNotificationDate: "",
+    proposalDeadlineDate: "",
+    proposalOpeningDate: "",
+    proposalEvalApprovalDate: "",
+    proposalAwardNotificationDate: "",
   };
 }
 
@@ -73,7 +113,32 @@ export function OrgProcurementPlanCreateForm({ projectId }) {
     planReference: "",
     financialYearId: "",
     planningPeriodId: "",
+    sheetType: PLAN_SHEET_TYPE.GOODS_WORKS_NON_CONSULTANCY,
+    isEmergency: false,
     items: [emptyItem()],
+  });
+  const [metaReady, setMetaReady] = useState(false);
+  const isConsultancy = form.sheetType === PLAN_SHEET_TYPE.CONSULTANCY;
+  const isEmergency = Boolean(form.isEmergency);
+
+  const { serverSyncState, clearDraft } = usePersistedFormDraft({
+    formKey: "procurement-plan:new",
+    values: form,
+    projectId,
+    enabled: metaReady && canCreate,
+    onHydrated: (payload) => {
+      if (payload && typeof payload === "object" && !Array.isArray(payload)) {
+        setForm((prev) => ({
+          ...prev,
+          .../** @type {typeof form} */ (payload),
+          items:
+            Array.isArray(/** @type {any} */ (payload).items) &&
+            /** @type {any} */ (payload).items.length
+              ? /** @type {any} */ (payload).items
+              : prev.items,
+        }));
+      }
+    },
   });
 
   const selectedFy = years.find((y) => y.id === form.financialYearId);
@@ -142,6 +207,7 @@ export function OrgProcurementPlanCreateForm({ projectId }) {
         financialYearId: firstFyId,
         planReference: autoRef || f.planReference,
       }));
+      setMetaReady(true);
     } finally {
       setLoading(false);
     }
@@ -157,7 +223,9 @@ export function OrgProcurementPlanCreateForm({ projectId }) {
     const next = nextOrgDocumentReference(existingRefs, {
       deptCode: actorDepartment.code,
       deptName: actorDepartment.name,
-      docType: ORG_REF_DOC.PROCUREMENT_PLAN,
+      docType: form.isEmergency
+        ? ORG_REF_DOC.EMERGENCY_PROCUREMENT_PLAN
+        : ORG_REF_DOC.PROCUREMENT_PLAN,
       fyLabel: fy.label,
     });
     setForm((f) => ({ ...f, planReference: next }));
@@ -197,9 +265,9 @@ export function OrgProcurementPlanCreateForm({ projectId }) {
       errors.financialYearId =
         fyEmptyMessage || "Choose a financial year.";
     }
-    if (!form.planningPeriodId) {
+    if (!isEmergency && !form.planningPeriodId) {
       errors.planningPeriodId = periodsEmpty
-        ? "No planning period is open for this financial year. Ask the Organization Administrator to open a planning period."
+        ? "No planning period is open for this financial year. Ask the Organization Administrator to open a planning period — or create an Emergency plan instead."
         : "Choose a planning period.";
     }
     form.items.forEach((item, idx) => {
@@ -231,10 +299,12 @@ export function OrgProcurementPlanCreateForm({ projectId }) {
       const payload = {
         ...form,
         planReference: form.planReference.trim(),
+        sheetType: form.sheetType,
         items: form.items.map((item) => ({
           ...item,
           quantity: parseMoneyInput(item.quantity),
           estimatedUnitPrice: parseMoneyInput(item.estimatedUnitPrice),
+          ...normalizeCircularPlanItemFields(item, form.sheetType),
         })),
       };
       const res = await fetch(`/api/projects/${projectId}/procurement-plans`, {
@@ -254,6 +324,7 @@ export function OrgProcurementPlanCreateForm({ projectId }) {
         });
         return;
       }
+      await clearDraft();
       showToast({ message: "Procurement plan draft saved.", severity: "success" });
       router.push(listHref);
     } finally {
@@ -312,10 +383,61 @@ export function OrgProcurementPlanCreateForm({ projectId }) {
           Back to list
         </Button>
       </div>
-      <Typography variant="subtitle1" sx={{ fontWeight: 600, mb: 2 }}>
+      <Typography variant="subtitle1" sx={{ fontWeight: 600, mb: 0.5 }}>
         Prepare procurement plan
       </Typography>
+      <Typography variant="caption" sx={{ ...adminMutedTextSx, display: "block", mb: 2 }}>
+        {serverSyncState === "saving"
+          ? "Saving draft…"
+          : serverSyncState === "saved"
+            ? "Draft saved — you can continue on another device"
+            : "Autosaves as you type (local + server, not every keystroke)"}
+      </Typography>
       <form className="grid gap-3 sm:grid-cols-2" onSubmit={saveDraft} noValidate>
+        <TextField
+          select
+          label="Plan type"
+          value={isEmergency ? "EMERGENCY" : "ANNUAL"}
+          onChange={(e) => {
+            const nextEmergency = e.target.value === "EMERGENCY";
+            setForm((f) => {
+              const fy = years.find((y) => y.id === f.financialYearId);
+              let planReference = f.planReference;
+              if (fy?.label && actorDepartment) {
+                planReference = nextOrgDocumentReference(existingRefs, {
+                  deptCode: actorDepartment.code,
+                  deptName: actorDepartment.name,
+                  docType: nextEmergency
+                    ? ORG_REF_DOC.EMERGENCY_PROCUREMENT_PLAN
+                    : ORG_REF_DOC.PROCUREMENT_PLAN,
+                  fyLabel: fy.label,
+                });
+              }
+              return {
+                ...f,
+                isEmergency: nextEmergency,
+                planningPeriodId: nextEmergency ? "" : f.planningPeriodId,
+                planReference,
+              };
+            });
+            setFieldErrors((fe) => {
+              const n = { ...fe };
+              delete n.planningPeriodId;
+              return n;
+            });
+          }}
+          fullWidth
+          helperText={
+            isEmergency
+              ? "Uses the Emergency Planning Process (short path). Planning period is optional."
+              : "Uses the annual Procurement Planning Process. Requires an open planning period."
+          }
+          sx={themedTextFieldSx}
+          className="sm:col-span-2"
+        >
+          <MenuItem value="ANNUAL">Annual procurement plan</MenuItem>
+          <MenuItem value="EMERGENCY">Emergency / unplanned plan</MenuItem>
+        </TextField>
         <TextField
           label="Plan title"
           value={form.title}
@@ -387,32 +509,56 @@ export function OrgProcurementPlanCreateForm({ projectId }) {
             });
           }}
           fullWidth
-          error={Boolean(fieldErrors.planningPeriodId) || periodsEmpty}
+          error={!isEmergency && (Boolean(fieldErrors.planningPeriodId) || periodsEmpty)}
           helperText={
-            fieldErrors.planningPeriodId ||
-            (periodsEmpty
-              ? "No planning period is open for this financial year. Ask the Organization Administrator to open a planning period."
-              : undefined)
+            isEmergency
+              ? "Optional for emergency plans."
+              : fieldErrors.planningPeriodId ||
+                (periodsEmpty
+                  ? "No planning period is open for this financial year. Ask the Organization Administrator to open a planning period."
+                  : undefined)
           }
           sx={themedTextFieldSx}
-          className="sm:col-span-2"
         >
+          {isEmergency ? (
+            <MenuItem value="">None (emergency)</MenuItem>
+          ) : null}
           {fyPeriods.map((p) => (
             <MenuItem key={p.id} value={p.id}>
-              {p.financialYear?.label || selectedFy?.label || "Period"} · {p.status} ·{" "}
-              {p.periodLabel || ""}
+              {p.label || p.financialYear?.label || selectedFy?.label || "Period"} ·{" "}
+              {p.statusLabel || p.status} · {p.periodLabel || ""}
             </MenuItem>
           ))}
-          {periodsEmpty ? (
+          {!isEmergency && periodsEmpty ? (
             <MenuItem value="" disabled>
               No planning period open
             </MenuItem>
           ) : null}
         </TextField>
+        <TextField
+          select
+          label="Circular 1/2024 sheet"
+          value={form.sheetType}
+          onChange={(e) => setForm((f) => ({ ...f, sheetType: e.target.value }))}
+          fullWidth
+          helperText="Choose Goods/Works/Non-consultancy or Consultancy columns."
+          sx={themedTextFieldSx}
+          className="sm:col-span-2"
+        >
+          {Object.entries(PLAN_SHEET_TYPE_LABELS).map(([value, label]) => (
+            <MenuItem key={value} value={value}>
+              {label}
+            </MenuItem>
+          ))}
+        </TextField>
 
         <div className="sm:col-span-2 space-y-3">
           <Typography variant="subtitle2" sx={{ fontWeight: 600 }}>
             Plan items
+          </Typography>
+          <Typography variant="body2" sx={adminMutedTextSx}>
+            Fill Circular No. 1/2024 fields per item (teaching). Optional download is a reference
+            HTML copy — submit stays in-app.
           </Typography>
           {form.items.map((item, idx) => (
             <div
@@ -522,6 +668,300 @@ export function OrgProcurementPlanCreateForm({ projectId }) {
                 className="sm:col-span-2"
                 sx={themedTextFieldSx}
               />
+
+              <Typography variant="subtitle2" sx={{ fontWeight: 600 }} className="sm:col-span-2">
+                Circular 1/2024 fields
+              </Typography>
+              <TextField
+                label="Source of funding"
+                value={item.sourceOfFunding}
+                onChange={(e) => updateItem(idx, { sourceOfFunding: e.target.value })}
+                fullWidth
+                sx={themedTextFieldSx}
+              />
+              <TextField
+                select
+                label="Planned procurement method"
+                value={item.plannedProcurementMethod}
+                onChange={(e) => updateItem(idx, { plannedProcurementMethod: e.target.value })}
+                fullWidth
+                sx={themedTextFieldSx}
+              >
+                <MenuItem value="">Select…</MenuItem>
+                {PPDA_PLAN_METHOD_OPTIONS.map((v) => (
+                  <MenuItem key={v} value={v}>
+                    {v}
+                  </MenuItem>
+                ))}
+              </TextField>
+              <TextField
+                select
+                label="Contract type"
+                value={item.contractType}
+                onChange={(e) => updateItem(idx, { contractType: e.target.value })}
+                fullWidth
+                sx={themedTextFieldSx}
+              >
+                <MenuItem value="">Select…</MenuItem>
+                {PPDA_CONTRACT_TYPE_OPTIONS.map((v) => (
+                  <MenuItem key={v} value={v}>
+                    {v}
+                  </MenuItem>
+                ))}
+              </TextField>
+              {!isConsultancy ? (
+                <TextField
+                  select
+                  label="Prequalification"
+                  value={item.prequalification}
+                  onChange={(e) => updateItem(idx, { prequalification: e.target.value })}
+                  fullWidth
+                  sx={themedTextFieldSx}
+                >
+                  <MenuItem value="">Select…</MenuItem>
+                  {PPDA_YES_NO.map((v) => (
+                    <MenuItem key={v} value={v}>
+                      {v}
+                    </MenuItem>
+                  ))}
+                </TextField>
+              ) : null}
+              <TextField
+                select
+                label="Apply reservation scheme"
+                value={item.applyReservationScheme}
+                onChange={(e) => updateItem(idx, { applyReservationScheme: e.target.value })}
+                fullWidth
+                sx={themedTextFieldSx}
+              >
+                <MenuItem value="">Select…</MenuItem>
+                {PPDA_YES_NO.map((v) => (
+                  <MenuItem key={v} value={v}>
+                    {v}
+                  </MenuItem>
+                ))}
+              </TextField>
+              <TextField
+                select
+                label="Reservation scheme detail"
+                value={item.reservationSchemeDetail}
+                onChange={(e) => updateItem(idx, { reservationSchemeDetail: e.target.value })}
+                fullWidth
+                sx={themedTextFieldSx}
+              >
+                <MenuItem value="">Select…</MenuItem>
+                {PPDA_RESERVATION_SCHEME_OPTIONS.map((v) => (
+                  <MenuItem key={v} value={v}>
+                    {v}
+                  </MenuItem>
+                ))}
+              </TextField>
+              <TextField
+                label="Multi-year current cost"
+                value={item.multiYearCurrentCost}
+                onChange={(e) => updateItem(idx, { multiYearCurrentCost: e.target.value })}
+                fullWidth
+                sx={themedTextFieldSx}
+              />
+              <TextField
+                label="Multi-year completion years"
+                value={item.multiYearCompletionYears}
+                onChange={(e) => updateItem(idx, { multiYearCompletionYears: e.target.value })}
+                fullWidth
+                sx={themedTextFieldSx}
+              />
+              <TextField
+                label="Paid-up sum"
+                value={item.multiYearPaidUpSum}
+                onChange={(e) => updateItem(idx, { multiYearPaidUpSum: e.target.value })}
+                fullWidth
+                sx={themedTextFieldSx}
+              />
+              <TextField
+                label="Pending sum"
+                value={item.multiYearPendingSum}
+                onChange={(e) => updateItem(idx, { multiYearPendingSum: e.target.value })}
+                fullWidth
+                sx={themedTextFieldSx}
+              />
+              <TextField
+                label="Pending time"
+                value={item.multiYearPendingTime}
+                onChange={(e) => updateItem(idx, { multiYearPendingTime: e.target.value })}
+                fullWidth
+                sx={themedTextFieldSx}
+              />
+              {!isConsultancy ? (
+                <>
+                  <TextField
+                    label="Bid invitation date"
+                    type="date"
+                    value={item.bidInvitationDate}
+                    onChange={(e) => updateItem(idx, { bidInvitationDate: e.target.value })}
+                    fullWidth
+                    InputLabelProps={{ shrink: true }}
+                    sx={themedTextFieldSx}
+                  />
+                  <TextField
+                    label="Bid closing / opening"
+                    type="date"
+                    value={item.bidClosingOpeningDate}
+                    onChange={(e) => updateItem(idx, { bidClosingOpeningDate: e.target.value })}
+                    fullWidth
+                    InputLabelProps={{ shrink: true }}
+                    sx={themedTextFieldSx}
+                  />
+                  <TextField
+                    label="Eval report approval"
+                    type="date"
+                    value={item.evaluationReportApprovalDate}
+                    onChange={(e) =>
+                      updateItem(idx, { evaluationReportApprovalDate: e.target.value })
+                    }
+                    fullWidth
+                    InputLabelProps={{ shrink: true }}
+                    sx={themedTextFieldSx}
+                  />
+                  <TextField
+                    label="Award notification"
+                    type="date"
+                    value={item.awardNotificationDate}
+                    onChange={(e) => updateItem(idx, { awardNotificationDate: e.target.value })}
+                    fullWidth
+                    InputLabelProps={{ shrink: true }}
+                    sx={themedTextFieldSx}
+                  />
+                </>
+              ) : (
+                <>
+                  <TextField
+                    label="EOI invitation"
+                    type="date"
+                    value={item.eoiInvitationDate}
+                    onChange={(e) => updateItem(idx, { eoiInvitationDate: e.target.value })}
+                    fullWidth
+                    InputLabelProps={{ shrink: true }}
+                    sx={themedTextFieldSx}
+                  />
+                  <TextField
+                    label="EOI closing / opening"
+                    type="date"
+                    value={item.eoiClosingOpeningDate}
+                    onChange={(e) => updateItem(idx, { eoiClosingOpeningDate: e.target.value })}
+                    fullWidth
+                    InputLabelProps={{ shrink: true }}
+                    sx={themedTextFieldSx}
+                  />
+                  <TextField
+                    label="Shortlist approval"
+                    type="date"
+                    value={item.eoiShortlistApprovalDate}
+                    onChange={(e) => updateItem(idx, { eoiShortlistApprovalDate: e.target.value })}
+                    fullWidth
+                    InputLabelProps={{ shrink: true }}
+                    sx={themedTextFieldSx}
+                  />
+                  <TextField
+                    label="Proposal notification"
+                    type="date"
+                    value={item.proposalNotificationDate}
+                    onChange={(e) => updateItem(idx, { proposalNotificationDate: e.target.value })}
+                    fullWidth
+                    InputLabelProps={{ shrink: true }}
+                    sx={themedTextFieldSx}
+                  />
+                  <TextField
+                    label="Proposal deadline"
+                    type="date"
+                    value={item.proposalDeadlineDate}
+                    onChange={(e) => updateItem(idx, { proposalDeadlineDate: e.target.value })}
+                    fullWidth
+                    InputLabelProps={{ shrink: true }}
+                    sx={themedTextFieldSx}
+                  />
+                  <TextField
+                    label="Proposal opening"
+                    type="date"
+                    value={item.proposalOpeningDate}
+                    onChange={(e) => updateItem(idx, { proposalOpeningDate: e.target.value })}
+                    fullWidth
+                    InputLabelProps={{ shrink: true }}
+                    sx={themedTextFieldSx}
+                  />
+                  <TextField
+                    label="Proposal eval approval"
+                    type="date"
+                    value={item.proposalEvalApprovalDate}
+                    onChange={(e) => updateItem(idx, { proposalEvalApprovalDate: e.target.value })}
+                    fullWidth
+                    InputLabelProps={{ shrink: true }}
+                    sx={themedTextFieldSx}
+                  />
+                  <TextField
+                    label="Proposal award notification"
+                    type="date"
+                    value={item.proposalAwardNotificationDate}
+                    onChange={(e) =>
+                      updateItem(idx, { proposalAwardNotificationDate: e.target.value })
+                    }
+                    fullWidth
+                    InputLabelProps={{ shrink: true }}
+                    sx={themedTextFieldSx}
+                  />
+                </>
+              )}
+              <TextField
+                label="Contract signing"
+                type="date"
+                value={item.contractSigningDate}
+                onChange={(e) => updateItem(idx, { contractSigningDate: e.target.value })}
+                fullWidth
+                InputLabelProps={{ shrink: true }}
+                sx={themedTextFieldSx}
+              />
+              <TextField
+                label="Completion date"
+                type="date"
+                value={item.completionDate}
+                onChange={(e) => updateItem(idx, { completionDate: e.target.value })}
+                fullWidth
+                InputLabelProps={{ shrink: true }}
+                sx={themedTextFieldSx}
+              />
+              <div className="sm:col-span-2">
+                <Button
+                  type="button"
+                  size="small"
+                  variant="outlined"
+                  startIcon={<DownloadRounded />}
+                  disabled={!String(item.title || "").trim()}
+                  title={
+                    String(item.title || "").trim()
+                      ? "Download this plan item as PDF"
+                      : "Enter an item title before downloading"
+                  }
+                  onClick={() => {
+                    if (!String(item.title || "").trim()) {
+                      showToast({
+                        message: "Enter an item title before downloading the PDF.",
+                        severity: "error",
+                      });
+                      return;
+                    }
+                    const cf = normalizeCircularPlanItemFields(item, form.sheetType);
+                    void downloadPdfReference(
+                      `circular-plan-item-${idx + 1}`,
+                      "Circular 1/2024 plan item",
+                      circularPlanItemToHtml(
+                        { title: item.title, circularFields: cf },
+                        form.sheetType,
+                      ),
+                    );
+                  }}
+                >
+                  Download item PDF
+                </Button>
+              </div>
             </div>
           ))}
           <Button

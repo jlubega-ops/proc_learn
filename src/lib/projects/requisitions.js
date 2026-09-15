@@ -14,6 +14,7 @@ import {
 } from "@/lib/projects/workflow-engine";
 import { ORG_REF_DOC, nextOrgDocumentReference } from "@/lib/projects/org-reference";
 import { resolveSlateIdForOrgCreate } from "@/lib/academic/org-academic-slate";
+import { presentOrgWorkflowStatus } from "@/lib/projects/workflow-status-presentation";
 
 /**
  * @param {unknown} value
@@ -74,6 +75,13 @@ export function serializeRequisition(row) {
       })()
     : null;
 
+  const presentation = presentOrgWorkflowStatus({
+    status: row.status,
+    workflowStage: row.workflowStage || null,
+    viewerHasPendingAction: Boolean(row.viewerHasPendingAction),
+    lastDecision: row.lastDecision || null,
+  });
+
   return {
     id: row.id,
     title: row.title,
@@ -87,6 +95,10 @@ export function serializeRequisition(row) {
     remarks: row.remarks || null,
     estimatedTotalValue: row.estimatedTotalValue?.toString?.() ?? String(row.estimatedTotalValue),
     status: row.status,
+    statusLabel: presentation.label,
+    statusColor: presentation.color,
+    workflowStage: row.workflowStage || null,
+    viewerHasPendingAction: Boolean(row.viewerHasPendingAction),
     procurementMethod: row.procurementMethod || null,
     submittedAt: row.submittedAt,
     approvedAt: row.approvedAt,
@@ -117,6 +129,7 @@ export function serializeRequisition(row) {
           id: row.procurementPlan.id,
           title: row.procurementPlan.title,
           status: row.procurementPlan.status,
+          planReference: row.procurementPlan.planReference || null,
         }
       : null,
     procurementPlanItem: row.procurementPlanItem
@@ -129,6 +142,10 @@ export function serializeRequisition(row) {
         }
       : null,
     budgetLine: budget,
+    form5PartI: row.form5PartI || null,
+    form5PartII: row.form5PartII || null,
+    form5PartIAt: row.form5PartIAt || null,
+    form5PartIIAt: row.form5PartIIAt || null,
     items: Array.isArray(row.items)
       ? row.items.map((i) => ({
           id: i.id,
@@ -150,7 +167,7 @@ export function serializeRequisition(row) {
 export const requisitionInclude = {
   financialYear: { select: { id: true, label: true } },
   department: { select: { id: true, name: true, code: true } },
-  procurementPlan: { select: { id: true, title: true, status: true } },
+  procurementPlan: { select: { id: true, title: true, status: true, planReference: true } },
   procurementPlanItem: {
     select: {
       id: true,
@@ -700,6 +717,95 @@ export async function actOnRequisitionTask(prisma, opts) {
  * @param {import("@prisma/client").PrismaClient} prisma
  * @param {any} requisition
  */
+/**
+ * Save Form 5 Part I or Part II (Fill-and-submit teaching forms).
+ * @param {import("@prisma/client").PrismaClient} prisma
+ * @param {{
+ *   projectId: string;
+ *   requisitionId: string;
+ *   actorOrgUserId: string;
+ *   part: "I" | "II";
+ *   body: any;
+ *   method?: string | null;
+ * }} opts
+ */
+export async function saveRequisitionForm5(prisma, opts) {
+  const row = await prisma.projectOrgRequisition.findFirst({
+    where: { id: opts.requisitionId, projectId: opts.projectId },
+    include: requisitionInclude,
+  });
+  if (!row) return { ok: false, error: "Requisition not found.", status: 404 };
+
+  const { buildForm5PartI, buildForm5PartII } = await import("@/lib/projects/ppda-forms");
+  const now = new Date();
+
+  if (opts.part === "I") {
+    const snapshot = buildForm5PartI(serializeRequisition(row), opts.body || {});
+    if (!snapshot.subjectOfProcurement) {
+      return {
+        ok: false,
+        error: "Validation failed.",
+        fieldErrors: { subjectOfProcurement: "Enter the subject of procurement." },
+        status: 400,
+      };
+    }
+    const updated = await prisma.projectOrgRequisition.update({
+      where: { id: row.id },
+      data: { form5PartI: snapshot, form5PartIAt: now },
+      include: requisitionInclude,
+    });
+    await writeAuditLog({
+      eventType: AuditEvent.PROJECT_ORG_REQUISITION_SUBMITTED,
+      actorUserId: null,
+      meta: {
+        projectId: opts.projectId,
+        requisitionId: row.id,
+        form: "FORM_5_PART_I",
+        actorOrgUserId: opts.actorOrgUserId,
+        outcome: "form_saved",
+      },
+    });
+    return { ok: true, requisition: serializeRequisition(updated) };
+  }
+
+  const snapshot = buildForm5PartII(opts.body || {}, {
+    method: opts.method || row.procurementMethod || null,
+  });
+  if (!snapshot.recommendedMethod) {
+    return {
+      ok: false,
+      error: "Validation failed.",
+      fieldErrors: { recommendedMethod: "Enter the recommended procurement method." },
+      status: 400,
+    };
+  }
+  if (!snapshot.methodJustification) {
+    return {
+      ok: false,
+      error: "Validation failed.",
+      fieldErrors: { methodJustification: "Enter the justification for the method." },
+      status: 400,
+    };
+  }
+  const updated = await prisma.projectOrgRequisition.update({
+    where: { id: row.id },
+    data: { form5PartII: snapshot, form5PartIIAt: now },
+    include: requisitionInclude,
+  });
+  await writeAuditLog({
+    eventType: AuditEvent.PROJECT_ORG_REQUISITION_SUBMITTED,
+    actorUserId: null,
+    meta: {
+      projectId: opts.projectId,
+      requisitionId: row.id,
+      form: "FORM_5_PART_II",
+      actorOrgUserId: opts.actorOrgUserId,
+      outcome: "form_saved",
+    },
+  });
+  return { ok: true, requisition: serializeRequisition(updated) };
+}
+
 export async function buildRequisitionVerificationEvidence(prisma, requisition) {
   if (!requisition) return null;
   /** @type {Record<string, unknown>} */

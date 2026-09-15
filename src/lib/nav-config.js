@@ -137,7 +137,7 @@ export const SIDEBAR_SECTIONS = [
       {
         href: "/admin/academic-setup",
         label: "Academic setup",
-        title: "Academic years, semesters, courses and classes",
+        title: "Academic years and courses",
         Icon: EventNoteRounded,
         anyOf: [ROLE.SYSTEM_ADMIN],
       },
@@ -582,7 +582,7 @@ export function sidebarNavForOrgMember(projectId, permissions = [], options = {}
   if (permSet.has(ORG_PERMISSION.VIEW_TASKS)) {
     opsLinks.push({
       href: `${base}/tasks`,
-      label: isHeadPdu ? "Pending Tasks" : isAo ? "Approvals" : "My Tasks",
+      label: "My Tasks",
       title: "Open your pending organisation tasks",
       Icon: TaskAltRounded,
       anyOf: null,

@@ -10,7 +10,7 @@ export const runtime = "nodejs";
 /**
  * Examiner Results — defaults to current academic year.
  * Examiners are owner-scoped when projectId is omitted (Phase 10).
- * Query: ?projectId=&academicYearId=&semesterId=&participation=all|students|demo
+ * Query: ?projectId=&academicYearId=&campus=&participation=all|students|demo
  */
 export async function GET(request) {
   const user = await getSessionUser();
@@ -23,7 +23,7 @@ export async function GET(request) {
   const url = new URL(request.url);
   const projectId = url.searchParams.get("projectId")?.trim() || null;
   const academicYearId = url.searchParams.get("academicYearId")?.trim() || null;
-  const semesterId = url.searchParams.get("semesterId")?.trim() || null;
+  const campus = url.searchParams.get("campus")?.trim() || null;
   const participation = url.searchParams.get("participation")?.trim() || "all";
 
   if (projectId) {
@@ -46,7 +46,7 @@ export async function GET(request) {
   const data = await getExaminerAssessmentResults({
     projectId,
     academicYearId,
-    semesterId,
+    campus,
     ownerUserId,
     participation: /** @type {'all'|'students'|'demo'} */ (
       ["all", "students", "demo"].includes(participation) ? participation : "all"

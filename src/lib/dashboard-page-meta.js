@@ -98,7 +98,7 @@ export function getDashboardPageMeta(pathname, _activeRole) {
   if (pathname.startsWith("/project-settings"))
     return { title: "Project settings", subtitle: "Configure student project behaviour" };
   if (pathname.startsWith("/admin/academic-setup"))
-    return { title: "Academic setup", subtitle: "Years, semesters, courses and classes" };
+    return { title: "Academic setup", subtitle: "Academic years and courses" };
   if (pathname.startsWith("/admin/activity"))
     return { title: "Activity logs", subtitle: "Audit trail (system admin)" };
   if (pathname.startsWith("/admin/programmes"))

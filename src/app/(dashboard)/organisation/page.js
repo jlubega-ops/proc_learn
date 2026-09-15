@@ -79,7 +79,9 @@ export default async function StudentOrganisationHomePage() {
           ) : (
             <Chip size="small" label="My Organisation" color="primary" />
           )}
-          <Chip size="small" label={project.status} color="info" />
+          {isAttemptOrg ? (
+            <Chip size="small" label={project.status} color="info" />
+          ) : null}
           {ctx.user ? (
             <Chip
               size="small"

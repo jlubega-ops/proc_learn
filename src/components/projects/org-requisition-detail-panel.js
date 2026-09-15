@@ -11,8 +11,10 @@ import Paper from "@mui/material/Paper";
 import TextField from "@mui/material/TextField";
 import Typography from "@mui/material/Typography";
 import ArrowBackRounded from "@mui/icons-material/ArrowBackRounded";
+import DescriptionRounded from "@mui/icons-material/DescriptionRounded";
 import RefreshRounded from "@mui/icons-material/RefreshRounded";
 import { OrgLineItemsTable } from "@/components/projects/org-line-items-table";
+import { OrgForm5FillDialog } from "@/components/projects/org-form5-fill-dialog";
 import { useToast } from "@/components/providers/toast-provider";
 import {
   adminCenteredLoadingBoxSx,
@@ -22,6 +24,8 @@ import {
   themedTextFieldSx,
 } from "@/lib/admin-mui-surfaces";
 import { formatMoneyAmount, formatMoneyUGX } from "@/lib/money";
+import { format, isValid, parseISO } from "date-fns";
+import { workflowDecisionButtonLabel } from "@/lib/projects/workflow-status-presentation";
 
 const REQUISITION_ITEM_COLUMNS = [
   {
@@ -58,6 +62,7 @@ export function OrgRequisitionDetailPanel({ projectId, requisitionId }) {
   const [decision, setDecision] = useState("APPROVE");
   const [comment, setComment] = useState("");
   const [procurementMethod, setProcurementMethod] = useState("");
+  const [form5Part, setForm5Part] = useState(/** @type {"I" | "II" | null} */ (null));
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -187,8 +192,8 @@ export function OrgRequisitionDetailPanel({ projectId, requisitionId }) {
           </div>
           <Chip
             size="small"
-            color={row.status === "APPROVED" ? "success" : "info"}
-            label={row.status}
+            color={row.statusColor || (row.status === "APPROVED" ? "success" : "warning")}
+            label={row.statusLabel || row.status}
           />
         </div>
 
@@ -228,6 +233,46 @@ export function OrgRequisitionDetailPanel({ projectId, requisitionId }) {
             footerLabel="Estimated total"
             footerTotal={row.estimatedTotalValue ?? null}
           />
+        </div>
+      </Paper>
+
+      <Paper variant="outlined" sx={{ p: 2, ...adminOutlinedTableContainerSx }}>
+        <Typography variant="subtitle1" sx={{ fontWeight: 600, mb: 1 }}>
+          FORM 5 (teaching)
+        </Typography>
+        <Typography variant="body2" sx={{ ...adminMutedTextSx, mb: 2 }}>
+          Fill Part I (User Department request) and Part II (PDU to Contracts Committee) in-app.
+          Download from the fill dialog is PDF-only after required fields are complete.
+        </Typography>
+        <div className="flex flex-wrap gap-2">
+          <Button
+            variant="contained"
+            startIcon={<DescriptionRounded />}
+            onClick={() => setForm5Part("I")}
+          >
+            {row.form5PartI ? "Edit Form 5 Part I" : "Fill Form 5 Part I"}
+          </Button>
+          <Button
+            variant="outlined"
+            startIcon={<DescriptionRounded />}
+            onClick={() => setForm5Part("II")}
+          >
+            {row.form5PartII ? "Edit Form 5 Part II" : "Fill Form 5 Part II"}
+          </Button>
+        </div>
+        <div className="mt-2 space-y-1 text-sm">
+          <p>
+            <span className="font-semibold">Part I:</span>{" "}
+            {row.form5PartIAt
+              ? `Saved ${formatDateShort(row.form5PartIAt)}`
+              : "Not filled yet"}
+          </p>
+          <p>
+            <span className="font-semibold">Part II:</span>{" "}
+            {row.form5PartIIAt
+              ? `Saved ${formatDateShort(row.form5PartIIAt)}`
+              : "Not filled yet"}
+          </p>
         </div>
       </Paper>
 
@@ -296,11 +341,12 @@ export function OrgRequisitionDetailPanel({ projectId, requisitionId }) {
           <div className="mt-3">
             <Button
               variant="contained"
+              color={decision === "REJECT" || decision === "FLAG_EXCEPTION" ? "error" : "primary"}
               disabled={busy}
               onClick={() => void submitDecision()}
               startIcon={busy ? <CircularProgress size={16} color="inherit" /> : null}
             >
-              {busy ? "Saving…" : "Record decision"}
+              {workflowDecisionButtonLabel(decision, { busy })}
             </Button>
           </div>
         </Paper>
@@ -322,6 +368,31 @@ export function OrgRequisitionDetailPanel({ projectId, requisitionId }) {
           </ul>
         </Paper>
       ) : null}
+
+      {form5Part ? (
+        <OrgForm5FillDialog
+          open
+          part={form5Part}
+          projectId={projectId}
+          requisition={row}
+          onClose={() => setForm5Part(null)}
+          onSaved={(next) => {
+            if (next) setRow(next);
+            else void load();
+          }}
+        />
+      ) : null}
     </div>
   );
+}
+
+/**
+ * @param {unknown} value
+ */
+function formatDateShort(value) {
+  if (!value) return "—";
+  const raw = String(value);
+  const d = raw.includes("T") ? parseISO(raw) : new Date(raw);
+  if (!isValid(d)) return raw.slice(0, 10);
+  return format(d, "MMM d, yyyy");
 }

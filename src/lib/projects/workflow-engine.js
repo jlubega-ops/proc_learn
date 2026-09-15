@@ -279,18 +279,20 @@ export async function startWorkflowFromTrigger(prisma, opts) {
   if (!adoption) {
     const binding = ENGINE_PROCESS_BINDINGS.find((b) => b.triggerKey === opts.triggerKey);
     const label =
-      binding?.label?.replace(/\s+started$/i, "") ||
+      binding?.label?.replace(/\s+started$/i, "")?.replace(/\s+submitted$/i, "") ||
       (opts.triggerKey === WORKFLOW_TRIGGERS.BUDGET_SUBMITTED
         ? "Budgeting"
         : opts.triggerKey === WORKFLOW_TRIGGERS.PLANNING_SUBMITTED
           ? "Procurement Planning"
-          : opts.triggerKey === WORKFLOW_TRIGGERS.MICRO_PROCUREMENT_STARTED
-            ? "Micro Procurement"
-            : opts.triggerKey === WORKFLOW_TRIGGERS.QUOTATION_STARTED
-              ? "Quotation"
-              : opts.triggerKey === WORKFLOW_TRIGGERS.TENDER_STARTED
-                ? "Tender"
-                : "Procurement Requisition");
+          : opts.triggerKey === WORKFLOW_TRIGGERS.EMERGENCY_PLANNING_SUBMITTED
+            ? "Emergency Planning"
+            : opts.triggerKey === WORKFLOW_TRIGGERS.MICRO_PROCUREMENT_STARTED
+              ? "Micro Procurement"
+              : opts.triggerKey === WORKFLOW_TRIGGERS.QUOTATION_STARTED
+                ? "Quotation"
+                : opts.triggerKey === WORKFLOW_TRIGGERS.TENDER_STARTED
+                  ? "Tender"
+                  : "Procurement Requisition");
     return {
       ok: false,
       error: `The ${label} Process is currently inactive for this organisation. An Organization Administrator must activate it before this procurement can proceed.`,
@@ -384,6 +386,7 @@ export async function startWorkflowFromTrigger(prisma, opts) {
   if (
     (opts.triggerKey === WORKFLOW_TRIGGERS.REQUISITION_SUBMITTED ||
       opts.triggerKey === WORKFLOW_TRIGGERS.PLANNING_SUBMITTED ||
+      opts.triggerKey === WORKFLOW_TRIGGERS.EMERGENCY_PLANNING_SUBMITTED ||
       opts.triggerKey === WORKFLOW_TRIGGERS.BUDGET_SUBMITTED) &&
     firstStep.actionKey === "SUBMIT" &&
     flow.items.length > 1

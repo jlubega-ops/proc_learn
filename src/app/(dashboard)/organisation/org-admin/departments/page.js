@@ -25,7 +25,7 @@ export default async function OrganisationDepartmentsPage() {
     <div className={BRAND_PAGE_SHELL_CLASS}>
       <DashboardPageIntro
         title="Departments / units"
-        description={`Manage departments and subunits for ${title}. Assign users to a department and optional subunit when creating organisation accounts.`}
+        description={`Create and rename departments and subunits for ${title}. Arrange top-to-bottom hierarchy on Organisation structure.`}
       />
       <ProjectOrgDepartmentsPanel projectId={project.id} />
     </div>

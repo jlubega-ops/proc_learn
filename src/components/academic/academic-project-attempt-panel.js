@@ -32,6 +32,7 @@ import { useToast } from "@/components/providers/toast-provider";
 import { useAuthSession } from "@/components/providers/auth-session-provider";
 import { RichHtml } from "@/components/ui/rich-html";
 import { formatCountdownParts } from "@/lib/academic/attempt-timer-format";
+import { useServerSyncedCountdown } from "@/hooks/use-server-synced-countdown";
 
 /**
  * Student attempt workspace for one Academic Project.
@@ -54,20 +55,7 @@ export function AcademicProjectAttemptPanel({ projectId, purpose }) {
   const [enrollmentKey, setEnrollmentKey] = useState("");
   const [submitOpen, setSubmitOpen] = useState(false);
 
-  const [deadlineMs, setDeadlineMs] = useState(/** @type {number | null} */ (null));
-  const [tickLeft, setTickLeft] = useState(/** @type {number | null} */ (null));
-
-  const syncDeadline = useCallback((nextTimer) => {
-    if (nextTimer?.deadlineAt) {
-      const ms = new Date(nextTimer.deadlineAt).getTime();
-      setDeadlineMs(Number.isFinite(ms) ? ms : null);
-    } else if (typeof nextTimer?.remainingSeconds === "number") {
-      setDeadlineMs(Date.now() + nextTimer.remainingSeconds * 1000);
-    } else {
-      setDeadlineMs(null);
-      setTickLeft(null);
-    }
-  }, []);
+  const { remainingSeconds: tickLeft, expired: tickExpired } = useServerSyncedCountdown(timer);
 
   const loadCatalogRow = useCallback(async () => {
     const res = await fetch(
@@ -81,9 +69,8 @@ export function AcademicProjectAttemptPanel({ projectId, purpose }) {
     setProjectRow(row);
     setAttempt(row.latestAttempt || null);
     setTimer(row.timer || null);
-    syncDeadline(row.timer || null);
     return row;
-  }, [projectId, purpose, syncDeadline]);
+  }, [projectId, purpose]);
 
   const pollTimer = useCallback(async (attemptId) => {
     if (!attemptId) return;
@@ -96,28 +83,13 @@ export function AcademicProjectAttemptPanel({ projectId, purpose }) {
     setAttempt(data.attempt || null);
     setTimer(data.timer || null);
     setProgress(data.progress || null);
-    syncDeadline(data.timer || null);
     if (data.autoExpired) {
       showToast({
         message: "Time expired. Your attempt was submitted automatically.",
         severity: "success",
       });
     }
-  }, [projectId, showToast, syncDeadline]);
-
-  useEffect(() => {
-    if (deadlineMs == null) {
-      setTickLeft(null);
-      return undefined;
-    }
-    const tick = () => {
-      setTickLeft(Math.max(0, Math.floor((deadlineMs - Date.now()) / 1000)));
-    };
-    tick();
-    const id = window.setInterval(tick, 1000);
-    return () => window.clearInterval(id);
-  }, [deadlineMs]);
-
+  }, [projectId, showToast]);
   useEffect(() => {
     let cancelled = false;
     (async () => {
@@ -287,10 +259,11 @@ export function AcademicProjectAttemptPanel({ projectId, purpose }) {
 
   const displayRemaining =
     tickLeft != null ? tickLeft : timer?.remainingSeconds;
+  const timeUp = Boolean(tickExpired || timer?.expired || displayRemaining === 0);
   const remainingLabel =
     timer?.mode === "NONE" || displayRemaining == null
       ? "No time limit"
-      : timer.expired || displayRemaining === 0
+      : timeUp
         ? "Time up"
         : formatCountdownParts(displayRemaining).label;
 
@@ -323,11 +296,11 @@ export function AcademicProjectAttemptPanel({ projectId, purpose }) {
           <Chip size="small" label={`Attempt ${attempt?.attemptNumber || "—"}`} />
           <Chip
             size="small"
-            color={timer?.expired ? "error" : timer?.mode === "DURATION" ? "warning" : "default"}
+            color={timeUp ? "error" : timer?.mode === "DURATION" ? "warning" : "default"}
             label={
               timer?.mode === "NONE" || displayRemaining == null
                 ? remainingLabel
-                : timer.expired || displayRemaining === 0
+                : timeUp
                   ? "Time up"
                   : `Time left · ${remainingLabel}`
             }
@@ -365,7 +338,7 @@ export function AcademicProjectAttemptPanel({ projectId, purpose }) {
             <p className="mt-0.5 font-mono text-base font-semibold tabular-nums text-brand-red">
               {timer?.mode === "NONE" || displayRemaining == null
                 ? "No timed limit"
-                : timer.expired || displayRemaining === 0
+                : timeUp
                   ? "Time up"
                   : formatCountdownParts(displayRemaining).label}
             </p>

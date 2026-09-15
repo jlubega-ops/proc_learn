@@ -9,11 +9,16 @@ import {
   useRef,
   useState,
 } from "react";
+import { usePathname } from "next/navigation";
 import { SessionIdleGuard } from "@/components/providers/session-idle-guard";
+import { RoleSwitchOverlay } from "@/components/layout/role-switch-overlay";
 import {
   queuePostAuthToast,
   setClientSigningOutFlag,
 } from "@/lib/auth/client-sign-out";
+
+/** Overlay must never outlive a hung fetch or a same-path navigation. */
+const SESSION_BLOCKING_MAX_MS = 10000;
 
 /**
  * @typedef {Object} SessionPayload
@@ -84,18 +89,37 @@ export function AuthSessionProvider({ children, initialSession = null }) {
   const [blocking, setBlocking] = useState({ active: false, message: "" });
   const [isSigningOut, setIsSigningOut] = useState(false);
   const signingOutRef = useRef(false);
+  const blockTimerRef = useRef(/** @type {ReturnType<typeof setTimeout> | null} */ (null));
+  const pathname = usePathname();
 
-  const setSessionBlocking = useCallback((active, message) => {
-    if (!active) {
-      setBlocking({ active: false, message: "" });
-      return;
+  const clearBlockTimer = useCallback(() => {
+    if (blockTimerRef.current) {
+      clearTimeout(blockTimerRef.current);
+      blockTimerRef.current = null;
     }
-    const m =
-      typeof message === "string" && message.trim()
-        ? message.trim()
-        : "Please wait…";
-    setBlocking({ active: true, message: m });
   }, []);
+
+  const setSessionBlocking = useCallback(
+    (active, message) => {
+      clearBlockTimer();
+      if (!active) {
+        setBlocking({ active: false, message: "" });
+        return;
+      }
+      if (signingOutRef.current) return;
+      const m =
+        typeof message === "string" && message.trim()
+          ? message.trim()
+          : "Please wait…";
+      setBlocking({ active: true, message: m });
+      blockTimerRef.current = setTimeout(() => {
+        blockTimerRef.current = null;
+        if (signingOutRef.current) return;
+        setBlocking({ active: false, message: "" });
+      }, SESSION_BLOCKING_MAX_MS);
+    },
+    [clearBlockTimer],
+  );
 
   const setRoleSwitching = useCallback(
     (v) => {
@@ -133,6 +157,7 @@ export function AuthSessionProvider({ children, initialSession = null }) {
     signingOutRef.current = true;
     setIsSigningOut(true);
     setClientSigningOutFlag(true);
+    clearBlockTimer();
 
     const redirectTo =
       typeof opts.redirectTo === "string" && opts.redirectTo.trim()
@@ -160,11 +185,29 @@ export function AuthSessionProvider({ children, initialSession = null }) {
     }
 
     window.location.replace(redirectTo);
-  }, []);
+  }, [clearBlockTimer]);
 
   useEffect(() => {
     void refresh();
   }, [refresh]);
+
+  useEffect(() => {
+    if (signingOutRef.current) return;
+    setBlocking({ active: false, message: "" });
+    if (blockTimerRef.current) {
+      clearTimeout(blockTimerRef.current);
+      blockTimerRef.current = null;
+    }
+  }, [pathname]);
+
+  useEffect(() => {
+    return () => {
+      if (blockTimerRef.current) {
+        clearTimeout(blockTimerRef.current);
+        blockTimerRef.current = null;
+      }
+    };
+  }, []);
 
   const value = useMemo(
     () => ({
@@ -194,6 +237,7 @@ export function AuthSessionProvider({ children, initialSession = null }) {
   return (
     <AuthSessionContext.Provider value={value}>
       <SessionIdleGuard />
+      <RoleSwitchOverlay active={blocking.active} message={blocking.message} />
       {children}
     </AuthSessionContext.Provider>
   );

@@ -8,6 +8,7 @@ import {
 } from "@prisma/client";
 import { writeAuditLog, AuditEvent } from "@/lib/audit-log";
 import { serializeSupplier } from "@/lib/projects/suppliers";
+import { buildBidDocument } from "@/lib/projects/ppda-forms";
 
 /** Ordinal position used to guard against moving a solicitation status backwards. */
 const STATUS_ORDER = [
@@ -31,6 +32,8 @@ export function serializeSolicitation(row) {
     solicitationType: row.solicitationType,
     title: row.title,
     status: row.status,
+    bidDocument: row.bidDocument || null,
+    bidDocumentAt: row.bidDocumentAt || null,
     issueDate: row.issueDate || null,
     closingDate: row.closingDate || null,
     openedAt: row.openedAt || null,
@@ -152,6 +155,107 @@ export async function getOrCreateDraftSolicitation(prisma, opts) {
   });
 
   return { ok: true, solicitation: serializeSolicitation(created), created: true };
+}
+
+/**
+ * Fill educational bid / RFQ document on the latest solicitation for a procurement.
+ * @param {import("@prisma/client").PrismaClient} prisma
+ * @param {{
+ *   projectId: string;
+ *   procurementId: string;
+ *   actorOrgUserId: string;
+ *   actorRoleName?: string | null;
+ *   body: any;
+ *   pdeName?: string | null;
+ * }} opts
+ */
+export async function saveBidDocumentForProcurement(prisma, opts) {
+  const procurement = await prisma.projectOrgProcurement.findFirst({
+    where: { id: opts.procurementId, projectId: opts.projectId },
+    include: {
+      requisition: true,
+      solicitations: { orderBy: { createdAt: "desc" }, take: 1 },
+    },
+  });
+  if (!procurement) return { ok: false, error: "Procurement not found.", status: 404 };
+
+  let solicitation = procurement.solicitations?.[0] || null;
+  if (!solicitation) {
+    const type =
+      procurement.procurementMethod === "TENDER"
+        ? OrgSolicitationType.TENDER
+        : OrgSolicitationType.RFQ;
+    const created = await getOrCreateDraftSolicitation(prisma, {
+      projectId: opts.projectId,
+      procurementId: opts.procurementId,
+      solicitationType: type,
+      actorOrgUserId: opts.actorOrgUserId,
+      actorRoleName: opts.actorRoleName || "Procurement Officer",
+    });
+    if (!created.ok) return created;
+    solicitation = await prisma.projectOrgSolicitation.findUnique({
+      where: { id: created.solicitation.id },
+    });
+  }
+  if (!solicitation) {
+    return { ok: false, error: "Could not prepare solicitation documents.", status: 400 };
+  }
+
+  const snapshot = buildBidDocument(
+    {
+      ...procurement,
+      procurementMethod: procurement.procurementMethod,
+      procurementNumber: procurement.procurementNumber,
+      title: procurement.title,
+      requisition: procurement.requisition,
+    },
+    { ...(opts.body || {}), pdeName: opts.pdeName || opts.body?.pdeName },
+  );
+  if (!snapshot.subject) {
+    return {
+      ok: false,
+      error: "Validation failed.",
+      fieldErrors: { subject: "Enter the subject of procurement." },
+      status: 400,
+    };
+  }
+  if (!snapshot.specifications) {
+    return {
+      ok: false,
+      error: "Validation failed.",
+      fieldErrors: { specifications: "Enter specifications or scope." },
+      status: 400,
+    };
+  }
+
+  const updated = await prisma.projectOrgSolicitation.update({
+    where: { id: solicitation.id },
+    data: {
+      bidDocument: snapshot,
+      bidDocumentAt: new Date(),
+      ...(snapshot.closingDate
+        ? { closingDate: new Date(`${snapshot.closingDate}T12:00:00.000Z`) }
+        : {}),
+    },
+    include: {
+      invites: { include: { supplier: true } },
+      offers: { include: { supplier: true } },
+    },
+  });
+
+  await writeAuditLog({
+    eventType: AuditEvent.PROJECT_ORG_SOLICITATION_UPDATED,
+    actorUserId: null,
+    meta: {
+      projectId: opts.projectId,
+      procurementId: opts.procurementId,
+      solicitationId: updated.id,
+      form: "BID_DOCUMENT",
+      actorOrgUserId: opts.actorOrgUserId,
+    },
+  });
+
+  return { ok: true, solicitation: serializeSolicitation(updated) };
 }
 
 /**

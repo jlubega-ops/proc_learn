@@ -7,7 +7,7 @@ import { isStudentMode } from "@/lib/academic/student-mode";
 export const runtime = "nodejs";
 
 /**
- * Student academic context: university year/semester + enrollment + join prompt.
+ * Student academic context: university academic year + enrollment + join prompt.
  * Authenticated effective STUDENT only (real students or Student Mode demos).
  */
 export async function GET() {

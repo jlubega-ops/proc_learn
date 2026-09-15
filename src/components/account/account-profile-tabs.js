@@ -171,6 +171,14 @@ export function AccountProfileTabs() {
                     />
                     <Detail label="Programme" value={profile.studentProfile.programmeName} />
                     <Detail
+                      label="Campus"
+                      value={
+                        profile.studentProfile.campusLabel ||
+                        profile.studentProfile.campus ||
+                        "—"
+                      }
+                    />
+                    <Detail
                       label="Academic year"
                       value={
                         profile.studentProfile.enrolledAcademicYearLabel ||

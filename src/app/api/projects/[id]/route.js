@@ -12,6 +12,7 @@ import {
 import { fetchAuthorizedProjectWorkspace } from "@/lib/projects/workspace-access";
 import { authorizeProjectOrgMember } from "@/lib/projects/workspace-access";
 import { ORG_PERMISSION } from "@/lib/projects/org-role-permissions";
+import { deleteProjectFully } from "@/lib/projects/purge-project-data";
 
 export const runtime = "nodejs";
 
@@ -145,20 +146,16 @@ export async function PATCH(request, context) {
   const d = validated.data;
 
   if (managesExaminerProject || staffManagesStudent) {
-    if (d.academicYearId || d.semesterId || d.programmeId) {
-      const [year, semester, programme] = await Promise.all([
+    if (d.academicYearId || d.programmeId) {
+      const [year, programme] = await Promise.all([
         d.academicYearId
           ? prisma.academicYear.findUnique({ where: { id: d.academicYearId } })
           : null,
-        d.semesterId ? prisma.semester.findUnique({ where: { id: d.semesterId } }) : null,
         d.programmeId ? prisma.programme.findUnique({ where: { id: d.programmeId } }) : null,
       ]);
       /** @type {Record<string, string>} */
       const fieldErrors = {};
       if (d.academicYearId && !year) fieldErrors.academicYearId = "Choose a valid academic year.";
-      if (d.semesterId && (!semester || (year && semester.academicYearId !== year.id))) {
-        fieldErrors.semesterId = "Choose a semester for the selected academic year.";
-      }
       if (d.programmeId && !programme) fieldErrors.programmeId = "Choose a valid programme.";
       if (Object.keys(fieldErrors).length) {
         return NextResponse.json(
@@ -183,7 +180,6 @@ export async function PATCH(request, context) {
           closeAt: d.closeAt,
           durationSeconds: d.durationSeconds,
           academicYearId: d.academicYearId,
-          semesterId: d.semesterId,
           programmeId: d.programmeId,
         }
       : {
@@ -207,9 +203,6 @@ export async function PATCH(request, context) {
           requiresEnrollment: [Role.EXAMINER, Role.SYSTEM_ADMIN].includes(activeRole),
           academicYearId: [Role.EXAMINER, Role.SYSTEM_ADMIN].includes(activeRole)
             ? d.academicYearId
-            : undefined,
-          semesterId: [Role.EXAMINER, Role.SYSTEM_ADMIN].includes(activeRole)
-            ? d.semesterId
             : undefined,
           programmeId: [Role.EXAMINER, Role.SYSTEM_ADMIN].includes(activeRole)
             ? d.programmeId
@@ -286,14 +279,15 @@ export async function DELETE(_request, context) {
   ]);
 
   await prisma.$transaction(async (tx) => {
-    await tx.projectOrgUser.deleteMany({ where: { projectId: id } });
-    await tx.projectOrgPlanningPeriod.deleteMany({ where: { projectId: id } });
-    await tx.projectOrgFinancialYear.deleteMany({ where: { projectId: id } });
-    await tx.projectOrgDepartment.deleteMany({
-      where: { projectId: id, parentId: { not: null } },
+    // Attempt workspaces linked to this academic project
+    const attemptOrgs = await tx.project.findMany({
+      where: { sourceAcademicProjectId: id },
+      select: { id: true },
     });
-    await tx.projectOrgDepartment.deleteMany({ where: { projectId: id } });
-    await tx.project.delete({ where: { id } });
+    for (const row of attemptOrgs) {
+      await deleteProjectFully(tx, row.id);
+    }
+    await deleteProjectFully(tx, id);
   });
   await writeAuditLog({
     eventType: AuditEvent.PROJECT_DELETED,

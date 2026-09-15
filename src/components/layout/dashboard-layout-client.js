@@ -16,10 +16,10 @@ import { sidebarNavForContext } from "@/lib/nav-config";
 import { formatRoleLabel } from "@/lib/roles";
 import { NavbarUserMenu } from "@/components/layout/navbar-user-menu";
 import { NotificationBellMenu } from "@/components/layout/notification-bell-menu";
-import { RoleSwitchOverlay } from "@/components/layout/role-switch-overlay";
 import { JoinAcademicYearPrompt } from "@/components/academic/join-academic-year-prompt";
 import { JoinPracticeProjectPrompt } from "@/components/academic/join-practice-project-prompt";
 import { ActiveOrgContextBanner, StudentExitOrgSidebarButton } from "@/components/academic/active-org-context-banner";
+import { ActiveCommitteeContextBanner } from "@/components/layout/active-committee-context-banner";
 import { StudentModeBanner } from "@/components/academic/student-mode-banner";
 import { getDashboardPageMeta } from "@/lib/dashboard-page-meta";
 import { DASHBOARD_MAIN_INNER_CLASS } from "@/lib/dashboard-content-width";
@@ -336,7 +336,7 @@ export default function DashboardLayoutClient({ children }) {
   const [drawerOpen, setDrawerOpen] = useState(false);
   // Layout shell: sidebar + header + main + footer (single root).
   const { mode, toggleMode } = useAppTheme();
-  const { session, loading: authLoading, setSessionBlocking } = useAuthSession();
+  const { session, loading: authLoading } = useAuthSession();
   const activeRole = session?.activeRole ?? "STUDENT";
   const isOrgSession = session?.sessionType === "org";
   const orgProjectId = isOrgSession ? String(session?.projectId || "") : "";
@@ -412,16 +412,8 @@ export default function DashboardLayoutClient({ children }) {
     session?.personalOrgName,
   ]);
 
-  useEffect(() => {
-    const onOrgRoute = isOrganisationPath(pathname || "");
-    if (!onOrgRoute) return;
-    if (isStudentOrgWorld && projectOrgLoading) return;
-    setSessionBlocking(false);
-  }, [pathname, isStudentOrgWorld, projectOrgLoading, setSessionBlocking]);
-
   return (
     <div className="flex min-h-dvh bg-[color:var(--surface-muted)] text-zinc-900 dark:bg-zinc-950 dark:text-zinc-50">
-      <RoleSwitchOverlay />
       <a
         href="#main-content"
         className="sr-only focus:not-sr-only focus:absolute focus:left-3 focus:top-3 focus:z-[120] focus:rounded focus:bg-white focus:px-3 focus:py-2 focus:text-sm focus:text-zinc-900 dark:focus:bg-zinc-900 dark:focus:text-white"
@@ -629,6 +621,7 @@ export default function DashboardLayoutClient({ children }) {
         </header>
 
         <ActiveOrgContextBanner />
+        <ActiveCommitteeContextBanner />
 
         <main
           id="main-content"
