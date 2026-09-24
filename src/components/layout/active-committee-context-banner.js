@@ -65,10 +65,11 @@ export function ActiveCommitteeContextBanner() {
       <div className="flex flex-col gap-2 px-3 py-2 sm:flex-row sm:items-center sm:justify-between md:px-6">
         <div className="min-w-0">
           <p className="text-[11px] font-bold uppercase tracking-wide text-zinc-700 dark:text-zinc-300">
-            Committee seat active
+            Committee mode
           </p>
           <p className="truncate text-sm font-semibold">
-            Switched to {committee.name} ({seat}). Your org role remains {orgRole}.
+            Acting as {committee.name} ({seat}). Only this committee’s work is shown — your org role
+            ({orgRole}) tasks are hidden until you clear the seat.
           </p>
         </div>
         <div className="flex flex-wrap gap-2 sm:justify-end">

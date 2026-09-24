@@ -51,7 +51,23 @@ export const CORE_ORG_ROLE_DEFINITIONS = [
     description: "Final organisational approval authority for budgets, plans and requisitions.",
     sortOrder: 60,
   },
+  {
+    name: "Contracts Committee",
+    description:
+      "Workflow routing role for Contracts Committee method approval (Form 5 Part II). Do not assign as a login role — seat members on the Contracts Committee instead.",
+    sortOrder: 200,
+  },
 ];
+
+/** Roles used only for workflow routing / committee hats — not org user logins. */
+export const WORKFLOW_ONLY_ORG_ROLE_NAMES = new Set(["Contracts Committee"]);
+
+/**
+ * @param {unknown} name
+ */
+export function isWorkflowOnlyOrgRole(name) {
+  return WORKFLOW_ONLY_ORG_ROLE_NAMES.has(String(name || "").trim());
+}
 
 /**
  * @param {unknown} name

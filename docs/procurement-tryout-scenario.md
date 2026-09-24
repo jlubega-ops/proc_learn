@@ -85,7 +85,15 @@ Do **not** create Eva/Insp users. Create the operational cast under **Users** fi
 | Member | Amina Nalwoga (User Department Officer) |
 | Secretary | Esther Namukasa (Finance/Budget Officer) |
 
-Optional **Contracts Committee** for Form 5 teaching: add **Lydia** and/or **Patrick** as seats — still no new logins. Do **not** seat Michael (Head PDU) or Esther (Finance) on Contracts Committee (PPDA Cap. 205 s.29(3)). Joan may sit on Evaluation as Member, but must **not** be Chairperson.
+**Contracts Committee** (required — method approval gate before Micro / Quotation / Tender)
+
+| Seat | Assign existing persona |
+| --- | --- |
+| Chairperson | Lydia Nakato (Accounting Officer) |
+| Member | Patrick Mbabazi (Contracts Officer) |
+| Secretary | Robert Ssekandi (Head User Department) — optional third seat |
+
+Still no new logins. Do **not** seat Michael (Head PDU) or Esther (Finance) on Contracts Committee (PPDA Cap. 205 s.29(3)). Joan may sit on Evaluation as Member, but must **not** be Chairperson of Evaluation.
 
 ---
 
@@ -170,9 +178,13 @@ For each committee: select **type** under **Create committee** (name is automati
    - Add seat → Robert → **Chairperson**  
    - Add seat → Amina → **Member**  
    - Add seat → Esther → **Secretary**  
-3. Optionally create type **Contracts** for Form 5 teaching — Add seat for **Lydia** and/or **Patrick** only (not Michael or Esther).
+3. Create type **Contracts** (**required** — method approval before Micro / Quotation / Tender).  
+   - Add seat → Lydia → **Chairperson**  
+   - Add seat → Patrick → **Member**  
+   - Optional: Add seat → Robert → **Secretary**  
+   Do **not** seat Michael (Head PDU) or Esther (Finance).
 
-Confirm the Committees list shows those seats. You will not use separate committee logins; actors switch context later when a seat is required.
+Confirm the Committees list shows those seats. You will not use separate committee logins; actors switch context later when a seat is required. Exclusive **committee mode** hides org-role tasks until you **Clear seat**.
 
 ### 1.8 Suppliers (registry — no bidder login yet)
 
@@ -298,21 +310,40 @@ Save → Submit.
 
 ---
 
-## Phase 5 — Teaching forms (optional but recommended)
+## Phase 5 — How method selection works now (read before Phase 6)
 
-Pick any approved requisition later, or after first requisition exists:
+Form 5 is **not** a free popup anymore. The live path is:
 
-1. Open requisition → **Fill Form 5 Part I** (UD story) → Save.  
-2. As Joan (PO) → **Fill Form 5 Part II** (method recommendation teaching) → Save.  
-3. Download HTML reference once — do **not** upload scans.
+1. **Part I** — filled by the User Department Officer **on the requisition create form** (extra PPDA fields).  
+2. Requisition approval chain (HOD → PO → Head PDU → AO).  
+3. **Part II** — **Joan (Procurement Officer)** opens task **Recommend Procurement Method (Form 5 Part II)**, enters justification + recommended **MICRO / QUOTATION / TENDER**, then **Submit**.  
+   - This only **recommends**. It does **not** start Micro / Quotation / Tender.  
+4. **Contracts Committee** — a seated member (e.g. Lydia) uses account menu → **Switch committee context** → **Contracts Committee**.  
+   - Yellow **Committee mode** banner appears: only CC tasks show; org-role tasks are hidden.  
+   - Open task **Approve Procurement Method (Contracts Committee)** → **Approve**.  
+5. **Then** the procurement case is created and the Micro / Quotation / Tender workflow starts.
+
+**Exit committee mode** when done: banner → **Clear seat** (or switch back) so you see your normal org tasks again.
+
+**Checkpoint before Phase 6:** Contracts Committee exists with at least one seat (Lydia and/or Patrick). If missing, return to Org Admin → Committees and add seats now.
 
 ---
 
 ## Phase 6 — Track A: Micro (whiteboards)
 
-### 6.1 Requisition
+### 6.0 Where you might be already
 
-**Login:** Amina → **Requisitions → New**
+| If you already… | Continue at |
+| --- | --- |
+| Have an APPROVED annual plan but no whiteboard requisition | **6.1** |
+| Submitted the requisition; approvals still pending | **6.2** |
+| AO has approved; waiting for method | **6.3** (Joan Part II → CC Approve) |
+| Procurement case already exists (Micro tasks showing) | **6.4** |
+
+### 6.1 Create requisition (includes Form 5 Part I)
+
+**Login:** Amina Nalwoga → **Requisitions → New**  
+Stay in **org role** (no committee mode).
 
 | Field | Value |
 | --- | --- |
@@ -320,35 +351,86 @@ Pick any approved requisition later, or after first requisition exists:
 | Plan | ICT Annual Procurement Plan 2026/2027 |
 | Plan item | Interactive whiteboard kit |
 | Budget line | Teaching aids & classroom kit |
-| Qty / price | 4 × 1,200,000 = **4,800,000** |
+| Qty / unit price | 4 × 1,200,000 = **4,800,000** |
 | Required by | 2026-09-30 |
 | Justification | Replace failing boards in Labs 1–2 for continuous teaching |
-| Need / delivery | ICT Labs, NSI main campus |
+| Delivery location | ICT Labs, NSI main campus |
+
+**Form 5 Part I** (same create form — fill before Submit):
+
+| Field | Suggested value |
+| --- | --- |
+| Market price | 4,800,000 |
+| Multi-year contracting | No |
+| Vote / head no. | 221001 |
+| Programme | Skills development |
+| Sub-programme | ICT teaching |
+| Funding item | Teaching aids & classroom kit |
+| Balance remaining | 12,000,000 |
+| Member name | Amina Nalwoga |
+| Member title | User Department Officer |
 
 Submit.
 
-### 6.2 Requisition workflow
+### 6.2 Requisition approval chain
 
-| Step | Login as | Action |
+Complete each **Tasks** item as the named role (logout / login between personas). Stay **out** of committee mode.
+
+| Step | Login as | Task action |
 | --- | --- | --- |
-| 1 | Robert — HOD | Approve |
-| 2 | Joan — PO | Verify plan |
+| 1 | Robert — Head User Department | Approve |
+| 2 | Joan — Procurement Officer | Verify plan |
 | 3 | Michael — Head PDU | Verify funding |
-| 4 | Lydia — AO | Approve |
-| 5 | Joan — PO | **Select method → MICRO** |
+| 4 | Lydia — Accounting Officer | Approve |
 
-**Checkpoint:** Procurement case created (note number). Micro workflow tasks appear.
+**Checkpoint:** Requisition status shows AO-approved / ready for method recommendation. You should **not** see a procurement case yet.
 
-### 6.3 Micro path (follow Tasks on the procurement)
+### 6.3 Recommend method → Contracts Committee approve (starts Micro)
 
-Typical order in this build (complete each pending task as the role named on the task):
+#### A — PDU recommends (Form 5 Part II)
+
+**Login:** Joan Atim (Procurement Officer)  
+Stay in org role (no committee mode).
+
+1. Open **Tasks** → **Recommend Procurement Method (Form 5 Part II)** (or open the requisition detail).  
+2. Set:
+
+| Field | Value |
+| --- | --- |
+| Recommended procurement method | **MICRO** |
+| Method justification | Value within micro threshold; standard goods available from local supplier; urgent classroom continuity |
+
+3. Submit / Complete the task.  
+4. Toast should indicate Form 5 Part II submitted and that **Contracts Committee must approve**.
+
+**Checkpoint:** Still **no** Micro procurement case. Next task belongs to Contracts Committee.
+
+#### B — Contracts Committee approves method
+
+**Login:** Lydia Nakato (or Patrick if she is not seated)
+
+1. Account menu → **Switch committee context** → **Contracts Committee** (Chairperson / Member as assigned).  
+2. Confirm yellow **Committee mode** banner: only CC work is visible.  
+3. Open **Tasks** → **Approve Procurement Method (Contracts Committee)**.  
+4. Review recommended **MICRO** + justification.  
+5. Decision: **Approve** (or Return / Reject if testing those paths).  
+6. Banner → **Clear seat** when finished.
+
+**Checkpoint:** Procurement case created (note the number / title). **Micro Procurement** workflow tasks appear for org roles. Method is locked from Form 5 + CC — do not expect a second “pick method” step.
+
+### 6.4 Micro path (follow Tasks on the procurement)
+
+Complete each pending task as the role named on the task. Clear any leftover committee mode first.
+
+Typical teaching order:
 
 1. Confirm / raise micro request details (UD / PO as assigned).  
-2. Verify & budget confirmations.  
+2. Verify & budget confirmations (PO / Head PDU / Finance as tasks demand).  
 3. Issue **purchase instruction** to **Lake Victoria Office Ltd** for UGX **4,800,000**.  
-4. Record delivery → inspection (**Login Robert → Switch to Inspection & Acceptance Committee (Chairperson)** if the step requires committee context; Amina/Esther for Member/Secretary as needed).  
-5. Invoice → Payment (Finance / AO as tasks demand).  
-6. Close when ready.
+4. Record delivery.  
+5. Inspection: **Login Robert** → **Switch to Inspection & Acceptance Committee (Chairperson)**; use Amina / Esther for Member / Secretary seats if tasks require them. Clear seat after.  
+6. Invoice → payment (Finance / AO).  
+7. Close when ready.
 
 **Success:** Micro procurement **CLOSED** (or ready for closure then closed).
 
@@ -356,21 +438,35 @@ Typical order in this build (complete each pending task as the role named on the
 
 ## Phase 7 — Track B: Quotation (notebooks) — run in parallel
 
-Do **not** wait for Micro to finish.
+Do **not** wait for Micro to finish. Same Form 5 → CC gate as Phase 6.
 
-### 7.1 Requisition → method
+### 7.1 Requisition + Part I
 
-Same requisition chain as 6.2 with:
+**Login:** Amina → **Requisitions → New**
 
 | Field | Value |
 | --- | --- |
 | Title | Supply of 12 staff notebooks for ICT trainers |
+| Plan | ICT Annual Procurement Plan 2026/2027 |
 | Plan item | Staff notebooks (14") |
-| Budget | Computing devices |
+| Budget line | Computing devices |
 | Lines | 12 × 4,500,000 = **54,000,000** |
-| Method | **QUOTATION** |
+| Justification | Equip ICT trainers with standard notebooks for labs |
+| Delivery location | ICT staff room / Labs, NSI main campus |
+| Form 5 Part I | Same pattern as 6.1 (member = Amina; funding item = Computing devices; market price ≈ 54M) |
 
-### 7.2 Solicitation & educational bid document
+Submit → run **6.2** approval chain (Robert → Joan → Michael → Lydia).
+
+### 7.2 Method: recommend QUOTATION → CC approve
+
+| Step | Who | Action |
+| --- | --- | --- |
+| 1 | Joan (org role) | Task **Recommend Procurement Method** → **QUOTATION** + short justification → Submit |
+| 2 | Lydia (switch to **Contracts Committee**) | Task **Approve Procurement Method** → Approve → Clear seat |
+
+**Checkpoint:** Quotation procurement case exists.
+
+### 7.3 Solicitation & educational bid document
 
 **Login:** Joan — Procurement Officer → open the procurement
 
@@ -385,19 +481,19 @@ Same requisition chain as 6.2 with:
 | Kampala SoftTech Ltd | 54,900,000 | Compliant |
 | Nile Systems Group Ltd | 52,800,000 | Compliant |
 
-### 7.3 Evaluation committee (switch seats — same people)
+### 7.4 Evaluation committee (exclusive committee mode)
 
 1. Nominate / approve evaluation committee if tasks ask.  
-2. **Login Amina Nalwoga** → **Switch to Evaluation Committee (Secretary)** — record technical pass for all three.
-3. **Login Robert Ssekandi** → **Switch to Evaluation Committee (Chairperson)** — financial ranking; recommend **Nile Systems** at **52,800,000**. (Joan as Member if a member step appears.)
+2. **Login Amina** → Switch to **Evaluation Committee (Secretary)** — record technical pass for all three → Clear seat.  
+3. **Login Robert** → Switch to **Evaluation Committee (Chairperson)** — financial ranking; recommend **Nile Systems** at **52,800,000**. (Joan as Member if a member step appears.) Clear seat after.  
 4. Submit / approve evaluation report per tasks.  
-5. Run **Post-qualification** checklist on Nile Systems if the process is active.
+5. Run **Post-qualification** on Nile Systems if that process is active.
 
-### 7.4 Award → LPO → delivery → pay → close
+### 7.5 Award → LPO → delivery → pay → close
 
 1. Award Nile Systems **52,800,000**.  
 2. Draft / approve / issue **LPO**.  
-3. Partial delivery teaching (optional): first **7** accepted, then remainder **5**.  
+3. Partial delivery (optional teaching): first **7** accepted, then remainder **5**.  
 4. Invoice **52,800,000** → verify → pay (`PAY-NSI-2026-Q01`) → close.
 
 **Success:** Quotation case closed; Micro may still be open or also closed.
@@ -406,7 +502,9 @@ Same requisition chain as 6.2 with:
 
 ## Phase 8 — Track C: Tender (Wi‑Fi lot)
 
-### 8.1 Requisition → TENDER
+Same Form 5 → CC gate.
+
+### 8.1 Requisition + Part I → approvals → recommend TENDER → CC approve
 
 | Field | Value |
 | --- | --- |
@@ -414,7 +512,8 @@ Same requisition chain as 6.2 with:
 | Plan item | Campus Wi‑Fi refresh (lot) |
 | Budget | Network & connectivity |
 | Value | **95,000,000** |
-| Method | **TENDER** |
+| Joan recommends | **TENDER** |
+| CC | Approve method |
 
 ### 8.2 Tender branch (follow Tasks)
 
@@ -427,9 +526,9 @@ Same requisition chain as 6.2 with:
 | Horizon Networks UG Ltd | 93,500,000 |
 | Nile Systems Group Ltd | 96,200,000 |
 
-4. Evaluation again: **Login Amina / Robert** → **Switch to Evaluation Committee** (Secretary / Chairperson) → recommend Horizon **93,500,000**.  
+4. Evaluation: Amina / Robert → **Switch to Evaluation Committee** → recommend Horizon **93,500,000** → Clear seat.  
 5. Post-qual → Award → **Contract** process (not LPO) → signature / issue.  
-6. Delivery / inspection → invoice → payment → close.
+6. Delivery / inspection (Inspection committee mode) → invoice → payment → close.
 
 **Success:** Tender path used **Contract** process; LPO not required for this branch.
 
@@ -437,7 +536,7 @@ Same requisition chain as 6.2 with:
 
 ## Phase 9 — Track E: Emergency UPS (after emergency plan approved)
 
-**Login:** Amina — new requisition linked to **Emergency — Hall B UPS** plan / item.
+**Login:** Amina — new requisition linked to **Emergency — Hall B UPS** plan / item (include Form 5 Part I).
 
 | Field | Value |
 | --- | --- |
@@ -446,13 +545,11 @@ Same requisition chain as 6.2 with:
 | Value | **8,500,000** |
 | Justification | Failed UPS; exams in Hall B within 10 days |
 
-Requisition approvals → Joan selects **MICRO** (or **QUOTATION** if you prefer a second RFQ practice).
+Approvals (6.2) → Joan recommends **MICRO** (or **QUOTATION**) → Lydia in **Contracts Committee** Approves method.
 
-Supplier: **Twin Lakes Power Solutions** · Amount **8,500,000**.
+Supplier: **Twin Lakes Power Solutions** · Amount **8,500,000**. Run that method path to closure.
 
-Run the method path to closure quickly.
-
-**Teaching point:** Emergency **plan** process ≠ micro method. Emergency plan only unlocks a documented requirement outside annual consolidation; **method** is still chosen on the requisition.
+**Teaching point:** Emergency **plan** ≠ method. The emergency plan only documents the need outside annual consolidation; **method** is still recommended on Form 5 Part II and approved by Contracts Committee.
 
 ---
 
@@ -463,9 +560,9 @@ Run the method path to closure quickly.
 | Processes | All listed processes show **activated** for the org |
 | Budget | ICT budget APPROVED, 197M lines |
 | Plans | 1 annual APPROVED + 1 emergency APPROVED |
-| Procurements | ≥3 cases (Micro / Quotation / Tender), optionally + emergency case |
-| Forms | At least one Form 5 Part I + II saved; one bid/RFQ filled |
-| Committees | Eval / inspection done by **different seats** (switch context), not one PO acting as all three without seats |
+| Procurements | ≥3 cases (Micro / Quotation / Tender), optionally + emergency |
+| Form 5 | Part I on each requisition create; Part II by PO; CC approve before case start |
+| Committees | Eval / inspection / Contracts done in **committee mode** (banner), then Clear seat |
 | Parallelism | Laptop quotation progressed while whiteboard micro still open |
 | Audit / notifications | Org activity log and bell show approvals (spot-check) |
 
@@ -473,18 +570,19 @@ Run the method path to closure quickly.
 
 ## Quick role cheat-sheet
 
-| When you need… | Log in as |
-| --- | --- |
-| Structure, FY, activate processes, users, committees | Organization Administrator |
-| Budget / annual plan / emergency plan / requisition create | Amina (UD Officer) |
-| Department endorse | Robert (HOD) |
-| Plan consolidate / funding verify | Michael (Head PDU) |
-| Annual plan Contracts review | Patrick (Contracts Officer) |
-| Budget finance review | Esther (Finance) |
-| Final approve budget / plans / requisitions / payments | Lydia (AO) |
-| Method, RFQ, offers, LPO, bid fill | Joan (PO) |
-| Evaluation seats | Robert (Chair) / Joan (Member) / Amina (Secretary) — switch committee context |
-| Inspection seats | Robert (Chair) / Amina (Member) / Esther (Secretary) — switch committee context |
+| When you need… | Log in as | Mode |
+| --- | --- | --- |
+| Structure, FY, processes, users, committees | Organization Administrator | — |
+| Budget / plans / requisition create (+ Form 5 Part I) | Amina (UD Officer) | Org role |
+| Department endorse | Robert (HOD) | Org role |
+| Plan consolidate / funding verify | Michael (Head PDU) | Org role |
+| Annual plan Contracts Officer review | Patrick | Org role |
+| Budget finance review | Esther | Org role |
+| Final approve budget / plans / requisitions / payments | Lydia (AO) | Org role |
+| Form 5 Part II recommend method, RFQ, offers, LPO | Joan (PO) | Org role |
+| **Approve procurement method** | Lydia or Patrick | **Contracts Committee** |
+| Evaluation seats | Robert / Joan / Amina | **Evaluation Committee** |
+| Inspection seats | Robert / Amina / Esther | **Inspection & Acceptance** |
 
 ---
 
@@ -495,9 +593,12 @@ Run the method path to closure quickly.
 | Cannot create annual plan | Planning period not OPEN, or FY inactive |
 | Emergency submit: process inactive | Activate **Emergency Planning Process** |
 | No budget lines on plan | Budget not APPROVED |
-| Cannot select method | Requisition not fully approved / AO step pending |
-| No assignees for a task | Missing org user with that **exact** role name in the department |
-| Evaluation blocked | Not assigned that Evaluation seat / wrong or missing **Switch committee context** |
+| No “Recommend method” task | AO has not approved the requisition yet |
+| Recommend submits but no procurement | Expected — wait for **Contracts Committee** Approve |
+| No CC task / no assignees | Create Contracts Committee + seat Lydia/Patrick; actor must **Switch to Contracts Committee** |
+| CC task missing while in org role | Switch into committee mode (exclusive filter) |
+| Org tasks missing after CC work | Banner → **Clear seat** |
+| Evaluation / inspection blocked | Wrong seat or still in another committee mode |
 | Quotation invite rejected | Supplier missing or inactive in registry |
 
 ---
@@ -509,7 +610,7 @@ Run the method path to closure quickly.
 | Phase 0–1 setup | 25–40 min |
 | Budget + annual plan | 20–30 min |
 | Emergency plan | 10–15 min |
-| Micro end-to-end | 20–30 min |
+| Micro (incl. Form 5 + CC) | 25–40 min |
 | Quotation + eval | 35–50 min |
 | Tender + contract | 35–50 min |
 | Emergency requisition | 15–20 min |

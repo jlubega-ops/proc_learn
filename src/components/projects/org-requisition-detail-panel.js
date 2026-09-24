@@ -11,8 +11,15 @@ import Paper from "@mui/material/Paper";
 import TextField from "@mui/material/TextField";
 import Typography from "@mui/material/Typography";
 import ArrowBackRounded from "@mui/icons-material/ArrowBackRounded";
+import DeleteOutlineRounded from "@mui/icons-material/DeleteOutlineRounded";
 import DescriptionRounded from "@mui/icons-material/DescriptionRounded";
+import EditRounded from "@mui/icons-material/EditRounded";
 import RefreshRounded from "@mui/icons-material/RefreshRounded";
+import Dialog from "@mui/material/Dialog";
+import DialogActions from "@mui/material/DialogActions";
+import DialogContent from "@mui/material/DialogContent";
+import DialogTitle from "@mui/material/DialogTitle";
+import { useRouter } from "next/navigation";
 import { OrgLineItemsTable } from "@/components/projects/org-line-items-table";
 import { OrgForm5FillDialog } from "@/components/projects/org-form5-fill-dialog";
 import { useToast } from "@/components/providers/toast-provider";
@@ -25,6 +32,11 @@ import {
 } from "@/lib/admin-mui-surfaces";
 import { formatMoneyAmount, formatMoneyUGX } from "@/lib/money";
 import { format, isValid, parseISO } from "date-fns";
+import {
+  defaultWorkflowDecision,
+  workflowDecisionHelp,
+  workflowDecisionOptions,
+} from "@/lib/projects/workflow-decision-options";
 import { workflowDecisionButtonLabel } from "@/lib/projects/workflow-status-presentation";
 
 const REQUISITION_ITEM_COLUMNS = [
@@ -54,15 +66,21 @@ const REQUISITION_ITEM_COLUMNS = [
  */
 export function OrgRequisitionDetailPanel({ projectId, requisitionId }) {
   const { showToast } = useToast();
+  const router = useRouter();
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
   const [row, setRow] = useState(/** @type {any} */ (null));
   const [pendingTask, setPendingTask] = useState(/** @type {any} */ (null));
   const [history, setHistory] = useState(/** @type {any[]} */ ([]));
+  const [canEdit, setCanEdit] = useState(false);
+  const [canDelete, setCanDelete] = useState(false);
+  const [deleteOpen, setDeleteOpen] = useState(false);
   const [decision, setDecision] = useState("APPROVE");
   const [comment, setComment] = useState("");
   const [procurementMethod, setProcurementMethod] = useState("");
   const [form5Part, setForm5Part] = useState(/** @type {"I" | "II" | null} */ (null));
+  const [form5Defaults, setForm5Defaults] = useState(/** @type {any} */ (null));
+  const [form5PartII, setForm5PartII] = useState(/** @type {Record<string, string>} */ ({}));
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -77,23 +95,46 @@ export function OrgRequisitionDetailPanel({ projectId, requisitionId }) {
           severity: "error",
         });
         setRow(null);
+        setCanEdit(false);
+        setCanDelete(false);
         return;
       }
       setRow(data.requisition || null);
+      setCanEdit(Boolean(data.canEdit));
+      setCanDelete(Boolean(data.canDelete));
+      setForm5Defaults(data.form5Defaults || null);
       setPendingTask(data.pendingTask || null);
       setHistory(Array.isArray(data.history) ? data.history : []);
       const key = String(data.pendingTask?.actionKey || "").toUpperCase();
-      setDecision(
-        key === "VERIFY"
-          ? "VERIFY"
-          : key === "SELECT_METHOD"
-            ? "SELECT_METHOD"
-            : key === "COMPLETE"
-              ? "COMPLETE"
-              : "APPROVE",
-      );
+      setDecision(defaultWorkflowDecision(key));
       setComment("");
-      setProcurementMethod("");
+      setProcurementMethod(
+        String(data.requisition?.procurementMethod || "").toUpperCase() || "",
+      );
+      const partII =
+        data.requisition?.form5PartII && typeof data.requisition.form5PartII === "object"
+          ? data.requisition.form5PartII
+          : {};
+      const defaultsII = data.form5Defaults?.partII || {};
+      setForm5PartII({
+        methodJustification: partII.methodJustification || "",
+        shortlistedProviders: partII.shortlistedProviders || "",
+        shortlistJustification: partII.shortlistJustification || "",
+        biddingDocumentPreparers:
+          partII.biddingDocumentPreparers || defaultsII.biddingDocumentPreparers || "",
+        evaluationCommitteeNominees:
+          partII.evaluationCommitteeNominees || defaultsII.evaluationCommitteeNominees || "",
+        evaluationCommitteeJustification: partII.evaluationCommitteeJustification || "",
+        biddingDocumentCost: partII.biddingDocumentCost || "",
+        otherInformation: partII.otherInformation || "",
+        pduOfficerName: partII.pduOfficerName || defaultsII.pduOfficerName || "",
+        pduOfficerPosition:
+          partII.pduOfficerPosition || defaultsII.pduOfficerPosition || "Procurement Officer",
+        ccChairName: partII.ccChairName || defaultsII.ccChairName || "",
+        ccSecretaryName: partII.ccSecretaryName || defaultsII.ccSecretaryName || "",
+        dateSubmittedToCc: partII.dateSubmittedToCc || new Date().toISOString().slice(0, 10),
+        ccMeetingReference: partII.ccMeetingReference || "",
+      });
     } finally {
       setLoading(false);
     }
@@ -109,6 +150,16 @@ export function OrgRequisitionDetailPanel({ projectId, requisitionId }) {
       showToast({ message: "Choose a procurement method.", severity: "error" });
       return;
     }
+    if (decision === "SELECT_METHOD") {
+      if (!String(form5PartII.methodJustification || "").trim()) {
+        showToast({ message: "Enter the method justification (Form 5 Part II).", severity: "error" });
+        return;
+      }
+      if (!String(form5PartII.pduOfficerName || "").trim()) {
+        showToast({ message: "Enter the PDU officer name.", severity: "error" });
+        return;
+      }
+    }
     setBusy(true);
     try {
       const payload = {
@@ -118,6 +169,13 @@ export function OrgRequisitionDetailPanel({ projectId, requisitionId }) {
       };
       if (decision === "SELECT_METHOD") {
         payload.procurementMethod = procurementMethod;
+        payload.form5 = form5PartII;
+      }
+      if (String(pendingTask.requiredRoleName || "") === "Contracts Committee") {
+        payload.form5 = {
+          ccChairName: form5PartII.ccChairName,
+          ccSecretaryName: form5PartII.ccSecretaryName,
+        };
       }
       const res = await fetch(`/api/projects/${projectId}/tasks`, {
         method: "POST",
@@ -133,8 +191,38 @@ export function OrgRequisitionDetailPanel({ projectId, requisitionId }) {
         });
         return;
       }
-      showToast({ message: "Decision recorded.", severity: "success" });
+      const msg = data.awaitingContractsCommittee
+        ? "Form 5 Part II submitted. Contracts Committee must approve the method."
+        : data.nextProcessStarted
+          ? "Method approved. Procurement process started."
+          : "Decision recorded.";
+      showToast({ message: msg, severity: "success" });
       await load();
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function deleteRequisition() {
+    setBusy(true);
+    try {
+      const res = await fetch(`/api/projects/${projectId}/requisitions/${requisitionId}`, {
+        method: "PATCH",
+        credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "delete" }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        showToast({
+          message: typeof data.error === "string" ? data.error : "Could not delete requisition.",
+          severity: "error",
+        });
+        return;
+      }
+      setDeleteOpen(false);
+      showToast({ message: "Requisition deleted.", severity: "success" });
+      router.push(`/projects/${projectId}/requisitions`);
     } finally {
       setBusy(false);
     }
@@ -165,9 +253,34 @@ export function OrgRequisitionDetailPanel({ projectId, requisitionId }) {
         >
           Back to requisitions
         </Button>
-        <Button startIcon={<RefreshRounded />} variant="outlined" onClick={() => load()}>
-          Refresh
-        </Button>
+        <div className="flex flex-wrap gap-2">
+          {canEdit ? (
+            <Button
+              component={Link}
+              href={`/projects/${projectId}/requisitions/${requisitionId}/edit`}
+              startIcon={<EditRounded />}
+              variant="outlined"
+              color="primary"
+              title="Edit requisition"
+            >
+              Edit
+            </Button>
+          ) : null}
+          {canDelete ? (
+            <Button
+              startIcon={<DeleteOutlineRounded />}
+              variant="outlined"
+              color="error"
+              onClick={() => setDeleteOpen(true)}
+              title="Delete requisition"
+            >
+              Delete
+            </Button>
+          ) : null}
+          <Button startIcon={<RefreshRounded />} variant="outlined" onClick={() => load()}>
+            Refresh
+          </Button>
+        </div>
       </div>
 
       <Paper variant="outlined" sx={{ p: 2, ...adminOutlinedTableContainerSx }}>
@@ -238,42 +351,40 @@ export function OrgRequisitionDetailPanel({ projectId, requisitionId }) {
 
       <Paper variant="outlined" sx={{ p: 2, ...adminOutlinedTableContainerSx }}>
         <Typography variant="subtitle1" sx={{ fontWeight: 600, mb: 1 }}>
-          FORM 5 (teaching)
+          FORM 5 (PPDA)
         </Typography>
         <Typography variant="body2" sx={{ ...adminMutedTextSx, mb: 2 }}>
-          Fill Part I (User Department request) and Part II (PDU to Contracts Committee) in-app.
-          Download from the fill dialog is PDF-only after required fields are complete.
+          Part I is filled when the User Department creates the requisition. Part II is completed by
+          the Procurement Officer when recommending a method, then Contracts Committee approves it
+          (switch to Contracts Committee in the navbar before approving).
         </Typography>
-        <div className="flex flex-wrap gap-2">
-          <Button
-            variant="contained"
-            startIcon={<DescriptionRounded />}
-            onClick={() => setForm5Part("I")}
-          >
-            {row.form5PartI ? "Edit Form 5 Part I" : "Fill Form 5 Part I"}
-          </Button>
-          <Button
-            variant="outlined"
-            startIcon={<DescriptionRounded />}
-            onClick={() => setForm5Part("II")}
-          >
-            {row.form5PartII ? "Edit Form 5 Part II" : "Fill Form 5 Part II"}
-          </Button>
-        </div>
         <div className="mt-2 space-y-1 text-sm">
           <p>
-            <span className="font-semibold">Part I:</span>{" "}
+            <span className="font-semibold">Part I (User Department):</span>{" "}
             {row.form5PartIAt
               ? `Saved ${formatDateShort(row.form5PartIAt)}`
-              : "Not filled yet"}
+              : "Not saved yet — complete on requisition create"}
           </p>
           <p>
-            <span className="font-semibold">Part II:</span>{" "}
+            <span className="font-semibold">Part II (PDU → CC):</span>{" "}
             {row.form5PartIIAt
-              ? `Saved ${formatDateShort(row.form5PartIIAt)}`
-              : "Not filled yet"}
+              ? `Saved ${formatDateShort(row.form5PartIIAt)}${
+                  row.procurementMethod ? ` · Recommended ${row.procurementMethod}` : ""
+                }`
+              : "Awaiting Procurement Officer recommendation"}
           </p>
         </div>
+        {row.form5PartI ? (
+          <div className="mt-3">
+            <Button
+              variant="outlined"
+              startIcon={<DescriptionRounded />}
+              onClick={() => setForm5Part("I")}
+            >
+              View / download Part I PDF
+            </Button>
+          </div>
+        ) : null}
       </Paper>
 
       {pendingTask ? (
@@ -282,9 +393,11 @@ export function OrgRequisitionDetailPanel({ projectId, requisitionId }) {
             Review task: {pendingTask.title}
           </Typography>
           <Typography variant="body2" sx={{ ...adminMutedTextSx, mb: 2 }}>
-            Role: {pendingTask.requiredRoleName}
-            {actionKey ? ` · ${actionKey}` : ""}. Flow: HOD → Procurement Officer (plan) → Head PDU
-            (funding) → Accounting Officer.
+            Role: {pendingTask.requiredRoleName}. Flow: HOD → PO (plan) → Head PDU (funding) → AO →
+            PO recommends method (Form 5 Part II) → Contracts Committee approves method.
+            {pendingTask.requiredRoleName === "Contracts Committee"
+              ? " Switch to Contracts Committee in the navbar before approving."
+              : ""}
           </Typography>
           <div className="grid gap-3 sm:grid-cols-2">
             <TextField
@@ -294,39 +407,142 @@ export function OrgRequisitionDetailPanel({ projectId, requisitionId }) {
               onChange={(e) => setDecision(e.target.value)}
               fullWidth
               sx={themedTextFieldSx}
+              helperText={workflowDecisionHelp(decision)}
             >
-              {actionKey === "SELECT_METHOD" ? (
-                <MenuItem value="SELECT_METHOD">Select procurement method</MenuItem>
-              ) : null}
-              {actionKey === "VERIFY" ? <MenuItem value="VERIFY">Verify</MenuItem> : null}
-              {actionKey !== "VERIFY" && actionKey !== "SELECT_METHOD" ? (
-                <MenuItem value="APPROVE">Approve</MenuItem>
-              ) : null}
-              {actionKey !== "SELECT_METHOD" ? (
-                <MenuItem value="RETURN">Return for correction</MenuItem>
-              ) : null}
-              {actionKey !== "SELECT_METHOD" ? <MenuItem value="REJECT">Reject</MenuItem> : null}
-              {actionKey === "VERIFY" ? (
-                <MenuItem value="FLAG_EXCEPTION">Flag exception</MenuItem>
-              ) : null}
+              {workflowDecisionOptions(actionKey, {
+                includeFlagException: actionKey === "VERIFY",
+              }).map((opt) => (
+                <MenuItem key={opt.value} value={opt.value}>
+                  {opt.label}
+                </MenuItem>
+              ))}
             </TextField>
-            {decision === "SELECT_METHOD" ? (
-              <TextField
-                select
-                label="Procurement method"
-                value={procurementMethod}
-                onChange={(e) => setProcurementMethod(e.target.value)}
-                fullWidth
-                required
-                sx={themedTextFieldSx}
-                helperText="Choose Micro, Quotation, or Tender. Recording this decision creates a Procurement record and starts that method’s workflow."
-              >
-                <MenuItem value="">Select a method</MenuItem>
-                <MenuItem value="MICRO">Micro Procurement</MenuItem>
-                <MenuItem value="QUOTATION">Quotation</MenuItem>
-                <MenuItem value="TENDER">Tender</MenuItem>
-              </TextField>
+
+            {actionKey === "SELECT_METHOD" || decision === "SELECT_METHOD" ? (
+              <>
+                <TextField
+                  select
+                  label="Recommended procurement method"
+                  value={procurementMethod}
+                  onChange={(e) => setProcurementMethod(e.target.value)}
+                  fullWidth
+                  sx={themedTextFieldSx}
+                  helperText="Form 5 Part II — goes to Contracts Committee for approval before Micro/Quotation/Tender starts."
+                >
+                  <MenuItem value="">Select a method</MenuItem>
+                  <MenuItem value="MICRO">Micro Procurement</MenuItem>
+                  <MenuItem value="QUOTATION">Quotation</MenuItem>
+                  <MenuItem value="TENDER">Tender</MenuItem>
+                </TextField>
+                <TextField
+                  label="Method justification"
+                  value={form5PartII.methodJustification || ""}
+                  onChange={(e) =>
+                    setForm5PartII((f) => ({ ...f, methodJustification: e.target.value }))
+                  }
+                  fullWidth
+                  multiline
+                  minRows={2}
+                  className="sm:col-span-2"
+                  sx={themedTextFieldSx}
+                />
+                <TextField
+                  label="Shortlisted providers"
+                  value={form5PartII.shortlistedProviders || ""}
+                  onChange={(e) =>
+                    setForm5PartII((f) => ({ ...f, shortlistedProviders: e.target.value }))
+                  }
+                  fullWidth
+                  className="sm:col-span-2"
+                  sx={themedTextFieldSx}
+                />
+                <TextField
+                  label="PDU officer"
+                  value={form5PartII.pduOfficerName || ""}
+                  onChange={(e) =>
+                    setForm5PartII((f) => ({ ...f, pduOfficerName: e.target.value }))
+                  }
+                  fullWidth
+                  sx={themedTextFieldSx}
+                />
+                <TextField
+                  label="PDU position"
+                  value={form5PartII.pduOfficerPosition || ""}
+                  onChange={(e) =>
+                    setForm5PartII((f) => ({ ...f, pduOfficerPosition: e.target.value }))
+                  }
+                  fullWidth
+                  sx={themedTextFieldSx}
+                />
+                <TextField
+                  label="Evaluation committee nominees"
+                  value={form5PartII.evaluationCommitteeNominees || ""}
+                  onChange={(e) =>
+                    setForm5PartII((f) => ({
+                      ...f,
+                      evaluationCommitteeNominees: e.target.value,
+                    }))
+                  }
+                  fullWidth
+                  className="sm:col-span-2"
+                  helperText="Prefilled from Evaluation Committee seats when configured."
+                  sx={themedTextFieldSx}
+                />
+                <TextField
+                  label="CC Chair (for record)"
+                  value={form5PartII.ccChairName || ""}
+                  InputProps={{ readOnly: true }}
+                  fullWidth
+                  helperText="From Contracts Committee setup — not editable here."
+                  sx={themedTextFieldSx}
+                />
+                <TextField
+                  label="CC Secretary (for record)"
+                  value={form5PartII.ccSecretaryName || ""}
+                  InputProps={{ readOnly: true }}
+                  fullWidth
+                  sx={themedTextFieldSx}
+                />
+              </>
             ) : null}
+
+            {pendingTask.requiredRoleName === "Contracts Committee" ? (
+              <>
+                <TextField
+                  label="Recommended method"
+                  value={row.procurementMethod || "—"}
+                  InputProps={{ readOnly: true }}
+                  fullWidth
+                  helperText="Recommended by PDU on Form 5 Part II."
+                  sx={themedTextFieldSx}
+                />
+                <TextField
+                  label="Method justification"
+                  value={row.form5PartII?.methodJustification || "—"}
+                  InputProps={{ readOnly: true }}
+                  fullWidth
+                  multiline
+                  minRows={2}
+                  className="sm:col-span-2"
+                  sx={themedTextFieldSx}
+                />
+                <TextField
+                  label="CC Chair"
+                  value={form5PartII.ccChairName || ""}
+                  InputProps={{ readOnly: true }}
+                  fullWidth
+                  sx={themedTextFieldSx}
+                />
+                <TextField
+                  label="CC Secretary"
+                  value={form5PartII.ccSecretaryName || ""}
+                  InputProps={{ readOnly: true }}
+                  fullWidth
+                  sx={themedTextFieldSx}
+                />
+              </>
+            ) : null}
+
             <TextField
               label="Comment"
               value={comment}
@@ -369,12 +585,13 @@ export function OrgRequisitionDetailPanel({ projectId, requisitionId }) {
         </Paper>
       ) : null}
 
-      {form5Part ? (
+      {form5Part === "I" && row.form5PartI ? (
         <OrgForm5FillDialog
           open
-          part={form5Part}
+          part="I"
           projectId={projectId}
           requisition={row}
+          form5Defaults={form5Defaults}
           onClose={() => setForm5Part(null)}
           onSaved={(next) => {
             if (next) setRow(next);
@@ -382,6 +599,40 @@ export function OrgRequisitionDetailPanel({ projectId, requisitionId }) {
           }}
         />
       ) : null}
+
+      <Dialog
+        open={deleteOpen}
+        onClose={() => !busy && setDeleteOpen(false)}
+        fullWidth
+        maxWidth="xs"
+      >
+        <DialogTitle>Delete requisition?</DialogTitle>
+        <DialogContent>
+          <Typography variant="body2">
+            This removes <strong>{row.title}</strong>
+            {row.status === "SUBMITTED"
+              ? " and cancels the pending Head of User Department review task."
+              : "."}{" "}
+            This cannot be undone.
+          </Typography>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setDeleteOpen(false)} disabled={busy}>
+            Cancel
+          </Button>
+          <Button
+            color="error"
+            variant="contained"
+            disabled={busy}
+            onClick={() => void deleteRequisition()}
+            startIcon={
+              busy ? <CircularProgress size={16} color="inherit" /> : <DeleteOutlineRounded />
+            }
+          >
+            {busy ? "Deleting…" : "Delete"}
+          </Button>
+        </DialogActions>
+      </Dialog>
     </div>
   );
 }

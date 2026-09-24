@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import Button from "@mui/material/Button";
 import CircularProgress from "@mui/material/CircularProgress";
 import Dialog from "@mui/material/Dialog";
@@ -20,10 +20,12 @@ import {
   PPDA_YES_NO,
   buildForm5PartI,
   buildForm5PartII,
-  downloadPdfReference,
-  form5PartIToHtml,
-  form5PartIIToHtml,
+  buildOrgPdfContext,
+  downloadOrgFormPdf,
+  form5PartIToPdfSpec,
+  form5PartIIToPdfSpec,
 } from "@/lib/projects/ppda-forms";
+import { mergeForm5Defaults } from "@/lib/projects/form5-prefill";
 
 /**
  * @param {{
@@ -31,12 +33,22 @@ import {
  *   onClose: () => void;
  *   projectId: string;
  *   requisition: any;
+ *   form5Defaults?: { partI?: Record<string, string>; partII?: Record<string, string> } | null;
  *   part: "I" | "II";
  *   onSaved?: (requisition: any) => void;
  * }} p
  */
-export function OrgForm5FillDialog({ open, onClose, projectId, requisition, part, onSaved }) {
+export function OrgForm5FillDialog({
+  open,
+  onClose,
+  projectId,
+  requisition,
+  form5Defaults,
+  part,
+  onSaved,
+}) {
   const { showToast } = useToast();
+  const contentRef = useRef(/** @type {HTMLDivElement | null} */ (null));
   const [busy, setBusy] = useState(false);
   const [fieldErrors, setFieldErrors] = useState(/** @type {Record<string, string>} */ ({}));
   const [form, setForm] = useState(/** @type {Record<string, string>} */ ({}));
@@ -49,9 +61,14 @@ export function OrgForm5FillDialog({ open, onClose, projectId, requisition, part
       setBaseReady(false);
       return;
     }
+    const defaults =
+      part === "I" ? form5Defaults?.partI || {} : form5Defaults?.partII || {};
+
     if (part === "I") {
       const snap = requisition.form5PartI || buildForm5PartI(requisition, {});
-      setForm({
+      setForm(
+        mergeForm5Defaults(
+          {
         pdeCode: snap.pdeCode || "",
         categorySuppliesWorksServices: snap.categorySuppliesWorksServices || "Supplies",
         financialYearLabel: snap.financialYearLabel || "",
@@ -82,12 +99,17 @@ export function OrgForm5FillDialog({ open, onClose, projectId, requisition, part
         hodTitle: snap.hodTitle || "",
         aoName: snap.aoName || "",
         aoTitle: snap.aoTitle || "Accounting Officer",
-      });
+          },
+          defaults,
+        ),
+      );
     } else {
       const snap =
         requisition.form5PartII ||
         buildForm5PartII({}, { method: requisition.procurementMethod || null });
-      setForm({
+      setForm(
+        mergeForm5Defaults(
+          {
         dateSubmittedToCc: snap.dateSubmittedToCc || "",
         ccMeetingReference: snap.ccMeetingReference || "",
         recommendedMethod: snap.recommendedMethod || "",
@@ -103,11 +125,28 @@ export function OrgForm5FillDialog({ open, onClose, projectId, requisition, part
         pduOfficerPosition: snap.pduOfficerPosition || "Procurement Officer",
         ccChairName: snap.ccChairName || "",
         ccSecretaryName: snap.ccSecretaryName || "",
-      });
+          },
+          defaults,
+        ),
+      );
     }
     setFieldErrors({});
     setBaseReady(true);
-  }, [open, requisition, part]);
+  }, [open, requisition, part, form5Defaults]);
+
+  function focusFirstFieldError(errors) {
+    const firstKey = Object.keys(errors)[0];
+    if (!firstKey || !contentRef.current) return;
+    window.requestAnimationFrame(() => {
+      const root = contentRef.current;
+      if (!root) return;
+      const input = root.querySelector(`[name="${firstKey}"]`);
+      if (input instanceof HTMLElement) {
+        input.scrollIntoView({ behavior: "smooth", block: "center" });
+        input.focus?.();
+      }
+    });
+  }
 
   const { serverSyncState, clearDraft } = usePersistedFormDraft({
     formKey,
@@ -161,16 +200,11 @@ export function OrgForm5FillDialog({ open, onClose, projectId, requisition, part
     return errors;
   }
 
-  const canDownloadPdf = useMemo(
-    () => Object.keys(validateClient()).length === 0,
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- validate from current form/part
-    [form, part],
-  );
-
   async function save() {
     const errors = validateClient();
     setFieldErrors(errors);
     if (Object.keys(errors).length) {
+      focusFirstFieldError(errors);
       showToast({ message: "Please fix the highlighted fields.", severity: "error" });
       return;
     }
@@ -211,28 +245,24 @@ export function OrgForm5FillDialog({ open, onClose, projectId, requisition, part
 
   async function downloadPdf() {
     const errors = validateClient();
-    setFieldErrors(errors);
-    if (Object.keys(errors).length) {
-      showToast({
-        message: "Complete all required fields before downloading the PDF.",
-        severity: "error",
-      });
-      return;
+    const incomplete = Object.keys(errors).length > 0;
+    if (incomplete) {
+      setFieldErrors(errors);
+      focusFirstFieldError(errors);
     }
     try {
+      const ctx = buildOrgPdfContext(requisition, {
+        referenceNumber: requisition.requisitionReference || "",
+      });
       if (part === "I") {
         const snap = buildForm5PartI(requisition, form);
-        await downloadPdfReference(
-          `form5-part-i-${requisition.requisitionReference || requisition.id}`,
-          "FORM 5 — Part I",
-          form5PartIToHtml(snap),
+        await downloadOrgFormPdf(
+          form5PartIToPdfSpec(snap, ctx, { draftIncomplete: incomplete }),
         );
       } else {
         const snap = buildForm5PartII(form, { method: requisition.procurementMethod });
-        await downloadPdfReference(
-          `form5-part-ii-${requisition.requisitionReference || requisition.id}`,
-          "FORM 5 — Part II",
-          form5PartIIToHtml(snap),
+        await downloadOrgFormPdf(
+          form5PartIIToPdfSpec(snap, ctx, { draftIncomplete: incomplete }),
         );
       }
     } catch {
@@ -254,7 +284,8 @@ export function OrgForm5FillDialog({ open, onClose, projectId, requisition, part
       <DialogContent className="pt-2">
         <Typography variant="body2" sx={{ ...adminMutedTextSx, mb: 1 }}>
           Teaching Form 5 (PPDA). Progress autosaves to your account so you can continue on another
-          device. PDF download unlocks when required fields are complete.
+          device. Download a branded PDF at any time — empty fields appear as — and the file is
+          named from the requisition reference.
         </Typography>
         <Typography variant="caption" sx={{ ...adminMutedTextSx, display: "block", mb: 2 }}>
           {serverSyncState === "saving"
@@ -265,10 +296,11 @@ export function OrgForm5FillDialog({ open, onClose, projectId, requisition, part
                 ? "Draft will retry as you continue"
                 : "Draft autosave on"}
         </Typography>
-        <div className="grid gap-3 sm:grid-cols-2">
+        <div ref={contentRef} className="grid gap-3 sm:grid-cols-2">
           {part === "I" ? (
             <>
               <TextField
+                name="subjectOfProcurement"
                 label="Subject of procurement"
                 value={form.subjectOfProcurement || ""}
                 onChange={(e) => patch("subjectOfProcurement", e.target.value)}
@@ -344,11 +376,14 @@ export function OrgForm5FillDialog({ open, onClose, projectId, requisition, part
                 sx={themedTextFieldSx}
               />
               <TextField
+                name="locationForDelivery"
                 label="Location for delivery"
                 value={form.locationForDelivery || ""}
                 onChange={(e) => patch("locationForDelivery", e.target.value)}
                 fullWidth
                 className="sm:col-span-2"
+                error={Boolean(fieldErrors.locationForDelivery)}
+                helperText={fieldErrors.locationForDelivery}
                 sx={themedTextFieldSx}
               />
               <TextField
@@ -359,10 +394,13 @@ export function OrgForm5FillDialog({ open, onClose, projectId, requisition, part
                 sx={themedTextFieldSx}
               />
               <TextField
+                name="estimatedTotalCost"
                 label="Estimated total cost"
                 value={form.estimatedTotalCost || ""}
                 onChange={(e) => patch("estimatedTotalCost", e.target.value)}
                 fullWidth
+                error={Boolean(fieldErrors.estimatedTotalCost)}
+                helperText={fieldErrors.estimatedTotalCost}
                 sx={themedTextFieldSx}
               />
               <TextField
@@ -408,10 +446,13 @@ export function OrgForm5FillDialog({ open, onClose, projectId, requisition, part
                 sx={themedTextFieldSx}
               />
               <TextField
+                name="memberName"
                 label="Member (User Department)"
                 value={form.memberName || ""}
                 onChange={(e) => patch("memberName", e.target.value)}
                 fullWidth
+                error={Boolean(fieldErrors.memberName)}
+                helperText={fieldErrors.memberName}
                 sx={themedTextFieldSx}
               />
               <TextField
@@ -453,6 +494,7 @@ export function OrgForm5FillDialog({ open, onClose, projectId, requisition, part
           ) : (
             <>
               <TextField
+                name="recommendedMethod"
                 select
                 label="Recommended method"
                 value={form.recommendedMethod || ""}
@@ -477,6 +519,7 @@ export function OrgForm5FillDialog({ open, onClose, projectId, requisition, part
                 <MenuItem value="TENDER">Tender (simulator)</MenuItem>
               </TextField>
               <TextField
+                name="methodJustification"
                 label="Method justification"
                 value={form.methodJustification || ""}
                 onChange={(e) => patch("methodJustification", e.target.value)}
@@ -538,6 +581,7 @@ export function OrgForm5FillDialog({ open, onClose, projectId, requisition, part
                 onChange={(e) => patch("evaluationCommitteeNominees", e.target.value)}
                 fullWidth
                 className="sm:col-span-2"
+                helperText="Auto-filled from your Evaluation Committee setup when available."
                 sx={themedTextFieldSx}
               />
               <TextField
@@ -568,10 +612,16 @@ export function OrgForm5FillDialog({ open, onClose, projectId, requisition, part
                 sx={themedTextFieldSx}
               />
               <TextField
+                name="pduOfficerName"
                 label="PDU officer"
                 value={form.pduOfficerName || ""}
                 onChange={(e) => patch("pduOfficerName", e.target.value)}
                 fullWidth
+                error={Boolean(fieldErrors.pduOfficerName)}
+                helperText={
+                  fieldErrors.pduOfficerName ||
+                  "Auto-filled from your Procurement Officer org user when available."
+                }
                 sx={themedTextFieldSx}
               />
               <TextField
@@ -586,6 +636,7 @@ export function OrgForm5FillDialog({ open, onClose, projectId, requisition, part
                 value={form.ccChairName || ""}
                 onChange={(e) => patch("ccChairName", e.target.value)}
                 fullWidth
+                helperText="Auto-filled from Contracts Committee chairperson when configured."
                 sx={themedTextFieldSx}
               />
               <TextField
@@ -593,6 +644,7 @@ export function OrgForm5FillDialog({ open, onClose, projectId, requisition, part
                 value={form.ccSecretaryName || ""}
                 onChange={(e) => patch("ccSecretaryName", e.target.value)}
                 fullWidth
+                helperText="Auto-filled from Contracts Committee secretary when configured."
                 sx={themedTextFieldSx}
               />
             </>
@@ -605,12 +657,8 @@ export function OrgForm5FillDialog({ open, onClose, projectId, requisition, part
           variant="outlined"
           startIcon={<DownloadRounded />}
           onClick={() => void downloadPdf()}
-          disabled={busy || !canDownloadPdf}
-          title={
-            canDownloadPdf
-              ? "Download completed form as PDF"
-              : "Fill all required fields to enable PDF download"
-          }
+          disabled={busy}
+          title="Download form as PDF (named from requisition reference)"
         >
           Download PDF
         </Button>

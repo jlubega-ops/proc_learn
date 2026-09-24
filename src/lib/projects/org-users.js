@@ -1,5 +1,5 @@
 import { Role } from "@prisma/client";
-import { getProjectOrgAdminRole, isProjectOrgAdminRole } from "@/lib/project-org-role";
+import { getProjectOrgAdminRole, isProjectOrgAdminRole, isWorkflowOnlyOrgRole } from "@/lib/project-org-role";
 import {
   formatOrgUsername,
   PROJECT_ORG_LEARN_PASSWORD,
@@ -143,7 +143,9 @@ export async function listAssignableProjectOrgRoles(prisma) {
     orderBy: [{ sortOrder: "asc" }, { name: "asc" }],
     select: { id: true, name: true },
   });
-  return rows.filter((row) => !isProjectOrgAdminRole(row.name));
+  return rows.filter(
+    (row) => !isProjectOrgAdminRole(row.name) && !isWorkflowOnlyOrgRole(row.name),
+  );
 }
 
 /**
@@ -155,7 +157,7 @@ export async function getAssignableProjectOrgRole(prisma, roleId) {
     where: { id: roleId, isActive: true },
     select: { id: true, name: true },
   });
-  if (!row || isProjectOrgAdminRole(row.name)) return null;
+  if (!row || isProjectOrgAdminRole(row.name) || isWorkflowOnlyOrgRole(row.name)) return null;
   return row;
 }
 

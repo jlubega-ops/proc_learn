@@ -11,6 +11,7 @@ import Paper from "@mui/material/Paper";
 import TextField from "@mui/material/TextField";
 import Typography from "@mui/material/Typography";
 import ArrowBackRounded from "@mui/icons-material/ArrowBackRounded";
+import DownloadRounded from "@mui/icons-material/DownloadRounded";
 import RefreshRounded from "@mui/icons-material/RefreshRounded";
 import SendRounded from "@mui/icons-material/SendRounded";
 import { OrgLineItemsTable } from "@/components/projects/org-line-items-table";
@@ -23,6 +24,12 @@ import {
   themedTextFieldSx,
 } from "@/lib/admin-mui-surfaces";
 import { formatMoneyAmount } from "@/lib/money";
+import { downloadOrgFormPdf, procurementPlanRecordToPdfSpec } from "@/lib/projects/ppda-forms";
+import {
+  defaultWorkflowDecision,
+  workflowDecisionHelp,
+  workflowDecisionOptions,
+} from "@/lib/projects/workflow-decision-options";
 import { workflowDecisionButtonLabel } from "@/lib/projects/workflow-status-presentation";
 
 const PLAN_ITEM_COLUMNS = [
@@ -91,7 +98,7 @@ export function OrgProcurementPlanDetailPanel({ projectId, planId }) {
       setHistory(Array.isArray(data.workflowHistory) ? data.workflowHistory : []);
       setCanSubmit(Boolean(data.canSubmit));
       const key = String(data.pendingTask?.actionKey || "").toUpperCase();
-      setDecision(key === "COMPLETE" ? "COMPLETE" : key === "VERIFY" ? "VERIFY" : "APPROVE");
+      setDecision(defaultWorkflowDecision(key));
       setComment("");
     } finally {
       setLoading(false);
@@ -178,9 +185,27 @@ export function OrgProcurementPlanDetailPanel({ projectId, planId }) {
         >
           Back to plans
         </Button>
-        <Button startIcon={<RefreshRounded />} variant="outlined" onClick={() => load()}>
-          Refresh
-        </Button>
+        <div className="flex flex-wrap gap-2">
+          <Button
+            startIcon={<DownloadRounded />}
+            variant="outlined"
+            disabled={!plan?.planReference}
+            title={
+              plan?.planReference
+                ? "Download plan as PDF (named from plan reference)"
+                : "Plan reference required"
+            }
+            onClick={() => {
+              if (!plan) return;
+              void downloadOrgFormPdf(procurementPlanRecordToPdfSpec(plan));
+            }}
+          >
+            Download PDF
+          </Button>
+          <Button startIcon={<RefreshRounded />} variant="outlined" onClick={() => load()}>
+            Refresh
+          </Button>
+        </div>
       </div>
 
       <Paper variant="outlined" sx={{ p: 2, ...adminOutlinedTableContainerSx }}>
@@ -256,8 +281,7 @@ export function OrgProcurementPlanDetailPanel({ projectId, planId }) {
             Review task: {pendingTask.title}
           </Typography>
           <Typography variant="body2" sx={{ ...adminMutedTextSx, mb: 2 }}>
-            Role: {pendingTask.requiredRoleName}
-            {actionKey ? ` · Action ${actionKey}` : ""}. Flow:{" "}
+            Role: {pendingTask.requiredRoleName}. Flow:{" "}
             {plan.isEmergency
               ? "HOD → Head PDU → Accounting Officer (emergency)."
               : "HOD → Head PDU → Contracts Officer → Accounting Officer."}
@@ -270,13 +294,15 @@ export function OrgProcurementPlanDetailPanel({ projectId, planId }) {
               onChange={(e) => setDecision(e.target.value)}
               fullWidth
               sx={themedTextFieldSx}
+              helperText={workflowDecisionHelp(decision)}
             >
-              {actionKey === "COMPLETE" ? (
-                <MenuItem value="COMPLETE">Complete consolidation</MenuItem>
-              ) : null}
-              <MenuItem value="APPROVE">Approve</MenuItem>
-              <MenuItem value="RETURN">Return for correction</MenuItem>
-              <MenuItem value="REJECT">Reject</MenuItem>
+              {workflowDecisionOptions(actionKey, {
+                isEmergencyPlan: Boolean(plan.isEmergency),
+              }).map((opt) => (
+                <MenuItem key={opt.value} value={opt.value}>
+                  {opt.label}
+                </MenuItem>
+              ))}
             </TextField>
             <TextField
               label="Comment (optional)"

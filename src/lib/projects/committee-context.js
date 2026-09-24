@@ -12,6 +12,133 @@ import { writeAuditLog, AuditEvent } from "@/lib/audit-log";
  */
 
 /**
+ * Workflow `requiredRoleName` values that are committee hats (not org logins).
+ * @type {Record<string, string[]>}
+ */
+export const COMMITTEE_TYPE_WORKFLOW_ROLES = {
+  CONTRACTS: ["Contracts Committee"],
+  EVALUATION: ["Evaluation Committee"],
+  NEGOTIATION: ["Negotiation Committee"],
+  INSPECTION_ACCEPTANCE: ["Inspection/Acceptance Committee", "Inspection Committee"],
+};
+
+/**
+ * @param {unknown} roleName
+ */
+export function isCommitteeWorkflowRole(roleName) {
+  const name = String(roleName || "").trim();
+  if (!name) return false;
+  return Object.values(COMMITTEE_TYPE_WORKFLOW_ROLES).some((roles) => roles.includes(name));
+}
+
+/**
+ * @param {unknown} committeeType
+ * @returns {string[]}
+ */
+export function workflowRolesForCommitteeType(committeeType) {
+  const key = String(committeeType || "").trim().toUpperCase();
+  return COMMITTEE_TYPE_WORKFLOW_ROLES[key] || [];
+}
+
+/**
+ * Whether a pending task belongs to the active committee seat.
+ * Strict: only tasks assigned to that committee workflow role (or Contracts method title).
+ * Evaluation / inspection work lives on procurement detail screens, not mixed into org tasks.
+ * @param {{ requiredRoleName?: string | null; title?: string | null }} task
+ * @param {{ committeeType?: string | null } | null | undefined} activeCommittee
+ */
+export function taskMatchesActiveCommittee(task, activeCommittee) {
+  const type = String(activeCommittee?.committeeType || "").trim().toUpperCase();
+  if (!type) return false;
+
+  const role = String(task?.requiredRoleName || "").trim();
+  const roles = workflowRolesForCommitteeType(type);
+  if (roles.includes(role)) return true;
+
+  if (type === "CONTRACTS") {
+    const title = String(task?.title || "");
+    return /approve procurement method/i.test(title) || /contracts committee/i.test(title);
+  }
+
+  return false;
+}
+
+/**
+ * Learner hint for where to work when this committee has few/no My Tasks rows.
+ * @param {unknown} committeeType
+ */
+export function committeeModeWorkspaceHint(committeeType) {
+  const type = String(committeeType || "").trim().toUpperCase();
+  if (type === "CONTRACTS") {
+    return {
+      message:
+        "Only Contracts Committee method-approval tasks are listed. Open a task to approve or return the recommended procurement method.",
+      focusLabel: "My Tasks",
+      focusPathSuffix: "/tasks",
+    };
+  }
+  if (type === "EVALUATION") {
+    return {
+      message:
+        "Evaluation work is done on the procurement record (evaluation report). My Tasks only lists committee-role steps when the process assigns them.",
+      focusLabel: "Procurements",
+      focusPathSuffix: "/procurements",
+    };
+  }
+  if (type === "INSPECTION_ACCEPTANCE") {
+    return {
+      message:
+        "Inspection / acceptance is recorded on the procurement delivery steps. Switch back to your organisation role for other approvals.",
+      focusLabel: "Procurements",
+      focusPathSuffix: "/procurements",
+    };
+  }
+  if (type === "NEGOTIATION") {
+    return {
+      message: "Negotiation committee actions are taken on the related procurement record.",
+      focusLabel: "Procurements",
+      focusPathSuffix: "/procurements",
+    };
+  }
+  return {
+    message: "Only this committee’s work is shown while the seat is active.",
+    focusLabel: "My Tasks",
+    focusPathSuffix: "/tasks",
+  };
+}
+
+/**
+ * Split assignee tasks into org-role work vs committee work for learner-friendly modes.
+ * @param {any[]} tasks
+ * @param {{ committeeType?: string | null } | null | undefined} activeCommittee
+ */
+export function partitionTasksForActingMode(tasks, activeCommittee) {
+  const list = Array.isArray(tasks) ? tasks : [];
+  const committeeTasks = list.filter((t) => isCommitteeWorkflowRole(t.requiredRoleName));
+  const orgTasks = list.filter((t) => !isCommitteeWorkflowRole(t.requiredRoleName));
+
+  if (activeCommittee?.committeeType) {
+    const visible = list.filter((t) => taskMatchesActiveCommittee(t, activeCommittee));
+    return {
+      mode: /** @type {"committee"} */ ("committee"),
+      visible,
+      hiddenCount: Math.max(0, list.length - visible.length),
+      otherCommitteeCount: committeeTasks.filter((t) => !taskMatchesActiveCommittee(t, activeCommittee))
+        .length,
+      orgTaskCount: orgTasks.length,
+    };
+  }
+
+  return {
+    mode: /** @type {"org"} */ ("org"),
+    visible: orgTasks,
+    hiddenCount: committeeTasks.length,
+    otherCommitteeCount: 0,
+    orgTaskCount: orgTasks.length,
+  };
+}
+
+/**
  * @param {unknown} role
  */
 export function formatCommitteeSeatLabel(role) {

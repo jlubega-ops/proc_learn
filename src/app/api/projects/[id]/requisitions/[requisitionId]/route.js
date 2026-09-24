@@ -6,8 +6,12 @@ import {
   requisitionInclude,
   serializeRequisition,
   submitRequisition,
+  getRequesterRequisitionMutationFlags,
+  createOrUpdateRequisitionDraft,
+  deleteRequisitionByRequester,
 } from "@/lib/projects/requisitions";
 import { healMissingStepTasks } from "@/lib/projects/workflow-engine";
+import { fetchForm5OrgDefaults } from "@/lib/projects/form5-prefill";
 
 export const runtime = "nodejs";
 
@@ -123,6 +127,23 @@ export async function GET(_request, context) {
     }
   }
 
+  const form5Defaults = await fetchForm5OrgDefaults(prisma, projectId, {
+    departmentId: row.departmentId,
+    requester: row.requester,
+  });
+
+  let canEdit = false;
+  let canDelete = false;
+  if (auth.type === "org") {
+    const flags = await getRequesterRequisitionMutationFlags(prisma, {
+      projectId,
+      requisition: row,
+      actorOrgUserId: auth.orgUser.id,
+    });
+    canEdit = flags.canEdit;
+    canDelete = flags.canDelete;
+  }
+
   return NextResponse.json({
     requisition: serializeRequisition({
       ...row,
@@ -130,12 +151,15 @@ export async function GET(_request, context) {
       lastDecision,
       viewerHasPendingAction,
     }),
+    form5Defaults,
     pendingTask: pendingTask
       ? {
           ...pendingTask,
           actionKey: pendingTask.processFlowItem?.actionKey || null,
         }
       : null,
+    canEdit,
+    canDelete,
     history: (row.instances || []).flatMap((inst) =>
       (inst.actions || []).map((a) => ({
         id: a.id,
@@ -216,4 +240,61 @@ export async function POST(request, context) {
     );
   }
   return NextResponse.json(submitted);
+}
+
+export async function PATCH(request, context) {
+  const params = await context.params;
+  const projectId = String(params?.id || "").trim();
+  const requisitionId = String(params?.requisitionId || "").trim();
+  if (!projectId || !requisitionId) {
+    return NextResponse.json({ error: "Invalid request." }, { status: 400 });
+  }
+
+  let body;
+  try {
+    body = await request.json();
+  } catch {
+    return NextResponse.json({ error: "Invalid request body." }, { status: 400 });
+  }
+
+  const auth = await authorizeProjectApiAccess(prisma, {
+    projectId,
+    orgPermission: ORG_PERMISSION.CREATE_REQUISITION,
+  });
+  if (!auth.ok || auth.type !== "org") {
+    return NextResponse.json({ error: "Forbidden." }, { status: 403 });
+  }
+
+  if (body?.action === "update") {
+    const updated = await createOrUpdateRequisitionDraft(prisma, {
+      projectId,
+      requisitionId,
+      requesterOrgUserId: auth.orgUser.id,
+      actorDepartmentId: auth.orgUser.departmentId,
+      departmentId: auth.orgUser.departmentId,
+      body,
+    });
+    if (!updated.ok) {
+      return NextResponse.json(
+        { error: updated.error, fieldErrors: updated.fieldErrors },
+        { status: updated.status || 400 },
+      );
+    }
+    return NextResponse.json(updated);
+  }
+
+  if (body?.action === "delete") {
+    const deleted = await deleteRequisitionByRequester(prisma, {
+      projectId,
+      requisitionId,
+      actorOrgUserId: auth.orgUser.id,
+      actorRoleName: auth.orgUser.projectOrgRole?.name || null,
+    });
+    if (!deleted.ok) {
+      return NextResponse.json({ error: deleted.error }, { status: deleted.status || 400 });
+    }
+    return NextResponse.json(deleted);
+  }
+
+  return NextResponse.json({ error: "Unsupported action." }, { status: 400 });
 }

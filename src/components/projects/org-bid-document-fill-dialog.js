@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useState } from "react";
 import Button from "@mui/material/Button";
 import CircularProgress from "@mui/material/CircularProgress";
 import Dialog from "@mui/material/Dialog";
@@ -16,8 +16,9 @@ import { adminDialogPaperSx, adminMutedTextSx, themedTextFieldSx } from "@/lib/a
 import { usePersistedFormDraft } from "@/hooks/use-persisted-form-draft";
 import {
   buildBidDocument,
-  bidDocumentToHtml,
-  downloadPdfReference,
+  buildOrgPdfContext,
+  bidDocumentToPdfSpec,
+  downloadOrgFormPdf,
 } from "@/lib/projects/ppda-forms";
 
 /**
@@ -103,12 +104,6 @@ export function OrgBidDocumentFillDialog({ open, onClose, projectId, procurement
     return errors;
   }
 
-  const canDownloadPdf = useMemo(
-    () => Object.keys(validateClient()).length === 0,
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    [form],
-  );
-
   async function save() {
     const errors = validateClient();
     setFieldErrors(errors);
@@ -149,20 +144,15 @@ export function OrgBidDocumentFillDialog({ open, onClose, projectId, procurement
 
   async function downloadPdf() {
     const errors = validateClient();
-    setFieldErrors(errors);
-    if (Object.keys(errors).length) {
-      showToast({
-        message: "Complete all required fields before downloading the PDF.",
-        severity: "error",
-      });
-      return;
-    }
+    const incomplete = Object.keys(errors).length > 0;
+    if (incomplete) setFieldErrors(errors);
     try {
       const snap = buildBidDocument(procurement, form);
-      await downloadPdfReference(
-        `bid-${procurement.procurementNumber || procurement.id}`,
-        snap.documentTitle || "Bid / RFQ document",
-        bidDocumentToHtml(snap),
+      const ctx = buildOrgPdfContext(procurement, {
+        referenceNumber: snap.procurementReference || procurement.procurementNumber || "",
+      });
+      await downloadOrgFormPdf(
+        bidDocumentToPdfSpec(snap, ctx, { draftIncomplete: incomplete }),
       );
     } catch {
       showToast({ message: "Could not generate the PDF.", severity: "error" });
@@ -180,8 +170,8 @@ export function OrgBidDocumentFillDialog({ open, onClose, projectId, procurement
       <DialogTitle>Fill educational bid / RFQ document</DialogTitle>
       <DialogContent className="pt-2">
         <Typography variant="body2" sx={{ ...adminMutedTextSx, mb: 1 }}>
-          Minimal teaching RFQ/bid form. Progress autosaves across devices. PDF download unlocks
-          when required fields are complete.
+          Minimal teaching RFQ/bid form. Progress autosaves across devices. Download a branded PDF
+          at any time — named from the procurement reference.
         </Typography>
         <Typography variant="caption" sx={{ ...adminMutedTextSx, display: "block", mb: 2 }}>
           {serverSyncState === "saving"
@@ -301,12 +291,8 @@ export function OrgBidDocumentFillDialog({ open, onClose, projectId, procurement
           variant="outlined"
           startIcon={<DownloadRounded />}
           onClick={() => void downloadPdf()}
-          disabled={busy || !canDownloadPdf}
-          title={
-            canDownloadPdf
-              ? "Download completed form as PDF"
-              : "Fill all required fields to enable PDF download"
-          }
+          disabled={busy}
+          title="Download bid / RFQ document as PDF"
         >
           Download PDF
         </Button>

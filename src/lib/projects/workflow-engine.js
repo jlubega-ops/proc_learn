@@ -87,7 +87,55 @@ export function expandOrgRoleNames(roleName) {
  * }} opts
  */
 export async function resolveEligibleOrgUsers(prisma, opts) {
-  const roleNames = expandOrgRoleNames(opts.roleName);
+  const roleName = String(opts.roleName || "").trim();
+
+  // Contracts Committee is a committee hat, not a login org role.
+  if (roleName === "Contracts Committee") {
+    const memberships = await prisma.projectOrgCommitteeMember.findMany({
+      where: {
+        status: "ACTIVE",
+        committee: {
+          projectId: opts.projectId,
+          isActive: true,
+          committeeType: "CONTRACTS",
+        },
+      },
+      include: {
+        orgUser: {
+          select: {
+            id: true,
+            firstName: true,
+            lastName: true,
+            email: true,
+            linkedUserId: true,
+            departmentId: true,
+            isProjectAdmin: true,
+          },
+        },
+      },
+    });
+    const seen = new Set();
+    /** @type {Array<{ id: string; firstName: string; lastName: string; email: string; linkedUserId: string | null; departmentId: string | null }>} */
+    const users = [];
+    for (const m of memberships) {
+      const u = m.orgUser;
+      if (!u || u.isProjectAdmin || seen.has(u.id)) continue;
+      seen.add(u.id);
+      users.push({
+        id: u.id,
+        firstName: u.firstName,
+        lastName: u.lastName,
+        email: u.email,
+        linkedUserId: u.linkedUserId,
+        departmentId: u.departmentId,
+      });
+    }
+    return users.sort((a, b) =>
+      `${a.lastName} ${a.firstName}`.localeCompare(`${b.lastName} ${b.firstName}`),
+    );
+  }
+
+  const roleNames = expandOrgRoleNames(roleName);
   if (roleNames.length === 0) return [];
 
   const where = {
@@ -610,7 +658,32 @@ export async function completeWorkflowTask(prisma, opts) {
   if (task.assigneeOrgUserId && task.assigneeOrgUserId !== opts.actorOrgUserId) {
     return { ok: false, error: "You are not assigned to this task.", status: 403 };
   }
-  if (task.requiredRoleName && opts.actorRoleName) {
+
+  /** @type {{ id: string; name: string; committeeType: string } | null} */
+  let actingCommittee = null;
+  /** @type {string | null} */
+  let actingCommitteeRole = opts.committeeRole || null;
+
+  if (task.requiredRoleName === "Contracts Committee") {
+    const { requireCommitteeMembership } = await import("@/lib/projects/committee-context");
+    const seat = await requireCommitteeMembership(prisma, {
+      projectId: task.projectId,
+      orgUserId: opts.actorOrgUserId,
+      committeeId: opts.committeeId || null,
+      committeeType: "CONTRACTS",
+    });
+    if (!seat.ok) {
+      return {
+        ok: false,
+        error:
+          seat.error ||
+          "Switch to the Contracts Committee (navbar) before approving the procurement method.",
+        status: seat.status || 403,
+      };
+    }
+    actingCommittee = seat.committee;
+    actingCommitteeRole = seat.committeeRole || actingCommitteeRole;
+  } else if (task.requiredRoleName && opts.actorRoleName) {
     const allowed = expandOrgRoleNames(task.requiredRoleName);
     if (!allowed.includes(opts.actorRoleName) && task.requiredRoleName !== opts.actorRoleName) {
       return {
@@ -936,8 +1009,8 @@ export async function completeWorkflowTask(prisma, opts) {
           taskId: task.id,
           actorOrgUserId: opts.actorOrgUserId,
           actorRoleName: opts.actorRoleName,
-          committeeId: opts.committeeId || null,
-          committeeRole: opts.committeeRole || null,
+          committeeId: actingCommittee?.id || opts.committeeId || null,
+          committeeRole: actingCommitteeRole || opts.committeeRole || null,
           decision,
           comment: opts.comment?.trim() || null,
           previousStatus,

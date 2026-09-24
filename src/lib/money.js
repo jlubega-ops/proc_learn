@@ -5,13 +5,22 @@
 export const DEFAULT_CURRENCY = "UGX";
 
 /**
- * Strip commas / spaces for parsing.
+ * Strip commas / spaces / currency letters for parsing.
  * @param {string | number | null | undefined} value
  */
 export function parseMoneyInput(value) {
+  if (value != null && typeof value === "object") {
+    // Prisma Decimal / similar
+    if (typeof value.toString === "function") {
+      value = value.toString();
+    } else if ("d" in /** @type {any} */ (value)) {
+      value = String(/** @type {any} */ (value));
+    }
+  }
   return String(value ?? "")
     .replace(/,/g, "")
     .replace(/\s/g, "")
+    .replace(/[A-Za-z]/g, "")
     .trim();
 }
 

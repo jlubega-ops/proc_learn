@@ -7,6 +7,7 @@ import {
   requisitionInclude,
   serializeRequisition,
   submitRequisition,
+  getRequesterRequisitionMutationFlags,
 } from "@/lib/projects/requisitions";
 import {
   orgOpsSlateListWhere,
@@ -75,15 +76,33 @@ export async function GET(request, context) {
     actorDepartment = dept;
   }
 
+  const mutationFlags =
+    auth.type === "org"
+      ? await Promise.all(
+          rows.map((row) =>
+            getRequesterRequisitionMutationFlags(prisma, {
+              projectId,
+              requisition: row,
+              actorOrgUserId: auth.orgUser.id,
+            }),
+          ),
+        )
+      : rows.map(() => ({ canEdit: false, canDelete: false }));
+
   return NextResponse.json({
-    requisitions: rows.map((row) => {
+    requisitions: rows.map((row, index) => {
       const ctx = ctxMap.get(row.id) || {};
-      return serializeRequisition({
-        ...row,
-        workflowStage: ctx.workflowStage || null,
-        lastDecision: ctx.lastDecision || null,
-        viewerHasPendingAction: Boolean(ctx.viewerHasPendingAction),
-      });
+      const flags = mutationFlags[index] || {};
+      return {
+        ...serializeRequisition({
+          ...row,
+          workflowStage: ctx.workflowStage || null,
+          lastDecision: ctx.lastDecision || null,
+          viewerHasPendingAction: Boolean(ctx.viewerHasPendingAction),
+        }),
+        canEdit: Boolean(flags.canEdit),
+        canDelete: Boolean(flags.canDelete),
+      };
     }),
     total: rows.length,
     canCreate:
@@ -92,6 +111,11 @@ export async function GET(request, context) {
         auth.orgUser.projectOrgRole?.name || "",
       ),
     actorDepartment,
+    actorDisplayName:
+      auth.type === "org"
+        ? `${auth.orgUser.firstName || ""} ${auth.orgUser.lastName || ""}`.trim()
+        : null,
+    actorRoleName: auth.type === "org" ? auth.orgUser.projectOrgRole?.name || null : null,
   });
 }
 

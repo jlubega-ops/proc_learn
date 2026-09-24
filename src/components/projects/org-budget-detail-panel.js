@@ -33,6 +33,10 @@ import {
 } from "@/lib/admin-mui-surfaces";
 import { DEFAULT_CURRENCY } from "@/lib/money";
 import { workflowDecisionButtonLabel } from "@/lib/projects/workflow-status-presentation";
+import {
+  workflowDecisionHelp,
+  workflowDecisionOptions,
+} from "@/lib/projects/workflow-decision-options";
 
 const BUDGET_LINE_COLUMNS = [
   {
@@ -333,10 +337,13 @@ export function OrgBudgetDetailPanel({ projectId, budgetId }) {
               onChange={(e) => setDecision(e.target.value)}
               fullWidth
               sx={themedTextFieldSx}
+              helperText={workflowDecisionHelp(decision)}
             >
-              <MenuItem value="APPROVE">Approve</MenuItem>
-              <MenuItem value="RETURN">Return for correction</MenuItem>
-              <MenuItem value="REJECT">Reject</MenuItem>
+              {workflowDecisionOptions("APPROVE").map((opt) => (
+                <MenuItem key={opt.value} value={opt.value}>
+                  {opt.label}
+                </MenuItem>
+              ))}
             </TextField>
             <TextField
               label="Comment (optional)"

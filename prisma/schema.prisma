@@ -1323,7 +1323,7 @@ model ProjectOrgRequisition {
   procurementMethod     OrgProcurementMethod?          @map("procurement_method")
   /// PPDA Form 5 Part I snapshot (Fill-and-submit teaching form).
   form5PartI            Json?                          @map("form5_part_i")
-  /// PPDA Form 5 Part II snapshot (method packet; CC gate deferred).
+  /// PPDA Form 5 Part II snapshot (PDU recommendation; Contracts Committee approves method).
   form5PartII           Json?                          @map("form5_part_ii")
   form5PartIAt          DateTime?                      @map("form5_part_i_at")
   form5PartIIAt         DateTime?                      @map("form5_part_ii_at")

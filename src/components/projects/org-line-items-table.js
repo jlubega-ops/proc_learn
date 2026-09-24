@@ -66,10 +66,9 @@ export function OrgLineItemsTable({
                   {columns.map((col) => {
                     const raw = col.render ? col.render(row, index) : row[col.id];
                     let display = raw;
-                    if (col.money && (raw === 0 || raw)) {
-                      display = formatMoneyAmount(raw);
-                    } else if (col.money && (raw === null || raw === undefined || raw === "")) {
-                      display = "—";
+                    if (col.money) {
+                      const amount = formatMoneyAmount(raw);
+                      display = amount || "—";
                     }
                     return (
                       <TableCell key={col.id} align={col.align || "left"}>

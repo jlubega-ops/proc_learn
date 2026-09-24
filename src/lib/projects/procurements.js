@@ -429,16 +429,12 @@ export async function createProcurementFromApprovedRequisition(prisma, opts) {
     if (stored !== method) {
       return {
         ok: false,
-        error: `A procurement method (${req.procurementMethod}) has already been selected for this requisition.`,
+        error: `A procurement method (${req.procurementMethod}) has already been recommended for this requisition.`,
         status: 400,
         code: "METHOD_ALREADY_SELECTED",
       };
     }
-    // Orphan flag with no procurement row — clear and continue so the officer can finish.
-    await prisma.projectOrgRequisition.update({
-      where: { id: req.id },
-      data: { procurementMethod: null },
-    });
+    // Method already on the requisition from Form 5 Part II / PDU recommendation — proceed.
   }
 
   if (!req.financialYear?.isActive) {

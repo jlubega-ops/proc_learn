@@ -17,6 +17,11 @@ import {
 import { actOnBudgetTask, budgetInclude, serializeBudget } from "@/lib/projects/budgets";
 import { actOnProcurementTask } from "@/lib/projects/procurement-tasks";
 import { healMissingStepTasks } from "@/lib/projects/workflow-engine";
+import {
+  getActiveCommittee,
+  partitionTasksForActingMode,
+  committeeModeWorkspaceHint,
+} from "@/lib/projects/committee-context";
 
 export const runtime = "nodejs";
 
@@ -127,7 +132,23 @@ export async function GET(_request, context) {
     });
   }
 
-  return NextResponse.json({ tasks: out, total: out.length });
+  const activeCommittee = await getActiveCommittee(prisma, auth.orgUser.id);
+  const partitioned = partitionTasksForActingMode(out, activeCommittee);
+
+  return NextResponse.json({
+    tasks: partitioned.visible,
+    total: partitioned.visible.length,
+    mode: partitioned.mode,
+    hiddenCount: partitioned.hiddenCount,
+    orgTaskCount: partitioned.orgTaskCount,
+    activeCommittee: activeCommittee
+      ? {
+          id: activeCommittee.id,
+          name: activeCommittee.name,
+          committeeType: activeCommittee.committeeType,
+        }
+      : null,
+  });
 }
 
 export async function POST(request, context) {
@@ -192,7 +213,22 @@ export async function POST(request, context) {
     actorDepartmentId: auth.orgUser.departmentId || null,
     decision: /** @type {import("@prisma/client").OrgWorkflowDecision} */ (decision),
     comment: typeof body?.comment === "string" ? body.comment : "",
+    committeeId: auth.orgUser.activeCommitteeId || null,
+    committeeRole: null,
   };
+
+  // Resolve committee seat label when acting under an active committee.
+  if (common.committeeId) {
+    const seat = await prisma.projectOrgCommitteeMember.findFirst({
+      where: {
+        orgUserId: auth.orgUser.id,
+        committeeId: common.committeeId,
+        status: "ACTIVE",
+      },
+      select: { committeeRole: true },
+    });
+    common.committeeRole = seat?.committeeRole || null;
+  }
 
   let result;
   if (taskMeta?.instance?.procurementId) {
@@ -209,6 +245,7 @@ export async function POST(request, context) {
       ...common,
       procurementMethod:
         typeof body?.procurementMethod === "string" ? body.procurementMethod : null,
+      form5: body?.form5 && typeof body.form5 === "object" ? body.form5 : null,
     });
   }
 

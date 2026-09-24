@@ -130,6 +130,7 @@ function NavLinks({
   orgProjectId = "",
   orgPermissions = [],
   orgRoleName = "",
+  activeCommittee = null,
   personalOrgProjectId = "",
   orgContext = "PERSONAL",
 }) {
@@ -140,6 +141,7 @@ function NavLinks({
     projectId: orgProjectId,
     permissions: orgPermissions,
     roleName: orgRoleName || null,
+    activeCommittee: activeCommittee || null,
     personalOrgProjectId,
     orgContext,
   });
@@ -311,6 +313,7 @@ function NavLinksWithSearch({
   orgProjectId,
   orgPermissions,
   orgRoleName,
+  activeCommittee,
   personalOrgProjectId,
   orgContext,
   ...props
@@ -325,6 +328,7 @@ function NavLinksWithSearch({
       orgProjectId={orgProjectId}
       orgPermissions={orgPermissions}
       orgRoleName={orgRoleName}
+      activeCommittee={activeCommittee}
       personalOrgProjectId={personalOrgProjectId}
       orgContext={orgContext}
     />
@@ -474,6 +478,7 @@ export default function DashboardLayoutClient({ children }) {
               orgProjectId={orgProjectId}
               orgPermissions={orgPermissions}
               orgRoleName={orgRoleName}
+              activeCommittee={isOrgSession ? session?.activeCommittee || null : null}
               personalOrgProjectId={personalOrgProjectId}
               orgContext={orgContext}
             />

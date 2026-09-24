@@ -16,12 +16,84 @@ import { ORG_REF_DOC, nextOrgDocumentReference } from "@/lib/projects/org-refere
 import { resolveSlateIdForOrgCreate } from "@/lib/academic/org-academic-slate";
 import { presentOrgWorkflowStatus } from "@/lib/projects/workflow-status-presentation";
 
+const HOD_ROLE_NAMES = new Set(["Head User Department", "Head of User Department"]);
+
+/**
+ * True while the open workflow step is still HOD review (HOD has not acted yet).
+ * @param {import("@prisma/client").PrismaClient} prisma
+ * @param {{ projectId: string; requisitionId: string }} opts
+ */
+export async function isRequisitionAwaitingHodReview(prisma, opts) {
+  const openTask = await prisma.projectOrgWorkflowTask.findFirst({
+    where: {
+      projectId: opts.projectId,
+      status: { in: [OrgWorkflowTaskStatus.PENDING, OrgWorkflowTaskStatus.IN_PROGRESS] },
+      instance: {
+        requisitionId: opts.requisitionId,
+        status: {
+          in: [OrgWorkflowInstanceStatus.ACTIVE, OrgWorkflowInstanceStatus.IN_PROGRESS],
+        },
+      },
+    },
+    orderBy: [{ stepNumber: "asc" }, { createdAt: "asc" }],
+    select: { requiredRoleName: true, stepNumber: true },
+  });
+  if (!openTask) return false;
+  return HOD_ROLE_NAMES.has(String(openTask.requiredRoleName || "").trim());
+}
+
+/**
+ * Requester may edit/delete draft, returned, or submitted requisitions still waiting on HOD.
+ * @param {import("@prisma/client").PrismaClient} prisma
+ * @param {{
+ *   projectId: string;
+ *   requisition: { id: string; status: string; requesterOrgUserId: string };
+ *   actorOrgUserId: string;
+ * }} opts
+ */
+export async function getRequesterRequisitionMutationFlags(prisma, opts) {
+  const { requisition, actorOrgUserId } = opts;
+  const isRequester = requisition.requesterOrgUserId === actorOrgUserId;
+  if (!isRequester) {
+    return { canEdit: false, canDelete: false, awaitingHodReview: false };
+  }
+
+  const status = String(requisition.status || "");
+  if (status === OrgRequisitionStatus.DRAFT || status === OrgRequisitionStatus.RETURNED) {
+    return {
+      canEdit: true,
+      canDelete: true,
+      awaitingHodReview: false,
+    };
+  }
+
+  if (status === OrgRequisitionStatus.SUBMITTED) {
+    const awaitingHodReview = await isRequisitionAwaitingHodReview(prisma, {
+      projectId: opts.projectId,
+      requisitionId: requisition.id,
+    });
+    return {
+      canEdit: awaitingHodReview,
+      canDelete: awaitingHodReview,
+      awaitingHodReview,
+    };
+  }
+
+  return { canEdit: false, canDelete: false, awaitingHodReview: false };
+}
+
 /**
  * @param {unknown} value
  */
 function toDecimal(value) {
-  const n = Number(String(value ?? "").replace(/,/g, "").replace(/\s/g, "").trim());
-  if (!Number.isFinite(n) || n < 0) return null;
+  const n = Number(
+    String(value ?? "")
+      .replace(/,/g, "")
+      .replace(/\s/g, "")
+      .replace(/[A-Za-z]/g, "")
+      .trim(),
+  );
+  if (!Number.isFinite(n) || n <= 0) return null;
   return new Prisma.Decimal(n.toFixed(2));
 }
 
@@ -340,6 +412,18 @@ export async function createOrUpdateRequisitionDraft(prisma, opts) {
     const qty = toDecimal(raw?.quantity);
     const unitPrice = toDecimal(raw?.estimatedUnitPrice);
     const uom = typeof raw?.unitOfMeasure === "string" ? raw.unitOfMeasure.trim() : "";
+    if (!itemName) {
+      fieldErrors[`items.${idx}.itemName`] = "Enter an item name.";
+    }
+    if (!qty) {
+      fieldErrors[`items.${idx}.quantity`] = "Enter a quantity greater than zero.";
+    }
+    if (!uom) {
+      fieldErrors[`items.${idx}.unitOfMeasure`] = "Enter a unit.";
+    }
+    if (!unitPrice) {
+      fieldErrors[`items.${idx}.estimatedUnitPrice`] = "Enter a unit price greater than zero.";
+    }
     if (!itemName || !qty || !unitPrice || !uom) return;
     const lineTotal = qty.mul(unitPrice);
     total = total.add(lineTotal);
@@ -356,7 +440,7 @@ export async function createOrUpdateRequisitionDraft(prisma, opts) {
     });
   });
 
-  if (itemRows.length === 0) {
+  if (itemsIn.length > 0 && itemRows.length === 0) {
     fieldErrors.items = "Each item needs name, quantity, unit, and unit price.";
   }
 
@@ -372,9 +456,15 @@ export async function createOrUpdateRequisitionDraft(prisma, opts) {
     const remainingValue = plannedValue - consumption.usedValue;
     if (totalQty > remainingQty + 0.009) {
       fieldErrors.items = `Requested quantity (${totalQty}) exceeds remaining planned quantity (${remainingQty}).`;
+      fieldErrors[`items.0.quantity`] =
+        fieldErrors[`items.0.quantity`] ||
+        `Exceeds remaining planned quantity (${remainingQty}).`;
     }
     if (Number(total) > remainingValue + 0.009) {
       fieldErrors.estimatedTotalValue = `Requested value exceeds remaining planned value (${remainingValue.toFixed(2)}).`;
+      fieldErrors[`items.0.estimatedUnitPrice`] =
+        fieldErrors[`items.0.estimatedUnitPrice`] ||
+        `Total exceeds remaining planned value (${remainingValue.toFixed(2)}).`;
     }
   }
 
@@ -408,6 +498,55 @@ export async function createOrUpdateRequisitionDraft(prisma, opts) {
     status: OrgRequisitionStatus.DRAFT,
   };
 
+  // Form 5 Part I is the official UD request — persist with the operational draft.
+  const { buildForm5PartI } = await import("@/lib/projects/ppda-forms");
+  const requester =
+    opts.requesterOrgUserId
+      ? await prisma.projectOrgUser.findFirst({
+          where: { id: opts.requesterOrgUserId, projectId: opts.projectId },
+          select: { firstName: true, lastName: true },
+        })
+      : null;
+  const requesterName = requester
+    ? `${requester.firstName || ""} ${requester.lastName || ""}`.trim()
+    : "";
+  const form5Body =
+    b.form5 && typeof b.form5 === "object" ? { ...b.form5 } : {};
+  if (!String(form5Body.memberName || "").trim() && requesterName) {
+    form5Body.memberName = requesterName;
+  }
+  if (!String(form5Body.memberTitle || "").trim()) {
+    form5Body.memberTitle = "User Department Officer";
+  }
+  if (!String(form5Body.estimatedTotalCost || "").trim()) {
+    form5Body.estimatedTotalCost = total.toString();
+  }
+  if (!String(form5Body.marketPrice || "").trim()) {
+    form5Body.marketPrice = total.toString();
+  }
+  const form5Snap = buildForm5PartI(
+    {
+      title,
+      category,
+      requisitionReference,
+      deliveryLocation,
+      requiredByDate: b.requiredByDate || null,
+      estimatedTotalValue: total.toString(),
+      financialYear: fy ? { label: fy.label } : null,
+      department: dept ? { code: dept.code, name: dept.name } : null,
+      procurementPlan: plan ? { planReference: plan.planReference || null } : null,
+      items: itemRows.map((it) => ({
+        lineNumber: it.lineNumber,
+        itemName: it.itemName,
+        quantity: it.quantity,
+        unitOfMeasure: it.unitOfMeasure,
+        estimatedUnitPrice: it.estimatedUnitPrice,
+        estimatedTotal: it.estimatedTotal,
+      })),
+    },
+    form5Body,
+  );
+
   let row;
   if (opts.requisitionId) {
     const existing = await prisma.projectOrgRequisition.findFirst({
@@ -415,12 +554,32 @@ export async function createOrUpdateRequisitionDraft(prisma, opts) {
         id: opts.requisitionId,
         projectId: opts.projectId,
         requesterOrgUserId: opts.requesterOrgUserId,
-        status: { in: [OrgRequisitionStatus.DRAFT, OrgRequisitionStatus.RETURNED] },
       },
     });
     if (!existing) {
       return { ok: false, error: "Requisition not found or cannot be edited.", status: 404 };
     }
+
+    const flags = await getRequesterRequisitionMutationFlags(prisma, {
+      projectId: opts.projectId,
+      requisition: existing,
+      actorOrgUserId: opts.requesterOrgUserId,
+    });
+    if (!flags.canEdit) {
+      return {
+        ok: false,
+        error:
+          "You can only edit this requisition while it is a draft, returned, or still awaiting Head of User Department review.",
+        status: 400,
+      };
+    }
+
+    // Keep submitted status when editing before HOD acts; drafts/returned go back to DRAFT until resubmit.
+    const nextStatus =
+      existing.status === OrgRequisitionStatus.SUBMITTED && flags.awaitingHodReview
+        ? OrgRequisitionStatus.SUBMITTED
+        : OrgRequisitionStatus.DRAFT;
+
     await prisma.projectOrgRequisitionItem.deleteMany({
       where: { requisitionId: existing.id },
     });
@@ -428,10 +587,25 @@ export async function createOrUpdateRequisitionDraft(prisma, opts) {
       where: { id: existing.id },
       data: {
         ...payload,
-        status: OrgRequisitionStatus.DRAFT,
+        status: nextStatus,
+        form5PartI: form5Snap,
+        form5PartIAt: new Date(),
         items: { create: itemRows },
       },
       include: requisitionInclude,
+    });
+
+    await writeAuditLog({
+      eventType: AuditEvent.PROJECT_ORG_REQUISITION_UPDATED,
+      actorUserId: null,
+      meta: {
+        projectId: opts.projectId,
+        requisitionId: row.id,
+        title: row.title,
+        status: row.status,
+        actorOrgUserId: opts.requesterOrgUserId,
+        awaitingHodReview: flags.awaitingHodReview,
+      },
     });
   } else {
     row = await prisma.projectOrgRequisition.create({
@@ -440,6 +614,8 @@ export async function createOrUpdateRequisitionDraft(prisma, opts) {
         requesterOrgUserId: opts.requesterOrgUserId,
         orgAcademicSlateId: await resolveSlateIdForOrgCreate(prisma, opts.projectId),
         ...payload,
+        form5PartI: form5Snap,
+        form5PartIAt: new Date(),
         items: { create: itemRows },
       },
       include: requisitionInclude,
@@ -447,6 +623,102 @@ export async function createOrUpdateRequisitionDraft(prisma, opts) {
   }
 
   return { ok: true, requisition: serializeRequisition(row) };
+}
+
+/**
+ * Requester deletes a draft/returned requisition, or withdraws one still awaiting HOD review.
+ * @param {import("@prisma/client").PrismaClient} prisma
+ * @param {{
+ *   projectId: string;
+ *   requisitionId: string;
+ *   actorOrgUserId: string;
+ *   actorRoleName?: string | null;
+ * }} opts
+ */
+export async function deleteRequisitionByRequester(prisma, opts) {
+  const existing = await prisma.projectOrgRequisition.findFirst({
+    where: { id: opts.requisitionId, projectId: opts.projectId },
+    select: {
+      id: true,
+      title: true,
+      status: true,
+      requesterOrgUserId: true,
+      requisitionReference: true,
+    },
+  });
+  if (!existing) return { ok: false, error: "Requisition not found.", status: 404 };
+
+  const flags = await getRequesterRequisitionMutationFlags(prisma, {
+    projectId: opts.projectId,
+    requisition: existing,
+    actorOrgUserId: opts.actorOrgUserId,
+  });
+  if (!flags.canDelete) {
+    return {
+      ok: false,
+      error:
+        "You can only delete this requisition while it is a draft, returned, or still awaiting Head of User Department review.",
+      status: 400,
+    };
+  }
+
+  const linkedProcurement = await prisma.projectOrgProcurement.findFirst({
+    where: { requisitionId: existing.id, projectId: opts.projectId },
+    select: { id: true },
+  });
+  if (linkedProcurement) {
+    return {
+      ok: false,
+      error: "This requisition already has a procurement case and cannot be deleted.",
+      status: 400,
+    };
+  }
+
+  await prisma.$transaction(async (tx) => {
+    await tx.projectOrgWorkflowTask.updateMany({
+      where: {
+        projectId: opts.projectId,
+        status: { in: [OrgWorkflowTaskStatus.PENDING, OrgWorkflowTaskStatus.IN_PROGRESS] },
+        instance: { requisitionId: existing.id },
+      },
+      data: { status: OrgWorkflowTaskStatus.CANCELLED },
+    });
+    await tx.projectOrgWorkflowInstance.updateMany({
+      where: {
+        projectId: opts.projectId,
+        requisitionId: existing.id,
+        status: {
+          in: [
+            OrgWorkflowInstanceStatus.ACTIVE,
+            OrgWorkflowInstanceStatus.IN_PROGRESS,
+            OrgWorkflowInstanceStatus.SUSPENDED,
+          ],
+        },
+      },
+      data: {
+        status: OrgWorkflowInstanceStatus.CANCELLED,
+        completedAt: new Date(),
+      },
+    });
+    await tx.projectOrgRequisition.delete({ where: { id: existing.id } });
+  });
+
+  await writeAuditLog({
+    eventType: AuditEvent.PROJECT_ORG_REQUISITION_DELETED,
+    actorUserId: null,
+    meta: {
+      projectId: opts.projectId,
+      requisitionId: existing.id,
+      title: existing.title,
+      requisitionReference: existing.requisitionReference,
+      previousStatus: existing.status,
+      actorOrgUserId: opts.actorOrgUserId,
+      actorRoleName: opts.actorRoleName || null,
+      awaitingHodReview: flags.awaitingHodReview,
+    },
+  });
+
+  return { ok: true };
 }
 
 /** @deprecated use createOrUpdateRequisitionDraft */
@@ -598,6 +870,9 @@ export async function submitRequisition(prisma, opts) {
  *   decision: import("@prisma/client").OrgWorkflowDecision;
  *   comment?: string;
  *   procurementMethod?: string | null;
+ *   form5?: Record<string, unknown> | null;
+ *   committeeId?: string | null;
+ *   committeeRole?: string | null;
  * }} opts
  */
 export async function actOnRequisitionTask(prisma, opts) {
@@ -605,57 +880,170 @@ export async function actOnRequisitionTask(prisma, opts) {
     opts.procurementMethod &&
     Object.prototype.hasOwnProperty.call(OrgProcurementMethod, opts.procurementMethod);
 
-  if (opts.decision === "SELECT_METHOD" && !methodOk) {
+  const taskPreview = await prisma.projectOrgWorkflowTask.findUnique({
+    where: { id: opts.taskId },
+    select: {
+      status: true,
+      assigneeOrgUserId: true,
+      requiredRoleName: true,
+      processFlowItem: { select: { actionKey: true } },
+      instance: { select: { id: true, requisitionId: true, projectId: true } },
+    },
+  });
+  if (!taskPreview?.instance?.requisitionId) {
     return {
       ok: false,
-      error: "Choose MICRO, QUOTATION, or TENDER.",
+      error: "This task is not linked to a requisition.",
       status: 400,
-      fieldErrors: { procurementMethod: "Choose a procurement method." },
+    };
+  }
+  if (taskPreview.status !== "PENDING") {
+    return { ok: false, error: "This task is no longer pending.", status: 400 };
+  }
+
+  const actionKey = String(taskPreview.processFlowItem?.actionKey || "").trim().toUpperCase();
+  const isCcMethodApprove =
+    taskPreview.requiredRoleName === "Contracts Committee" &&
+    (opts.decision === "APPROVE" || opts.decision === "COMPLETE") &&
+    actionKey === "APPROVE";
+
+  // PDU recommends method + Form 5 Part II — does not start the method branch yet.
+  if (opts.decision === "SELECT_METHOD") {
+    if (!methodOk) {
+      return {
+        ok: false,
+        error: "Choose MICRO, QUOTATION, or TENDER.",
+        status: 400,
+        fieldErrors: { procurementMethod: "Choose a procurement method." },
+      };
+    }
+
+    const { buildForm5PartII } = await import("@/lib/projects/ppda-forms");
+    const form5Body = opts.form5 && typeof opts.form5 === "object" ? opts.form5 : {};
+    const snapshot = buildForm5PartII(
+      { ...form5Body, recommendedMethod: opts.procurementMethod },
+      { method: opts.procurementMethod },
+    );
+    if (!snapshot.methodJustification) {
+      return {
+        ok: false,
+        error: "Enter the justification for the recommended method.",
+        status: 400,
+        fieldErrors: { methodJustification: "Enter the justification for the method." },
+      };
+    }
+    if (!snapshot.pduOfficerName) {
+      return {
+        ok: false,
+        error: "Enter the PDU officer name.",
+        status: 400,
+        fieldErrors: { pduOfficerName: "Enter the PDU officer name." },
+      };
+    }
+
+    await prisma.projectOrgRequisition.update({
+      where: { id: taskPreview.instance.requisitionId },
+      data: {
+        procurementMethod: /** @type {import("@prisma/client").OrgProcurementMethod} */ (
+          opts.procurementMethod
+        ),
+        form5PartII: snapshot,
+        form5PartIIAt: new Date(),
+      },
+    });
+
+    const result = await completeWorkflowTask(prisma, {
+      taskId: opts.taskId,
+      actorOrgUserId: opts.actorOrgUserId,
+      actorRoleName: opts.actorRoleName,
+      actorDepartmentId: opts.actorDepartmentId || null,
+      decision: "SELECT_METHOD",
+      comment: opts.comment,
+      metadata: {
+        procurementMethod: opts.procurementMethod,
+        form5PartIISaved: true,
+        awaitingContractsCommittee: true,
+      },
+    });
+
+    return {
+      ...result,
+      nextProcessStarted: false,
+      awaitingContractsCommittee: true,
     };
   }
 
-  if (opts.decision === "SELECT_METHOD" && methodOk) {
-    const { createProcurementFromApprovedRequisition } = await import(
-      "@/lib/projects/procurements"
-    );
-
-    const taskPreview = await prisma.projectOrgWorkflowTask.findUnique({
-      where: { id: opts.taskId },
+  // Contracts Committee approves the recommended method → start Micro/Quotation/Tender.
+  if (isCcMethodApprove) {
+    const req = await prisma.projectOrgRequisition.findFirst({
+      where: { id: taskPreview.instance.requisitionId, projectId: taskPreview.instance.projectId },
       select: {
+        id: true,
         status: true,
-        assigneeOrgUserId: true,
-        instance: { select: { id: true, requisitionId: true, projectId: true } },
+        procurementMethod: true,
+        form5PartII: true,
       },
     });
-    if (!taskPreview?.instance?.requisitionId) {
+    if (!req) {
+      return { ok: false, error: "Requisition not found.", status: 404 };
+    }
+    if (req.status !== OrgRequisitionStatus.APPROVED) {
       return {
         ok: false,
-        error: "This method-selection task is not linked to a requisition.",
+        error: "Requisition must be approved by the Accounting Officer before method approval.",
         status: 400,
       };
     }
-    if (taskPreview.status !== "PENDING") {
-      return { ok: false, error: "This task is no longer pending.", status: 400 };
+    const method = String(req.procurementMethod || "").trim().toUpperCase();
+    if (!method || !Object.prototype.hasOwnProperty.call(OrgProcurementMethod, method)) {
+      return {
+        ok: false,
+        error:
+          "No recommended procurement method is on file. The Procurement Officer must submit Form 5 Part II first.",
+        status: 400,
+      };
     }
 
+    // Stamp CC decision onto Form 5 Part II snapshot when provided.
+    if (opts.form5 && typeof opts.form5 === "object") {
+      const prev =
+        req.form5PartII && typeof req.form5PartII === "object" ? { ...req.form5PartII } : {};
+      await prisma.projectOrgRequisition.update({
+        where: { id: req.id },
+        data: {
+          form5PartII: {
+            ...prev,
+            ccChairName: opts.form5.ccChairName || prev.ccChairName || "",
+            ccSecretaryName: opts.form5.ccSecretaryName || prev.ccSecretaryName || "",
+            ccDecisionAt: new Date().toISOString(),
+            ccDecision: "APPROVE",
+            ccDecisionByRole: opts.actorRoleName,
+          },
+          form5PartIIAt: new Date(),
+        },
+      });
+    }
+
+    const { createProcurementFromApprovedRequisition } = await import(
+      "@/lib/projects/procurements"
+    );
     const created = await createProcurementFromApprovedRequisition(prisma, {
       projectId: taskPreview.instance.projectId,
-      requisitionId: taskPreview.instance.requisitionId,
-      procurementMethod: opts.procurementMethod,
+      requisitionId: req.id,
+      procurementMethod: method,
       actorOrgUserId: opts.actorOrgUserId,
       actorRoleName: opts.actorRoleName,
       actorDepartmentId: opts.actorDepartmentId || null,
     });
-    if (!created.ok) {
-      return created;
-    }
+    if (!created.ok) return created;
 
     const metadata = {
-      procurementMethod: opts.procurementMethod,
+      procurementMethod: method,
       nextProcessQueued: created.nextProcessQueued,
       nextProcessStarted: true,
       procurementId: created.procurement?.id || null,
       procurementNumber: created.procurement?.procurementNumber || null,
+      contractsCommitteeApproved: true,
     };
 
     const result = await completeWorkflowTask(prisma, {
@@ -663,31 +1051,22 @@ export async function actOnRequisitionTask(prisma, opts) {
       actorOrgUserId: opts.actorOrgUserId,
       actorRoleName: opts.actorRoleName,
       actorDepartmentId: opts.actorDepartmentId || null,
-      decision: opts.decision,
+      committeeId: opts.committeeId || null,
+      committeeRole: opts.committeeRole || null,
+      decision: "APPROVE",
       comment: opts.comment,
       metadata,
     });
 
     if (!result.ok) {
-      // Method workflow already started; surface the task completion error with context.
       return {
         ...result,
         procurement: created.procurement,
         nextProcessQueued: created.nextProcessQueued,
         nextProcessStarted: true,
         warning:
-          "Procurement was created and the method workflow started, but the method-selection task could not be closed. Open My Tasks or the procurement detail to continue.",
+          "Procurement was created and the method workflow started, but the Contracts Committee task could not be closed.",
       };
-    }
-
-    if (taskPreview.instance.id) {
-      await prisma.projectOrgWorkflowAction.updateMany({
-        where: {
-          taskId: opts.taskId,
-          decision: "SELECT_METHOD",
-        },
-        data: { metadata },
-      });
     }
 
     return {
@@ -704,10 +1083,48 @@ export async function actOnRequisitionTask(prisma, opts) {
     actorOrgUserId: opts.actorOrgUserId,
     actorRoleName: opts.actorRoleName,
     actorDepartmentId: opts.actorDepartmentId || null,
+    committeeId: opts.committeeId || null,
+    committeeRole: opts.committeeRole || null,
     decision: opts.decision,
     comment: opts.comment,
     metadata: null,
   });
+
+  // Stamp Form 5 Part I confirmation names when HOD / AO approve.
+  if (
+    result.ok &&
+    (opts.decision === "APPROVE" || opts.decision === "VERIFY") &&
+    taskPreview.instance.requisitionId
+  ) {
+    const req = await prisma.projectOrgRequisition.findUnique({
+      where: { id: taskPreview.instance.requisitionId },
+      select: { form5PartI: true },
+    });
+    if (req?.form5PartI && typeof req.form5PartI === "object") {
+      const actor = await prisma.projectOrgUser.findUnique({
+        where: { id: opts.actorOrgUserId },
+        select: { firstName: true, lastName: true },
+      });
+      const name = `${actor?.firstName || ""} ${actor?.lastName || ""}`.trim();
+      const snap = { ...req.form5PartI };
+      if (opts.actorRoleName === "Head User Department" || opts.actorRoleName === "Head of User Department") {
+        if (name) {
+          snap.hodName = name;
+          snap.hodTitle = "Head User Department";
+        }
+      }
+      if (opts.actorRoleName === "Accounting Officer" && opts.decision === "APPROVE") {
+        if (name) {
+          snap.aoName = name;
+          snap.aoTitle = "Accounting Officer";
+        }
+      }
+      await prisma.projectOrgRequisition.update({
+        where: { id: taskPreview.instance.requisitionId },
+        data: { form5PartI: snap, form5PartIAt: new Date() },
+      });
+    }
+  }
 
   return result;
 }
@@ -784,6 +1201,14 @@ export async function saveRequisitionForm5(prisma, opts) {
       ok: false,
       error: "Validation failed.",
       fieldErrors: { methodJustification: "Enter the justification for the method." },
+      status: 400,
+    };
+  }
+  if (!snapshot.pduOfficerName) {
+    return {
+      ok: false,
+      error: "Validation failed.",
+      fieldErrors: { pduOfficerName: "Enter the PDU officer name." },
       status: 400,
     };
   }

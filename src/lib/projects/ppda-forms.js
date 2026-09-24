@@ -3,6 +3,8 @@
  * Fill-in-app is primary; download is reference-only (no upload loop).
  */
 
+import { downloadOrgDocumentPdf, pdfFieldValue } from "@/lib/projects/org-document-pdf";
+
 export const PLAN_SHEET_TYPE = {
   GOODS_WORKS_NON_CONSULTANCY: "GOODS_WORKS_NON_CONSULTANCY",
   CONSULTANCY: "CONSULTANCY",
@@ -258,76 +260,488 @@ export function buildBidDocument(procurement, body = {}) {
 }
 
 /**
- * Client-side: download a PDF reference (not HTML).
- * Uses dynamic import so the PDF library loads only when downloading.
+ * Shared org / department context for PDF headers.
+ * @param {any} entity
+ * @param {Record<string, string>} [overrides]
+ */
+export function buildOrgPdfContext(entity, overrides = {}) {
+  const stage = entity?.workflowStage;
+  const stageLine =
+    overrides.workflowStage ||
+    (stage?.title
+      ? String(stage.title)
+      : stage?.requiredRoleName
+        ? `Current step: ${stage.requiredRoleName}`
+        : "");
+
+  return {
+    organisationName:
+      overrides.organisationName ||
+      entity?.organisationName ||
+      entity?.pdeName ||
+      "",
+    departmentName: overrides.departmentName || entity?.department?.name || "",
+    departmentCode: overrides.departmentCode || entity?.department?.code || "",
+    financialYear: overrides.financialYear || entity?.financialYear?.label || "",
+    referenceNumber:
+      overrides.referenceNumber ||
+      entity?.requisitionReference ||
+      entity?.planReference ||
+      entity?.procurementNumber ||
+      entity?.budgetReference ||
+      "",
+    statusLabel:
+      overrides.statusLabel || entity?.statusLabel || entity?.status || "Draft",
+    statusColor: overrides.statusColor || entity?.statusColor || "info",
+    workflowStage: stageLine,
+  };
+}
+
+/**
+ * @param {Record<string, any>} form5
+ * @param {ReturnType<typeof buildOrgPdfContext>} ctx
+ * @param {{ draftIncomplete?: boolean }} [opts]
+ */
+export function form5PartIToPdfSpec(form5, ctx, opts = {}) {
+  const ref = form5.sequenceNumber || ctx.referenceNumber || "";
+  const lineRows = (form5.lineItems || []).map((li) => [
+    li.itemNo,
+    li.description,
+    li.quantity,
+    li.unitOfMeasure,
+    li.estimatedUnitCost,
+    li.estimatedTotal,
+  ]);
+
+  return {
+    referenceNumber: ref,
+    documentTitle: "FORM 5 — Part I",
+    documentSubtitle: "Request by User Department (PPDA teaching form)",
+    organisationName: ctx.organisationName,
+    departmentName: ctx.departmentName,
+    departmentCode: ctx.departmentCode,
+    financialYear: ctx.financialYear || form5.financialYearLabel,
+    status: {
+      label: ctx.statusLabel,
+      stage: ctx.workflowStage,
+      color: ctx.statusColor,
+    },
+    draftIncomplete: Boolean(opts.draftIncomplete),
+    sections: [
+      {
+        title: "Requisition details",
+        fields: [
+          { label: "Subject of procurement", value: form5.subjectOfProcurement },
+          { label: "PDE code", value: form5.pdeCode },
+          { label: "Category (supplies / works / services)", value: form5.categorySuppliesWorksServices },
+          { label: "Financial year", value: form5.financialYearLabel },
+          { label: "Sequence / requisition reference", value: form5.sequenceNumber },
+          { label: "Budget category", value: form5.budgetCategory },
+          { label: "Project code", value: form5.projectCode },
+          { label: "Project title", value: form5.projectTitle },
+          { label: "Multi-year contracting", value: form5.multiYearContracting },
+          { label: "Resources year 1", value: form5.resourcesYearOne },
+          { label: "Resources year 2", value: form5.resourcesYearTwo },
+          { label: "Resources year 3", value: form5.resourcesYearThree },
+          { label: "Resources year 4", value: form5.resourcesYearFour },
+          { label: "Procurement plan reference", value: form5.procurementPlanReference },
+          { label: "Date required", value: form5.dateRequired },
+          { label: "Location for delivery", value: form5.locationForDelivery },
+          { label: "Currency", value: form5.currency },
+          { label: "Estimated total cost", value: form5.estimatedTotalCost },
+          { label: "Market price", value: form5.marketPrice },
+        ],
+      },
+      {
+        title: "Line items",
+        table: {
+          headers: ["#", "Description", "Qty", "UoM", "Unit cost", "Total"],
+          rows: lineRows.length
+            ? lineRows
+            : [["—", "—", "—", "—", "—", "—"]],
+        },
+      },
+      {
+        title: "Funding confirmation",
+        fields: [
+          { label: "Vote / head no.", value: form5.voteHeadNo },
+          { label: "Programme", value: form5.programme },
+          { label: "Sub-programme", value: form5.subProgramme },
+          { label: "Funding item", value: form5.fundingItem },
+          { label: "Balance remaining", value: form5.balanceRemaining },
+        ],
+      },
+      {
+        title: "Signatories",
+        fields: [
+          { label: "Member (User Department)", value: form5.memberName },
+          { label: "Member title", value: form5.memberTitle },
+          { label: "Head of User Department", value: form5.hodName },
+          { label: "HOD title", value: form5.hodTitle },
+          { label: "Accounting Officer", value: form5.aoName },
+          { label: "AO title", value: form5.aoTitle },
+        ],
+      },
+    ],
+  };
+}
+
+/**
+ * @param {Record<string, any>} form5
+ * @param {ReturnType<typeof buildOrgPdfContext>} ctx
+ * @param {{ draftIncomplete?: boolean }} [opts]
+ */
+export function form5PartIIToPdfSpec(form5, ctx, opts = {}) {
+  const ref = ctx.referenceNumber || "";
+  return {
+    referenceNumber: `${ref}-F5-II`,
+    documentTitle: "FORM 5 — Part II",
+    documentSubtitle: "PDU to Contracts Committee (PPDA teaching form)",
+    organisationName: ctx.organisationName,
+    departmentName: ctx.departmentName,
+    departmentCode: ctx.departmentCode,
+    financialYear: ctx.financialYear,
+    status: {
+      label: ctx.statusLabel,
+      stage: ctx.workflowStage,
+      color: ctx.statusColor,
+    },
+    draftIncomplete: Boolean(opts.draftIncomplete),
+    sections: [
+      {
+        title: "Contracts Committee submission",
+        fields: [
+          { label: "Date submitted to CC", value: form5.dateSubmittedToCc },
+          { label: "CC meeting reference", value: form5.ccMeetingReference },
+          { label: "Recommended method", value: form5.recommendedMethod },
+          { label: "Method justification", value: form5.methodJustification },
+          { label: "Shortlisted providers", value: form5.shortlistedProviders },
+          { label: "Shortlist justification", value: form5.shortlistJustification },
+          { label: "Bidding document preparers", value: form5.biddingDocumentPreparers },
+          { label: "Evaluation committee nominees", value: form5.evaluationCommitteeNominees },
+          { label: "EC justification", value: form5.evaluationCommitteeJustification },
+          { label: "Bidding document cost", value: form5.biddingDocumentCost },
+          { label: "Other information", value: form5.otherInformation },
+        ],
+      },
+      {
+        title: "Officers",
+        fields: [
+          { label: "PDU officer", value: form5.pduOfficerName },
+          { label: "PDU position", value: form5.pduOfficerPosition },
+          { label: "CC Chair", value: form5.ccChairName },
+          { label: "CC Secretary", value: form5.ccSecretaryName },
+        ],
+      },
+    ],
+    footerNote:
+      "Teaching note: Part II records the Form 5 packet; method selection still happens on the workflow task.",
+  };
+}
+
+/**
+ * @param {Record<string, any>} bid
+ * @param {ReturnType<typeof buildOrgPdfContext>} ctx
+ * @param {{ draftIncomplete?: boolean }} [opts]
+ */
+export function bidDocumentToPdfSpec(bid, ctx, opts = {}) {
+  const ref = bid.procurementReference || ctx.referenceNumber || "";
+  return {
+    referenceNumber: ref,
+    documentTitle: bid.documentTitle || "Bid / RFQ document",
+    documentSubtitle: "Educational solicitation document",
+    organisationName: bid.pdeName || ctx.organisationName,
+    departmentName: ctx.departmentName,
+    departmentCode: ctx.departmentCode,
+    financialYear: ctx.financialYear,
+    status: {
+      label: ctx.statusLabel,
+      stage: ctx.workflowStage,
+      color: ctx.statusColor,
+    },
+    draftIncomplete: Boolean(opts.draftIncomplete),
+    sections: [
+      {
+        title: "Document details",
+        fields: [
+          { label: "Procurement reference", value: bid.procurementReference },
+          { label: "Subject", value: bid.subject },
+          { label: "Closing date", value: bid.closingDate },
+          { label: "Issue date", value: bid.issueDate },
+          { label: "Issued by", value: bid.issuedByName },
+          { label: "Position", value: bid.issuedByPosition },
+        ],
+      },
+      {
+        title: "Specifications / scope",
+        paragraph: pdfFieldValue(bid.specifications),
+      },
+      {
+        title: "Submission instructions",
+        paragraph: pdfFieldValue(bid.submissionInstructions),
+      },
+      {
+        title: "Evaluation criteria",
+        paragraph: pdfFieldValue(bid.evaluationCriteria),
+      },
+    ],
+  };
+}
+
+/**
+ * @param {any} item
+ * @param {string} sheetType
+ * @param {ReturnType<typeof buildOrgPdfContext>} ctx
+ * @param {{ itemIndex?: number; draftIncomplete?: boolean }} [opts]
+ */
+export function circularPlanItemToPdfSpec(item, sheetType, ctx, opts = {}) {
+  const cf = item?.circularFields || item || {};
+  const isConsultancy = sheetType === PLAN_SHEET_TYPE.CONSULTANCY;
+  const label = isConsultancy
+    ? PLAN_SHEET_TYPE_LABELS.CONSULTANCY
+    : PLAN_SHEET_TYPE_LABELS.GOODS_WORKS_NON_CONSULTANCY;
+  const idx = opts.itemIndex != null ? opts.itemIndex + 1 : 1;
+  const ref = ctx.referenceNumber
+    ? `${ctx.referenceNumber}-ITEM-${String(idx).padStart(2, "0")}`
+    : `PLAN-ITEM-${String(idx).padStart(2, "0")}`;
+
+  /** @type {import("@/lib/projects/org-document-pdf").OrgPdfField[]} */
+  const generalFields = [
+    { label: "Subject / title", value: item?.title },
+    { label: "Currency", value: cf.currency },
+    { label: "Source of funding", value: cf.sourceOfFunding },
+    { label: "Planned procurement method", value: cf.plannedProcurementMethod },
+    { label: "Contract type", value: cf.contractType },
+    { label: "Multi-year current cost", value: cf.multiYearCurrentCost },
+    { label: "Completion years", value: cf.multiYearCompletionYears },
+    { label: "Paid-up sum", value: cf.multiYearPaidUpSum },
+    { label: "Pending sum", value: cf.multiYearPendingSum },
+    { label: "Pending time", value: cf.multiYearPendingTime },
+  ];
+
+  if (!isConsultancy) {
+    generalFields.splice(5, 0, {
+      label: "Prequalification",
+      value: cf.prequalification,
+    });
+    generalFields.splice(6, 0, {
+      label: "Reservation scheme",
+      value: [cf.applyReservationScheme, cf.reservationSchemeDetail].filter(Boolean).join(" — "),
+    });
+  }
+
+  /** @type {import("@/lib/projects/org-document-pdf").OrgPdfField[]} */
+  const dateFields = isConsultancy
+    ? [
+        { label: "EOI invitation", value: cf.eoiInvitationDate },
+        { label: "EOI closing / opening", value: cf.eoiClosingOpeningDate },
+        { label: "Shortlist approval", value: cf.eoiShortlistApprovalDate },
+        { label: "Proposal notification", value: cf.proposalNotificationDate },
+        { label: "Proposal deadline", value: cf.proposalDeadlineDate },
+        { label: "Proposal opening", value: cf.proposalOpeningDate },
+        { label: "Evaluation approval", value: cf.proposalEvalApprovalDate },
+        { label: "Award notification", value: cf.proposalAwardNotificationDate },
+        { label: "Contract signing", value: cf.contractSigningDate },
+        { label: "Completion", value: cf.completionDate },
+      ]
+    : [
+        { label: "Bid invitation", value: cf.bidInvitationDate },
+        { label: "Bid closing / opening", value: cf.bidClosingOpeningDate },
+        { label: "Evaluation report approval", value: cf.evaluationReportApprovalDate },
+        { label: "Award notification", value: cf.awardNotificationDate },
+        { label: "Contract signing", value: cf.contractSigningDate },
+        { label: "Completion", value: cf.completionDate },
+      ];
+
+  return {
+    referenceNumber: ref,
+    documentTitle: "Procurement plan item",
+    documentSubtitle: `Circular No. 1/2024 — ${label}`,
+    organisationName: ctx.organisationName,
+    departmentName: ctx.departmentName,
+    departmentCode: ctx.departmentCode,
+    financialYear: ctx.financialYear,
+    status: {
+      label: ctx.statusLabel || "Draft",
+      stage: ctx.workflowStage,
+      color: ctx.statusColor || "info",
+    },
+    draftIncomplete: Boolean(opts.draftIncomplete),
+    sections: [
+      { title: "Item details", fields: generalFields },
+      { title: "Key dates", fields: dateFields },
+    ],
+  };
+}
+
+/**
+ * Saved procurement plan record from the API.
+ * @param {any} plan
+ */
+export function procurementPlanRecordToPdfSpec(plan) {
+  const ctx = buildOrgPdfContext(plan);
+  const sheetLabel =
+    plan.sheetType === PLAN_SHEET_TYPE.CONSULTANCY
+      ? PLAN_SHEET_TYPE_LABELS.CONSULTANCY
+      : PLAN_SHEET_TYPE_LABELS.GOODS_WORKS_NON_CONSULTANCY;
+
+  const itemRows = (plan.items || []).map((item, i) => [
+    i + 1,
+    item.title,
+    item.category,
+    item.quantity,
+    item.unitOfMeasure,
+    item.estimatedUnitPrice,
+    item.estimatedTotal,
+    item.budgetLine?.code || "—",
+  ]);
+
+  const sections = [
+    {
+      title: "Plan summary",
+      fields: [
+        { label: "Plan title", value: plan.title },
+        { label: "Plan reference", value: plan.planReference },
+        { label: "Plan type", value: plan.isEmergency ? "Emergency" : "Annual" },
+        { label: "Circular sheet", value: sheetLabel },
+        { label: "Created by", value: plan.createdBy?.displayName },
+        { label: "Approved by", value: plan.approvedBy?.displayName },
+      ],
+    },
+    {
+      title: "Plan items",
+      table: {
+        headers: ["#", "Title", "Category", "Qty", "UoM", "Unit price", "Line total", "Budget line"],
+        rows: itemRows.length ? itemRows : [["—", "—", "—", "—", "—", "—", "—", "—"]],
+      },
+    },
+  ];
+
+  (plan.items || []).forEach((item, idx) => {
+    const itemSpec = circularPlanItemToPdfSpec(item, plan.sheetType, ctx, {
+      itemIndex: idx,
+    });
+    for (const section of itemSpec.sections) {
+      sections.push({
+        title: section.title
+          ? `Item ${idx + 1} · ${section.title}`
+          : `Item ${idx + 1}`,
+        fields: section.fields,
+        table: section.table,
+        paragraph: section.paragraph,
+      });
+    }
+  });
+
+  return {
+    referenceNumber: plan.planReference || ctx.referenceNumber || "PROCUREMENT-PLAN",
+    documentTitle: "Procurement plan",
+    documentSubtitle: plan.isEmergency
+      ? "Emergency / unplanned procurement plan"
+      : `Annual procurement plan · Circular 1/2024 — ${sheetLabel}`,
+    organisationName: ctx.organisationName,
+    departmentName: ctx.departmentName,
+    departmentCode: ctx.departmentCode,
+    financialYear: ctx.financialYear,
+    status: {
+      label: ctx.statusLabel,
+      stage: ctx.workflowStage,
+      color: ctx.statusColor,
+    },
+    sections,
+  };
+}
+
+/**
+ * Full procurement plan form (all items).
+ * @param {any} form
+ * @param {ReturnType<typeof buildOrgPdfContext>} ctx
+ * @param {any[]} budgetLines
+ * @param {{ draftIncomplete?: boolean }} [opts]
+ */
+export function procurementPlanFormToPdfSpec(form, ctx, budgetLines = [], opts = {}) {
+  const sheetLabel =
+    form.sheetType === PLAN_SHEET_TYPE.CONSULTANCY
+      ? PLAN_SHEET_TYPE_LABELS.CONSULTANCY
+      : PLAN_SHEET_TYPE_LABELS.GOODS_WORKS_NON_CONSULTANCY;
+
+  const itemRows = (form.items || []).map((item, i) => {
+    const bl = budgetLines.find((b) => b.id === item.budgetLineId);
+    return [
+      i + 1,
+      item.title,
+      item.category,
+      item.quantity,
+      item.unitOfMeasure,
+      item.estimatedUnitPrice,
+      item.estimatedUnitPrice && item.quantity
+        ? String(Number(item.quantity) * Number(String(item.estimatedUnitPrice).replace(/,/g, "")))
+        : "",
+      bl?.code || "—",
+    ];
+  });
+
+  return {
+    referenceNumber: form.planReference || ctx.referenceNumber || "PROCUREMENT-PLAN",
+    documentTitle: "Procurement plan",
+    documentSubtitle: form.isEmergency
+      ? "Emergency / unplanned procurement plan"
+      : `Annual procurement plan · Circular 1/2024 — ${sheetLabel}`,
+    organisationName: ctx.organisationName,
+    departmentName: ctx.departmentName,
+    departmentCode: ctx.departmentCode,
+    financialYear: ctx.financialYear,
+    status: {
+      label: ctx.statusLabel || "Draft",
+      stage: ctx.workflowStage || (form.isEmergency ? "Emergency planning process" : "Annual planning process"),
+      color: ctx.statusColor || "info",
+    },
+    draftIncomplete: Boolean(opts.draftIncomplete),
+    sections: [
+      {
+        title: "Plan summary",
+        fields: [
+          { label: "Plan title", value: form.title },
+          { label: "Plan reference", value: form.planReference },
+          { label: "Plan type", value: form.isEmergency ? "Emergency" : "Annual" },
+          { label: "Circular sheet", value: sheetLabel },
+        ],
+      },
+      {
+        title: "Plan items",
+        table: {
+          headers: ["#", "Title", "Category", "Qty", "UoM", "Unit price", "Line total", "Budget line"],
+          rows: itemRows.length
+            ? itemRows
+            : [["—", "—", "—", "—", "—", "—", "—", "—"]],
+        },
+      },
+    ],
+  };
+}
+
+/**
+ * Client-side: download a structured organisation PDF.
+ * @param {import("@/lib/projects/org-document-pdf").OrgDocumentPdfSpec} spec
+ */
+export async function downloadOrgFormPdf(spec) {
+  await downloadOrgDocumentPdf(spec);
+}
+
+/**
+ * @deprecated Prefer {@link downloadOrgFormPdf} with a structured spec.
  * @param {string} filename
  * @param {string} title
  * @param {string} bodyHtml
  */
 export async function downloadPdfReference(filename, title, bodyHtml) {
-  if (typeof document === "undefined") return;
-  const { jsPDF } = await import("jspdf");
-  const doc = new jsPDF({ unit: "pt", format: "a4" });
-  const margin = 48;
-  const pageWidth = doc.internal.pageSize.getWidth();
-  const pageHeight = doc.internal.pageSize.getHeight();
-  const maxWidth = pageWidth - margin * 2;
-  let y = margin;
-
-  const ensureSpace = (needed = 16) => {
-    if (y + needed > pageHeight - margin) {
-      doc.addPage();
-      y = margin;
-    }
-  };
-
-  doc.setFont("helvetica", "bold");
-  doc.setFontSize(14);
-  doc.setTextColor(0, 139, 208);
-  const titleLines = doc.splitTextToSize(String(title || "Proc Learn form"), maxWidth);
-  doc.text(titleLines, margin, y);
-  y += titleLines.length * 18 + 6;
-
-  doc.setFont("helvetica", "normal");
-  doc.setFontSize(9);
-  doc.setTextColor(80, 80, 80);
-  const meta = "Proc Learn teaching reference — submit in the simulator; this PDF is for review only.";
-  const metaLines = doc.splitTextToSize(meta, maxWidth);
-  doc.text(metaLines, margin, y);
-  y += metaLines.length * 12 + 14;
-
-  doc.setDrawColor(0, 139, 208);
-  doc.setLineWidth(2);
-  doc.line(margin, y, margin + 40, y);
-  doc.setDrawColor(255, 242, 0);
-  doc.line(margin + 40, y, margin + 80, y);
-  doc.setDrawColor(237, 28, 36);
-  doc.line(margin + 80, y, margin + 120, y);
-  y += 18;
-
-  doc.setTextColor(24, 24, 27);
-  doc.setFontSize(10);
-  const plain = htmlToPlainText(bodyHtml);
-  const paragraphs = plain.split(/\n+/).map((p) => p.trim()).filter(Boolean);
-  for (const para of paragraphs) {
-    const isHeading = para === para.toUpperCase() || /^(FORM 5|Circular|Line items|Funding|Key dates|Specifications|Submission|Evaluation)/i.test(para);
-    if (isHeading) {
-      ensureSpace(22);
-      doc.setFont("helvetica", "bold");
-      doc.setFontSize(11);
-    } else {
-      ensureSpace(16);
-      doc.setFont("helvetica", "normal");
-      doc.setFontSize(10);
-    }
-    const lines = doc.splitTextToSize(para, maxWidth);
-    ensureSpace(lines.length * 13 + 4);
-    doc.text(lines, margin, y);
-    y += lines.length * 13 + (isHeading ? 8 : 6);
-  }
-
-  const safeName = filename.replace(/\.html$/i, "").replace(/\.pdf$/i, "");
-  doc.save(`${safeName}.pdf`);
+  await downloadOrgFormPdf({
+    referenceNumber: filename.replace(/\.(html|pdf)$/i, ""),
+    documentTitle: title,
+    organisationName: "",
+    status: { label: "Reference copy", color: "info" },
+    sections: [{ paragraph: htmlToPlainText(bodyHtml) }],
+  });
 }
 
 /**

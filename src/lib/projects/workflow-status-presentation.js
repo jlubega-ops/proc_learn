@@ -89,13 +89,13 @@ export function presentOrgWorkflowStatus(opts) {
 export function workflowDecisionButtonLabel(decision, opts = {}) {
   if (opts.busy) return "Saving…";
   const d = String(decision || "").trim().toUpperCase();
-  if (d === "APPROVE") return "Approve";
+  if (d === "APPROVE") return "Approve & forward";
   if (d === "RETURN") return "Return for correction";
   if (d === "REJECT") return "Reject";
-  if (d === "SELECT_METHOD") return "Select method";
-  if (d === "COMPLETE") return "Complete";
+  if (d === "SELECT_METHOD") return "Recommend method";
+  if (d === "COMPLETE") return "Approve & forward";
   if (d === "SUBMIT") return "Submit";
-  if (d === "VERIFY") return "Verify";
+  if (d === "VERIFY") return "Verify & forward";
   if (d === "FLAG_EXCEPTION") return "Flag exception";
   return "Confirm";
 }

@@ -24,6 +24,11 @@ import {
   themedTextFieldSx,
 } from "@/lib/admin-mui-surfaces";
 import { formatMoneyUGX } from "@/lib/money";
+import {
+  defaultWorkflowDecision,
+  workflowDecisionHelp,
+  workflowDecisionOptions,
+} from "@/lib/projects/workflow-decision-options";
 import { workflowDecisionButtonLabel } from "@/lib/projects/workflow-status-presentation";
 
 /**
@@ -82,15 +87,7 @@ export function OrgProcurementDetailPanel({ projectId, procurementId }) {
       const task = data.pendingTask || null;
       setPendingTask(task);
       const key = String(task?.actionKey || "").toUpperCase();
-      setDecision(
-        key === "VERIFY"
-          ? "VERIFY"
-          : key === "SUBMIT"
-            ? "SUBMIT"
-            : key === "COMPLETE"
-              ? "COMPLETE"
-              : "APPROVE",
-      );
+      setDecision(defaultWorkflowDecision(key));
       setComment("");
       setSupplierId("");
       setNewSupplierName("");
@@ -321,7 +318,6 @@ export function OrgProcurementDetailPanel({ projectId, procurementId }) {
           </Typography>
           <Typography variant="body2" sx={{ ...adminMutedTextSx, mb: 2 }}>
             Role: {pendingTask.requiredRoleName}
-            {actionKey ? ` · ${actionKey}` : ""}
           </Typography>
           <div className="grid gap-3 sm:grid-cols-2">
             <TextField
@@ -331,15 +327,13 @@ export function OrgProcurementDetailPanel({ projectId, procurementId }) {
               onChange={(e) => setDecision(e.target.value)}
               fullWidth
               sx={themedTextFieldSx}
+              helperText={workflowDecisionHelp(decision)}
             >
-              {actionKey === "SUBMIT" ? <MenuItem value="SUBMIT">Submit / raise</MenuItem> : null}
-              {actionKey === "VERIFY" ? <MenuItem value="VERIFY">Verify</MenuItem> : null}
-              {actionKey === "COMPLETE" ? <MenuItem value="COMPLETE">Complete</MenuItem> : null}
-              {actionKey !== "VERIFY" && actionKey !== "SUBMIT" ? (
-                <MenuItem value="APPROVE">Approve</MenuItem>
-              ) : null}
-              <MenuItem value="RETURN">Return for correction</MenuItem>
-              <MenuItem value="REJECT">Reject</MenuItem>
+              {workflowDecisionOptions(actionKey).map((opt) => (
+                <MenuItem key={opt.value} value={opt.value}>
+                  {opt.label}
+                </MenuItem>
+              ))}
             </TextField>
 
             {isIssuePi ? (
@@ -493,7 +487,7 @@ export function OrgProcurementDetailPanel({ projectId, procurementId }) {
           </Typography>
           <Typography variant="body2" sx={{ ...adminMutedTextSx, mb: 2 }}>
             Fill the educational bid or request-for-quotations packet in-app. Saving creates a draft
-            solicitation if needed. Download PDF unlocks when required fields are complete.
+            solicitation if needed. Download a branded PDF from the fill dialog (named from the procurement reference).
           </Typography>
           <Button
             variant="contained"

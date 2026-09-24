@@ -42,9 +42,11 @@ import {
   PPDA_PLAN_METHOD_OPTIONS,
   PPDA_RESERVATION_SCHEME_OPTIONS,
   PPDA_YES_NO,
-  circularPlanItemToHtml,
-  downloadPdfReference,
+  buildOrgPdfContext,
+  circularPlanItemToPdfSpec,
+  downloadOrgFormPdf,
   normalizeCircularPlanItemFields,
+  procurementPlanFormToPdfSpec,
 } from "@/lib/projects/ppda-forms";
 import { usePersistedFormDraft } from "@/hooks/use-persisted-form-draft";
 
@@ -949,12 +951,20 @@ export function OrgProcurementPlanCreateForm({ projectId }) {
                       return;
                     }
                     const cf = normalizeCircularPlanItemFields(item, form.sheetType);
-                    void downloadPdfReference(
-                      `circular-plan-item-${idx + 1}`,
-                      "Circular 1/2024 plan item",
-                      circularPlanItemToHtml(
+                    const ctx = buildOrgPdfContext(null, {
+                      departmentName: actorDepartment?.name || "",
+                      departmentCode: actorDepartment?.code || "",
+                      financialYear: selectedFy?.label || "",
+                      referenceNumber: form.planReference || "",
+                      statusLabel: "Draft",
+                      statusColor: "info",
+                    });
+                    void downloadOrgFormPdf(
+                      circularPlanItemToPdfSpec(
                         { title: item.title, circularFields: cf },
                         form.sheetType,
+                        ctx,
+                        { itemIndex: idx },
                       ),
                     );
                   }}
@@ -991,7 +1001,40 @@ export function OrgProcurementPlanCreateForm({ projectId }) {
           />
         </div>
 
-        <div className="sm:col-span-2">
+        <div className="flex flex-wrap gap-2 sm:col-span-2">
+          <Button
+            type="button"
+            variant="outlined"
+            startIcon={<DownloadRounded />}
+            disabled={!String(form.planReference || "").trim()}
+            title={
+              String(form.planReference || "").trim()
+                ? "Download the full plan as PDF (named from plan reference)"
+                : "Enter a plan reference first"
+            }
+            onClick={() => {
+              if (!String(form.planReference || "").trim()) {
+                showToast({
+                  message: "Enter a plan reference before downloading the PDF.",
+                  severity: "error",
+                });
+                return;
+              }
+              const ctx = buildOrgPdfContext(null, {
+                departmentName: actorDepartment?.name || "",
+                departmentCode: actorDepartment?.code || "",
+                financialYear: selectedFy?.label || "",
+                referenceNumber: form.planReference,
+                statusLabel: "Draft",
+                statusColor: "info",
+              });
+              void downloadOrgFormPdf(
+                procurementPlanFormToPdfSpec(form, ctx, budgetLines),
+              );
+            }}
+          >
+            Download plan PDF
+          </Button>
           <Button type="submit" variant="contained" disabled={busy}>
             {busy ? "Saving…" : "Save draft"}
           </Button>

@@ -347,9 +347,15 @@ export const BASELINE_PROCESS_TEMPLATES = [
       },
       {
         stepNumber: 6,
-        taskDescription: "Select Procurement Method",
+        taskDescription: "Recommend Procurement Method (Form 5 Part II)",
         roleName: "Procurement Officer",
         actionKey: "SELECT_METHOD",
+      },
+      {
+        stepNumber: 7,
+        taskDescription: "Approve Procurement Method (Contracts Committee)",
+        roleName: "Contracts Committee",
+        actionKey: "APPROVE",
       },
     ],
   },

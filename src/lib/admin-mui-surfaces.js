@@ -44,20 +44,36 @@ export const themedTextFieldSx = {
   "& .MuiInputLabel-root.Mui-focused": {
     color: "color-mix(in oklab, var(--foreground) 78%, transparent)",
   },
+  "& .MuiInputLabel-root.Mui-error": {
+    color: "var(--brand-red)",
+  },
   "& .MuiSelect-icon": {
     color: "var(--foreground)",
   },
-  "& .MuiOutlinedInput-notchedOutline": {
+  // Default outline — do not override .Mui-error or red validation borders disappear.
+  "& .MuiOutlinedInput-root:not(.Mui-error) .MuiOutlinedInput-notchedOutline": {
     borderColor: "color-mix(in oklab, var(--foreground) 18%, transparent)",
   },
-  "&:hover .MuiOutlinedInput-notchedOutline": {
+  "& .MuiOutlinedInput-root:not(.Mui-error):hover .MuiOutlinedInput-notchedOutline": {
     borderColor: "color-mix(in oklab, var(--foreground) 28%, transparent)",
   },
-  "& .MuiOutlinedInput-root.Mui-focused .MuiOutlinedInput-notchedOutline": {
+  "& .MuiOutlinedInput-root:not(.Mui-error).Mui-focused .MuiOutlinedInput-notchedOutline": {
     borderColor: "var(--brand-blue)",
+  },
+  "& .MuiOutlinedInput-root.Mui-error .MuiOutlinedInput-notchedOutline": {
+    borderColor: "var(--brand-red)",
+  },
+  "& .MuiOutlinedInput-root.Mui-error:hover .MuiOutlinedInput-notchedOutline": {
+    borderColor: "var(--brand-red)",
+  },
+  "& .MuiOutlinedInput-root.Mui-error.Mui-focused .MuiOutlinedInput-notchedOutline": {
+    borderColor: "var(--brand-red)",
   },
   "& .MuiFormHelperText-root": {
     color: "color-mix(in oklab, var(--foreground) 55%, transparent)",
+  },
+  "& .MuiFormHelperText-root.Mui-error": {
+    color: "var(--brand-red)",
   },
 };
 

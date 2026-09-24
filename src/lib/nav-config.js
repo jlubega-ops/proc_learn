@@ -495,12 +495,73 @@ export function sidebarNavForProjectWorkspace(projectId, options = {}) {
  * Role-aware sidebar for simulated organisation users (permission-gated; no disabled stubs).
  * @param {string} projectId
  * @param {string[]} [permissions]
- * @param {{ roleName?: string | null }} [options]
+ * @param {{ roleName?: string | null; activeCommittee?: { id?: string; name?: string; committeeType?: string } | null }} [options]
  */
 export function sidebarNavForOrgMember(projectId, permissions = [], options = {}) {
   const base = `/projects/${projectId}`;
   const permSet = new Set(permissions);
   const roleName = String(options.roleName || "").trim();
+  const activeCommittee = options.activeCommittee || null;
+
+  // Exclusive committee mode: only show work that committee can act on.
+  if (activeCommittee?.id) {
+    const type = String(activeCommittee.committeeType || "").toUpperCase();
+    /** @type {NavLinkItem[]} */
+    const links = [
+      {
+        href: base,
+        label: "Dashboard",
+        title: "Organisation dashboard",
+        Icon: HomeRounded,
+        anyOf: null,
+      },
+      {
+        href: `${base}/tasks`,
+        label: "Committee tasks",
+        title: `Tasks for ${activeCommittee.name || "this committee"}`,
+        Icon: TaskAltRounded,
+        anyOf: null,
+      },
+    ];
+    if (type === "CONTRACTS" && permSet.has(ORG_PERMISSION.VIEW_REQUISITIONS)) {
+      links.push({
+        href: `${base}/requisitions`,
+        label: "Requisitions",
+        title: "Open requisitions for method approval",
+        Icon: AssignmentRounded,
+        anyOf: null,
+      });
+    }
+    if (
+      (type === "EVALUATION" ||
+        type === "INSPECTION_ACCEPTANCE" ||
+        type === "NEGOTIATION" ||
+        type === "CONTRACTS") &&
+      permSet.has(ORG_PERMISSION.VIEW_PROCUREMENTS)
+    ) {
+      links.push({
+        href: `${base}/procurements`,
+        label: "Procurements",
+        title: "Open procurements for committee actions",
+        Icon: ShoppingCartRounded,
+        anyOf: null,
+      });
+    }
+    links.push({
+      href: `${base}/my-account`,
+      label: "My account",
+      title: "Your organisation account details",
+      Icon: BadgeRounded,
+      anyOf: null,
+    });
+    return [
+      {
+        id: "committee-mode",
+        label: activeCommittee.name || "Committee",
+        links,
+      },
+    ];
+  }
 
   const isUdo =
     roleName === "User Department Officer" || roleName === "User Department";
@@ -712,6 +773,7 @@ export function sidebarNavForOrgMember(projectId, permissions = [], options = {}
  *   projectId?: string;
  *   permissions?: string[];
  *   roleName?: string | null;
+ *   activeCommittee?: { id?: string; name?: string; committeeType?: string } | null;
  *   personalOrgProjectId?: string | null;
  *   orgContext?: 'PERSONAL' | 'PRACTICE' | 'ASSESSMENT' | null;
  * }} [options]
@@ -720,6 +782,7 @@ export function sidebarNavForContext(activeRole, pathname, options = {}) {
   if (options.sessionType === "org" && options.projectId) {
     return sidebarNavForOrgMember(options.projectId, options.permissions, {
       roleName: options.roleName || null,
+      activeCommittee: options.activeCommittee || null,
     });
   }
 

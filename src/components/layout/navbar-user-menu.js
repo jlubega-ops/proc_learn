@@ -219,7 +219,7 @@ export function NavbarUserMenu() {
       const active = data.activeCommittee;
       showToast({
         message: active
-          ? `Switched to ${active.name} (${formatCommitteeSeatLabel(active.committeeRole)}).`
+          ? `Committee mode: ${active.name} (${formatCommitteeSeatLabel(active.committeeRole)}). Only this committee’s work is shown.`
           : "Back to organisational role only.",
         severity: "success",
       });

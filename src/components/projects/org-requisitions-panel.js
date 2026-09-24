@@ -16,8 +16,14 @@ import TableRow from "@mui/material/TableRow";
 import Tooltip from "@mui/material/Tooltip";
 import Typography from "@mui/material/Typography";
 import AddRounded from "@mui/icons-material/AddRounded";
+import DeleteOutlineRounded from "@mui/icons-material/DeleteOutlineRounded";
+import EditRounded from "@mui/icons-material/EditRounded";
 import RefreshRounded from "@mui/icons-material/RefreshRounded";
 import VisibilityRounded from "@mui/icons-material/VisibilityRounded";
+import Dialog from "@mui/material/Dialog";
+import DialogActions from "@mui/material/DialogActions";
+import DialogContent from "@mui/material/DialogContent";
+import DialogTitle from "@mui/material/DialogTitle";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useToast } from "@/components/providers/toast-provider";
@@ -41,7 +47,9 @@ export function OrgRequisitionsPanel({ projectId }) {
   const { showToast } = useToast();
   const router = useRouter();
   const [loading, setLoading] = useState(true);
+  const [busy, setBusy] = useState(false);
   const [rows, setRows] = useState(/** @type {any[]} */ ([]));
+  const [deleteTarget, setDeleteTarget] = useState(/** @type {any | null} */ (null));
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -66,6 +74,32 @@ export function OrgRequisitionsPanel({ projectId }) {
   useEffect(() => {
     void load();
   }, [load]);
+
+  async function deleteRequisition() {
+    if (!deleteTarget?.id) return;
+    setBusy(true);
+    try {
+      const res = await fetch(`/api/projects/${projectId}/requisitions/${deleteTarget.id}`, {
+        method: "PATCH",
+        credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "delete" }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        showToast({
+          message: typeof data.error === "string" ? data.error : "Could not delete requisition.",
+          severity: "error",
+        });
+        return;
+      }
+      setDeleteTarget(null);
+      showToast({ message: "Requisition deleted.", severity: "success" });
+      await load();
+    } finally {
+      setBusy(false);
+    }
+  }
 
   const statusColor = (s) => {
     if (s === "APPROVED") return "success";
@@ -155,6 +189,31 @@ export function OrgRequisitionsPanel({ projectId }) {
                       onClick={stopRowClick}
                       onKeyDown={stopRowClick}
                     >
+                      {r.canEdit ? (
+                        <Tooltip title="Edit requisition">
+                          <IconButton
+                            component={Link}
+                            href={`/projects/${projectId}/requisitions/${r.id}/edit`}
+                            size="small"
+                            color="primary"
+                            aria-label={`Edit requisition ${r.title}`}
+                          >
+                            <EditRounded fontSize="small" />
+                          </IconButton>
+                        </Tooltip>
+                      ) : null}
+                      {r.canDelete ? (
+                        <Tooltip title="Delete requisition">
+                          <IconButton
+                            size="small"
+                            color="error"
+                            aria-label={`Delete requisition ${r.title}`}
+                            onClick={() => setDeleteTarget(r)}
+                          >
+                            <DeleteOutlineRounded fontSize="small" />
+                          </IconButton>
+                        </Tooltip>
+                      ) : null}
                       <Tooltip title="Open requisition details">
                         <IconButton
                           component={Link}
@@ -174,6 +233,37 @@ export function OrgRequisitionsPanel({ projectId }) {
           </Table>
         </TableContainer>
       )}
+
+      <Dialog
+        open={Boolean(deleteTarget)}
+        onClose={() => !busy && setDeleteTarget(null)}
+        fullWidth
+        maxWidth="xs"
+      >
+        <DialogTitle>Delete requisition?</DialogTitle>
+        <DialogContent>
+          <Typography variant="body2">
+            This removes <strong>{deleteTarget?.title || "this requisition"}</strong>
+            {deleteTarget?.status === "SUBMITTED"
+              ? " and cancels the pending Head of User Department review."
+              : "."}{" "}
+            This cannot be undone.
+          </Typography>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setDeleteTarget(null)} disabled={busy}>
+            Cancel
+          </Button>
+          <Button
+            color="error"
+            variant="contained"
+            disabled={busy}
+            onClick={() => void deleteRequisition()}
+          >
+            {busy ? "Deleting…" : "Delete"}
+          </Button>
+        </DialogActions>
+      </Dialog>
     </div>
   );
 }
