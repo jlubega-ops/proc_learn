@@ -2,7 +2,7 @@
  * Pre-auth pages that always use light UI (`html` without `.dark`).
  * Used by SSR theme class resolution and `ThemeProvider`.
  */
-const PREFIXES = ["/login", "/forgot-password", "/reset-password", "/activate", "/setup-password"];
+const PREFIXES = ["/login", "/forgot-password", "/reset-password", "/activate", "/setup-password", "/provider-portal"];
 
 /** @param {string | null | undefined} pathname */
 export function isAuthLightRoutePath(pathname) {

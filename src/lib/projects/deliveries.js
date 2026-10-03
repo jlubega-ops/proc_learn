@@ -11,6 +11,7 @@ export function serializeDelivery(row) {
     procurementId: row.procurementId,
     status: row.status,
     deliveryDate: row.deliveryDate || null,
+    deliveryAddress: row.deliveryAddress || null,
     remarks: row.remarks || null,
     recordedBy: row.recordedBy
       ? { id: row.recordedBy.id, displayName: `${row.recordedBy.firstName || ""} ${row.recordedBy.lastName || ""}`.trim() }
@@ -155,6 +156,7 @@ export async function recordDelivery(prisma, opts) {
         status: fullyDelivered ? OrgDeliveryStatus.COMPLETE : OrgDeliveryStatus.PARTIAL,
         deliveryDate: opts.deliveryDate ? new Date(opts.deliveryDate) : new Date(),
         recordedByOrgUserId: opts.actorOrgUserId,
+        deliveryAddress: order.deliveryAddress || null,
         remarks: typeof opts.remarks === "string" ? opts.remarks.trim() || null : null,
         lines: { create: lineRows },
       },

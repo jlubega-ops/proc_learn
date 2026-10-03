@@ -204,6 +204,8 @@ export function buildForm5PartII(body = {}, ctx = {}) {
     methodJustification: trimOrNull(body.methodJustification) || "",
     shortlistedProviders: trimOrNull(body.shortlistedProviders) || "",
     shortlistJustification: trimOrNull(body.shortlistJustification) || "",
+    shortlist: Array.isArray(ctx.shortlist) ? ctx.shortlist : [],
+    shortlistValidatedAt: ctx.shortlistValidatedAt || null,
     biddingDocumentPreparers: trimOrNull(body.biddingDocumentPreparers) || "",
     evaluationCommitteeNominees: trimOrNull(body.evaluationCommitteeNominees) || "",
     evaluationCommitteeJustification:

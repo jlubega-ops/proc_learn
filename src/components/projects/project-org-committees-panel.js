@@ -69,7 +69,7 @@ export function ProjectOrgCommitteesPanel({ projectId, readOnly = false }) {
     committeeId: "",
     orgUserId: "",
     committeeRole: "MEMBER",
-    startDate: "",
+    startDate: format(new Date(), "yyyy-MM-dd"),
   });
   const [memberFieldErrors, setMemberFieldErrors] = useState(
     /** @type {Record<string, string>} */ ({}),
@@ -429,24 +429,14 @@ export function ProjectOrgCommitteesPanel({ projectId, readOnly = false }) {
 
   return (
     <div className="space-y-4">
-      <p className="text-sm text-zinc-600 dark:text-zinc-400">
-        Create committees, then <strong>Add seat</strong> for people who already exist under Users.
-        Their organisation role stays the same; they use <strong>Switch committee context</strong> in
-        the account menu when acting as chair, member, or secretary. Deleting a committee or
-        unassigning a seat only removes the seat — not the organisation user.
-      </p>
       {!readOnly ? (
         <Paper variant="outlined" sx={{ p: 2, ...adminOutlinedTableContainerSx }}>
           <Typography variant="subtitle1" sx={{ fontWeight: 600, mb: 2 }}>
             Create committee
           </Typography>
-          <Typography variant="body2" sx={{ ...adminMutedTextSx, mb: 2 }}>
-            Choose a type — that becomes the committee name (e.g. Evaluation Committee). One of each
-            type per organisation.
-          </Typography>
           {availableCreateTypes.length === 0 ? (
             <Typography variant="body2" sx={adminMutedTextSx}>
-              All committee types already exist. Edit or delete one if you need to change it.
+              All committee types exist.
             </Typography>
           ) : (
             <form className="grid gap-3 sm:grid-cols-2" onSubmit={createCommittee} noValidate>
@@ -490,9 +480,6 @@ export function ProjectOrgCommitteesPanel({ projectId, readOnly = false }) {
         <Paper variant="outlined" sx={{ p: 2, ...adminOutlinedTableContainerSx }}>
           <Typography variant="subtitle1" sx={{ fontWeight: 600, mb: 2 }}>
             Add seat
-          </Typography>
-          <Typography variant="body2" sx={{ ...adminMutedTextSx, mb: 1 }}>
-            Pick an existing organisation user and the seat they hold on this committee.
           </Typography>
           {selectedCommittee ? (
             <Typography variant="body2" sx={{ ...adminMutedTextSx, mb: 2 }}>

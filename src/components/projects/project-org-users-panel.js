@@ -344,32 +344,18 @@ export function ProjectOrgUsersPanel({ projectId }) {
 
       {roles.length === 0 ? (
         <Typography variant="body2" sx={{ ...adminMutedTextSx, mb: 2 }}>
-          No assignable roles are available yet. Ask system admin to add active
-          project roles first.
+          No roles available yet.
         </Typography>
       ) : null}
 
       {departments.length === 0 ? (
         <Typography variant="body2" sx={{ ...adminMutedTextSx, mb: 2 }}>
-          Create at least one active department before adding organisation
-          users.
+          Create a department first.
         </Typography>
       ) : null}
 
       <Typography variant="body2" sx={{ ...adminMutedTextSx, mb: 2 }}>
-        Click a row or use the view icon to see full account details. Login emails are
-        unique organisation addresses on @org.learn (never Gmail), auto-generated in
-        lowercase with this project&apos;s code
-        {projectCode ? (
-          <>
-            {" "}
-            (<span className="font-semibold">{String(projectCode).toLowerCase()}</span>)
-          </>
-        ) : null}
-        . Exact duplicate full names are rejected — add a middle name if two people share
-        the same name. Password for all learning users is{" "}
-        <span className="font-semibold">password123</span>. Your project Admin account is
-        listed first and cannot be edited here.
+        Password for all users: <span className="font-semibold">password123</span>
       </Typography>
 
       <Box sx={{ position: "relative" }}>
@@ -690,8 +676,7 @@ function OrgUserDetailsDialog({ user, projectCode = "", onClose, onEdit }) {
         </dl>
         {user.isProjectAdmin ? (
           <Typography variant="body2" sx={{ ...adminMutedTextSx, mt: 2 }}>
-            This is your project Admin account. It is synced from your student profile and
-            cannot be edited here.
+            Your Admin account — not editable.
           </Typography>
         ) : null}
       </DialogContent>
@@ -807,15 +792,11 @@ function OrgUserFormDialog({
               value={savedUser.loginEmail || savedUser.username}
               fullWidth
               disabled
-              helperText="Auto-generated on create. Use this to sign in (password123)."
               sx={themedTextFieldSx}
             />
           ) : isCreate ? (
-            <Typography variant="body2" className="sm:col-span-2" sx={adminMutedTextSx}>
-              Login email is generated automatically as a unique @org.learn address (never
-              Gmail) from the name and project code. Exact duplicate full names are rejected —
-              add a middle name if needed. You can copy the login email from the user list
-              afterward.
+            <Typography variant="body2" sx={adminMutedTextSx}>
+              Login email is generated automatically.
             </Typography>
           ) : null}
           <FormControl

@@ -14,6 +14,8 @@ const ROLE_SHORT = {
   "User Department": "User Department",
   "Head PDU": "Head PDU",
   "Contracts Committee": "Contracts Committee",
+  "Evaluation Committee": "Evaluation Committee",
+  "Inspection/Acceptance Committee": "Inspection Committee",
 };
 
 /**

@@ -9,6 +9,9 @@ import {
 import { loadProcurementDomainTimeline } from "@/lib/projects/procurement-timeline";
 import { evaluateClosureReadiness } from "@/lib/projects/procurement-closure";
 import { healMissingStepTasks } from "@/lib/projects/workflow-engine";
+import { checkActingModeForTask, getActiveCommittee } from "@/lib/projects/committee-context";
+import { loadProcurementWorkflowProgress } from "@/lib/projects/procurement-workflow-progress";
+import { procurementSectionAccess } from "@/lib/projects/procurement-section-access";
 
 export const runtime = "nodejs";
 
@@ -58,7 +61,12 @@ export async function GET(_request, context) {
 
   /** @type {any} */
   let pendingTask = null;
+  /** @type {{ title: string; message: string } | null} */
+  let blockedTask = null;
+  /** @type {any} */
+  let activeCommittee = null;
   if (auth.type === "org") {
+    activeCommittee = await getActiveCommittee(prisma, auth.orgUser.id);
     pendingTask = await prisma.projectOrgWorkflowTask.findFirst({
       where: {
         projectId,
@@ -76,7 +84,16 @@ export async function GET(_request, context) {
         processFlowItem: { select: { actionKey: true } },
       },
     });
+    if (pendingTask) {
+      const mode = checkActingModeForTask(pendingTask, activeCommittee);
+      if (!mode.ok) {
+        blockedTask = { title: pendingTask.title, message: mode.error };
+        pendingTask = null;
+      }
+    }
   }
+
+  const workflowProgress = await loadProcurementWorkflowProgress(prisma, projectId, procurementId);
 
   const domainTimeline = await loadProcurementDomainTimeline(prisma, {
     projectId,
@@ -105,6 +122,20 @@ export async function GET(_request, context) {
           actionKey: pendingTask.processFlowItem?.actionKey || null,
         }
       : null,
+    blockedTask,
+    workflowProgress,
+    viewer:
+      auth.type === "org"
+        ? {
+            roleName: auth.orgUser.projectOrgRole?.name || null,
+            committeeType: activeCommittee?.committeeType || null,
+            committeeName: activeCommittee?.name || null,
+            sections: procurementSectionAccess({
+              roleName: auth.orgUser.projectOrgRole?.name || null,
+              committeeType: activeCommittee?.committeeType || null,
+            }),
+          }
+        : null,
     closure,
   });
 }

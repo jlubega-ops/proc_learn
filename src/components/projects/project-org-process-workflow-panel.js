@@ -1,52 +1,35 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import Accordion from "@mui/material/Accordion";
 import AccordionDetails from "@mui/material/AccordionDetails";
 import AccordionSummary from "@mui/material/AccordionSummary";
+import Alert from "@mui/material/Alert";
 import Box from "@mui/material/Box";
 import Button from "@mui/material/Button";
 import Chip from "@mui/material/Chip";
 import CircularProgress from "@mui/material/CircularProgress";
-import Dialog from "@mui/material/Dialog";
-import DialogActions from "@mui/material/DialogActions";
-import DialogContent from "@mui/material/DialogContent";
-import DialogTitle from "@mui/material/DialogTitle";
 import Paper from "@mui/material/Paper";
+import Switch from "@mui/material/Switch";
 import Table from "@mui/material/Table";
 import TableBody from "@mui/material/TableBody";
 import TableCell from "@mui/material/TableCell";
 import TableContainer from "@mui/material/TableContainer";
 import TableHead from "@mui/material/TableHead";
 import TableRow from "@mui/material/TableRow";
+import Tooltip from "@mui/material/Tooltip";
 import Typography from "@mui/material/Typography";
-import Alert from "@mui/material/Alert";
-import AddRounded from "@mui/icons-material/AddRounded";
-import CheckCircleRounded from "@mui/icons-material/CheckCircleRounded";
-import DeleteOutlineRounded from "@mui/icons-material/DeleteOutlineRounded";
 import ExpandMoreRounded from "@mui/icons-material/ExpandMoreRounded";
 import RefreshRounded from "@mui/icons-material/RefreshRounded";
-import { format, parseISO } from "date-fns";
 import { useToast } from "@/components/providers/toast-provider";
 import {
   adminCenteredLoadingBoxSx,
-  adminDialogPaperSx,
   adminLoadingSpinnerSx,
   adminMutedTextSx,
   adminOutlinedTableContainerSx,
   adminTableRefetchOverlaySx,
   adminTableSx,
 } from "@/lib/admin-mui-surfaces";
-
-/**
- * @param {unknown} value
- */
-function fmtDate(value) {
-  if (!value) return "—";
-  const d = typeof value === "string" ? parseISO(value) : new Date(value);
-  if (Number.isNaN(d.getTime())) return "—";
-  return format(d, "MMM d, yyyy");
-}
 
 /**
  * @param {{ items: any[]; loading?: boolean }} p
@@ -75,7 +58,7 @@ function ProcessStepsTable({ items, loading = false }) {
             <TableRow>
               <TableCell colSpan={3} align="center" sx={{ py: 3 }}>
                 <Typography variant="body2" sx={adminMutedTextSx}>
-                  This process has no steps defined yet.
+                  No steps yet.
                 </Typography>
               </TableCell>
             </TableRow>
@@ -108,17 +91,10 @@ export function ProjectOrgProcessWorkflowPanel({ projectId }) {
   const [catalogue, setCatalogue] = useState(/** @type {any[]} */ ([]));
   const [restrictedByExaminer, setRestrictedByExaminer] = useState(false);
 
-  const [expandedCatalogueId, setExpandedCatalogueId] = useState(
-    /** @type {string | false} */ (false),
-  );
-  const [expandedAdoptedId, setExpandedAdoptedId] = useState(/** @type {string | false} */ (false));
-
+  const [expandedId, setExpandedId] = useState(/** @type {string | false} */ (false));
   const [itemsCache, setItemsCache] = useState(/** @type {Record<string, any[]>} */ ({}));
   const [itemsLoadingId, setItemsLoadingId] = useState(/** @type {string | null} */ (null));
-
-  const [adoptBusyId, setAdoptBusyId] = useState(/** @type {string | null} */ (null));
-  const [removeRow, setRemoveRow] = useState(/** @type {any} */ (null));
-  const [removeBusy, setRemoveBusy] = useState(false);
+  const [busyId, setBusyId] = useState(/** @type {string | null} */ (null));
 
   const load = useCallback(
     async (opts = /** @type {{ silent?: boolean }} */ ({})) => {
@@ -137,20 +113,19 @@ export function ProjectOrgProcessWorkflowPanel({ projectId }) {
           });
           return;
         }
-        setAdopted(Array.isArray(data.adopted) ? data.adopted : []);
-        setCatalogue(Array.isArray(data.catalogue) ? data.catalogue : []);
+        const nextAdopted = Array.isArray(data.adopted) ? data.adopted : [];
+        const nextCatalogue = Array.isArray(data.catalogue) ? data.catalogue : [];
+        setAdopted(nextAdopted);
+        setCatalogue(nextCatalogue);
         setRestrictedByExaminer(Boolean(data.restrictedByExaminer));
         if (typeof data.canAdopt === "boolean") setCanAdopt(data.canAdopt);
 
-        // Prefill step cache from embedded items (avoids a fragile second fetch).
         const nextCache = {};
-        for (const row of Array.isArray(data.catalogue) ? data.catalogue : []) {
+        for (const row of nextCatalogue) {
           if (row?.id && Array.isArray(row.items)) nextCache[row.id] = row.items;
         }
-        for (const row of Array.isArray(data.adopted) ? data.adopted : []) {
-          if (row?.processFlowId && Array.isArray(row.items)) {
-            nextCache[row.processFlowId] = row.items;
-          }
+        for (const row of nextAdopted) {
+          if (row?.processFlowId && Array.isArray(row.items)) nextCache[row.processFlowId] = row.items;
         }
         if (Object.keys(nextCache).length > 0) {
           setItemsCache((prev) => ({ ...prev, ...nextCache }));
@@ -181,8 +156,7 @@ export function ProjectOrgProcessWorkflowPanel({ projectId }) {
           });
           return;
         }
-        const items = Array.isArray(data.items) ? data.items : [];
-        setItemsCache((prev) => ({ ...prev, [processFlowId]: items }));
+        setItemsCache((prev) => ({ ...prev, [processFlowId]: Array.isArray(data.items) ? data.items : [] }));
       } finally {
         setItemsLoadingId((current) => (current === processFlowId ? null : current));
       }
@@ -195,108 +169,72 @@ export function ProjectOrgProcessWorkflowPanel({ projectId }) {
   }, [load]);
 
   useEffect(() => {
-    if (expandedCatalogueId && typeof expandedCatalogueId === "string" && !itemsCache[expandedCatalogueId]) {
-      void loadItems(expandedCatalogueId);
+    if (typeof expandedId === "string" && !itemsCache[expandedId]) {
+      void loadItems(expandedId);
     }
-  }, [expandedCatalogueId, itemsCache, loadItems]);
+  }, [expandedId, itemsCache, loadItems]);
 
-  useEffect(() => {
-    if (expandedAdoptedId && typeof expandedAdoptedId === "string") {
-      const row = adopted.find((r) => r.id === expandedAdoptedId);
-      if (row?.processFlowId && !itemsCache[row.processFlowId]) {
-        void loadItems(row.processFlowId);
-      }
-    }
-  }, [adopted, expandedAdoptedId, itemsCache, loadItems]);
-
-  async function adoptProcess(processRow) {
-    if (!processRow?.id || processRow.isAdopted) return;
-    setAdoptBusyId(processRow.id);
-    try {
-      const res = await fetch(`/api/projects/${projectId}/org-process-flow-adoptions`, {
-        method: "POST",
-        credentials: "include",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ processFlowId: processRow.id }),
+  const rows = useMemo(() => {
+    const adoptionByFlow = new Map(adopted.map((a) => [a.processFlowId, a]));
+    const list = catalogue.map((c) => ({
+      processFlowId: c.id,
+      name: c.name,
+      description: c.description,
+      triggerKey: c.triggerKey,
+      code: c.code,
+      itemCount: c.itemCount,
+      items: c.items,
+      adoption: adoptionByFlow.get(c.id) || null,
+    }));
+    const listed = new Set(list.map((r) => r.processFlowId));
+    for (const a of adopted) {
+      if (listed.has(a.processFlowId)) continue;
+      list.push({
+        processFlowId: a.processFlowId,
+        name: a.name,
+        description: a.description,
+        triggerKey: a.triggerKey,
+        code: a.code,
+        itemCount: a.itemCount,
+        items: a.items,
+        adoption: a,
       });
+    }
+    return list;
+  }, [adopted, catalogue]);
+
+  async function setEnabled(row, enable) {
+    setBusyId(row.processFlowId);
+    try {
+      const res = row.adoption
+        ? await fetch(`/api/projects/${projectId}/org-process-flow-adoptions/${row.adoption.id}`, {
+            method: "PATCH",
+            credentials: "include",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ isActive: enable }),
+          })
+        : await fetch(`/api/projects/${projectId}/org-process-flow-adoptions`, {
+            method: "POST",
+            credentials: "include",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ processFlowId: row.processFlowId }),
+          });
       const data = await res.json().catch(() => ({}));
       if (!res.ok) {
         showToast({
-          message: typeof data.error === "string" ? data.error : "Could not activate process.",
-          severity: "error",
-        });
-        return;
-      }
-      showToast({ message: "Process activated for your organisation.", severity: "success" });
-      await load({ silent: true });
-    } finally {
-      setAdoptBusyId(null);
-    }
-  }
-
-  async function setAdoptionActive(row, isActive) {
-    if (!row?.id) return;
-    setAdoptBusyId(row.id);
-    try {
-      const res = await fetch(`/api/projects/${projectId}/org-process-flow-adoptions/${row.id}`, {
-        method: "PATCH",
-        credentials: "include",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ isActive }),
-      });
-      const data = await res.json().catch(() => ({}));
-      if (!res.ok) {
-        showToast({
-          message: typeof data.error === "string" ? data.error : "Could not update process status.",
+          message: typeof data.error === "string" ? data.error : "Could not update process.",
           severity: "error",
         });
         return;
       }
       showToast({
-        message: isActive ? "Process activated." : "Process deactivated.",
+        message: enable ? `${row.name} enabled.` : `${row.name} disabled.`,
         severity: "success",
       });
       await load({ silent: true });
     } finally {
-      setAdoptBusyId(null);
+      setBusyId(null);
     }
-  }
-
-  async function removeAdoption() {
-    if (!removeRow?.id) return;
-    setRemoveBusy(true);
-    try {
-      const res = await fetch(
-        `/api/projects/${projectId}/org-process-flow-adoptions/${removeRow.id}`,
-        { method: "DELETE", credentials: "include" },
-      );
-      const data = await res.json().catch(() => ({}));
-      if (!res.ok) {
-        showToast({
-          message: typeof data.error === "string" ? data.error : "Could not remove process.",
-          severity: "error",
-        });
-        return;
-      }
-      showToast({ message: "Process removed from your organisation.", severity: "success" });
-      if (expandedAdoptedId === removeRow.id) setExpandedAdoptedId(false);
-      setRemoveRow(null);
-      await load({ silent: true });
-    } finally {
-      setRemoveBusy(false);
-    }
-  }
-
-  function statusChip(row) {
-    if (row?.isAdopted && row?.isActive !== false) {
-      return (
-        <Chip size="small" color="success" icon={<CheckCircleRounded />} label="Active" />
-      );
-    }
-    if (row?.isAdopted && row?.isActive === false) {
-      return <Chip size="small" color="warning" label="Inactive" />;
-    }
-    return <Chip size="small" color="default" label="Not activated" />;
   }
 
   if (loading) {
@@ -308,322 +246,143 @@ export function ProjectOrgProcessWorkflowPanel({ projectId }) {
   }
 
   return (
-    <div className="space-y-4">
-      <Paper
-        variant="outlined"
-        sx={{ p: { xs: 2, sm: 3 }, borderRadius: 2, ...adminOutlinedTableContainerSx }}
-      >
-        <Typography variant="subtitle1" sx={{ fontWeight: 600, mb: 1 }}>
+    <Paper
+      variant="outlined"
+      sx={{ p: { xs: 2, sm: 3 }, borderRadius: 2, ...adminOutlinedTableContainerSx, position: "relative" }}
+    >
+      <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+        <Typography variant="subtitle1" sx={{ fontWeight: 600 }}>
           Organisation processes
         </Typography>
-        <Typography variant="body2" sx={{ ...adminMutedTextSx, mb: 2 }}>
-          Processes activated for this organisation. Expand a process to view its steps
-          {canAdopt ? ", activate/deactivate it, or remove it" : ""}.
-        </Typography>
+        <Button
+          variant="outlined"
+          startIcon={refetching ? <CircularProgress size={16} /> : <RefreshRounded />}
+          disabled={refetching}
+          onClick={() => load({ silent: true })}
+          className="w-full sm:w-auto"
+          title="Refresh processes"
+        >
+          Refresh
+        </Button>
+      </div>
 
-        {adopted.length === 0 ? (
-          <Typography variant="body2" sx={adminMutedTextSx}>
-            No processes activated yet. Choose one from the available list below.
-          </Typography>
-        ) : (
-          <Box sx={{ display: "flex", flexDirection: "column", gap: 1 }}>
-            {adopted.map((row) => {
-              const expanded = expandedAdoptedId === row.id;
-              const items = itemsCache[row.processFlowId] || row.items || [];
-              const stepsLoading = itemsLoadingId === row.processFlowId;
-              return (
-                <Accordion
-                  key={row.id}
-                  expanded={expanded}
-                  onChange={(_e, isExpanded) => setExpandedAdoptedId(isExpanded ? row.id : false)}
-                  disableGutters
-                  elevation={0}
+      {restrictedByExaminer ? (
+        <Alert severity="info" className="mb-3">
+          Limited to processes allowed for this project.
+        </Alert>
+      ) : null}
+
+      {rows.length === 0 ? (
+        <Typography variant="body2" sx={adminMutedTextSx}>
+          No processes yet.
+        </Typography>
+      ) : (
+        <Box sx={{ display: "flex", flexDirection: "column", gap: 1 }}>
+          {rows.map((row) => {
+            const enabled = Boolean(row.adoption) && row.adoption.isActive !== false;
+            const busy = busyId === row.processFlowId;
+            const wired = Boolean(row.triggerKey);
+            const items = itemsCache[row.processFlowId] || row.items || [];
+            const stepsLoading = itemsLoadingId === row.processFlowId;
+            const switchDisabled = !canAdopt || busy || refetching || (!enabled && !wired);
+            const switchTitle = !canAdopt
+              ? "View only"
+              : !enabled && !wired
+                ? "Not linked to a workflow event"
+                : enabled
+                  ? `Disable ${row.name}`
+                  : `Enable ${row.name}`;
+
+            return (
+              <Accordion
+                key={row.processFlowId}
+                expanded={expandedId === row.processFlowId}
+                onChange={(_e, isExpanded) => setExpandedId(isExpanded ? row.processFlowId : false)}
+                disableGutters
+                elevation={0}
+                sx={{
+                  border: "1px solid",
+                  borderColor: "divider",
+                  borderRadius: 1,
+                  "&:before": { display: "none" },
+                  bgcolor: "background.paper",
+                }}
+              >
+                <AccordionSummary
+                  expandIcon={<ExpandMoreRounded />}
+                  aria-controls={`process-${row.processFlowId}`}
+                  id={`process-header-${row.processFlowId}`}
                   sx={{
-                    border: "1px solid",
-                    borderColor: "divider",
-                    borderRadius: 1,
-                    "&:before": { display: "none" },
-                    bgcolor: "background.paper",
+                    flexDirection: "row-reverse",
+                    gap: 1,
+                    "& .MuiAccordionSummary-content": { alignItems: "center", gap: 1, minWidth: 0 },
                   }}
                 >
-                  <AccordionSummary
-                    expandIcon={<ExpandMoreRounded />}
-                    aria-controls={`adopted-process-${row.id}`}
-                    id={`adopted-process-header-${row.id}`}
-                    sx={{ "& .MuiAccordionSummary-content": { alignItems: "center", gap: 1, flexWrap: "wrap" } }}
-                  >
-                    <Typography component="span" sx={{ fontWeight: 600, flex: "1 1 auto", minWidth: 0 }}>
+                  <Box sx={{ flex: "1 1 auto", minWidth: 0 }}>
+                    <Typography component="span" sx={{ fontWeight: 600, display: "block" }} noWrap>
                       {row.name}
                     </Typography>
+                    <Typography component="span" variant="caption" sx={adminMutedTextSx}>
+                      {row.itemCount ?? items.length} steps
+                    </Typography>
+                  </Box>
+                  {!wired ? <Chip size="small" color="warning" label="Not wired" /> : null}
+                  <Box
+                    sx={{ display: "flex", alignItems: "center", flexShrink: 0 }}
+                    onClick={(e) => e.stopPropagation()}
+                    onFocus={(e) => e.stopPropagation()}
+                  >
                     <Typography
                       component="span"
                       variant="body2"
-                      sx={{ ...adminMutedTextSx, display: { xs: "none", md: "inline" } }}
+                      sx={{
+                        fontWeight: 600,
+                        color: enabled ? "success.main" : "error.main",
+                        display: { xs: "none", sm: "inline" },
+                      }}
                     >
-                      {row.triggerKey
-                        ? `Engine: ${row.triggerKey}`
-                        : row.code
-                          ? `Code: ${row.code}`
-                          : "No engine event"}
-                      {` · ${row.itemCount ?? 0} steps`}
+                      {enabled ? "Enabled" : "Disabled"}
                     </Typography>
-                    {row.triggerKey ? (
-                      <Chip size="small" color="info" label={row.triggerKey} />
+                    {busy ? (
+                      <CircularProgress size={18} sx={{ mx: 1.5 }} aria-label="Updating" />
                     ) : (
-                      <Chip size="small" color="default" label="Not wired" />
-                    )}
-                    <Chip
-                      size="small"
-                      color={row.isActive === false ? "warning" : "success"}
-                      icon={row.isActive === false ? undefined : <CheckCircleRounded />}
-                      label={row.isActive === false ? "Inactive" : "Active"}
-                    />
-                  </AccordionSummary>
-                  <AccordionDetails id={`adopted-process-${row.id}`} sx={{ pt: 0 }}>
-                    {row.description ? (
-                      <Typography variant="body2" sx={{ ...adminMutedTextSx, mb: 1 }}>
-                        {row.description}
-                      </Typography>
-                    ) : null}
-                    <Typography variant="body2" sx={{ mb: 2 }}>
-                      <strong>Engine event:</strong> {row.triggerKey || "—"}
-                      {row.code ? (
-                        <>
-                          {" "}
-                          · <strong>Code:</strong> {row.code}
-                        </>
-                      ) : null}
-                    </Typography>
-                    <ProcessStepsTable items={items} loading={stepsLoading && items.length === 0} />
-                    {canAdopt ? (
-                      <Box
-                        sx={{
-                          mt: 2,
-                          display: "flex",
-                          flexWrap: "wrap",
-                          gap: 1,
-                          justifyContent: "flex-end",
-                        }}
-                      >
-                        <Button
-                          variant="outlined"
-                          color={row.isActive === false ? "primary" : "warning"}
-                          disabled={adoptBusyId === row.id}
-                          onClick={() => setAdoptionActive(row, row.isActive === false)}
-                          className="w-full sm:w-auto"
-                          title={
-                            row.isActive === false
-                              ? `Activate ${row.name}`
-                              : `Deactivate ${row.name}`
-                          }
-                        >
-                          {adoptBusyId === row.id
-                            ? "Updating…"
-                            : row.isActive === false
-                              ? "Activate"
-                              : "Deactivate"}
-                        </Button>
-                        <Button
-                          variant="outlined"
-                          color="error"
-                          startIcon={<DeleteOutlineRounded />}
-                          onClick={() => setRemoveRow(row)}
-                          className="w-full sm:w-auto"
-                          title={`Remove ${row.name}`}
-                        >
-                          Remove process
-                        </Button>
-                      </Box>
-                    ) : null}
-                  </AccordionDetails>
-                </Accordion>
-              );
-            })}
-          </Box>
-        )}
-      </Paper>
-
-      <Paper
-        variant="outlined"
-        sx={{ p: { xs: 2, sm: 3 }, borderRadius: 2, ...adminOutlinedTableContainerSx, position: "relative" }}
-      >
-        <Typography variant="subtitle1" sx={{ fontWeight: 600, mb: 1 }}>
-          Available processes
-        </Typography>
-        <Typography variant="body2" sx={{ ...adminMutedTextSx, mb: 2 }}>
-          {canAdopt
-            ? "Expand a process to review its steps and activate it for your organisation."
-            : "Expand a process to view its steps."}
-        </Typography>
-        {restrictedByExaminer ? (
-          <Alert severity="info" className="mb-3">
-            Only processes allowed for this academic project are listed. You still activate each one
-            here before staff can use it.
-          </Alert>
-        ) : null}
-
-        <div className="mb-3 flex flex-wrap gap-2">
-          <Button
-            variant="outlined"
-            startIcon={refetching ? <CircularProgress size={16} /> : <RefreshRounded />}
-            disabled={refetching}
-            onClick={() => load({ silent: true })}
-            className="w-full sm:w-auto"
-            title="Refresh processes"
-          >
-            Refresh
-          </Button>
-        </div>
-
-        {catalogue.length === 0 ? (
-          <Typography variant="body2" sx={adminMutedTextSx}>
-            No processes are available yet. System administrators must add process flows under
-            Project settings.
-          </Typography>
-        ) : (
-          <Box sx={{ display: "flex", flexDirection: "column", gap: 1 }}>
-            {catalogue.map((row) => {
-              const expanded = expandedCatalogueId === row.id;
-              const items = itemsCache[row.id] || row.items || [];
-              const stepsLoading = itemsLoadingId === row.id;
-              const adoptBusy = adoptBusyId === row.id;
-              return (
-                <Accordion
-                  key={row.id}
-                  expanded={expanded}
-                  onChange={(_e, isExpanded) => setExpandedCatalogueId(isExpanded ? row.id : false)}
-                  disableGutters
-                  elevation={0}
-                  sx={{
-                    border: "1px solid",
-                    borderColor: "divider",
-                    borderRadius: 1,
-                    "&:before": { display: "none" },
-                    bgcolor: "background.paper",
-                  }}
-                >
-                  <AccordionSummary
-                    expandIcon={<ExpandMoreRounded />}
-                    aria-controls={`catalogue-process-${row.id}`}
-                    id={`catalogue-process-header-${row.id}`}
-                    sx={{ "& .MuiAccordionSummary-content": { alignItems: "center", gap: 1, flexWrap: "wrap" } }}
-                  >
-                    <Typography component="span" sx={{ fontWeight: 500, flex: "1 1 auto", minWidth: 0 }}>
-                      {row.name}
-                    </Typography>
-                    <Typography component="span" variant="body2" sx={{ ...adminMutedTextSx, display: { xs: "none", sm: "inline" } }}>
-                      {row.itemCount ?? 0} steps
-                      {row.triggerKey ? ` · ${row.triggerKey}` : row.code ? ` · ${row.code}` : " · legacy"}
-                    </Typography>
-                    {row.triggerKey ? (
-                      <Chip size="small" color="info" label="Engine" />
-                    ) : (
-                      <Chip size="small" color="default" label="Not wired" />
-                    )}
-                    {statusChip(row)}
-                  </AccordionSummary>
-                  <AccordionDetails id={`catalogue-process-${row.id}`} sx={{ pt: 0 }}>
-                    {row.description ? (
-                      <Typography variant="body2" sx={{ ...adminMutedTextSx, mb: 2 }}>
-                        {row.description}
-                      </Typography>
-                    ) : null}
-                    {row.triggerKey ? (
-                      <Typography variant="body2" sx={{ mb: 2 }}>
-                        Budget/plan/requisition submit uses this when trigger is{" "}
-                        <strong>{row.triggerKey}</strong>
-                        {row.code ? ` (code ${row.code})` : ""}.
-                      </Typography>
-                    ) : (
-                      <Typography variant="body2" sx={{ mb: 2, color: "error.main" }}>
-                        Legacy catalogue row — activating this will not drive budget/plan/requisition
-                        submit. Prefer the engine template with the same name that shows trigger{" "}
-                        <strong>BUDGET_SUBMITTED</strong> / <strong>PLANNING_SUBMITTED</strong> /{" "}
-                        <strong>REQUISITION_SUBMITTED</strong>.
-                      </Typography>
-                    )}
-                    <ProcessStepsTable items={items} loading={stepsLoading && items.length === 0} />
-                    {canAdopt ? (
-                      <Box sx={{ mt: 2, display: "flex", justifyContent: "flex-end" }}>
-                        {row.isAdopted && row.isActive !== false ? (
-                          <Chip
+                      <Tooltip title={switchTitle}>
+                        <span>
+                          <Switch
+                            checked={enabled}
+                            onChange={(e) => void setEnabled(row, e.target.checked)}
+                            disabled={switchDisabled}
                             color="success"
-                            icon={<CheckCircleRounded />}
-                            label="Already activated"
+                            slotProps={{ input: { "aria-label": `${row.name}: ${enabled ? "enabled" : "disabled"}` } }}
                           />
-                        ) : row.isAdopted && row.isActive === false ? (
-                          <Button
-                            variant="contained"
-                            disabled={adoptBusy || refetching || !row.triggerKey}
-                            onClick={() => {
-                              const adoption = adopted.find((a) => a.processFlowId === row.id);
-                              if (adoption) void setAdoptionActive(adoption, true);
-                            }}
-                            className="w-full sm:w-auto"
-                            title={`Activate ${row.name}`}
-                          >
-                            {adoptBusy ? "Activating…" : "Activate process"}
-                          </Button>
-                        ) : (
-                          <Button
-                            variant="contained"
-                            startIcon={
-                              adoptBusy ? (
-                                <CircularProgress size={16} color="inherit" />
-                              ) : (
-                                <AddRounded />
-                              )
-                            }
-                            disabled={adoptBusy || refetching || !row.triggerKey}
-                            onClick={() => void adoptProcess(row)}
-                            className="w-full sm:w-auto"
-                            title={
-                              row.triggerKey
-                                ? `Activate ${row.name} for this organisation`
-                                : "Legacy process is not wired to submit triggers"
-                            }
-                          >
-                            {adoptBusy ? "Activating…" : "Activate process"}
-                          </Button>
-                        )}
-                      </Box>
+                        </span>
+                      </Tooltip>
+                    )}
+                  </Box>
+                </AccordionSummary>
+                <AccordionDetails id={`process-${row.processFlowId}`} sx={{ pt: 0 }}>
+                  {row.description ? (
+                    <Typography variant="body2" sx={{ ...adminMutedTextSx, mb: 1 }}>
+                      {row.description}
+                    </Typography>
+                  ) : null}
+                  <Typography variant="body2" sx={{ mb: 2 }}>
+                    <strong>Engine event:</strong> {row.triggerKey || "—"}
+                    {row.code ? (
+                      <>
+                        {" "}
+                        · <strong>Code:</strong> {row.code}
+                      </>
                     ) : null}
-                  </AccordionDetails>
-                </Accordion>
-              );
-            })}
-          </Box>
-        )}
-        {refetching ? <Box sx={adminTableRefetchOverlaySx} aria-hidden /> : null}
-      </Paper>
-
-      <Dialog
-        open={Boolean(removeRow)}
-        onClose={() => !removeBusy && setRemoveRow(null)}
-        slotProps={{ paper: { sx: adminDialogPaperSx } }}
-      >
-        <DialogTitle>Remove process?</DialogTitle>
-        <DialogContent>
-          <Typography variant="body2">
-            Remove <strong>{removeRow?.name}</strong> from your organisation? You can activate it
-            again later from the available list.
-          </Typography>
-        </DialogContent>
-        <DialogActions sx={{ px: 3, pb: 2 }}>
-          <Button onClick={() => setRemoveRow(null)} disabled={removeBusy}>
-            Cancel
-          </Button>
-          <Button
-            variant="contained"
-            color="error"
-            onClick={() => void removeAdoption()}
-            disabled={removeBusy}
-            startIcon={removeBusy ? <CircularProgress size={16} color="inherit" /> : null}
-          >
-            {removeBusy ? "Removing…" : "Remove"}
-          </Button>
-        </DialogActions>
-      </Dialog>
-    </div>
+                  </Typography>
+                  <ProcessStepsTable items={items} loading={stepsLoading && items.length === 0} />
+                </AccordionDetails>
+              </Accordion>
+            );
+          })}
+        </Box>
+      )}
+      {refetching ? <Box sx={adminTableRefetchOverlaySx} aria-hidden /> : null}
+    </Paper>
   );
 }

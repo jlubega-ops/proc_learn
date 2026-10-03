@@ -140,11 +140,11 @@ export function ExaminerStudentObservePanel({
     <div className={BRAND_PAGE_SHELL_CLASS}>
       <DashboardPageIntro
         hero
-        title={org?.name || `${s.displayName} Organization`}
+        title={org?.name || `${s.displayName} Organisation`}
         description={
-          academicProjectId
-            ? `Read-only report of ${s.displayName}’s organisation for this project. You cannot change their work.`
-            : `Read-only view of ${s.displayName}’s organisation. You can see every procurement stage, who acted, and what is still open. You cannot change their work.`
+          org?.displayName && org.displayName !== org.name
+            ? `Shown to the student as ${org.displayName} · read-only`
+            : "Read-only"
         }
       >
         <div className="mt-3 flex flex-wrap items-center gap-2">

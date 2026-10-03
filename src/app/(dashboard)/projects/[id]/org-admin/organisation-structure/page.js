@@ -3,6 +3,7 @@ import { prisma } from "@/lib/prisma";
 import { safeNextPath } from "@/lib/auth/safe-next-path";
 import { getProjectWorkspacePageContext } from "@/lib/projects/project-page-context";
 import { OrganisationStructurePanel } from "@/components/projects/organisation-structure-panel";
+import { DashboardPageIntro } from "@/components/layout/dashboard-page-intro";
 
 export default async function ProjectOrganisationStructurePage({ params }) {
   const p = await params;
@@ -26,26 +27,15 @@ export default async function ProjectOrganisationStructurePage({ params }) {
     notFound();
   }
 
-  const orgDisplayName =
-    String(project.organizationName || "").trim() || project.name;
-
   return (
     <div className="w-full space-y-4">
-      <div className="rounded-xl border border-[color:var(--border-subtle)] bg-[color:var(--surface-elevated)] p-4 sm:p-5">
-        <h1 className="text-lg font-semibold text-foreground sm:text-xl">
-          Organisation structure
-        </h1>
-        <p className="mt-2 text-sm text-zinc-600 dark:text-zinc-300">
-          {ctx.readOnly ? "View" : "Arrange"} how{" "}
-          <span className="font-semibold text-foreground">{orgDisplayName}</span> is organised
-          from top to bottom. Create units under Departments, then set parents and order here.
-        </p>
-      </div>
+      <DashboardPageIntro
+        title="Organisation structure"
+        description="Order departments and nest subunits."
+      />
 
       <OrganisationStructurePanel
         projectId={project.id}
-        organizationName={project.organizationName}
-        projectName={project.name}
         readOnly={ctx.readOnly}
         departmentsHref={`/projects/${project.id}/org-admin/departments`}
       />

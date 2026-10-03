@@ -24,6 +24,7 @@ import { StudentModeBanner } from "@/components/academic/student-mode-banner";
 import { getDashboardPageMeta } from "@/lib/dashboard-page-meta";
 import { DASHBOARD_MAIN_INNER_CLASS } from "@/lib/dashboard-content-width";
 import { PROJECT_ORG_ENTRY_ROLE_NAME } from "@/lib/project-org-role";
+import { PROCUREMENT_STAGE_PAGES } from "@/lib/projects/procurement-stage-pages";
 import {
   BRAND_NAV_ACTIVE_CLASS,
   BRAND_NAV_INACTIVE_CLASS,
@@ -77,6 +78,12 @@ function navItemIsActive(navPathname, searchParams, href) {
   // Dashboard home is exact-match only
   if (base === "/") {
     return navPathname === "/" || navPathname === "";
+  }
+
+  // "All procurements" stays active on a procurement's detail page but not on the stage sub-pages.
+  if (/\/procurements$/.test(base) && navPathname.startsWith(`${base}/`)) {
+    const next = navPathname.slice(base.length + 1).split("/")[0];
+    return !Object.hasOwn(PROCUREMENT_STAGE_PAGES, next);
   }
 
   if (navPathname === base) return true;

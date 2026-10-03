@@ -363,77 +363,47 @@ export const BASELINE_PROCESS_TEMPLATES = [
     code: PROCESS_FLOW_CODES.MICRO_PROCUREMENT,
     name: "Micro Procurement Process",
     description:
-      "Raise, verify, confirm budget, approve, issue a purchase instruction, then delivery, invoice, payment and closure for micro procurement.",
+      "Starts once the Contracts Committee approves MICRO: purchase instruction to one provider (confirms the supplier), delivery and user-department acceptance, invoice, payment and closure. The need, plan, funding and AO approval were already settled on the requisition.",
     triggerKey: WORKFLOW_TRIGGERS.MICRO_PROCUREMENT_STARTED,
     steps: [
       {
         stepNumber: 1,
-        taskDescription: "Raise Micro Procurement Request",
-        roleName: "User Department Officer",
-        actionKey: "SUBMIT",
-      },
-      {
-        stepNumber: 2,
-        taskDescription: "Verify Requirement",
-        roleName: "Head User Department",
-        actionKey: "APPROVE",
-      },
-      {
-        stepNumber: 3,
-        taskDescription: "Confirm Budget",
-        roleName: "Procurement Officer",
-        actionKey: "VERIFY",
-      },
-      {
-        stepNumber: 4,
-        taskDescription: "Approve Micro Procurement",
-        roleName: "Accounting Officer",
-        actionKey: "APPROVE",
-      },
-      {
-        stepNumber: 5,
         taskDescription: "Issue Purchase Instruction",
         roleName: "Procurement Officer",
         actionKey: "COMPLETE",
       },
       {
-        stepNumber: 6,
-        taskDescription: "Confirm Supplier",
-        roleName: "Procurement Officer",
-        actionKey: "COMPLETE",
-      },
-      {
-        stepNumber: 7,
+        stepNumber: 2,
         taskDescription: "Record Delivery/Receipt",
         roleName: "User Department Officer",
         actionKey: "COMPLETE",
       },
       {
-        stepNumber: 8,
+        stepNumber: 3,
         taskDescription: "Verify/Accept Delivery",
         roleName: "Head User Department",
         actionKey: "APPROVE",
       },
       {
-        stepNumber: 9,
+        stepNumber: 4,
         taskDescription: "Process Invoice",
         roleName: "Contracts Officer",
         actionKey: "VERIFY",
       },
       {
-        stepNumber: 10,
+        stepNumber: 5,
         taskDescription: "Approve Payment",
         roleName: "Accounting Officer",
         actionKey: "APPROVE",
       },
       {
-        stepNumber: 11,
+        stepNumber: 6,
         taskDescription: "Record Payment",
         roleName: "Finance/Budget Officer",
         actionKey: "COMPLETE",
       },
       {
-        stepNumber: 12,
+        stepNumber: 7,
         taskDescription: "Close Procurement",
         roleName: "Contracts Officer",
         actionKey: "COMPLETE",
@@ -462,7 +432,7 @@ export const BASELINE_PROCESS_TEMPLATES = [
       {
         stepNumber: 3,
         taskDescription: "Approve RFQ Documents",
-        roleName: "Contracts Officer",
+        roleName: "Contracts Committee",
         actionKey: "APPROVE",
       },
       {
@@ -498,25 +468,25 @@ export const BASELINE_PROCESS_TEMPLATES = [
       {
         stepNumber: 9,
         taskDescription: "Approve Evaluation Committee",
-        roleName: "Contracts Officer",
+        roleName: "Contracts Committee",
         actionKey: "APPROVE",
       },
       {
         stepNumber: 10,
         taskDescription: "Technical Evaluation",
-        roleName: "Contracts Officer",
+        roleName: "Evaluation Committee",
         actionKey: "COMPLETE",
       },
       {
         stepNumber: 11,
         taskDescription: "Financial Evaluation",
-        roleName: "Contracts Officer",
+        roleName: "Evaluation Committee",
         actionKey: "COMPLETE",
       },
       {
         stepNumber: 12,
         taskDescription: "Prepare Evaluation Report",
-        roleName: "Contracts Officer",
+        roleName: "Evaluation Committee",
         actionKey: "COMPLETE",
       },
       {
@@ -528,7 +498,7 @@ export const BASELINE_PROCESS_TEMPLATES = [
       {
         stepNumber: 14,
         taskDescription: "Approve Evaluation Report",
-        roleName: "Contracts Officer",
+        roleName: "Contracts Committee",
         actionKey: "APPROVE",
       },
       {
@@ -546,7 +516,7 @@ export const BASELINE_PROCESS_TEMPLATES = [
       {
         stepNumber: 17,
         taskDescription: "Approve Award",
-        roleName: "Accounting Officer",
+        roleName: "Contracts Committee",
         actionKey: "APPROVE",
       },
       {
@@ -651,7 +621,7 @@ export const BASELINE_PROCESS_TEMPLATES = [
       {
         stepNumber: 3,
         taskDescription: "Approve Tender Documents",
-        roleName: "Contracts Officer",
+        roleName: "Contracts Committee",
         actionKey: "APPROVE",
       },
       {
@@ -693,25 +663,25 @@ export const BASELINE_PROCESS_TEMPLATES = [
       {
         stepNumber: 10,
         taskDescription: "Approve Evaluation Committee",
-        roleName: "Contracts Officer",
+        roleName: "Contracts Committee",
         actionKey: "APPROVE",
       },
       {
         stepNumber: 11,
         taskDescription: "Technical Evaluation",
-        roleName: "Contracts Officer",
+        roleName: "Evaluation Committee",
         actionKey: "COMPLETE",
       },
       {
         stepNumber: 12,
         taskDescription: "Financial Evaluation",
-        roleName: "Contracts Officer",
+        roleName: "Evaluation Committee",
         actionKey: "COMPLETE",
       },
       {
         stepNumber: 13,
         taskDescription: "Prepare Evaluation Report",
-        roleName: "Contracts Officer",
+        roleName: "Evaluation Committee",
         actionKey: "COMPLETE",
       },
       {
@@ -723,13 +693,13 @@ export const BASELINE_PROCESS_TEMPLATES = [
       {
         stepNumber: 15,
         taskDescription: "Post-Qualification where applicable",
-        roleName: "Procurement Officer",
+        roleName: "Evaluation Committee",
         actionKey: "COMPLETE",
       },
       {
         stepNumber: 16,
         taskDescription: "Approve Evaluation/Recommendation",
-        roleName: "Contracts Officer",
+        roleName: "Contracts Committee",
         actionKey: "APPROVE",
       },
       {
@@ -741,7 +711,7 @@ export const BASELINE_PROCESS_TEMPLATES = [
       {
         stepNumber: 18,
         taskDescription: "Approve Award",
-        roleName: "Accounting Officer",
+        roleName: "Contracts Committee",
         actionKey: "APPROVE",
       },
       {
@@ -783,7 +753,7 @@ export const BASELINE_PROCESS_TEMPLATES = [
       {
         stepNumber: 25,
         taskDescription: "Inspection/Acceptance",
-        roleName: "Head User Department",
+        roleName: "Inspection/Acceptance Committee",
         actionKey: "APPROVE",
       },
       {
@@ -828,7 +798,7 @@ export const BASELINE_PROCESS_TEMPLATES = [
       {
         stepNumber: 1,
         taskDescription: "Approve Evaluation Report",
-        roleName: "Head PDU",
+        roleName: "Contracts Committee",
         actionKey: "APPROVE",
       },
     ],
@@ -843,7 +813,7 @@ export const BASELINE_PROCESS_TEMPLATES = [
       {
         stepNumber: 1,
         taskDescription: "Approve Post-Qualification Checklist",
-        roleName: "Head PDU",
+        roleName: "Contracts Committee",
         actionKey: "APPROVE",
       },
     ],

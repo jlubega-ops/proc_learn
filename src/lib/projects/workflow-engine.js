@@ -9,6 +9,7 @@ import {
   Prisma,
 } from "@prisma/client";
 import { writeAuditLog, AuditEvent } from "@/lib/audit-log";
+import { committeeTypeForWorkflowRole } from "@/lib/projects/committee-context";
 import {
   WORKFLOW_TRIGGERS,
   TRIGGER_TO_PROCESS_CODE,
@@ -89,15 +90,16 @@ export function expandOrgRoleNames(roleName) {
 export async function resolveEligibleOrgUsers(prisma, opts) {
   const roleName = String(opts.roleName || "").trim();
 
-  // Contracts Committee is a committee hat, not a login org role.
-  if (roleName === "Contracts Committee") {
+  // Committee routing roles are hats worn by seated members, not login org roles.
+  const committeeType = committeeTypeForWorkflowRole(roleName);
+  if (committeeType) {
     const memberships = await prisma.projectOrgCommitteeMember.findMany({
       where: {
         status: "ACTIVE",
         committee: {
           projectId: opts.projectId,
           isActive: true,
-          committeeType: "CONTRACTS",
+          committeeType,
         },
       },
       include: {
@@ -664,20 +666,29 @@ export async function completeWorkflowTask(prisma, opts) {
   /** @type {string | null} */
   let actingCommitteeRole = opts.committeeRole || null;
 
-  if (task.requiredRoleName === "Contracts Committee") {
+  const taskCommitteeType = committeeTypeForWorkflowRole(task.requiredRoleName);
+  if (taskCommitteeType) {
+    if (!opts.committeeId) {
+      return {
+        ok: false,
+        error: `This is ${task.requiredRoleName} work. Switch to the ${task.requiredRoleName} (account menu) before acting on it.`,
+        code: "COMMITTEE_MODE_REQUIRED",
+        status: 403,
+      };
+    }
     const { requireCommitteeMembership } = await import("@/lib/projects/committee-context");
     const seat = await requireCommitteeMembership(prisma, {
       projectId: task.projectId,
       orgUserId: opts.actorOrgUserId,
-      committeeId: opts.committeeId || null,
-      committeeType: "CONTRACTS",
+      committeeId: opts.committeeId,
+      committeeType: taskCommitteeType,
     });
     if (!seat.ok) {
       return {
         ok: false,
         error:
           seat.error ||
-          "Switch to the Contracts Committee (navbar) before approving the procurement method.",
+          `Switch to the ${task.requiredRoleName} (account menu) before acting on it.`,
         status: seat.status || 403,
       };
     }
@@ -815,7 +826,11 @@ export async function completeWorkflowTask(prisma, opts) {
       task.requiredRoleName === "Accounting Officer"
     ) {
       newReqStatus = OrgRequisitionStatus.APPROVED;
-    } else if (decision !== OrgWorkflowDecision.SELECT_METHOD) {
+    } else if (
+      decision !== OrgWorkflowDecision.SELECT_METHOD &&
+      previousStatus !== OrgRequisitionStatus.APPROVED
+    ) {
+      // Post-approval steps (Form 5 Part II, Contracts Committee method approval) keep APPROVED.
       newReqStatus = OrgRequisitionStatus.UNDER_REVIEW;
     }
   }
@@ -917,11 +932,14 @@ export async function completeWorkflowTask(prisma, opts) {
       });
 
       if (instance.requisition) {
+        const becameApproved =
+          newReqStatus === OrgRequisitionStatus.APPROVED &&
+          previousStatus !== OrgRequisitionStatus.APPROVED;
         await tx.projectOrgRequisition.update({
           where: { id: instance.requisition.id },
           data: {
             status: newReqStatus,
-            ...(newReqStatus === OrgRequisitionStatus.APPROVED
+            ...(becameApproved
               ? {
                   approvedAt: new Date(),
                   approvedByOrgUserId: opts.actorOrgUserId,
@@ -930,11 +948,8 @@ export async function completeWorkflowTask(prisma, opts) {
           },
         });
 
-        // Commit budget on Accounting Officer approval
-        if (
-          newReqStatus === OrgRequisitionStatus.APPROVED &&
-          instance.requisition.budgetLineId
-        ) {
+        // Commit budget once, on the Accounting Officer's approval (later steps keep APPROVED).
+        if (becameApproved && instance.requisition.budgetLineId) {
           const line = await tx.projectOrgBudgetLine.findUnique({
             where: { id: instance.requisition.budgetLineId },
           });

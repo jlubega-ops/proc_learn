@@ -11,6 +11,7 @@ import {
  * @returns {Promise<import('iron-session').IronSession<{
  *   userId?: string;
  *   orgUserId?: string;
+ *   providerId?: string;
  *   lastActivityAt?: number;
  * }> | null>}
  */

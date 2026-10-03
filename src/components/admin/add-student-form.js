@@ -359,7 +359,7 @@ export function AddStudentForm({ afterCreatePath = "/students/manage" }) {
             });
           }}
           error={Boolean(errors.campus)}
-          helperText={errors.campus || "Where the student studies"}
+          helperText={errors.campus || ""}
           fullWidth
           sx={themedTextFieldSx}
         >

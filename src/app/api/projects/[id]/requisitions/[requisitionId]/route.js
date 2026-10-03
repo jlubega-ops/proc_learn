@@ -12,6 +12,7 @@ import {
 } from "@/lib/projects/requisitions";
 import { healMissingStepTasks } from "@/lib/projects/workflow-engine";
 import { fetchForm5OrgDefaults } from "@/lib/projects/form5-prefill";
+import { checkActingModeForTask, getActiveCommittee } from "@/lib/projects/committee-context";
 
 export const runtime = "nodejs";
 
@@ -65,6 +66,8 @@ export async function GET(_request, context) {
   /** @type {any} */
   let lastDecision = null;
   let viewerHasPendingAction = false;
+  /** @type {{ title: string; message: string } | null} */
+  let blockedTask = null;
 
   if (auth.type === "org") {
     pendingTask = await prisma.projectOrgWorkflowTask.findFirst({
@@ -84,6 +87,16 @@ export async function GET(_request, context) {
         processFlowItem: { select: { actionKey: true } },
       },
     });
+    if (pendingTask) {
+      const mode = checkActingModeForTask(
+        pendingTask,
+        await getActiveCommittee(prisma, auth.orgUser.id),
+      );
+      if (!mode.ok) {
+        blockedTask = { title: pendingTask.title, message: mode.error };
+        pendingTask = null;
+      }
+    }
     viewerHasPendingAction = Boolean(pendingTask);
 
     const openTask = await prisma.projectOrgWorkflowTask.findFirst({
@@ -158,6 +171,7 @@ export async function GET(_request, context) {
           actionKey: pendingTask.processFlowItem?.actionKey || null,
         }
       : null,
+    blockedTask,
     canEdit,
     canDelete,
     history: (row.instances || []).flatMap((inst) =>

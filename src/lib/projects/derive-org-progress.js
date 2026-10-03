@@ -803,7 +803,8 @@ export async function listPersonalOrgProgressSummaries(ownerUserIds, opts = {}) 
     byOwner.set(org.ownerUserId, {
       organisation: {
         projectId: org.id,
-        name: org.organizationName || org.name,
+        name: org.name,
+        displayName: org.organizationName || org.name,
         projectCode: org.projectCode,
         status: org.status,
       },

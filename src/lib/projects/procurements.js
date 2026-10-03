@@ -42,6 +42,9 @@ export const procurementInclude = {
       estimatedTotalValue: true,
       procurementMethod: true,
       needDescription: true,
+      category: true,
+      deliveryLocation: true,
+      form5PartII: true,
       items: {
         orderBy: { lineNumber: "asc" },
         select: {
@@ -234,6 +237,11 @@ export function serializeProcurement(row, opts = {}) {
           status: row.requisition.status,
           requisitionReference: row.requisition.requisitionReference || null,
           needDescription: row.requisition.needDescription || null,
+          category: row.requisition.category || null,
+          deliveryLocation: row.requisition.deliveryLocation || null,
+          shortlist: Array.isArray(row.requisition.form5PartII?.shortlist)
+            ? row.requisition.form5PartII.shortlist
+            : [],
           estimatedTotalValue:
             row.requisition.estimatedTotalValue?.toString?.() ??
             String(row.requisition.estimatedTotalValue ?? ""),

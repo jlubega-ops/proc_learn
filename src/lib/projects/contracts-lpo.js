@@ -8,9 +8,14 @@ import {
 import { writeAuditLog, AuditEvent } from "@/lib/audit-log";
 import { notifyOrgUsers, OrgNotificationType } from "@/lib/projects/org-notifications";
 import { financialYearRefToken } from "@/lib/projects/org-reference";
-import { serializeSupplier } from "@/lib/projects/suppliers";
+import { serializeProviderSummary } from "@/lib/projects/providers";
 import { WORKFLOW_TRIGGERS } from "@/lib/projects/process-catalogue";
 import { startWorkflowFromTrigger } from "@/lib/projects/workflow-engine";
+import {
+  normalizeDeliveryAddress,
+  resolveDeliveryAddress,
+  validateDeliveryAddressInput,
+} from "@/lib/projects/delivery-address";
 
 /**
  * @param {import("@prisma/client").PrismaClient} prisma
@@ -48,12 +53,13 @@ export function serializeContract(row) {
     procurementId: row.procurementId,
     awardId: row.awardId || null,
     supplierId: row.supplierId,
-    supplier: row.supplier ? serializeSupplier(row.supplier) : null,
+    supplier: row.supplier ? serializeProviderSummary(row.supplier) : null,
     contractNumber: row.contractNumber,
     contractValue: row.contractValue?.toString?.() ?? String(row.contractValue ?? ""),
     status: row.status,
     startDate: row.startDate || null,
     endDate: row.endDate || null,
+    deliveryAddress: row.deliveryAddress || null,
     issuedAt: row.issuedAt || null,
     createdAt: row.createdAt,
     updatedAt: row.updatedAt,
@@ -68,9 +74,10 @@ export function serializeLpo(row) {
     procurementId: row.procurementId,
     awardId: row.awardId || null,
     supplierId: row.supplierId,
-    supplier: row.supplier ? serializeSupplier(row.supplier) : null,
+    supplier: row.supplier ? serializeProviderSummary(row.supplier) : null,
     lpoNumber: row.lpoNumber,
     lpoValue: row.lpoValue?.toString?.() ?? String(row.lpoValue ?? ""),
+    deliveryAddress: row.deliveryAddress || null,
     status: row.status,
     issuedAt: row.issuedAt || null,
     acceptedAt: row.acceptedAt || null,
@@ -128,6 +135,7 @@ async function loadAcceptedAward(prisma, projectId, procurementId) {
  *   actorRoleName: string;
  *   startDate?: string | Date | null;
  *   endDate?: string | Date | null;
+ *   deliveryAddress?: string | null;
  * }} opts
  */
 export async function createContract(prisma, opts) {
@@ -183,6 +191,9 @@ export async function createContract(prisma, opts) {
       supplierId: award.supplierId,
       contractNumber,
       contractValue: award.awardedAmount,
+      deliveryAddress:
+        normalizeDeliveryAddress(opts.deliveryAddress) ||
+        (await resolveDeliveryAddress(prisma, { projectId: opts.projectId, procurementId: procurement.id })),
       status: OrgContractStatus.DRAFT,
       startDate: opts.startDate ? new Date(opts.startDate) : null,
       endDate: opts.endDate ? new Date(opts.endDate) : null,
@@ -295,7 +306,7 @@ export async function issueContract(prisma, opts) {
 /**
  * Create a DRAFT LPO for a QUOTATION procurement from its ACCEPTED award.
  * @param {import("@prisma/client").PrismaClient} prisma
- * @param {{ projectId: string; procurementId: string; actorOrgUserId: string; actorRoleName: string }} opts
+ * @param {{ projectId: string; procurementId: string; actorOrgUserId: string; actorRoleName: string; deliveryAddress?: string | null }} opts
  */
 export async function createLpo(prisma, opts) {
   const procurement = await prisma.projectOrgProcurement.findFirst({
@@ -350,6 +361,9 @@ export async function createLpo(prisma, opts) {
       supplierId: award.supplierId,
       lpoNumber,
       lpoValue: award.awardedAmount,
+      deliveryAddress:
+        normalizeDeliveryAddress(opts.deliveryAddress) ||
+        (await resolveDeliveryAddress(prisma, { projectId: opts.projectId, procurementId: procurement.id })),
       status: OrgLpoStatus.DRAFT,
     },
     include: { supplier: true },
@@ -485,19 +499,138 @@ export async function getActiveOrderValue(prisma, projectId, procurementId) {
     where: { projectId, procurementId, status: { in: [OrgContractStatus.ACTIVE, OrgContractStatus.ISSUED, OrgContractStatus.SIGNED] } },
     orderBy: { createdAt: "desc" },
   });
-  if (contract) return { kind: "contract", id: contract.id, value: Number(contract.contractValue) };
+  if (contract) {
+    return {
+      kind: "contract",
+      id: contract.id,
+      number: contract.contractNumber,
+      value: Number(contract.contractValue),
+      supplierId: contract.supplierId,
+      deliveryAddress: contract.deliveryAddress || null,
+    };
+  }
 
   const lpo = await prisma.projectOrgLpo.findFirst({
     where: { projectId, procurementId, status: { in: [OrgLpoStatus.ACCEPTED, OrgLpoStatus.ISSUED] } },
     orderBy: { createdAt: "desc" },
   });
-  if (lpo) return { kind: "lpo", id: lpo.id, value: Number(lpo.lpoValue) };
+  if (lpo) {
+    return {
+      kind: "lpo",
+      id: lpo.id,
+      number: lpo.lpoNumber,
+      value: Number(lpo.lpoValue),
+      supplierId: lpo.supplierId,
+      deliveryAddress: lpo.deliveryAddress || null,
+    };
+  }
 
   const pi = await prisma.projectOrgPurchaseInstruction.findFirst({
     where: { projectId, procurementId, status: "ISSUED" },
     orderBy: { createdAt: "desc" },
   });
-  if (pi) return { kind: "purchase_instruction", id: pi.id, value: Number(pi.amount) };
+  if (pi) {
+    return {
+      kind: "purchase_instruction",
+      id: pi.id,
+      number: pi.instructionNumber,
+      value: Number(pi.amount),
+      supplierId: pi.supplierId,
+      deliveryAddress: pi.deliveryAddress || null,
+    };
+  }
 
   return null;
+}
+
+/**
+ * Correct the delivery address on an LPO or contract before it is issued to the
+ * provider. Deliveries and invoices recorded afterwards inherit the corrected value.
+ *
+ * @param {import("@prisma/client").PrismaClient} prisma
+ * @param {{
+ *   projectId: string;
+ *   procurementId: string;
+ *   kind: "lpo" | "contract";
+ *   deliveryAddress: unknown;
+ *   actorOrgUserId: string;
+ *   actorRoleName: string;
+ * }} opts
+ */
+export async function updateOrderDeliveryAddress(prisma, opts) {
+  const error = validateDeliveryAddressInput(opts.deliveryAddress);
+  if (error) return { ok: false, error, status: 400, fieldErrors: { deliveryAddress: error } };
+  const deliveryAddress = normalizeDeliveryAddress(opts.deliveryAddress);
+
+  if (opts.kind === "contract") {
+    const row = await prisma.projectOrgContract.findFirst({
+      where: {
+        projectId: opts.projectId,
+        procurementId: opts.procurementId,
+        status: { in: [OrgContractStatus.DRAFT, OrgContractStatus.APPROVED] },
+      },
+      orderBy: { createdAt: "desc" },
+    });
+    if (!row) {
+      return {
+        ok: false,
+        error: "The delivery address can only be changed while the contract is in draft or approved.",
+        status: 400,
+      };
+    }
+    const updated = await prisma.projectOrgContract.update({
+      where: { id: row.id },
+      data: { deliveryAddress },
+      include: { supplier: true },
+    });
+    await writeAuditLog({
+      eventType: AuditEvent.PROJECT_ORG_DELIVERY_ADDRESS_UPDATED,
+      actorUserId: null,
+      meta: {
+        projectId: opts.projectId,
+        procurementId: opts.procurementId,
+        contractId: row.id,
+        previous: row.deliveryAddress || null,
+        deliveryAddress,
+        actorOrgUserId: opts.actorOrgUserId,
+        actorRoleName: opts.actorRoleName,
+      },
+    });
+    return { ok: true, contract: serializeContract(updated) };
+  }
+
+  const row = await prisma.projectOrgLpo.findFirst({
+    where: {
+      projectId: opts.projectId,
+      procurementId: opts.procurementId,
+      status: { in: [OrgLpoStatus.DRAFT, OrgLpoStatus.APPROVED] },
+    },
+    orderBy: { createdAt: "desc" },
+  });
+  if (!row) {
+    return {
+      ok: false,
+      error: "The delivery address can only be changed while the LPO is in draft or approved.",
+      status: 400,
+    };
+  }
+  const updated = await prisma.projectOrgLpo.update({
+    where: { id: row.id },
+    data: { deliveryAddress },
+    include: { supplier: true },
+  });
+  await writeAuditLog({
+    eventType: AuditEvent.PROJECT_ORG_DELIVERY_ADDRESS_UPDATED,
+    actorUserId: null,
+    meta: {
+      projectId: opts.projectId,
+      procurementId: opts.procurementId,
+      lpoId: row.id,
+      previous: row.deliveryAddress || null,
+      deliveryAddress,
+      actorOrgUserId: opts.actorOrgUserId,
+      actorRoleName: opts.actorRoleName,
+    },
+  });
+  return { ok: true, lpo: serializeLpo(updated) };
 }

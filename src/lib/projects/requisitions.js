@@ -919,10 +919,86 @@ export async function actOnRequisitionTask(prisma, opts) {
     }
 
     const { buildForm5PartII } = await import("@/lib/projects/ppda-forms");
+    const { assessProviderSelection } = await import("@/lib/projects/providers");
     const form5Body = opts.form5 && typeof opts.form5 === "object" ? opts.form5 : {};
+    const method = String(opts.procurementMethod);
+
+    const reqRow = await prisma.projectOrgRequisition.findUnique({
+      where: { id: taskPreview.instance.requisitionId },
+      select: { category: true, estimatedTotalValue: true },
+    });
+    const { checkMethodValueCeiling } = await import("@/lib/projects/procurement-thresholds");
+    const ceiling = checkMethodValueCeiling(method, reqRow?.estimatedTotalValue);
+    if (!ceiling.ok) {
+      return {
+        ok: false,
+        error: ceiling.error,
+        status: 400,
+        fieldErrors: { procurementMethod: ceiling.error },
+      };
+    }
+    const rawIds = method === "TENDER" ? [] : form5Body.shortlistedProviderIds;
+    const assessed = await assessProviderSelection(prisma, {
+      projectId: taskPreview.instance.projectId,
+      providerIds: rawIds,
+      method,
+      category: reqRow?.category || null,
+    });
+    if (!assessed.ok) {
+      return { ...assessed, fieldErrors: { shortlistedProviderIds: assessed.error } };
+    }
+    const picked = assessed.providers;
+    if (method === "MICRO" && picked.length > 1) {
+      return {
+        ok: false,
+        error: "Micro procurement uses a single provider. Select only one.",
+        status: 400,
+        fieldErrors: { shortlistedProviderIds: "Select only one provider." },
+      };
+    }
+    if (method === "QUOTATION" && picked.length === 0) {
+      return {
+        ok: false,
+        error: "Shortlist at least one provider for request for quotations.",
+        status: 400,
+        fieldErrors: { shortlistedProviderIds: "Shortlist at least one provider." },
+      };
+    }
+    if (
+      method === "QUOTATION" &&
+      picked.length < 3 &&
+      !String(form5Body.shortlistJustification || "").trim()
+    ) {
+      return {
+        ok: false,
+        error: "Fewer than three providers are shortlisted. Enter the justification.",
+        status: 400,
+        fieldErrors: {
+          shortlistJustification: "Explain why fewer than three providers are shortlisted.",
+        },
+      };
+    }
+
     const snapshot = buildForm5PartII(
-      { ...form5Body, recommendedMethod: opts.procurementMethod },
-      { method: opts.procurementMethod },
+      {
+        ...form5Body,
+        recommendedMethod: method,
+        shortlistedProviders: picked.length
+          ? picked.map((p) => p.name).join(", ")
+          : method === "TENDER"
+            ? "Open advertisement — no shortlist"
+            : form5Body.shortlistedProviders,
+      },
+      {
+        method,
+        shortlist: picked.map((p) => ({
+          id: p.id,
+          name: p.name,
+          qualifies: p.qualifies,
+          failedReasons: p.failedReasons,
+        })),
+        shortlistValidatedAt: picked.length ? new Date().toISOString() : null,
+      },
     );
     if (!snapshot.methodJustification) {
       return {
@@ -963,6 +1039,8 @@ export async function actOnRequisitionTask(prisma, opts) {
         procurementMethod: opts.procurementMethod,
         form5PartIISaved: true,
         awaitingContractsCommittee: true,
+        shortlistedProviderIds: picked.map((p) => p.id),
+        ...(assessed.warnings.length ? { eligibilityWarnings: assessed.warnings } : {}),
       },
     });
 
@@ -982,10 +1060,20 @@ export async function actOnRequisitionTask(prisma, opts) {
         status: true,
         procurementMethod: true,
         form5PartII: true,
+        estimatedTotalValue: true,
       },
     });
     if (!req) {
       return { ok: false, error: "Requisition not found.", status: 404 };
+    }
+    const { checkMethodValueCeiling } = await import("@/lib/projects/procurement-thresholds");
+    const ceiling = checkMethodValueCeiling(req.procurementMethod, req.estimatedTotalValue);
+    if (!ceiling.ok) {
+      return {
+        ok: false,
+        error: `${ceiling.error} Return it to the Procurement Officer.`,
+        status: 400,
+      };
     }
     if (req.status !== OrgRequisitionStatus.APPROVED) {
       return {
@@ -1185,8 +1273,11 @@ export async function saveRequisitionForm5(prisma, opts) {
     return { ok: true, requisition: serializeRequisition(updated) };
   }
 
+  const prevPartII = row.form5PartII && typeof row.form5PartII === "object" ? row.form5PartII : {};
   const snapshot = buildForm5PartII(opts.body || {}, {
     method: opts.method || row.procurementMethod || null,
+    shortlist: Array.isArray(prevPartII.shortlist) ? prevPartII.shortlist : [],
+    shortlistValidatedAt: prevPartII.shortlistValidatedAt || null,
   });
   if (!snapshot.recommendedMethod) {
     return {

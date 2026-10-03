@@ -7,6 +7,7 @@
  *   isEmergencyPlan?: boolean;
  *   includeReturnReject?: boolean;
  *   includeFlagException?: boolean;
+ *   isProcurementStep?: boolean;
  * }} [opts]
  * @returns {{ value: string; label: string }[]}
  */
@@ -19,9 +20,11 @@ export function workflowDecisionOptions(actionKey, opts = {}) {
   if (key === "COMPLETE") {
     options.push({
       value: "COMPLETE",
-      label: opts.isEmergencyPlan
-        ? "Approve & forward"
-        : "Approve consolidation & forward",
+      label: opts.isProcurementStep
+        ? "Complete & forward"
+        : opts.isEmergencyPlan
+          ? "Approve & forward"
+          : "Approve consolidation & forward",
     });
   } else if (key === "VERIFY") {
     options.push({ value: "VERIFY", label: "Verify & forward" });
@@ -43,6 +46,54 @@ export function workflowDecisionOptions(actionKey, opts = {}) {
   }
 
   return options;
+}
+
+const POSITIVE_DECISIONS = new Set(["COMPLETE", "APPROVE", "SUBMIT", "VERIFY"]);
+
+/** @type {[RegExp, string][]} */
+const STEP_ACTION_LABELS = [
+  [/^create procurement requisition/i, "Submit requisition"],
+  [/^review requisition/i, "Endorse requisition and forward"],
+  [/^verify procurement plan/i, "Confirm item is in plan and forward"],
+  [/^verify funding/i, "Confirm funds available and forward"],
+  [/^approve requisition/i, "Approve requisition and forward"],
+  [/^approve procurement method/i, "Approve procurement method"],
+  [/^issue purchase instruction/i, "Issue purchase instruction"],
+  [/^issue rfqs/i, "Issue RFQs"],
+  [/^advertise tender/i, "Advertise tender"],
+  [/^record delivery|^delivery$/i, "Receive delivered items and forward"],
+  [/^verify\/accept delivery|^certify delivery|^inspection\/acceptance/i, "Accept delivery and forward"],
+  [/^process invoice|^invoice verification|^verify invoice/i, "Process invoice and forward"],
+  [/^approve payment|^payment approval/i, "Approve payment and forward"],
+  [/^record payment|^payment recording/i, "Record payment and forward"],
+  [/^close procurement|^procurement closure/i, "Close procurement"],
+];
+
+/**
+ * Names the positive action after the step ("Approve payment and forward") instead of a generic verb.
+ * @param {string | null | undefined} title Task title, e.g. "Approve Payment: PROC-2026-0001".
+ */
+export function workflowStepActionLabel(title) {
+  const step = String(title || "").split(":")[0].trim();
+  return STEP_ACTION_LABELS.find(([re]) => re.test(step))?.[1] || "";
+}
+
+/**
+ * Label for one decision option on a task, using the step-specific wording for the positive decision.
+ * @param {{ value: string; label: string }} opt
+ * @param {string | null | undefined} title
+ */
+export function workflowDecisionLabelForTask(opt, title) {
+  const stepLabel = workflowStepActionLabel(title);
+  return stepLabel && POSITIVE_DECISIONS.has(opt.value) ? stepLabel : opt.label;
+}
+
+/**
+ * True when the decision moves the record forward (not return / reject / flag).
+ * @param {string | null | undefined} decision
+ */
+export function isPositiveWorkflowDecision(decision) {
+  return POSITIVE_DECISIONS.has(String(decision || "").trim().toUpperCase());
 }
 
 /**

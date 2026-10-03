@@ -8,7 +8,7 @@ import {
 } from "@prisma/client";
 import { completeWorkflowTask, computeBudgetAvailability } from "@/lib/projects/workflow-engine";
 import { issuePurchaseInstruction } from "@/lib/projects/purchase-instructions";
-import { createOrGetSupplier } from "@/lib/projects/suppliers";
+import { assessProviderSelection, createOrGetProvider } from "@/lib/projects/providers";
 import {
   getOrCreateDraftSolicitation,
   advanceSolicitationStatus,
@@ -23,6 +23,11 @@ import { getLatestAward } from "@/lib/projects/awards";
 import { listDeliveries } from "@/lib/projects/deliveries";
 import { listInvoices } from "@/lib/projects/invoices";
 import { listPayments } from "@/lib/projects/payments";
+import { autoRespondToSolicitation } from "@/lib/projects/provider-auto-responses";
+import {
+  committeeTypeForWorkflowRole,
+  requireCommitteeMembership,
+} from "@/lib/projects/committee-context";
 
 /**
  * Step-title matchers keyed to the exact wording used in the Micro/Quotation/
@@ -31,8 +36,6 @@ import { listPayments } from "@/lib/projects/payments";
  * so anchoring at the start of the string is enough to identify the step.
  */
 const STEP = {
-  MICRO_RAISE: /^raise micro procurement request/i,
-  MICRO_CONFIRM_BUDGET: /^confirm budget/i,
   MICRO_ISSUE_PI: /^issue purchase instruction/i,
 
   RFQ_PREPARE: /^prepare rfq documents/i,
@@ -49,6 +52,8 @@ const STEP = {
   RFQ_PREPARE_EVAL: /^prepare evaluation report/i,
   RFQ_REVIEW_EVAL: /^review evaluation report/i,
   RFQ_APPROVE_EVAL: /^approve evaluation report/i,
+  TENDER_POST_QUAL: /^post-qualification/i,
+  TENDER_APPROVE_RECOMMENDATION: /^approve evaluation\/recommendation/i,
   RFQ_PREPARE_AWARD: /^prepare award recommendation/i,
   RFQ_REVIEW_AWARD: /^review award recommendation/i,
   RFQ_APPROVE_AWARD: /^approve award$/i,
@@ -65,8 +70,6 @@ const STEP = {
   APPROVE_PAYMENT: /^approve payment|^payment approval/i,
   RECORD_PAYMENT: /^record payment|^payment recording/i,
   CLOSE_PROCUREMENT: /^close procurement|^procurement closure/i,
-
-  MICRO_CONFIRM_SUPPLIER: /^confirm supplier$/i,
 
   TENDER_PREPARE: /^prepare tender documents/i,
   TENDER_REVIEW: /^review tender documents/i,
@@ -92,6 +95,8 @@ const STEP = {
  *   actorDepartmentId?: string | null;
  *   decision: import("@prisma/client").OrgWorkflowDecision;
  *   comment?: string | null;
+ *   committeeId?: string | null;
+ *   committeeRole?: string | null;
  *   body?: any;
  * }} opts
  */
@@ -103,6 +108,7 @@ export async function actOnProcurementTask(prisma, opts) {
     select: {
       id: true,
       title: true,
+      requiredRoleName: true,
       status: true,
       assigneeOrgUserId: true,
       processFlowItem: { select: { actionKey: true } },
@@ -124,8 +130,29 @@ export async function actOnProcurementTask(prisma, opts) {
 
   const projectId = taskPreview.instance.projectId;
   const procurementId = taskPreview.instance.procurementId;
-  const title = String(taskPreview.title || "");
+  // Titles are "<step>: <PROC no>: <procurement title>" — match on the step part only.
+  const title = String(taskPreview.title || "").split(":")[0].trim();
   const decision = opts.decision;
+
+  const committeeType = committeeTypeForWorkflowRole(taskPreview.requiredRoleName);
+  if (committeeType) {
+    if (!opts.committeeId) {
+      return {
+        ok: false,
+        error: `This is ${taskPreview.requiredRoleName} work. Switch to the ${taskPreview.requiredRoleName} (account menu) before acting on it.`,
+        code: "COMMITTEE_MODE_REQUIRED",
+        status: 403,
+      };
+    }
+    const seat = await requireCommitteeMembership(prisma, {
+      projectId,
+      orgUserId: opts.actorOrgUserId,
+      committeeId: opts.committeeId,
+      committeeType,
+    });
+    if (!seat.ok) return seat;
+  }
+  const actingCommitteeType = committeeType || null;
   const isPositive =
     decision === OrgWorkflowDecision.COMPLETE ||
     decision === OrgWorkflowDecision.APPROVE ||
@@ -140,6 +167,8 @@ export async function actOnProcurementTask(prisma, opts) {
       actorDepartmentId: opts.actorDepartmentId || null,
       decision: opts.decision,
       comment: opts.comment,
+      committeeId: opts.committeeId || null,
+      committeeRole: opts.committeeRole || null,
       metadata: metadata || null,
     });
 
@@ -148,7 +177,7 @@ export async function actOnProcurementTask(prisma, opts) {
     const supplierId = typeof rawSupplierId === "string" ? rawSupplierId.trim() : "";
     if (supplierId) return { ok: true, supplierId };
     if (inlineSupplier && typeof inlineSupplier === "object") {
-      const created = await createOrGetSupplier(prisma, {
+      const created = await createOrGetProvider(prisma, {
         projectId,
         actorOrgUserId: opts.actorOrgUserId,
         actorRoleName: opts.actorRoleName,
@@ -160,59 +189,38 @@ export async function actOnProcurementTask(prisma, opts) {
     return null;
   };
 
+  /** Learning-mode eligibility snapshot recorded on the task (never blocks). */
+  const eligibilityFor = async (providerIds, method) => {
+    const proc = await prisma.projectOrgProcurement.findFirst({
+      where: { id: procurementId, projectId },
+      select: { requisition: { select: { category: true } } },
+    });
+    return assessProviderSelection(prisma, {
+      projectId,
+      providerIds,
+      method,
+      category: proc?.requisition?.category || null,
+    });
+  };
+
   // ---------------------------------------------------------------------
   // MICRO PROCUREMENT
   // ---------------------------------------------------------------------
-
-  if (STEP.MICRO_CONFIRM_BUDGET.test(title) && decision === OrgWorkflowDecision.VERIFY) {
-    const procurement = await prisma.projectOrgProcurement.findFirst({
-      where: { id: procurementId, projectId },
-      include: { requisition: { include: { budgetLine: true } } },
-    });
-    const budgetLine = procurement?.requisition?.budgetLine;
-    const requested = Number(procurement?.requisition?.estimatedTotalValue ?? 0);
-    if (budgetLine) {
-      // Funds were already committed when the Accounting Officer approved the requisition.
-      // Confirm Budget verifies the approved line still covers that value — do not subtract
-      // the amount again from available balance (that would double-count).
-      const approved = Number(budgetLine.approvedAmount ?? 0);
-      const committed = Number(budgetLine.committedAmount ?? 0);
-      const funding = {
-        approvedAmount: approved,
-        committedAmount: committed,
-        availableBalance: approved - committed,
-        requestedAmount: requested,
-        projectedBalance: approved - committed,
-        sufficient: approved + 0.009 >= requested && committed + 0.009 >= requested,
-      };
-      if (!funding.sufficient) {
-        return {
-          ok: false,
-          error:
-            "Budget confirmation failed. The approved budget line does not cover this micro procurement (funds may not have been committed at requisition approval).",
-          code: "INSUFFICIENT_FUNDS",
-          status: 400,
-          funding,
-          fieldErrors: {
-            comment: "Return or flag an exception — the budget line does not cover this requirement.",
-          },
-        };
-      }
-    }
-    return complete({ fundingConfirmed: true, requestedAmount: requested });
-  }
 
   if (STEP.MICRO_ISSUE_PI.test(title) && isPositive) {
     const resolved = await resolveSupplierId(body.supplierId, body.supplier);
     if (!resolved) {
       return {
         ok: false,
-        error: "Choose a registered supplier or add a new supplier to issue the purchase instruction.",
+        error: "Select a supplier from the register and run validation before issuing the purchase instruction.",
         status: 400,
-        fieldErrors: { supplierId: "Choose or add a supplier." },
+        fieldErrors: { supplierId: "Select a supplier." },
       };
     }
     if (!resolved.ok) return resolved;
+
+    const eligibility = await eligibilityFor([resolved.supplierId], "MICRO");
+    if (!eligibility.ok) return eligibility;
 
     const issued = await issuePurchaseInstruction(prisma, {
       projectId,
@@ -221,6 +229,7 @@ export async function actOnProcurementTask(prisma, opts) {
       actorOrgUserId: opts.actorOrgUserId,
       actorRoleName: opts.actorRoleName,
       remarks: typeof body.remarks === "string" ? body.remarks : null,
+      deliveryAddress: typeof body.deliveryAddress === "string" ? body.deliveryAddress : null,
     });
     if (!issued.ok) return issued;
 
@@ -228,7 +237,9 @@ export async function actOnProcurementTask(prisma, opts) {
       purchaseInstructionId: issued.purchaseInstruction.id,
       instructionNumber: issued.purchaseInstruction.instructionNumber,
       supplierId: resolved.supplierId,
+      supplierConfirmed: true,
       amount: issued.purchaseInstruction.amount,
+      ...(eligibility.warnings.length ? { eligibilityWarnings: eligibility.warnings } : {}),
     });
     if (!result.ok) {
       return {
@@ -290,6 +301,9 @@ export async function actOnProcurementTask(prisma, opts) {
   }
 
   if (STEP.RFQ_ISSUE.test(title) && isPositive) {
+    const eligibility = await eligibilityFor(body.inviteSupplierIds, "QUOTATION");
+    if (!eligibility.ok) return eligibility;
+
     const issuedSol = await issueSolicitation(prisma, {
       projectId,
       procurementId,
@@ -306,8 +320,19 @@ export async function actOnProcurementTask(prisma, opts) {
       data: { status: OrgProcurementStatus.SOLICITATION },
     });
 
-    const result = await complete({ solicitationId: issuedSol.solicitation.id });
-    return { ...result, solicitation: issuedSol.solicitation };
+    const autoResponses = await bestEffortAutoRespond(prisma, {
+      projectId,
+      procurementId,
+      solicitationType: OrgSolicitationType.RFQ,
+      actorOrgUserId: opts.actorOrgUserId,
+    });
+
+    const result = await complete({
+      solicitationId: issuedSol.solicitation.id,
+      ...(eligibility.warnings.length ? { eligibilityWarnings: eligibility.warnings } : {}),
+      autoResponseCount: autoResponses.responded.length,
+    });
+    return { ...result, solicitation: issuedSol.solicitation, autoResponses };
   }
 
   if (STEP.RFQ_RECEIVE.test(title)) {
@@ -416,8 +441,18 @@ export async function actOnProcurementTask(prisma, opts) {
       data: { status: OrgProcurementStatus.SOLICITATION },
     });
 
-    const result = await complete({ solicitationId: issuedSol.solicitation.id });
-    return { ...result, solicitation: issuedSol.solicitation };
+    const autoResponses = await bestEffortAutoRespond(prisma, {
+      projectId,
+      procurementId,
+      solicitationType: OrgSolicitationType.TENDER,
+      actorOrgUserId: opts.actorOrgUserId,
+    });
+
+    const result = await complete({
+      solicitationId: issuedSol.solicitation.id,
+      autoResponseCount: autoResponses.responded.length,
+    });
+    return { ...result, solicitation: issuedSol.solicitation, autoResponses };
   }
 
   if (STEP.TENDER_RECEIVE.test(title)) {
@@ -480,22 +515,6 @@ export async function actOnProcurementTask(prisma, opts) {
   // Shared post-solicitation lifecycle bridges (Micro / Quotation / Tender)
   // ------------------------------------------------------------------
 
-  if (STEP.MICRO_CONFIRM_SUPPLIER.test(title) && isPositive) {
-    const pi = await prisma.projectOrgPurchaseInstruction.findFirst({
-      where: { projectId, procurementId, status: "ISSUED" },
-      include: { supplier: true },
-    });
-    if (!pi?.supplierId) {
-      return {
-        ok: false,
-        error:
-          "Confirm the supplier on an issued Purchase Instruction before completing this step.",
-        status: 400,
-      };
-    }
-    return complete({ supplierId: pi.supplierId, purchaseInstructionId: pi.id });
-  }
-
   if (
     (STEP.RFQ_NOMINATE_EVAL.test(title) || STEP.RFQ_APPROVE_EVAL_COMMITTEE.test(title)) &&
     isPositive
@@ -531,34 +550,90 @@ export async function actOnProcurementTask(prisma, opts) {
     return complete({ committeeId: committee.id, committeeName: committee.name });
   }
 
+  if (STEP.RFQ_PREPARE_EVAL.test(title) && isPositive) {
+    const report = await latestEvaluationReport(prisma, projectId, procurementId);
+    if (!report || !["SUBMITTED", "APPROVED"].includes(report.status)) {
+      return {
+        ok: false,
+        error:
+          "Submit the evaluation report first: Evaluation panel → fill the scores and recommendation → Submit report. Then complete this task.",
+        status: 400,
+      };
+    }
+    return complete({ evaluationReportId: report.id });
+  }
+
   if (
     (STEP.RFQ_TECH_EVAL.test(title) ||
       STEP.RFQ_FIN_EVAL.test(title) ||
-      STEP.RFQ_PREPARE_EVAL.test(title) ||
       STEP.RFQ_REVIEW_EVAL.test(title) ||
       STEP.RFQ_PREPARE_AWARD.test(title) ||
       STEP.RFQ_REVIEW_AWARD.test(title)) &&
     isPositive
   ) {
-    // Educational progression steps; domain award still requires approved evaluation report.
+    // Progression checkpoints; the award itself still requires an approved evaluation report.
     return complete({ educationalCheckpoint: true });
   }
 
-  if ((STEP.RFQ_APPROVE_EVAL.test(title) || /approve evaluation\/recommendation/i.test(title)) && isPositive) {
-    if (body.evaluationReportId && (body.decision || opts.decision === OrgWorkflowDecision.APPROVE)) {
-      const { decideEvaluationReport } = await import("@/lib/projects/evaluation");
-      const decided = await decideEvaluationReport(prisma, {
-        projectId,
-        evaluationReportId: String(body.evaluationReportId),
-        actorOrgUserId: opts.actorOrgUserId,
-        actorRoleName: opts.actorRoleName,
-        decision: body.decision || "APPROVE",
-        comment: opts.comment || "Approved.",
-      });
-      if (!decided.ok) return decided;
-      return complete({ evaluationReportId: body.evaluationReportId });
+  if (STEP.TENDER_POST_QUAL.test(title) && isPositive) {
+    const pq = await latestPostQualification(prisma, projectId, procurementId);
+    if (!pq || !["SUBMITTED", "APPROVED"].includes(pq.status)) {
+      return {
+        ok: false,
+        error:
+          "Submit post-qualification first: Evaluation panel → Post-qualification → Run validation → Submit post-qualification. Then complete this task.",
+        status: 400,
+      };
     }
-    return complete({ educationalCheckpoint: true });
+    return complete({ postQualificationReportId: pq.id });
+  }
+
+  if ((STEP.RFQ_APPROVE_EVAL.test(title) || STEP.TENDER_APPROVE_RECOMMENDATION.test(title)) && isPositive) {
+    const report = body.evaluationReportId
+      ? { id: String(body.evaluationReportId), status: "SUBMITTED" }
+      : await latestEvaluationReport(prisma, projectId, procurementId);
+    if (!report || !["SUBMITTED", "APPROVED"].includes(report.status)) {
+      return {
+        ok: false,
+        error: "The Evaluation Committee has not submitted an evaluation report for this procurement yet.",
+        status: 400,
+      };
+    }
+    if (STEP.TENDER_APPROVE_RECOMMENDATION.test(title)) {
+      const pq = await latestPostQualification(prisma, projectId, procurementId);
+      if (!pq || !["SUBMITTED", "APPROVED"].includes(pq.status)) {
+        return {
+          ok: false,
+          error: "The Evaluation Committee has not submitted post-qualification for the recommended bidder yet.",
+          status: 400,
+        };
+      }
+      if (pq.status === "SUBMITTED") {
+        const pqDecided = await actOnProcurementLifecycle(prisma, {
+          projectId,
+          procurementId,
+          action: "decide_post_qualification",
+          actorOrgUserId: opts.actorOrgUserId,
+          actorRoleName: opts.actorRoleName,
+          actorDepartmentId: opts.actorDepartmentId,
+          actingCommitteeType,
+          body: { decision: "APPROVE", comment: opts.comment || "Approved by the Contracts Committee." },
+        });
+        if (!pqDecided.ok) return pqDecided;
+      }
+    }
+    if (report.status === "APPROVED") return complete({ evaluationReportId: report.id });
+    const { decideEvaluationReport } = await import("@/lib/projects/evaluation");
+    const decided = await decideEvaluationReport(prisma, {
+      projectId,
+      evaluationReportId: report.id,
+      actorOrgUserId: opts.actorOrgUserId,
+      actorRoleName: opts.actorRoleName,
+      decision: "APPROVE",
+      comment: opts.comment || "Approved by the Contracts Committee.",
+    });
+    if (!decided.ok) return decided;
+    return complete({ evaluationReportId: report.id });
   }
 
   if (STEP.RFQ_APPROVE_AWARD.test(title) && isPositive) {
@@ -569,6 +644,7 @@ export async function actOnProcurementTask(prisma, opts) {
       actorOrgUserId: opts.actorOrgUserId,
       actorRoleName: opts.actorRoleName,
       actorDepartmentId: opts.actorDepartmentId,
+      actingCommitteeType,
       body: { approvalReference: body.approvalReference || null },
     });
     if (!created.ok && created.code !== "AWARD_ALREADY_EXISTS") return created;
@@ -709,9 +785,12 @@ export async function actOnProcurementTask(prisma, opts) {
 
   if ((STEP.RECORD_DELIVERY.test(title) || /^delivery$/i.test(title)) && isPositive) {
     if (!Array.isArray(body.lines) || body.lines.length === 0) {
+      const recorded = (await listDeliveries(prisma, projectId, procurementId)).slice(-1)[0];
+      if (recorded) return complete({ deliveryId: recorded.id });
       return {
         ok: false,
-        error: "Provide delivery lines (itemName + receivedQuantity) to record delivery.",
+        error:
+          "Record the delivery first: Delivery & inspection → enter the received quantities → Record delivery. Then receive the delivered items.",
         status: 400,
         fieldErrors: { lines: "Add at least one delivery line." },
       };
@@ -735,17 +814,20 @@ export async function actOnProcurementTask(prisma, opts) {
       /verify\/accept delivery/i.test(title)) &&
     isPositive
   ) {
-    const deliveryId =
-      typeof body.deliveryId === "string"
-        ? body.deliveryId
-        : (await listDeliveries(prisma, projectId, procurementId)).slice(-1)[0]?.id;
-    if (!deliveryId || !Array.isArray(body.lineDecisions) || body.lineDecisions.length === 0) {
+    const latestDelivery = (await listDeliveries(prisma, projectId, procurementId)).slice(-1)[0];
+    const deliveryId = typeof body.deliveryId === "string" ? body.deliveryId : latestDelivery?.id;
+    if (!Array.isArray(body.lineDecisions) || body.lineDecisions.length === 0) {
+      if (latestDelivery?.inspection) return complete({ deliveryId: latestDelivery.id });
       return {
         ok: false,
-        error:
-          "Provide deliveryId and lineDecisions (acceptedQuantity / rejectedQuantity) to inspect delivery.",
+        error: latestDelivery
+          ? "Inspect the delivery first: Delivery & inspection → Accept all received (or Record inspection). Then accept the delivery."
+          : "No delivery has been recorded yet for this procurement.",
         status: 400,
       };
+    }
+    if (!deliveryId) {
+      return { ok: false, error: "No delivery has been recorded yet for this procurement.", status: 400 };
     }
     const out = await actOnProcurementLifecycle(prisma, {
       projectId,
@@ -754,12 +836,13 @@ export async function actOnProcurementTask(prisma, opts) {
       actorOrgUserId: opts.actorOrgUserId,
       actorRoleName: opts.actorRoleName,
       actorDepartmentId: opts.actorDepartmentId,
+      actingCommitteeType,
       body: {
         deliveryId,
         resultNotes: body.resultNotes || opts.comment || null,
         lineDecisions: body.lineDecisions,
-        committeeId: body.committeeId || null,
-        committeeRole: body.committeeRole || null,
+        committeeId: actingCommitteeType ? opts.committeeId : body.committeeId || null,
+        committeeRole: actingCommitteeType ? opts.committeeRole || null : body.committeeRole || null,
       },
     });
     if (!out.ok) return out;
@@ -767,6 +850,42 @@ export async function actOnProcurementTask(prisma, opts) {
   }
 
   if (STEP.RECEIVE_INVOICE.test(title) && isPositive) {
+    const providerInvoiceId = typeof body.invoiceId === "string" ? body.invoiceId.trim() : "";
+    if (providerInvoiceId) {
+      const existingInvoice = await prisma.projectOrgInvoice.findFirst({
+        where: {
+          id: providerInvoiceId,
+          projectId,
+          procurementId,
+          status: { in: ["RECEIVED", "CERTIFIED", "VERIFIED"] },
+        },
+        select: { id: true, status: true },
+      });
+      if (!existingInvoice) {
+        return {
+          ok: false,
+          error: "The selected provider invoice was not found or has already been processed.",
+          status: 400,
+        };
+      }
+      // Micro has no separate Verify Invoice step: processing certifies and verifies it so
+      // Approve Payment can raise the payment.
+      if (/^process invoice/i.test(title)) {
+        const pending = { RECEIVED: ["certify_invoice", "verify_invoice"], CERTIFIED: ["verify_invoice"] };
+        for (const action of pending[existingInvoice.status] || []) {
+          const out = await actOnProcurementLifecycle(prisma, {
+            projectId,
+            procurementId,
+            action,
+            actorOrgUserId: opts.actorOrgUserId,
+            actorRoleName: opts.actorRoleName,
+            body: { invoiceId: existingInvoice.id },
+          });
+          if (!out.ok) return out;
+        }
+      }
+      return complete({ invoiceId: existingInvoice.id, acknowledgedProviderInvoice: true });
+    }
     if (body.amount == null) {
       return {
         ok: false,
@@ -819,6 +938,29 @@ export async function actOnProcurementTask(prisma, opts) {
 
   if (STEP.APPROVE_PAYMENT.test(title) && isPositive) {
     let paymentId = typeof body.paymentId === "string" ? body.paymentId : null;
+    const existingPayments = await listPayments(prisma, projectId, procurementId);
+    const openPayment = existingPayments.filter((p) => p.status !== "REJECTED").slice(-1)[0];
+    if (!paymentId && openPayment && ["APPROVED", "PAID"].includes(openPayment.status)) {
+      return complete({ paymentId: openPayment.id });
+    }
+    if (!paymentId && openPayment?.status === "PENDING") paymentId = openPayment.id;
+    if (!paymentId && body.amount == null) {
+      const verified = (await listInvoices(prisma, projectId, procurementId))
+        .filter((i) => i.status === "VERIFIED")
+        .slice(-1)[0];
+      if (verified) {
+        const created = await actOnProcurementLifecycle(prisma, {
+          projectId,
+          procurementId,
+          action: "create_payment",
+          actorOrgUserId: opts.actorOrgUserId,
+          actorRoleName: opts.actorRoleName,
+          body: { invoiceId: verified.id, amount: Number(verified.amount) },
+        });
+        if (!created.ok) return created;
+        paymentId = created.payment?.id;
+      }
+    }
     if (!paymentId && body.amount != null) {
       const invoiceId =
         typeof body.invoiceId === "string"
@@ -836,12 +978,9 @@ export async function actOnProcurementTask(prisma, opts) {
       paymentId = created.payment?.id;
     }
     if (!paymentId) {
-      paymentId = (await listPayments(prisma, projectId, procurementId)).slice(-1)[0]?.id;
-    }
-    if (!paymentId) {
       return {
         ok: false,
-        error: "Raise a payment (amount + verified invoice) before approving payment.",
+        error: "The invoice must be processed (verified) before the payment can be approved.",
         status: 400,
       };
     }
@@ -858,10 +997,13 @@ export async function actOnProcurementTask(prisma, opts) {
   }
 
   if (STEP.RECORD_PAYMENT.test(title) && isPositive) {
-    const paymentId =
-      typeof body.paymentId === "string"
-        ? body.paymentId
-        : (await listPayments(prisma, projectId, procurementId)).slice(-1)[0]?.id;
+    const latestPayment = (await listPayments(prisma, projectId, procurementId))
+      .filter((p) => p.status !== "REJECTED")
+      .slice(-1)[0];
+    if (typeof body.paymentId !== "string" && latestPayment?.status === "PAID") {
+      return complete({ paymentId: latestPayment.id });
+    }
+    const paymentId = typeof body.paymentId === "string" ? body.paymentId : latestPayment?.id;
     if (!paymentId) {
       return { ok: false, error: "No approved payment is available to mark as paid.", status: 400 };
     }
@@ -878,6 +1020,11 @@ export async function actOnProcurementTask(prisma, opts) {
   }
 
   if (STEP.CLOSE_PROCUREMENT.test(title) && isPositive) {
+    const current = await prisma.projectOrgProcurement.findFirst({
+      where: { id: procurementId, projectId },
+      select: { status: true },
+    });
+    if (current?.status === OrgProcurementStatus.CLOSED) return complete({ closed: true });
     const out = await actOnProcurementLifecycle(prisma, {
       projectId,
       procurementId,
@@ -891,11 +1038,51 @@ export async function actOnProcurementTask(prisma, opts) {
   }
 
   // ---------------------------------------------------------------------
-  // Everything else (Raise Micro Procurement Request, Verify Requirement,
-  // Approve Micro Procurement — administrative steps with no dedicated
-  // business object) just progresses the generic engine.
+  // Everything else (administrative steps with no dedicated business object)
+  // just progresses the generic engine.
   // ---------------------------------------------------------------------
   return complete();
+}
+
+/**
+ * @param {import("@prisma/client").PrismaClient} prisma
+ * @param {string} projectId
+ * @param {string} procurementId
+ */
+function latestEvaluationReport(prisma, projectId, procurementId) {
+  return prisma.projectOrgEvaluationReport.findFirst({
+    where: { projectId, procurementId },
+    orderBy: { createdAt: "desc" },
+    select: { id: true, status: true },
+  });
+}
+
+/**
+ * @param {import("@prisma/client").PrismaClient} prisma
+ * @param {string} projectId
+ * @param {string} procurementId
+ */
+function latestPostQualification(prisma, projectId, procurementId) {
+  return prisma.projectOrgPostQualificationReport.findFirst({
+    where: { projectId, procurementId },
+    orderBy: { createdAt: "desc" },
+    select: { id: true, status: true },
+  });
+}
+
+/**
+ * Simulated providers answer the solicitation; a failure here must never undo
+ * the issue/advertise step itself.
+ *
+ * @param {import("@prisma/client").PrismaClient} prisma
+ * @param {{ projectId: string; procurementId: string; solicitationType: string; actorOrgUserId: string }} opts
+ */
+async function bestEffortAutoRespond(prisma, opts) {
+  try {
+    return await autoRespondToSolicitation(prisma, opts);
+  } catch {
+    return { ok: false, responded: [], skipped: [] };
+  }
 }
 
 /**
@@ -954,7 +1141,11 @@ async function handleReceiveStep(prisma, p) {
   }
 
   const count = await prisma.projectOrgOffer.count({
-    where: { procurementId, offerType: solicitationType === OrgSolicitationType.RFQ ? "QUOTATION" : "BID" },
+    where: {
+      procurementId,
+      offerType: solicitationType === OrgSolicitationType.RFQ ? "QUOTATION" : "BID",
+      status: { not: "WITHDRAWN" },
+    },
   });
   if (count === 0) {
     return {

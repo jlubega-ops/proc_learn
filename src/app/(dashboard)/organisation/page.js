@@ -10,6 +10,7 @@ import {
   BRAND_PAGE_LEAD_CLASS,
 } from "@/components/layout/dashboard-page-intro";
 import { BRAND_BTN_PRIMARY_CLASS, BRAND_CARD_CLASS, BRAND_SECTION_TITLE_CLASS } from "@/lib/brand-ui";
+import { OrgDisplayNameForm } from "@/components/projects/org-display-name-form";
 
 export const metadata = {
   title: "Organisation dashboard",
@@ -63,10 +64,10 @@ export default async function StudentOrganisationHomePage() {
         title={title}
         description={
           isAttemptOrg
-            ? `Organisation dashboard for this ${purposeLabel?.toLowerCase() || "project"} workspace. Use the sidebar to manage this unit — not your default My Organisation.`
+            ? `${purposeLabel || "Project"} workspace.`
             : project.projectCode
-              ? `You are signed in as Admin for this organisation unit. Unit code: ${project.projectCode}`
-              : "You are signed in as Admin for this organisation unit."
+              ? `Your organisation · ${project.projectCode}`
+              : "Your organisation"
         }
       >
         <div className="mt-3 flex flex-wrap items-center gap-2">
@@ -107,26 +108,19 @@ export default async function StudentOrganisationHomePage() {
         </div>
       ) : null}
 
-      <div className={`${BRAND_CARD_CLASS} p-4 sm:p-5`}>
-        <h2 className={BRAND_SECTION_TITLE_CLASS}>About this organisation</h2>
-        <p className={`mt-2 whitespace-pre-wrap ${BRAND_PAGE_LEAD_CLASS}`}>
-          {project.description ||
-            (isAttemptOrg
-              ? "This organisation shell is dedicated to your current project attempt. Staff and procurement records here stay separate from your default organisation."
-              : "This is your default organisation workspace. Use System Administration and Manage Organisation in the sidebar. Practice and Assessments are under My Academic Work.")}
-        </p>
-      </div>
+      {!isAttemptOrg && project.isPersonalOrg ? (
+        <div className={`${BRAND_CARD_CLASS} p-4 sm:p-5`}>
+          <OrgDisplayNameForm
+            organizationName={project.organizationName || project.name}
+            defaultName={project.name}
+          />
+        </div>
+      ) : null}
 
       <div className={`${BRAND_CARD_CLASS} p-4 sm:p-5`}>
         <h2 className={BRAND_SECTION_TITLE_CLASS}>Owner</h2>
         <p className={`mt-2 ${BRAND_PAGE_LEAD_CLASS}`}>
           {formatUserDisplayName(project.owner)} ({project.owner?.email || "—"})
-        </p>
-        <p className={`mt-2 ${BRAND_PAGE_LEAD_CLASS}`}>
-          Use <span className="font-semibold text-primary">System Administration</span> for
-          departments, users, and roles, and{" "}
-          <span className="font-semibold text-primary">Manage Organisation</span> for structure,
-          financial years, budgets, planning periods, and committees.
         </p>
       </div>
     </div>

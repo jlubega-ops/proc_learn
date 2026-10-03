@@ -26,6 +26,7 @@ export function serializePostQualificationReport(row) {
     registrationVerified: row.registrationVerified,
     taxComplianceVerified: row.taxComplianceVerified,
     experienceVerified: row.experienceVerified,
+    validation: row.validationJson || null,
     comments: row.comments || null,
     status: row.status,
     approvedAt: row.approvedAt || null,
@@ -48,21 +49,26 @@ export function postQualificationRequired(procurement) {
  * @param {string} projectId
  * @param {string} procurementId
  */
-async function loadProcurementWithApprovedEvaluation(prisma, projectId, procurementId) {
+async function loadProcurementWithEvaluation(prisma, projectId, procurementId) {
   const procurement = await prisma.projectOrgProcurement.findFirst({
     where: { id: procurementId, projectId },
   });
   if (!procurement) return { procurement: null, evaluation: null };
   const evaluation = await prisma.projectOrgEvaluationReport.findFirst({
-    where: { projectId, procurementId, status: OrgEvaluationReportStatus.APPROVED },
-    orderBy: { approvedAt: "desc" },
+    where: {
+      projectId,
+      procurementId,
+      status: { in: [OrgEvaluationReportStatus.SUBMITTED, OrgEvaluationReportStatus.APPROVED] },
+    },
+    orderBy: { createdAt: "desc" },
   });
   return { procurement, evaluation };
 }
 
 /**
  * Create the DRAFT post-qualification checklist for the recommended supplier from
- * the (already approved) evaluation report.
+ * the submitted evaluation report. PPDA: the Evaluation Committee post-qualifies the
+ * best evaluated bidder before the Contracts Committee approves the recommendation.
  *
  * @param {import("@prisma/client").PrismaClient} prisma
  * @param {{
@@ -74,7 +80,7 @@ async function loadProcurementWithApprovedEvaluation(prisma, projectId, procurem
  * }} opts
  */
 export async function createPostQualificationChecklist(prisma, opts) {
-  const { procurement, evaluation } = await loadProcurementWithApprovedEvaluation(
+  const { procurement, evaluation } = await loadProcurementWithEvaluation(
     prisma,
     opts.projectId,
     opts.procurementId,
@@ -91,7 +97,7 @@ export async function createPostQualificationChecklist(prisma, opts) {
   if (!evaluation || !evaluation.recommendedSupplierId) {
     return {
       ok: false,
-      error: "An approved evaluation report with a recommended supplier is required before post-qualification.",
+      error: "The Evaluation Committee must submit its evaluation report (with a recommended bidder) before post-qualification.",
       status: 400,
       code: "NO_APPROVED_EVALUATION",
     };
@@ -203,17 +209,21 @@ export async function verifyPostQualificationChecklist(prisma, opts) {
     },
   });
 
-  const approvers = await prisma.projectOrgUser.findMany({
-    where: { projectId: opts.projectId, projectOrgRole: { name: { in: ["Head PDU"] } } },
-    select: { id: true, linkedUserId: true },
+  const contractsSeats = await prisma.projectOrgCommitteeMember.findMany({
+    where: {
+      status: "ACTIVE",
+      committee: { projectId: opts.projectId, isActive: true, committeeType: "CONTRACTS" },
+    },
+    select: { orgUser: { select: { id: true, linkedUserId: true } } },
   });
+  const approvers = [...new Map(contractsSeats.map((s) => [s.orgUser.id, s.orgUser])).values()];
   if (approvers.length) {
     await notifyOrgUsers(prisma, {
       projectId: opts.projectId,
       recipients: approvers,
       type: OrgNotificationType.WORKFLOW_TASK,
       title: "Post-qualification checklist ready for approval",
-      body: "A post-qualification checklist was submitted. Open the procurement to approve or reject it.",
+      body: "A post-qualification checklist was submitted. Switch to your Contracts Committee seat and open the procurement to approve or reject it.",
       linkUrl: `/projects/${opts.projectId}/procurements/${row.procurementId}`,
       relatedEntityType: "post_qualification_report",
       relatedEntityId: row.id,
@@ -255,15 +265,9 @@ export async function decidePostQualificationReport(prisma, opts) {
       fieldErrors: { comment: "Enter a meaningful comment." },
     };
   }
-  if (decision === "APPROVE" && !(row.registrationVerified && row.taxComplianceVerified && row.experienceVerified)) {
-    return {
-      ok: false,
-      error:
-        "All three checks (registration, tax compliance, experience) must be verified before approval.",
-      status: 400,
-      code: "PQ_INCOMPLETE",
-    };
-  }
+  // Learning mode: failed checks never block approval; they are recorded with the decision.
+  const approvedWithWarnings =
+    decision === "APPROVE" && !(row.registrationVerified && row.taxComplianceVerified && row.experienceVerified);
 
   const newStatus =
     decision === "APPROVE"
@@ -290,6 +294,7 @@ export async function decidePostQualificationReport(prisma, opts) {
       postQualificationReportId: row.id,
       kind: "post_qualification_decided",
       decision,
+      approvedWithWarnings,
       comment: opts.comment || null,
       actorOrgUserId: opts.actorOrgUserId,
       actorRoleName: opts.actorRoleName,

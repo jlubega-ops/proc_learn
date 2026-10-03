@@ -243,9 +243,10 @@ enum OrgProcurementStatus {
   REJECTED
 }
 
-enum OrgSupplierStatus {
+enum OrgProviderStatus {
   ACTIVE
   INACTIVE
+  SUSPENDED
 }
 
 enum OrgPurchaseInstructionStatus {
@@ -380,13 +381,13 @@ model User {
   userRoles    UserRole[]
   mediaObjects MediaObject[]
 
-  studentProfile           StudentProfile?
-  academicEnrollments      StudentAcademicEnrollment[]
-  authTokens               AuthToken[]
-  notifications            Notification[]
-  projects                 Project[]
-  projectEnrollments       ProjectEnrollment[]
-  attemptGrades            ProjectAttemptGrade[] @relation("AttemptGradedBy")
+  studentProfile      StudentProfile?
+  academicEnrollments StudentAcademicEnrollment[]
+  authTokens          AuthToken[]
+  notifications       Notification[]
+  projects            Project[]
+  projectEnrollments  ProjectEnrollment[]
+  attemptGrades       ProjectAttemptGrade[]       @relation("AttemptGradedBy")
 
   @@map("user")
 }
@@ -402,16 +403,16 @@ model UserRole {
 }
 
 model UserSettings {
-  id         String   @id @default(uuid())
-  userId     String   @unique @map("user_id") @db.VarChar(36)
-  user       User     @relation(fields: [userId], references: [id], onDelete: Cascade)
-  theme      String   @default("light") @db.VarChar(16)
-  activeRole Role     @default(STUDENT) @map("active_role")
+  id                 String   @id @default(uuid())
+  userId             String   @unique @map("user_id") @db.VarChar(36)
+  user               User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  theme              String   @default("light") @db.VarChar(16)
+  activeRole         Role     @default(STUDENT) @map("active_role")
   /// Student's current organisation shell: personal org or a per-attempt workspace.
   activeOrgProjectId String?  @map("active_org_project_id") @db.VarChar(36)
   activeOrgProject   Project? @relation("UserActiveOrg", fields: [activeOrgProjectId], references: [id], onDelete: SetNull)
-  createdAt  DateTime @default(now()) @map("created_at")
-  updatedAt  DateTime @updatedAt @map("updated_at")
+  createdAt          DateTime @default(now()) @map("created_at")
+  updatedAt          DateTime @updatedAt @map("updated_at")
 
   @@index([activeOrgProjectId])
   @@map("user_settings")
@@ -498,21 +499,21 @@ model StudentProfile {
 /// Uniqueness: one row per (userId, academicYearId). History is preserved by status —
 /// joining a new year marks prior ACTIVE enrollments HISTORICAL (never deletes).
 model StudentAcademicEnrollment {
-  id                String                     @id @default(uuid())
-  userId            String                     @map("user_id")
-  user              User                       @relation(fields: [userId], references: [id], onDelete: Cascade)
-  academicYearId    String                     @map("academic_year_id")
-  academicYear      AcademicYear               @relation(fields: [academicYearId], references: [id], onDelete: Restrict)
-  status            AcademicEnrollmentStatus   @default(ACTIVE)
-  participationType AcademicParticipationType  @default(STUDENT) @map("participation_type")
-  joinedAt          DateTime                   @default(now()) @map("joined_at")
+  id                String                    @id @default(uuid())
+  userId            String                    @map("user_id")
+  user              User                      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  academicYearId    String                    @map("academic_year_id")
+  academicYear      AcademicYear              @relation(fields: [academicYearId], references: [id], onDelete: Restrict)
+  status            AcademicEnrollmentStatus  @default(ACTIVE)
+  participationType AcademicParticipationType @default(STUDENT) @map("participation_type")
+  joinedAt          DateTime                  @default(now()) @map("joined_at")
   /// Set when the enrollment becomes HISTORICAL (e.g. student joins a newer year).
-  endedAt           DateTime?                  @map("ended_at")
-  createdAt         DateTime                   @default(now()) @map("created_at")
-  updatedAt         DateTime                   @updatedAt @map("updated_at")
+  endedAt           DateTime?                 @map("ended_at")
+  createdAt         DateTime                  @default(now()) @map("created_at")
+  updatedAt         DateTime                  @updatedAt @map("updated_at")
 
   /// One slate per organisation project for this academic enrollment.
-  orgSlates OrgAcademicSlate[]
+  orgSlates       OrgAcademicSlate[]
   projectAttempts ProjectAttempt[]
 
   @@unique([userId, academicYearId])
@@ -525,23 +526,23 @@ model StudentAcademicEnrollment {
 /// Academic-year participation context over one organisation Project (personal or attempt workspace).
 /// One slate per (organisation project, academic enrollment) — never share a slate across orgs.
 model OrgAcademicSlate {
-  id             String                 @id @default(uuid())
-  projectId      String                 @map("project_id")
-  project        Project                @relation(fields: [projectId], references: [id], onDelete: Cascade)
-  enrollmentId   String                 @map("enrollment_id")
+  id             String                    @id @default(uuid())
+  projectId      String                    @map("project_id")
+  project        Project                   @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  enrollmentId   String                    @map("enrollment_id")
   enrollment     StudentAcademicEnrollment @relation(fields: [enrollmentId], references: [id], onDelete: Cascade)
-  academicYearId String                 @map("academic_year_id")
-  academicYear   AcademicYear           @relation(fields: [academicYearId], references: [id], onDelete: Restrict)
-  status         OrgAcademicSlateStatus @default(CURRENT)
-  openedAt       DateTime               @default(now()) @map("opened_at")
-  closedAt       DateTime?              @map("closed_at")
-  createdAt      DateTime               @default(now()) @map("created_at")
-  updatedAt      DateTime               @updatedAt @map("updated_at")
+  academicYearId String                    @map("academic_year_id")
+  academicYear   AcademicYear              @relation(fields: [academicYearId], references: [id], onDelete: Restrict)
+  status         OrgAcademicSlateStatus    @default(CURRENT)
+  openedAt       DateTime                  @default(now()) @map("opened_at")
+  closedAt       DateTime?                 @map("closed_at")
+  createdAt      DateTime                  @default(now()) @map("created_at")
+  updatedAt      DateTime                  @updatedAt @map("updated_at")
 
-  budgets       ProjectOrgBudget[]
-  plans         ProjectOrgProcurementPlan[]
-  requisitions  ProjectOrgRequisition[]
-  procurements  ProjectOrgProcurement[]
+  budgets         ProjectOrgBudget[]
+  plans           ProjectOrgProcurementPlan[]
+  requisitions    ProjectOrgRequisition[]
+  procurements    ProjectOrgProcurement[]
   projectAttempts ProjectAttempt[]
 
   @@unique([projectId, enrollmentId])
@@ -576,6 +577,21 @@ model AuditLog {
 
   @@index([eventType, createdAt])
   @@map("audit_log")
+}
+
+/// Platform-wide settings managed by system admins (single row, key = "default").
+model SiteSetting {
+  id                     String    @id @default(uuid())
+  key                    String    @unique @default("default") @db.VarChar(32)
+  maintenanceEnabled     Boolean   @default(false) @map("maintenance_enabled")
+  maintenanceStartedAt   DateTime? @map("maintenance_started_at")
+  /// Secret path segment for the admin sign-in link while maintenance is on.
+  maintenanceBypassToken String?   @map("maintenance_bypass_token") @db.VarChar(128)
+  updatedByUserId        String?   @map("updated_by_user_id") @db.VarChar(36)
+  createdAt              DateTime  @default(now()) @map("created_at")
+  updatedAt              DateTime  @updatedAt @map("updated_at")
+
+  @@map("site_setting")
 }
 
 model Notification {
@@ -630,46 +646,46 @@ model MediaObject {
 }
 
 model Project {
-  id                 String            @id @default(uuid())
-  ownerUserId        String            @map("owner_user_id")
-  owner              User              @relation(fields: [ownerUserId], references: [id], onDelete: Cascade)
-  creatorRole        Role              @map("creator_role")
-  name               String            @db.VarChar(255)
-  description        String?           @db.Text
-  organizationName   String?           @map("organization_name") @db.VarChar(255)
-  purpose            ProjectPurpose    @default(PRACTICE)
-  status             ProjectStatus     @default(NOT_STARTED)
-  visibility         ProjectVisibility @default(PRIVATE)
-  instructions       String?           @db.Text
-  questionText       String?           @map("question_text") @db.Text
-  questionFileUrl    String?           @map("question_file_url") @db.VarChar(2048)
-  isPublished        Boolean           @default(false) @map("is_published")
-  openAt             DateTime?         @map("open_at")
-  closeAt            DateTime?         @map("close_at")
-  durationSeconds    Int?              @map("duration_seconds")
+  id                      String            @id @default(uuid())
+  ownerUserId             String            @map("owner_user_id")
+  owner                   User              @relation(fields: [ownerUserId], references: [id], onDelete: Cascade)
+  creatorRole             Role              @map("creator_role")
+  name                    String            @db.VarChar(255)
+  description             String?           @db.Text
+  organizationName        String?           @map("organization_name") @db.VarChar(255)
+  purpose                 ProjectPurpose    @default(PRACTICE)
+  status                  ProjectStatus     @default(NOT_STARTED)
+  visibility              ProjectVisibility @default(PRIVATE)
+  instructions            String?           @db.Text
+  questionText            String?           @map("question_text") @db.Text
+  questionFileUrl         String?           @map("question_file_url") @db.VarChar(2048)
+  isPublished             Boolean           @default(false) @map("is_published")
+  openAt                  DateTime?         @map("open_at")
+  closeAt                 DateTime?         @map("close_at")
+  durationSeconds         Int?              @map("duration_seconds")
   /// Max ProjectAttempt rows per enrollment. Null = unlimited (typical Practice).
-  maxAttempts        Int?              @map("max_attempts")
+  maxAttempts             Int?              @map("max_attempts")
   /// When false, submitted attempts cannot be reopened for further edits.
-  allowEditAfterSubmit Boolean         @default(false) @map("allow_edit_after_submit")
-  enrollmentKey      String?           @map("enrollment_key") @db.VarChar(16)
-  requiresEnrollment Boolean           @default(false) @map("requires_enrollment")
+  allowEditAfterSubmit    Boolean           @default(false) @map("allow_edit_after_submit")
+  enrollmentKey           String?           @map("enrollment_key") @db.VarChar(16)
+  requiresEnrollment      Boolean           @default(false) @map("requires_enrollment")
   /// Short immutable code that distinguishes this project/organisation (e.g. ORG-A1B2C3).
-  projectCode        String?           @unique @map("project_code") @db.VarChar(16)
+  projectCode             String?           @unique @map("project_code") @db.VarChar(16)
   /// True for the student's home organisation (one per student owner).
-  isPersonalOrg      Boolean           @default(false) @map("is_personal_org")
+  isPersonalOrg           Boolean           @default(false) @map("is_personal_org")
   /// Isolated organisation shell created when a student starts a Practice/Assessment attempt.
-  isAttemptOrg       Boolean           @default(false) @map("is_attempt_org")
+  isAttemptOrg            Boolean           @default(false) @map("is_attempt_org")
   /// Academic project (examiner PRACTICE/ASSESSMENT) this attempt workspace was created for.
-  sourceAcademicProjectId String?      @map("source_academic_project_id")
-  sourceAcademicProject   Project?     @relation("AcademicProjectWorkspaces", fields: [sourceAcademicProjectId], references: [id], onDelete: Cascade)
-  attemptWorkspaces       Project[]    @relation("AcademicProjectWorkspaces")
+  sourceAcademicProjectId String?           @map("source_academic_project_id")
+  sourceAcademicProject   Project?          @relation("AcademicProjectWorkspaces", fields: [sourceAcademicProjectId], references: [id], onDelete: Cascade)
+  attemptWorkspaces       Project[]         @relation("AcademicProjectWorkspaces")
   /// Academic context for Practice / Assessment projects (examiner-created).
-  academicYearId     String?           @map("academic_year_id")
-  academicYear       AcademicYear?     @relation(fields: [academicYearId], references: [id], onDelete: SetNull)
-  programmeId        String?           @map("programme_id")
-  programme          Programme?        @relation(fields: [programmeId], references: [id], onDelete: SetNull)
-  createdAt          DateTime          @default(now()) @map("created_at")
-  updatedAt          DateTime          @updatedAt @map("updated_at")
+  academicYearId          String?           @map("academic_year_id")
+  academicYear            AcademicYear?     @relation(fields: [academicYearId], references: [id], onDelete: SetNull)
+  programmeId             String?           @map("programme_id")
+  programme               Programme?        @relation(fields: [programmeId], references: [id], onDelete: SetNull)
+  createdAt               DateTime          @default(now()) @map("created_at")
+  updatedAt               DateTime          @updatedAt @map("updated_at")
 
   enrollments             ProjectEnrollment[]
   orgUsers                ProjectOrgUser[]
@@ -683,7 +699,7 @@ model Project {
   orgBudgetLines          ProjectOrgBudgetLine[]
   orgRequisitions         ProjectOrgRequisition[]
   orgProcurements         ProjectOrgProcurement[]
-  orgSuppliers            ProjectOrgSupplier[]
+  orgProviders            ProjectOrgProvider[]
   orgNotifications        ProjectOrgNotification[]
   orgWorkflowInstances    ProjectOrgWorkflowInstance[]
   orgWorkflowTasks        ProjectOrgWorkflowTask[]
@@ -691,8 +707,8 @@ model Project {
   orgAcademicSlates       OrgAcademicSlate[]
   orgFormDrafts           ProjectOrgFormDraft[]
   assessment              ProjectAssessment?
-  workspaceAttempts       ProjectAttempt[] @relation("AttemptWorkspace")
-  activeOrgForUsers       UserSettings[]   @relation("UserActiveOrg")
+  workspaceAttempts       ProjectAttempt[]                @relation("AttemptWorkspace")
+  activeOrgForUsers       UserSettings[]                  @relation("UserActiveOrg")
 
   @@index([ownerUserId, createdAt])
   @@index([ownerUserId, isPersonalOrg])
@@ -728,28 +744,28 @@ model ProjectEnrollment {
 
 /// One execution of an Academic Project for an enrollment (retakes = multiple rows).
 model ProjectAttempt {
-  id                          String              @id @default(uuid())
-  enrollmentId                String              @map("enrollment_id")
-  enrollment                  ProjectEnrollment   @relation(fields: [enrollmentId], references: [id], onDelete: Cascade)
-  attemptNumber               Int                 @map("attempt_number")
+  id                          String                     @id @default(uuid())
+  enrollmentId                String                     @map("enrollment_id")
+  enrollment                  ProjectEnrollment          @relation(fields: [enrollmentId], references: [id], onDelete: Cascade)
+  attemptNumber               Int                        @map("attempt_number")
   /// Organisation shell CURRENT slate when the attempt started (personal or attempt workspace).
-  academicSlateId             String?             @map("academic_slate_id")
-  academicSlate               OrgAcademicSlate?   @relation(fields: [academicSlateId], references: [id], onDelete: SetNull)
-  studentAcademicEnrollmentId String?             @map("student_academic_enrollment_id")
+  academicSlateId             String?                    @map("academic_slate_id")
+  academicSlate               OrgAcademicSlate?          @relation(fields: [academicSlateId], references: [id], onDelete: SetNull)
+  studentAcademicEnrollmentId String?                    @map("student_academic_enrollment_id")
   studentAcademicEnrollment   StudentAcademicEnrollment? @relation(fields: [studentAcademicEnrollmentId], references: [id], onDelete: SetNull)
   /// Isolated organisation Project this attempt is executed in (null = legacy personal-org attempts).
-  workspaceProjectId          String?             @map("workspace_project_id")
-  workspaceProject            Project?            @relation("AttemptWorkspace", fields: [workspaceProjectId], references: [id], onDelete: SetNull)
-  status                      ProjectAttemptStatus @default(NOT_STARTED)
-  startedAt                   DateTime?           @map("started_at")
-  submittedAt                 DateTime?           @map("submitted_at")
+  workspaceProjectId          String?                    @map("workspace_project_id")
+  workspaceProject            Project?                   @relation("AttemptWorkspace", fields: [workspaceProjectId], references: [id], onDelete: SetNull)
+  status                      ProjectAttemptStatus       @default(NOT_STARTED)
+  startedAt                   DateTime?                  @map("started_at")
+  submittedAt                 DateTime?                  @map("submitted_at")
   /// Seconds of active work; primarily derived from startedAt→now/submit for the timer.
-  durationSecondsUsed         Int                 @default(0) @map("duration_seconds_used")
+  durationSecondsUsed         Int                        @default(0) @map("duration_seconds_used")
   /// Cache only — progress is derived from the attempt workspace procurement domain.
-  progressPercent             Int?                @map("progress_percent")
-  currentStageKey             String?             @map("current_stage_key") @db.VarChar(64)
-  createdAt                   DateTime            @default(now()) @map("created_at")
-  updatedAt                   DateTime            @updatedAt @map("updated_at")
+  progressPercent             Int?                       @map("progress_percent")
+  currentStageKey             String?                    @map("current_stage_key") @db.VarChar(64)
+  createdAt                   DateTime                   @default(now()) @map("created_at")
+  updatedAt                   DateTime                   @updatedAt @map("updated_at")
 
   grade ProjectAttemptGrade?
 
@@ -764,22 +780,22 @@ model ProjectAttempt {
 /// Assessment configuration for an Academic Project (Practice or Assessment purpose).
 /// Observes the real procurement domain — does not duplicate workflow rules.
 model ProjectAssessment {
-  id                 String                @id @default(uuid())
-  projectId          String                @unique @map("project_id")
-  project            Project               @relation(fields: [projectId], references: [id], onDelete: Cascade)
-  gradingMode        AssessmentGradingMode @default(AUTOMATIC) @map("grading_mode")
+  id              String                @id @default(uuid())
+  projectId       String                @unique @map("project_id")
+  project         Project               @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  gradingMode     AssessmentGradingMode @default(AUTOMATIC) @map("grading_mode")
   /// Examiner-entered marks cap (0 for AUTOMATIC). Auto cap = sum of active checkpoint marks.
-  manualMaxMarks     Int                   @default(0) @map("manual_max_marks")
+  manualMaxMarks  Int                   @default(0) @map("manual_max_marks")
   /// Pass when finalPercent >= this value (default 50).
-  passMarkPercent    Int                   @default(50) @map("pass_mark_percent")
+  passMarkPercent Int                   @default(50) @map("pass_mark_percent")
   /// Total grade this project is scored out of. Allowed processes share this total.
-  totalMarks         Int                   @default(100) @map("total_marks")
+  totalMarks      Int                   @default(100) @map("total_marks")
   /// When false, Practice projects skip scoring UI/eval (Assessment defaults to true).
-  scoringEnabled     Boolean               @default(true) @map("scoring_enabled")
+  scoringEnabled  Boolean               @default(true) @map("scoring_enabled")
   /// When true, students may see their final score and feedback.
-  resultsReleased    Boolean               @default(false) @map("results_released")
-  createdAt          DateTime              @default(now()) @map("created_at")
-  updatedAt          DateTime              @updatedAt @map("updated_at")
+  resultsReleased Boolean               @default(false) @map("results_released")
+  createdAt       DateTime              @default(now()) @map("created_at")
+  updatedAt       DateTime              @updatedAt @map("updated_at")
 
   checkpoints AssessmentCheckpoint[]
   processes   AssessmentProcess[]
@@ -789,20 +805,20 @@ model ProjectAssessment {
 }
 
 model AssessmentCheckpoint {
-  id                 String                    @id @default(uuid())
-  assessmentId       String                    @map("assessment_id")
-  assessment         ProjectAssessment         @relation(fields: [assessmentId], references: [id], onDelete: Cascade)
-  sortOrder          Int                       @default(0) @map("sort_order")
-  label              String                    @db.VarChar(255)
-  kind               AssessmentCheckpointKind
+  id                String                   @id @default(uuid())
+  assessmentId      String                   @map("assessment_id")
+  assessment        ProjectAssessment        @relation(fields: [assessmentId], references: [id], onDelete: Cascade)
+  sortOrder         Int                      @default(0) @map("sort_order")
+  label             String                   @db.VarChar(255)
+  kind              AssessmentCheckpointKind
   /// For STAGE_COMPLETED / STAGE_REACHED — OBSERVATION_STAGE_KEYS value.
-  stageKey           String?                   @map("stage_key") @db.VarChar(64)
+  stageKey          String?                  @map("stage_key") @db.VarChar(64)
   /// For PROCUREMENT_METHOD — OrgProcurementMethod value.
-  procurementMethod  String?                   @map("procurement_method") @db.VarChar(32)
-  marks              Int
-  isActive           Boolean                   @default(true) @map("is_active")
-  createdAt          DateTime                  @default(now()) @map("created_at")
-  updatedAt          DateTime                  @updatedAt @map("updated_at")
+  procurementMethod String?                  @map("procurement_method") @db.VarChar(32)
+  marks             Int
+  isActive          Boolean                  @default(true) @map("is_active")
+  createdAt         DateTime                 @default(now()) @map("created_at")
+  updatedAt         DateTime                 @updatedAt @map("updated_at")
 
   @@index([assessmentId, sortOrder])
   @@map("assessment_checkpoint")
@@ -829,26 +845,26 @@ model AssessmentProcess {
 
 /// One grade per ProjectAttempt. Demo participation may have grades but is excluded from official stats/exports.
 model ProjectAttemptGrade {
-  id                 String             @id @default(uuid())
-  attemptId          String             @unique @map("attempt_id")
-  attempt            ProjectAttempt     @relation(fields: [attemptId], references: [id], onDelete: Cascade)
-  assessmentId       String             @map("assessment_id")
-  assessment         ProjectAssessment  @relation(fields: [assessmentId], references: [id], onDelete: Cascade)
-  autoScore          Int                @default(0) @map("auto_score")
-  manualScore        Int?               @map("manual_score")
-  finalScore         Int?               @map("final_score")
-  finalPercent       Int?               @map("final_percent")
-  passFail           PassFailResult?    @map("pass_fail")
-  feedback           String?            @db.Text
-  status             AttemptGradeStatus @default(NOT_GRADED)
+  id                String             @id @default(uuid())
+  attemptId         String             @unique @map("attempt_id")
+  attempt           ProjectAttempt     @relation(fields: [attemptId], references: [id], onDelete: Cascade)
+  assessmentId      String             @map("assessment_id")
+  assessment        ProjectAssessment  @relation(fields: [assessmentId], references: [id], onDelete: Cascade)
+  autoScore         Int                @default(0) @map("auto_score")
+  manualScore       Int?               @map("manual_score")
+  finalScore        Int?               @map("final_score")
+  finalPercent      Int?               @map("final_percent")
+  passFail          PassFailResult?    @map("pass_fail")
+  feedback          String?            @db.Text
+  status            AttemptGradeStatus @default(NOT_GRADED)
   /// Snapshot of checkpoint evaluations at last auto run.
-  checkpointResults  Json?              @map("checkpoint_results")
-  gradedByUserId     String?            @map("graded_by_user_id")
-  gradedBy           User?              @relation("AttemptGradedBy", fields: [gradedByUserId], references: [id], onDelete: SetNull)
-  gradedAt           DateTime?          @map("graded_at")
-  autoEvaluatedAt    DateTime?          @map("auto_evaluated_at")
-  createdAt          DateTime           @default(now()) @map("created_at")
-  updatedAt          DateTime           @updatedAt @map("updated_at")
+  checkpointResults Json?              @map("checkpoint_results")
+  gradedByUserId    String?            @map("graded_by_user_id")
+  gradedBy          User?              @relation("AttemptGradedBy", fields: [gradedByUserId], references: [id], onDelete: SetNull)
+  gradedAt          DateTime?          @map("graded_at")
+  autoEvaluatedAt   DateTime?          @map("auto_evaluated_at")
+  createdAt         DateTime           @default(now()) @map("created_at")
+  updatedAt         DateTime           @updatedAt @map("updated_at")
 
   @@index([assessmentId, status])
   @@index([gradedByUserId])
@@ -947,6 +963,7 @@ model ProjectOrgUser {
   purchaseInstructionsIssued ProjectOrgPurchaseInstruction[] @relation("PurchaseInstructionIssuer")
   awardsApproved             ProjectOrgAward[]               @relation("AwardApprover")
   deliveriesRecorded         ProjectOrgDelivery[]            @relation("DeliveryRecorder")
+  providersCreated           ProjectOrgProvider[]            @relation("ProviderCreator")
   inspectionsRecorded        ProjectOrgInspection[]          @relation("InspectionRecorder")
   invoicesCreated            ProjectOrgInvoice[]             @relation("InvoiceCreator")
   paymentsApproved           ProjectOrgPayment[]             @relation("PaymentApprover")
@@ -1422,17 +1439,40 @@ model ProjectOrgProcurement {
   @@map("project_org_procurement")
 }
 
-model ProjectOrgSupplier {
-  id              String            @id @default(uuid())
-  projectId       String            @map("project_id")
-  project         Project           @relation(fields: [projectId], references: [id], onDelete: Cascade)
-  name            String            @db.VarChar(255)
-  email           String?           @db.VarChar(255)
-  phone           String?           @db.VarChar(64)
-  registrationRef String?           @map("registration_ref") @db.VarChar(128)
-  status          OrgSupplierStatus @default(ACTIVE)
-  createdAt       DateTime          @default(now()) @map("created_at")
-  updatedAt       DateTime          @updatedAt @map("updated_at")
+/// Organisation-scoped provider register (suppliers, contractors, service providers, consultants).
+/// Table name kept as project_org_supplier so existing rows are preserved.
+model ProjectOrgProvider {
+  id                 String            @id @default(uuid())
+  projectId          String            @map("project_id")
+  project            Project           @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  name               String            @db.VarChar(255)
+  email              String?           @db.VarChar(255)
+  phone              String?           @db.VarChar(64)
+  contactPerson      String?           @map("contact_person") @db.VarChar(160)
+  physicalAddress    String?           @map("physical_address") @db.VarChar(255)
+  /// URSB company / business registration number.
+  registrationRef    String?           @map("registration_ref") @db.VarChar(128)
+  tin                String?           @db.VarChar(32)
+  /// Array of provider category keys (GOODS, WORKS, NON_CONSULTANCY, CONSULTANCY).
+  categories         Json?
+  linesOfBusiness    String?           @map("lines_of_business") @db.VarChar(500)
+  /// Simulated compliance documents keyed by document code: { held, number, expiresAt }.
+  compliance         Json?
+  /// Simulated PPDA suspended-providers list flag (regulator side).
+  ppdaSuspended      Boolean           @default(false) @map("ppda_suspended")
+  /// Simulated provider behaviour key used by auto-responses (see provider-behaviours.js).
+  behaviour          String?           @db.VarChar(40)
+  isGenerated        Boolean           @default(false) @map("is_generated")
+  status             OrgProviderStatus @default(ACTIVE)
+  statusReason       String?           @map("status_reason") @db.VarChar(500)
+  /// Base portal login email (scoped with project code at login).
+  portalEmail        String?           @map("portal_email") @db.VarChar(255)
+  portalPasswordHash String?           @map("portal_password_hash") @db.VarChar(255)
+  portalLastLoginAt  DateTime?         @map("portal_last_login_at")
+  createdByOrgUserId String?           @map("created_by_org_user_id")
+  createdBy          ProjectOrgUser?   @relation("ProviderCreator", fields: [createdByOrgUserId], references: [id], onDelete: SetNull)
+  createdAt          DateTime          @default(now()) @map("created_at")
+  updatedAt          DateTime          @updatedAt @map("updated_at")
 
   purchaseInstructions ProjectOrgPurchaseInstruction[]
   solicitationInvites  ProjectOrgSolicitationInvite[]
@@ -1441,8 +1481,10 @@ model ProjectOrgSupplier {
   awards               ProjectOrgAward[]
   contracts            ProjectOrgContract[]
   lpos                 ProjectOrgLpo[]
+  invoices             ProjectOrgInvoice[]             @relation("InvoiceSupplier")
 
   @@unique([projectId, name])
+  @@unique([projectId, portalEmail])
   @@index([projectId, status])
   @@map("project_org_supplier")
 }
@@ -1453,7 +1495,7 @@ model ProjectOrgPurchaseInstruction {
   procurementId     String                       @unique @map("procurement_id")
   procurement       ProjectOrgProcurement        @relation(fields: [procurementId], references: [id], onDelete: Cascade)
   supplierId        String                       @map("supplier_id")
-  supplier          ProjectOrgSupplier           @relation(fields: [supplierId], references: [id], onDelete: Restrict)
+  supplier          ProjectOrgProvider           @relation(fields: [supplierId], references: [id], onDelete: Restrict)
   instructionNumber String                       @map("instruction_number") @db.VarChar(32)
   amount            Decimal                      @db.Decimal(18, 2)
   status            OrgPurchaseInstructionStatus @default(DRAFT)
@@ -1461,6 +1503,7 @@ model ProjectOrgPurchaseInstruction {
   issuedByOrgUserId String?                      @map("issued_by_org_user_id")
   issuedBy          ProjectOrgUser?              @relation("PurchaseInstructionIssuer", fields: [issuedByOrgUserId], references: [id], onDelete: SetNull)
   remarks           String?                      @db.Text
+  deliveryAddress   String?                      @map("delivery_address") @db.VarChar(255)
   createdAt         DateTime                     @default(now()) @map("created_at")
   updatedAt         DateTime                     @updatedAt @map("updated_at")
 
@@ -1501,7 +1544,7 @@ model ProjectOrgSolicitationInvite {
   solicitationId String                 @map("solicitation_id")
   solicitation   ProjectOrgSolicitation @relation(fields: [solicitationId], references: [id], onDelete: Cascade)
   supplierId     String                 @map("supplier_id")
-  supplier       ProjectOrgSupplier     @relation(fields: [supplierId], references: [id], onDelete: Restrict)
+  supplier       ProjectOrgProvider     @relation(fields: [supplierId], references: [id], onDelete: Restrict)
   invitedAt      DateTime               @default(now()) @map("invited_at")
 
   @@unique([solicitationId, supplierId])
@@ -1517,12 +1560,17 @@ model ProjectOrgOffer {
   solicitationId String?                 @map("solicitation_id")
   solicitation   ProjectOrgSolicitation? @relation(fields: [solicitationId], references: [id], onDelete: SetNull)
   supplierId     String                  @map("supplier_id")
-  supplier       ProjectOrgSupplier      @relation(fields: [supplierId], references: [id], onDelete: Restrict)
+  supplier       ProjectOrgProvider      @relation(fields: [supplierId], references: [id], onDelete: Restrict)
   offerType      OrgOfferType            @map("offer_type")
   amount         Decimal                 @db.Decimal(18, 2)
   status         OrgOfferStatus          @default(SUBMITTED)
   submittedAt    DateTime                @default(now()) @map("submitted_at")
   openedAt       DateTime?               @map("opened_at")
+  /// OFFICER (recorded by PDU), PORTAL (provider login) or AUTO (generated provider).
+  source         String                  @default("OFFICER") @db.VarChar(16)
+  deliveryDays   Int?                    @map("delivery_days")
+  remarks        String?                 @db.Text
+  withdrawnAt    DateTime?               @map("withdrawn_at")
   createdAt      DateTime                @default(now()) @map("created_at")
   updatedAt      DateTime                @updatedAt @map("updated_at")
 
@@ -1540,11 +1588,13 @@ model ProjectOrgEvaluationReport {
   committeeId           String?                   @map("committee_id")
   committee             ProjectOrgCommittee?      @relation(fields: [committeeId], references: [id], onDelete: SetNull)
   recommendedSupplierId String?                   @map("recommended_supplier_id")
-  recommendedSupplier   ProjectOrgSupplier?       @relation("EvaluationRecommendedSupplier", fields: [recommendedSupplierId], references: [id], onDelete: SetNull)
+  recommendedSupplier   ProjectOrgProvider?       @relation("EvaluationRecommendedSupplier", fields: [recommendedSupplierId], references: [id], onDelete: SetNull)
   evaluatedAmount       Decimal?                  @map("evaluated_amount") @db.Decimal(18, 2)
   recommendation        String?                   @db.Text
   comments              String?                   @db.Text
   scoresJson            Json?                     @map("scores_json")
+  /// System "Run validation" eligibility results per bidder (learning mode: warnings only).
+  eligibilityJson       Json?                     @map("eligibility_json")
   status                OrgEvaluationReportStatus @default(DRAFT)
   approvedAt            DateTime?                 @map("approved_at")
   createdAt             DateTime                  @default(now()) @map("created_at")
@@ -1580,6 +1630,8 @@ model ProjectOrgPostQualificationReport {
   registrationVerified  Boolean                    @default(false) @map("registration_verified")
   taxComplianceVerified Boolean                    @default(false) @map("tax_compliance_verified")
   experienceVerified    Boolean                    @default(false) @map("experience_verified")
+  /// System "Run validation" result for the recommended bidder.
+  validationJson        Json?                      @map("validation_json")
   comments              String?                    @db.Text
   status                OrgPostQualificationStatus @default(DRAFT)
   approvedAt            DateTime?                  @map("approved_at")
@@ -1596,7 +1648,7 @@ model ProjectOrgAward {
   procurementId       String                @map("procurement_id")
   procurement         ProjectOrgProcurement @relation(fields: [procurementId], references: [id], onDelete: Cascade)
   supplierId          String                @map("supplier_id")
-  supplier            ProjectOrgSupplier    @relation(fields: [supplierId], references: [id], onDelete: Restrict)
+  supplier            ProjectOrgProvider    @relation(fields: [supplierId], references: [id], onDelete: Restrict)
   awardedAmount       Decimal               @map("awarded_amount") @db.Decimal(18, 2)
   status              OrgAwardStatus        @default(DRAFT)
   awardDate           DateTime?             @map("award_date")
@@ -1617,22 +1669,23 @@ model ProjectOrgAward {
 }
 
 model ProjectOrgContract {
-  id             String                @id @default(uuid())
-  projectId      String                @map("project_id")
-  procurementId  String                @map("procurement_id")
-  procurement    ProjectOrgProcurement @relation(fields: [procurementId], references: [id], onDelete: Cascade)
-  awardId        String?               @map("award_id")
-  award          ProjectOrgAward?      @relation(fields: [awardId], references: [id], onDelete: SetNull)
-  supplierId     String                @map("supplier_id")
-  supplier       ProjectOrgSupplier    @relation(fields: [supplierId], references: [id], onDelete: Restrict)
-  contractNumber String                @map("contract_number") @db.VarChar(32)
-  contractValue  Decimal               @map("contract_value") @db.Decimal(18, 2)
-  status         OrgContractStatus     @default(DRAFT)
-  startDate      DateTime?             @map("start_date")
-  endDate        DateTime?             @map("end_date")
-  issuedAt       DateTime?             @map("issued_at")
-  createdAt      DateTime              @default(now()) @map("created_at")
-  updatedAt      DateTime              @updatedAt @map("updated_at")
+  id              String                @id @default(uuid())
+  projectId       String                @map("project_id")
+  procurementId   String                @map("procurement_id")
+  procurement     ProjectOrgProcurement @relation(fields: [procurementId], references: [id], onDelete: Cascade)
+  awardId         String?               @map("award_id")
+  award           ProjectOrgAward?      @relation(fields: [awardId], references: [id], onDelete: SetNull)
+  supplierId      String                @map("supplier_id")
+  supplier        ProjectOrgProvider    @relation(fields: [supplierId], references: [id], onDelete: Restrict)
+  contractNumber  String                @map("contract_number") @db.VarChar(32)
+  contractValue   Decimal               @map("contract_value") @db.Decimal(18, 2)
+  status          OrgContractStatus     @default(DRAFT)
+  startDate       DateTime?             @map("start_date")
+  endDate         DateTime?             @map("end_date")
+  issuedAt        DateTime?             @map("issued_at")
+  deliveryAddress String?               @map("delivery_address") @db.VarChar(255)
+  createdAt       DateTime              @default(now()) @map("created_at")
+  updatedAt       DateTime              @updatedAt @map("updated_at")
 
   @@unique([projectId, contractNumber])
   @@index([procurementId, status])
@@ -1640,21 +1693,22 @@ model ProjectOrgContract {
 }
 
 model ProjectOrgLpo {
-  id            String                @id @default(uuid())
-  projectId     String                @map("project_id")
-  procurementId String                @map("procurement_id")
-  procurement   ProjectOrgProcurement @relation(fields: [procurementId], references: [id], onDelete: Cascade)
-  awardId       String?               @map("award_id")
-  award         ProjectOrgAward?      @relation(fields: [awardId], references: [id], onDelete: SetNull)
-  supplierId    String                @map("supplier_id")
-  supplier      ProjectOrgSupplier    @relation(fields: [supplierId], references: [id], onDelete: Restrict)
-  lpoNumber     String                @map("lpo_number") @db.VarChar(32)
-  lpoValue      Decimal               @map("lpo_value") @db.Decimal(18, 2)
-  status        OrgLpoStatus          @default(DRAFT)
-  issuedAt      DateTime?             @map("issued_at")
-  acceptedAt    DateTime?             @map("accepted_at")
-  createdAt     DateTime              @default(now()) @map("created_at")
-  updatedAt     DateTime              @updatedAt @map("updated_at")
+  id              String                @id @default(uuid())
+  projectId       String                @map("project_id")
+  procurementId   String                @map("procurement_id")
+  procurement     ProjectOrgProcurement @relation(fields: [procurementId], references: [id], onDelete: Cascade)
+  awardId         String?               @map("award_id")
+  award           ProjectOrgAward?      @relation(fields: [awardId], references: [id], onDelete: SetNull)
+  supplierId      String                @map("supplier_id")
+  supplier        ProjectOrgProvider    @relation(fields: [supplierId], references: [id], onDelete: Restrict)
+  lpoNumber       String                @map("lpo_number") @db.VarChar(32)
+  lpoValue        Decimal               @map("lpo_value") @db.Decimal(18, 2)
+  status          OrgLpoStatus          @default(DRAFT)
+  issuedAt        DateTime?             @map("issued_at")
+  acceptedAt      DateTime?             @map("accepted_at")
+  deliveryAddress String?               @map("delivery_address") @db.VarChar(255)
+  createdAt       DateTime              @default(now()) @map("created_at")
+  updatedAt       DateTime              @updatedAt @map("updated_at")
 
   @@unique([projectId, lpoNumber])
   @@index([procurementId, status])
@@ -1671,6 +1725,7 @@ model ProjectOrgDelivery {
   recordedByOrgUserId String?               @map("recorded_by_org_user_id")
   recordedBy          ProjectOrgUser?       @relation("DeliveryRecorder", fields: [recordedByOrgUserId], references: [id], onDelete: SetNull)
   remarks             String?               @db.Text
+  deliveryAddress     String?               @map("delivery_address") @db.VarChar(255)
   createdAt           DateTime              @default(now()) @map("created_at")
   updatedAt           DateTime              @updatedAt @map("updated_at")
 
@@ -1726,6 +1781,14 @@ model ProjectOrgInvoice {
   deliveryId         String?               @map("delivery_id")
   delivery           ProjectOrgDelivery?   @relation(fields: [deliveryId], references: [id], onDelete: SetNull)
   invoiceNumber      String                @map("invoice_number") @db.VarChar(64)
+  supplierId         String?               @map("supplier_id")
+  supplier           ProjectOrgProvider?   @relation("InvoiceSupplier", fields: [supplierId], references: [id], onDelete: SetNull)
+  /// Provider's own invoice reference (as printed on their invoice).
+  supplierReference  String?               @map("supplier_reference") @db.VarChar(64)
+  /// OFFICER (received by officer), PORTAL (provider login) or AUTO (generated provider).
+  source             String                @default("OFFICER") @db.VarChar(16)
+  deliveryAddress    String?               @map("delivery_address") @db.VarChar(255)
+  notes              String?               @db.Text
   amount             Decimal               @db.Decimal(18, 2)
   status             OrgInvoiceStatus      @default(DRAFT)
   invoiceDate        DateTime?             @map("invoice_date")
@@ -1742,6 +1805,7 @@ model ProjectOrgInvoice {
   @@unique([projectId, invoiceNumber])
   @@index([procurementId, status])
   @@index([deliveryId])
+  @@index([supplierId])
   @@map("project_org_invoice")
 }
 

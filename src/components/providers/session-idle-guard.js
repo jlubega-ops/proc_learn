@@ -8,6 +8,15 @@ const ACTIVITY_EVENTS = ["mousedown", "keydown", "scroll", "touchstart", "pointe
 const PING_DEBOUNCE_MS = 45_000;
 const SESSION_POLL_MS = 60_000;
 
+/** @param {Response} res */
+async function leaveIfMaintenance(res) {
+  if (res.status !== 503) return false;
+  const data = await res.clone().json().catch(() => ({}));
+  if (data.code !== "maintenance") return false;
+  window.location.replace("/maintenance");
+  return true;
+}
+
 /**
  * Tracks user interaction, pings the server to slide idle expiry, and signs out when idle.
  */
@@ -45,6 +54,7 @@ export function SessionIdleGuard() {
         method: "POST",
         credentials: "include",
       });
+      if (await leaveIfMaintenance(res)) return;
       if (res.status === 401) {
         await signOutIdle();
       }
@@ -76,6 +86,7 @@ export function SessionIdleGuard() {
             credentials: "include",
             cache: "no-store",
           });
+          if (await leaveIfMaintenance(res)) return;
           const data = await res.json().catch(() => ({}));
           if (!data.authenticated && data.reason === "idle_expired") {
             await signOutIdle();

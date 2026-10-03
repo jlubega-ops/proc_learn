@@ -66,7 +66,7 @@ export async function purgeProjectData(tx, projectId) {
   await tx.projectOrgProcessFlowAdoption.deleteMany({ where: { projectId: id } });
 
   await tx.projectOrgUser.deleteMany({ where: { projectId: id } });
-  await tx.projectOrgSupplier.deleteMany({ where: { projectId: id } });
+  await tx.projectOrgProvider.deleteMany({ where: { projectId: id } });
 
   await tx.projectOrgDepartment.deleteMany({
     where: { projectId: id, parentId: { not: null } },

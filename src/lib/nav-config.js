@@ -19,8 +19,70 @@ import Groups2Rounded from "@mui/icons-material/Groups2Rounded";
 import ShoppingCartRounded from "@mui/icons-material/ShoppingCartRounded";
 import StorefrontRounded from "@mui/icons-material/StorefrontRounded";
 import EventNoteRounded from "@mui/icons-material/EventNoteRounded";
+import FactCheckRounded from "@mui/icons-material/FactCheckRounded";
+import EmojiEventsRounded from "@mui/icons-material/EmojiEventsRounded";
+import DescriptionRounded from "@mui/icons-material/DescriptionRounded";
+import LocalShippingRounded from "@mui/icons-material/LocalShippingRounded";
+import ReceiptLongRounded from "@mui/icons-material/ReceiptLongRounded";
+import PaymentsRounded from "@mui/icons-material/PaymentsRounded";
+import LockRounded from "@mui/icons-material/LockRounded";
+import ListAltRounded from "@mui/icons-material/ListAltRounded";
+import TuneRounded from "@mui/icons-material/TuneRounded";
 import { ROLE } from "@/lib/roles";
 import { ORG_PERMISSION } from "@/lib/projects/org-role-permissions";
+import { procurementSectionAccess } from "@/lib/projects/procurement-section-access";
+import {
+  PROCUREMENT_STAGE_PAGES,
+  canViewProcurementStage,
+} from "@/lib/projects/procurement-stage-pages";
+
+const PROCUREMENT_STAGE_ICONS = {
+  "review-tasks": FactCheckRounded,
+  awards: EmojiEventsRounded,
+  contracts: DescriptionRounded,
+  deliveries: LocalShippingRounded,
+  invoices: ReceiptLongRounded,
+  payments: PaymentsRounded,
+  closures: LockRounded,
+};
+
+/**
+ * Procurements dropdown: the full list plus one page per stage the viewer may see.
+ * @param {string} base
+ * @param {{ roleName?: string | null; committeeType?: string | null }} viewer
+ * @returns {NavLinkItem}
+ */
+function procurementsNavItem(base, viewer) {
+  const sections = procurementSectionAccess(viewer);
+  /** @type {NavLinkItem[]} */
+  const children = [
+    {
+      href: `${base}/procurements`,
+      label: "All procurements",
+      title: "Every procurement after method selection",
+      Icon: ListAltRounded,
+      anyOf: null,
+    },
+  ];
+  for (const [stage, page] of Object.entries(PROCUREMENT_STAGE_PAGES)) {
+    if (!canViewProcurementStage(stage, sections)) continue;
+    children.push({
+      href: `${base}/procurements/${stage}`,
+      label: page.label,
+      title: page.title,
+      Icon: PROCUREMENT_STAGE_ICONS[stage] || ShoppingCartRounded,
+      anyOf: null,
+    });
+  }
+  return {
+    href: `${base}/procurements`,
+    label: "Procurements",
+    title: "Procurements and their stages",
+    Icon: ShoppingCartRounded,
+    anyOf: null,
+    children,
+  };
+}
 
 /**
  * @typedef {{
@@ -148,6 +210,13 @@ export const SIDEBAR_SECTIONS = [
         Icon: CategoryRounded,
         anyOf: [ROLE.SYSTEM_ADMIN],
       },
+      {
+        href: "/admin/site-settings",
+        label: "Site settings",
+        title: "Maintenance mode and other platform switches",
+        Icon: TuneRounded,
+        anyOf: [ROLE.SYSTEM_ADMIN],
+      },
     ],
   },
 ];
@@ -221,6 +290,13 @@ export function organisationAdministrationLinks(base, anyOf = [ROLE.STUDENT]) {
       label: "Committees",
       title: "Manage organisation committees and memberships",
       Icon: Groups2Rounded,
+      anyOf,
+    },
+    {
+      href: `${base}/org-admin/providers`,
+      label: "Providers (read-only)",
+      title: "View the provider register and provider portal logins",
+      Icon: StorefrontRounded,
       anyOf,
     },
     {
@@ -320,6 +396,13 @@ function studentManageOrganisationLinks(base, anyOf = [ROLE.STUDENT]) {
       label: "Committees",
       title: "Manage organisation committees and memberships",
       Icon: Groups2Rounded,
+      anyOf,
+    },
+    {
+      href: `${base}/org-admin/providers`,
+      label: "Providers",
+      title: "View the provider register and provider portal logins (read-only)",
+      Icon: StorefrontRounded,
       anyOf,
     },
   ];
@@ -539,13 +622,7 @@ export function sidebarNavForOrgMember(projectId, permissions = [], options = {}
         type === "CONTRACTS") &&
       permSet.has(ORG_PERMISSION.VIEW_PROCUREMENTS)
     ) {
-      links.push({
-        href: `${base}/procurements`,
-        label: "Procurements",
-        title: "Open procurements for committee actions",
-        Icon: ShoppingCartRounded,
-        anyOf: null,
-      });
+      links.push(procurementsNavItem(base, { roleName, committeeType: type }));
     }
     links.push({
       href: `${base}/my-account`,
@@ -689,19 +766,16 @@ export function sidebarNavForOrgMember(projectId, permissions = [], options = {}
     });
   }
   if (permSet.has(ORG_PERMISSION.VIEW_PROCUREMENTS)) {
-    opsLinks.push({
-      href: `${base}/procurements`,
-      label: "Procurements",
-      title: "View procurements after method selection",
-      Icon: ShoppingCartRounded,
-      anyOf: null,
-    });
+    opsLinks.push(procurementsNavItem(base, { roleName, committeeType: null }));
   }
-  if (permSet.has(ORG_PERMISSION.VIEW_SUPPLIERS)) {
+  if (permSet.has(ORG_PERMISSION.VIEW_PROVIDERS)) {
+    const canManageProviders = permSet.has(ORG_PERMISSION.MANAGE_PROVIDERS);
     opsLinks.push({
-      href: `${base}/suppliers`,
-      label: "Suppliers",
-      title: "View and manage organisation suppliers/providers",
+      href: `${base}/providers`,
+      label: "Providers",
+      title: canManageProviders
+        ? "Manage the organisation's provider register"
+        : "View the organisation's provider register",
       Icon: StorefrontRounded,
       anyOf: null,
     });

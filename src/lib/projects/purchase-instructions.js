@@ -1,7 +1,8 @@
-import { OrgProcurementMethod, OrgPurchaseInstructionStatus, OrgSupplierStatus } from "@prisma/client";
+import { OrgProcurementMethod, OrgPurchaseInstructionStatus, OrgProviderStatus } from "@prisma/client";
 import { writeAuditLog, AuditEvent } from "@/lib/audit-log";
 import { financialYearRefToken } from "@/lib/projects/org-reference";
-import { serializeSupplier } from "@/lib/projects/suppliers";
+import { serializeProviderSummary } from "@/lib/projects/providers";
+import { normalizeDeliveryAddress, resolveDeliveryAddress } from "@/lib/projects/delivery-address";
 
 /**
  * @param {any} row
@@ -16,7 +17,8 @@ export function serializePurchaseInstruction(row) {
     status: row.status,
     issuedAt: row.issuedAt || null,
     remarks: row.remarks || null,
-    supplier: row.supplier ? serializeSupplier(row.supplier) : null,
+    deliveryAddress: row.deliveryAddress || null,
+    supplier: row.supplier ? serializeProviderSummary(row.supplier) : null,
     issuedBy: row.issuedBy
       ? {
           id: row.issuedBy.id,
@@ -60,6 +62,7 @@ async function nextInstructionNumber(prisma, projectId, yearToken) {
  *   actorOrgUserId: string;
  *   actorRoleName: string;
  *   remarks?: string | null;
+ *   deliveryAddress?: string | null;
  * }} opts
  */
 export async function issuePurchaseInstruction(prisma, opts) {
@@ -97,7 +100,7 @@ export async function issuePurchaseInstruction(prisma, opts) {
     };
   }
 
-  const supplier = await prisma.projectOrgSupplier.findFirst({
+  const supplier = await prisma.projectOrgProvider.findFirst({
     where: { id: opts.supplierId, projectId: opts.projectId },
   });
   if (!supplier) {
@@ -108,7 +111,7 @@ export async function issuePurchaseInstruction(prisma, opts) {
       fieldErrors: { supplierId: "Choose a valid supplier." },
     };
   }
-  if (supplier.status !== OrgSupplierStatus.ACTIVE) {
+  if (supplier.status !== OrgProviderStatus.ACTIVE) {
     return {
       ok: false,
       error: "This supplier is inactive. Choose an active supplier.",
@@ -120,6 +123,9 @@ export async function issuePurchaseInstruction(prisma, opts) {
   const yearToken = financialYearRefToken(procurement.financialYear?.label);
   const instructionNumber = await nextInstructionNumber(prisma, opts.projectId, yearToken);
   const remarks = typeof opts.remarks === "string" ? opts.remarks.trim() || null : null;
+  const deliveryAddress =
+    normalizeDeliveryAddress(opts.deliveryAddress) ||
+    (await resolveDeliveryAddress(prisma, { projectId: opts.projectId, procurementId: procurement.id }));
 
   const created = await prisma.projectOrgPurchaseInstruction.create({
     data: {
@@ -132,6 +138,7 @@ export async function issuePurchaseInstruction(prisma, opts) {
       issuedAt: new Date(),
       issuedByOrgUserId: opts.actorOrgUserId,
       remarks,
+      deliveryAddress,
     },
     include: {
       supplier: true,

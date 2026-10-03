@@ -14,8 +14,8 @@ import { startWorkflowFromTrigger } from "@/lib/projects/workflow-engine";
 /**
  * Evaluation reports compare offers received for QUOTATION / TENDER procurements
  * and recommend a supplier. Authoring is gated on Evaluation Committee membership;
- * approval is a separate oversight decision (Contracts Officer / Head PDU / Accounting
- * Officer, depending on the adopted workflow).
+ * approval is a Contracts Committee decision (PPDA: the committee, not an individual
+ * officer, approves the evaluation report and the award).
  */
 
 /**
@@ -36,6 +36,7 @@ export function serializeEvaluationReport(row) {
     recommendation: row.recommendation || null,
     comments: row.comments || null,
     scoresJson: row.scoresJson || null,
+    eligibility: row.eligibilityJson || null,
     status: row.status,
     approvedAt: row.approvedAt || null,
     participations: Array.isArray(row.participations)
@@ -130,7 +131,7 @@ export async function createEvaluationReport(prisma, opts) {
 
   let recommendedSupplierId = null;
   if (opts.recommendedSupplierId) {
-    const supplier = await prisma.projectOrgSupplier.findFirst({
+    const supplier = await prisma.projectOrgProvider.findFirst({
       where: { id: opts.recommendedSupplierId, projectId: opts.projectId },
     });
     if (!supplier) {

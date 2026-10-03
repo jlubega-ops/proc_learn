@@ -233,6 +233,10 @@ export function ExaminerParticipationPanel() {
                       {row.organisation ? (
                         <>
                           <div className="font-medium">{row.organisation.name}</div>
+                          {row.organisation.displayName &&
+                          row.organisation.displayName !== row.organisation.name ? (
+                            <div className="text-xs">Shown as: {row.organisation.displayName}</div>
+                          ) : null}
                           <div className="text-xs opacity-70">{row.organisation.projectCode || "—"}</div>
                         </>
                       ) : (

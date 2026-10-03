@@ -5,6 +5,7 @@ import { safeNextPath } from "@/lib/auth/safe-next-path";
 import { getReadableAppSession } from "@/lib/auth/session";
 import { buildSessionPayloadForUserId } from "@/lib/auth/session-payload";
 import { buildIronSessionOptions } from "@/lib/auth/session-options";
+import { getReadableProviderSessionId } from "@/lib/projects/provider-portal";
 
 export const metadata = {
   title: "Sign in",
@@ -18,6 +19,9 @@ export default async function LoginPage({ searchParams }) {
   );
 
   if (buildIronSessionOptions()) {
+    if (await getReadableProviderSessionId()) {
+      redirect("/provider-portal");
+    }
     const session = await getReadableAppSession();
     if (session?.userId) {
       const payload = await buildSessionPayloadForUserId(session.userId);

@@ -21,15 +21,9 @@ export default async function OrganisationUsersPage() {
     notFound();
   }
 
-  const title = project.organizationName || project.name;
-  const codeHint = project.projectCode ? ` (unit code ${project.projectCode})` : "";
-
   return (
     <div className={BRAND_PAGE_SHELL_CLASS}>
-      <DashboardPageIntro
-        title="User accounts"
-        description={`Manage organisation user accounts for ${title}${codeHint}.`}
-      />
+      <DashboardPageIntro title="User accounts" description="People who work in your organisation." />
       <ProjectOrgUsersPanel projectId={project.id} />
     </div>
   );

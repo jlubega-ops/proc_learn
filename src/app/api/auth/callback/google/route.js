@@ -14,7 +14,8 @@ import { splitGoogleDisplayName } from "@/lib/user-display";
 import { writeAuditLog, AuditEvent } from "@/lib/audit-log";
 import { getRequestIp, getRequestUserAgent } from "@/lib/request-meta";
 import { prisma } from "@/lib/prisma";
-import { grantedRoles, pickHighestGrantedRole } from "@/lib/roles";
+import { ROLE, grantedRoles, pickHighestGrantedRole } from "@/lib/roles";
+import { isMaintenanceEnabled } from "@/lib/site-settings";
 import { isMubsSchoolEmail } from "@/lib/mubs-email";
 import { normalizeEmail } from "@/lib/validation/email";
 
@@ -103,6 +104,21 @@ export async function GET(request) {
 
   if (user.accountStatus === UserAccountStatus.SUSPENDED) {
     return redirectToLogin("error=account_suspended");
+  }
+
+  if (
+    (await isMaintenanceEnabled()) &&
+    !grantedRoles(user.userRoles).includes(ROLE.SYSTEM_ADMIN)
+  ) {
+    await writeAuditLog({
+      eventType: AuditEvent.LOGIN_BLOCKED_MAINTENANCE,
+      actorUserId: user.id,
+      targetUserId: user.id,
+      ip,
+      userAgent,
+      meta: { email, method: "google_oauth" },
+    });
+    return redirectToAppPath("/maintenance");
   }
 
   const accessToken =

@@ -2,7 +2,7 @@ import { OrgAwardStatus, OrgEvaluationReportStatus, OrgProcurementStatus } from 
 import { writeAuditLog, AuditEvent } from "@/lib/audit-log";
 import { notifyOrgUsers, OrgNotificationType } from "@/lib/projects/org-notifications";
 import { postQualificationRequired } from "@/lib/projects/post-qualification";
-import { serializeSupplier } from "@/lib/projects/suppliers";
+import { serializeProviderSummary } from "@/lib/projects/providers";
 
 /**
  * @param {any} row
@@ -13,7 +13,7 @@ export function serializeAward(row) {
     id: row.id,
     procurementId: row.procurementId,
     supplierId: row.supplierId,
-    supplier: row.supplier ? serializeSupplier(row.supplier) : null,
+    supplier: row.supplier ? serializeProviderSummary(row.supplier) : null,
     awardedAmount: row.awardedAmount?.toString?.() ?? String(row.awardedAmount ?? ""),
     status: row.status,
     awardDate: row.awardDate || null,

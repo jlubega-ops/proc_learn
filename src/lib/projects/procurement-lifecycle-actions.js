@@ -17,6 +17,7 @@ import {
   approveContract,
   signContract,
   issueContract,
+  updateOrderDeliveryAddress,
 } from "@/lib/projects/contracts-lpo";
 import { recordDelivery, recordInspection } from "@/lib/projects/deliveries";
 import { createInvoice, certifyInvoice, verifyInvoice, rejectInvoice } from "@/lib/projects/invoices";
@@ -26,48 +27,29 @@ import {
   evaluateClosureReadiness,
 } from "@/lib/projects/procurement-closure";
 import { PROJECT_ORG_ENTRY_ROLE_NAME } from "@/lib/project-org-role";
+import { autoInvoiceFromGeneratedProvider } from "@/lib/projects/provider-auto-responses";
+import {
+  decidePostQualification,
+  getEvaluationContext,
+  runPostQualification,
+  saveEvaluationWithEligibility,
+} from "@/lib/projects/evaluation-eligibility";
 
-/**
- * Thin lifecycle action → allowed organisational roles.
- * Organization Administrator is never listed — configuration only.
- */
-export const LIFECYCLE_ACTION_ROLES = {
-  create_award: ["Accounting Officer", "Head PDU", "Contracts Officer"],
-  communicate_award: ["Procurement Officer", "Head PDU"],
-  accept_award: ["Procurement Officer", "Head PDU"],
-  cancel_award: ["Accounting Officer", "Contracts Officer", "Head PDU"],
-  create_lpo: ["Procurement Officer", "Contracts Officer", "Head PDU"],
-  approve_lpo: ["Accounting Officer", "Head PDU", "Contracts Officer", "Procurement Officer"],
-  issue_lpo: ["Procurement Officer", "Contracts Officer", "Head PDU"],
-  accept_lpo: ["Procurement Officer", "Head PDU"],
-  create_contract: ["Contracts Officer", "Procurement Officer", "Head PDU"],
-  approve_contract: ["Accounting Officer", "Contracts Officer", "Head PDU"],
-  sign_contract: ["Accounting Officer", "Contracts Officer"],
-  issue_contract: ["Contracts Officer", "Procurement Officer", "Head PDU"],
-  record_delivery: ["User Department Officer", "Head User Department"],
-  record_inspection: ["Head User Department", "User Department Officer", "Contracts Officer"],
-  create_invoice: [
-    "User Department Officer",
-    "Head User Department",
-    "Contracts Officer",
-    "Finance/Budget Officer",
-  ],
-  certify_invoice: ["Head User Department", "Contracts Officer", "Finance/Budget Officer"],
-  verify_invoice: ["Contracts Officer", "Finance/Budget Officer"],
-  reject_invoice: ["Contracts Officer", "Finance/Budget Officer", "Head User Department"],
-  create_payment: ["Finance/Budget Officer", "Accounting Officer", "Contracts Officer"],
-  approve_payment: ["Accounting Officer"],
-  mark_payment_paid: ["Finance/Budget Officer", "Accounting Officer"],
-  reject_payment: ["Accounting Officer", "Finance/Budget Officer"],
-  close_procurement: ["Contracts Officer", "Head PDU", "Procurement Officer", "Accounting Officer"],
-  evaluate_closure: null, // any role with VIEW_PROCUREMENTS
-};
+import {
+  COMMITTEE_LIFECYCLE_AUTHORITY,
+  LIFECYCLE_ACTION_ROLES,
+  committeeMayPerformLifecycleAction,
+} from "@/lib/projects/procurement-lifecycle-roles";
+import { COMMITTEE_TYPE_WORKFLOW_ROLES } from "@/lib/projects/committee-context";
+
+export { LIFECYCLE_ACTION_ROLES };
 
 /**
  * @param {string} action
  * @param {string} roleName
+ * @param {string | null} [actingCommitteeType] committee seat the actor is acting under
  */
-export function canPerformLifecycleAction(action, roleName) {
+export function canPerformLifecycleAction(action, roleName, actingCommitteeType = null) {
   const role = String(roleName || "").trim();
   const allowed = LIFECYCLE_ACTION_ROLES[action];
   if (allowed === undefined) {
@@ -75,6 +57,16 @@ export function canPerformLifecycleAction(action, roleName) {
   }
   // Read-only readiness check is available to any viewer (including Organization Administrator).
   if (allowed === null) return { ok: true };
+  if (committeeMayPerformLifecycleAction(action, actingCommitteeType)) return { ok: true };
+  if (allowed.length === 0) {
+    const committees = Object.entries(COMMITTEE_LIFECYCLE_AUTHORITY)
+      .filter(([, actions]) => actions.includes(action))
+      .map(([type]) => COMMITTEE_TYPE_WORKFLOW_ROLES[type]?.[0] || type);
+    return {
+      ok: false,
+      error: `“${action.replace(/_/g, " ")}” is a ${committees.join(" / ") || "committee"} decision under PPDA. Switch to that committee seat to act on it.`,
+    };
+  }
   if (!role || role === PROJECT_ORG_ENTRY_ROLE_NAME || role === "Admin") {
     return {
       ok: false,
@@ -100,12 +92,13 @@ export function canPerformLifecycleAction(action, roleName) {
  *   actorOrgUserId: string;
  *   actorRoleName: string;
  *   actorDepartmentId?: string | null;
+ *   actingCommitteeType?: string | null;
  *   body?: any;
  * }} opts
  */
 export async function actOnProcurementLifecycle(prisma, opts) {
   const action = String(opts.action || "").trim();
-  const roleCheck = canPerformLifecycleAction(action, opts.actorRoleName);
+  const roleCheck = canPerformLifecycleAction(action, opts.actorRoleName, opts.actingCommitteeType || null);
   if (!roleCheck.ok) return { ...roleCheck, status: 403 };
 
   const procurement = await prisma.projectOrgProcurement.findFirst({
@@ -126,7 +119,8 @@ export async function actOnProcurementLifecycle(prisma, opts) {
     [OrgProcurementStatus.CLOSED, OrgProcurementStatus.CANCELLED, OrgProcurementStatus.REJECTED].includes(
       procurement.status,
     ) &&
-    action !== "evaluate_closure"
+    action !== "evaluate_closure" &&
+    action !== "evaluation_context"
   ) {
     return {
       ok: false,
@@ -163,6 +157,38 @@ export async function actOnProcurementLifecycle(prisma, opts) {
   switch (action) {
     case "evaluate_closure":
       return evaluateClosureReadiness(prisma, opts.projectId, opts.procurementId);
+
+    case "evaluation_context":
+      return getEvaluationContext(prisma, {
+        projectId: opts.projectId,
+        procurementId: opts.procurementId,
+        orgUserId: opts.actorOrgUserId,
+        roleName: opts.actorRoleName,
+        actingCommitteeType: opts.actingCommitteeType || null,
+      });
+    case "save_evaluation":
+    case "submit_evaluation":
+      return saveEvaluationWithEligibility(prisma, {
+        ...base,
+        procurementId: opts.procurementId,
+        recommendedSupplierId: body.recommendedSupplierId,
+        recommendation: body.recommendation,
+        comments: body.comments,
+        submit: action === "submit_evaluation",
+      });
+    case "run_post_qualification":
+      return runPostQualification(prisma, {
+        ...base,
+        procurementId: opts.procurementId,
+        comments: body.comments,
+      });
+    case "decide_post_qualification":
+      return decidePostQualification(prisma, {
+        ...base,
+        procurementId: opts.procurementId,
+        decision: body.decision,
+        comment: body.comment,
+      });
 
     case "create_award":
       return createAwardFromApprovedEvaluation(prisma, {
@@ -209,8 +235,20 @@ export async function actOnProcurementLifecycle(prisma, opts) {
       });
     }
 
+    case "update_delivery_address":
+      return updateOrderDeliveryAddress(prisma, {
+        ...base,
+        procurementId: opts.procurementId,
+        kind: body.kind === "contract" ? "contract" : "lpo",
+        deliveryAddress: body.deliveryAddress,
+      });
+
     case "create_lpo":
-      return createLpo(prisma, { ...base, procurementId: opts.procurementId });
+      return createLpo(prisma, {
+        ...base,
+        procurementId: opts.procurementId,
+        deliveryAddress: typeof body.deliveryAddress === "string" ? body.deliveryAddress : null,
+      });
     case "approve_lpo":
       if (!body.lpoId) return { ok: false, error: "lpoId is required.", status: 400 };
       return approveLpo(prisma, { ...base, lpoId: String(body.lpoId) });
@@ -222,7 +260,13 @@ export async function actOnProcurementLifecycle(prisma, opts) {
       return acceptLpo(prisma, { ...base, lpoId: String(body.lpoId) });
 
     case "create_contract":
-      return createContract(prisma, { ...base, procurementId: opts.procurementId });
+      return createContract(prisma, {
+        ...base,
+        procurementId: opts.procurementId,
+        startDate: body.startDate || null,
+        endDate: body.endDate || null,
+        deliveryAddress: typeof body.deliveryAddress === "string" ? body.deliveryAddress : null,
+      });
     case "approve_contract":
       if (!body.contractId) return { ok: false, error: "contractId is required.", status: 400 };
       return approveContract(prisma, { ...base, contractId: String(body.contractId) });
@@ -242,11 +286,11 @@ export async function actOnProcurementLifecycle(prisma, opts) {
         lines: Array.isArray(body.lines) ? body.lines : [],
       });
 
-    case "record_inspection":
+    case "record_inspection": {
       if (!body.deliveryId) {
         return { ok: false, error: "deliveryId is required for inspection.", status: 400 };
       }
-      return recordInspection(prisma, {
+      const inspected = await recordInspection(prisma, {
         ...base,
         deliveryId: String(body.deliveryId),
         resultNotes: typeof body.resultNotes === "string" ? body.resultNotes : null,
@@ -254,6 +298,19 @@ export async function actOnProcurementLifecycle(prisma, opts) {
         committeeId: body.committeeId || null,
         committeeRole: body.committeeRole || null,
       });
+      if (inspected.ok && inspected.delivery?.inspection?.status !== "REJECTED") {
+        try {
+          const auto = await autoInvoiceFromGeneratedProvider(prisma, {
+            projectId: opts.projectId,
+            procurementId: opts.procurementId,
+          });
+          if (auto?.ok && auto.invoice) return { ...inspected, autoInvoice: auto.invoice };
+        } catch {
+          // Simulated invoicing is best-effort; the officer can still receive the invoice manually.
+        }
+      }
+      return inspected;
+    }
 
     case "create_invoice":
       return createInvoice(prisma, {
@@ -262,6 +319,9 @@ export async function actOnProcurementLifecycle(prisma, opts) {
         amount: body.amount,
         invoiceDate: body.invoiceDate || null,
         deliveryId: body.deliveryId || null,
+        supplierReference: typeof body.supplierReference === "string" ? body.supplierReference : null,
+        notes: typeof body.notes === "string" ? body.notes : null,
+        source: "OFFICER",
       });
     case "certify_invoice":
       if (!body.invoiceId) return { ok: false, error: "invoiceId is required.", status: 400 };

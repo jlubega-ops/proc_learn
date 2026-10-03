@@ -16,11 +16,11 @@ export function BrandedPublicShell({ children, className = "" }) {
             alt=""
             fill
             priority
-            className="scale-105 object-cover blur-sm"
+            className="scale-[1.02] object-cover blur-[1.5px]"
             sizes="100vw"
           />
         </div>
-        <div className="absolute inset-0 bg-gradient-to-b from-black/40 via-black/28 to-black/50" />
+        <div className="absolute inset-0 bg-gradient-to-b from-black/25 via-black/12 to-black/35" />
         <div
           className="absolute inset-0 opacity-35 mix-blend-overlay"
           style={{

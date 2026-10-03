@@ -1,4 +1,8 @@
 import { writeAuditLog, AuditEvent } from "@/lib/audit-log";
+import {
+  COMMITTEE_LIFECYCLE_AUTHORITY,
+  LIFECYCLE_ACTION_ROLES,
+} from "@/lib/projects/procurement-lifecycle-roles";
 
 /**
  * "Active committee" is the committee context an organisation user is currently
@@ -64,6 +68,86 @@ export function taskMatchesActiveCommittee(task, activeCommittee) {
 }
 
 /**
+ * Committee type of a workflow role name ("Contracts Committee" → "CONTRACTS"), or null for org roles.
+ * @param {unknown} roleName
+ */
+export function committeeTypeForWorkflowRole(roleName) {
+  const name = String(roleName || "").trim();
+  for (const [type, roles] of Object.entries(COMMITTEE_TYPE_WORKFLOW_ROLES)) {
+    if (roles.includes(name)) return type;
+  }
+  return null;
+}
+
+/** Read-only lifecycle actions allowed in any acting mode. */
+const READ_ONLY_LIFECYCLE_ACTIONS = new Set(["evaluate_closure", "evaluation_context"]);
+
+/**
+ * @param {string} type
+ */
+function committeeLabel(type) {
+  const roles = COMMITTEE_TYPE_WORKFLOW_ROLES[type];
+  return roles?.[0] || `${type.replace(/_/g, " ").toLowerCase()} committee`;
+}
+
+/**
+ * Exclusive acting mode for workflow tasks: committee tasks need that committee seat active;
+ * organisation-role tasks need committee mode switched off.
+ * @param {{ requiredRoleName?: string | null; title?: string | null }} task
+ * @param {{ committeeType?: string | null; name?: string | null } | null | undefined} activeCommittee
+ * @returns {{ ok: true } | { ok: false; error: string; status: number; code: string }}
+ */
+export function checkActingModeForTask(task, activeCommittee) {
+  const requiredType = committeeTypeForWorkflowRole(task?.requiredRoleName);
+  const activeType = String(activeCommittee?.committeeType || "").toUpperCase() || null;
+  if (requiredType) {
+    if (activeType !== requiredType) {
+      return {
+        ok: false,
+        error: `This is ${committeeLabel(requiredType)} work. Switch to the ${committeeLabel(requiredType)} from the account menu before acting on it.`,
+        status: 403,
+        code: "COMMITTEE_MODE_REQUIRED",
+      };
+    }
+    return { ok: true };
+  }
+  if (activeType) {
+    return {
+      ok: false,
+      error: `You are acting as ${activeCommittee?.name || committeeLabel(activeType)}. Click “Switch back to organisation role” in the banner to do ${task?.requiredRoleName || "organisation-role"} work.`,
+      status: 403,
+      code: "ORG_ROLE_MODE_REQUIRED",
+    };
+  }
+  return { ok: true };
+}
+
+/**
+ * Same exclusive acting-mode rule for procurement lifecycle actions.
+ * @param {string} action
+ * @param {{ committeeType?: string | null; name?: string | null } | null | undefined} activeCommittee
+ * @returns {{ ok: true } | { ok: false; error: string; status: number; code: string }}
+ */
+export function checkActingModeForLifecycleAction(action, activeCommittee) {
+  if (READ_ONLY_LIFECYCLE_ACTIONS.has(action)) return { ok: true };
+  const activeType = String(activeCommittee?.committeeType || "").toUpperCase() || null;
+  const committeeTypes = Object.entries(COMMITTEE_LIFECYCLE_AUTHORITY)
+    .filter(([, actions]) => actions.includes(action))
+    .map(([type]) => type);
+  const orgRoles = LIFECYCLE_ACTION_ROLES[action];
+  const orgRoleMayAct = Array.isArray(orgRoles) && orgRoles.length > 0;
+
+  if (activeType) {
+    if (committeeTypes.includes(activeType)) return { ok: true };
+    return checkActingModeForTask({ requiredRoleName: "organisation-role" }, activeCommittee);
+  }
+  if (!orgRoleMayAct && committeeTypes.length > 0) {
+    return checkActingModeForTask({ requiredRoleName: committeeLabel(committeeTypes[0]) }, null);
+  }
+  return { ok: true };
+}
+
+/**
  * Learner hint for where to work when this committee has few/no My Tasks rows.
  * @param {unknown} committeeType
  */
@@ -72,7 +156,7 @@ export function committeeModeWorkspaceHint(committeeType) {
   if (type === "CONTRACTS") {
     return {
       message:
-        "Only Contracts Committee method-approval tasks are listed. Open a task to approve or return the recommended procurement method.",
+        "Contracts Committee decisions are listed here: procurement method, solicitation documents, evaluation committee, evaluation report, post-qualification and award. Open a task to approve or return it.",
       focusLabel: "My Tasks",
       focusPathSuffix: "/tasks",
     };
@@ -80,17 +164,17 @@ export function committeeModeWorkspaceHint(committeeType) {
   if (type === "EVALUATION") {
     return {
       message:
-        "Evaluation work is done on the procurement record (evaluation report). My Tasks only lists committee-role steps when the process assigns them.",
-      focusLabel: "Procurements",
-      focusPathSuffix: "/procurements",
+        "Evaluation steps (technical, financial, report, post-qualification) are listed in My Tasks. Fill and submit the evaluation report on the procurement record before completing the report task.",
+      focusLabel: "My Tasks",
+      focusPathSuffix: "/tasks",
     };
   }
   if (type === "INSPECTION_ACCEPTANCE") {
     return {
       message:
-        "Inspection / acceptance is recorded on the procurement delivery steps. Switch back to your organisation role for other approvals.",
-      focusLabel: "Procurements",
-      focusPathSuffix: "/procurements",
+        "Inspection / acceptance tasks are listed in My Tasks and recorded on the procurement delivery. Switch back to your organisation role for other approvals.",
+      focusLabel: "My Tasks",
+      focusPathSuffix: "/tasks",
     };
   }
   if (type === "NEGOTIATION") {

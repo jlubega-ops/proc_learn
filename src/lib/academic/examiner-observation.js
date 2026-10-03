@@ -297,7 +297,8 @@ export async function getExaminerStudentObservation(studentUserId, opts = {}) {
     organisation: org
       ? {
           projectId: org.id,
-          name: org.organizationName || org.name,
+          name: org.name,
+          displayName: org.organizationName || org.name,
           projectCode: org.projectCode,
           status: org.status,
         }

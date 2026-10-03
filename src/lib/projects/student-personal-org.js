@@ -2,6 +2,7 @@ import { ProjectPurpose, ProjectStatus, ProjectVisibility, Role } from "@prisma/
 import { formatUserDisplayName } from "@/lib/user-display";
 import { generateUniqueProjectCode } from "@/lib/projects/project-identity";
 import { ensureProjectOwnerOrgUser } from "@/lib/projects/org-users";
+import { buildOrgDisplayName } from "@/lib/validation/org-display-name";
 
 /**
  * @param {import("@prisma/client").PrismaClient} prisma
@@ -26,14 +27,13 @@ export async function findStudentPersonalOrg(prisma, userId) {
 }
 
 /**
- * Builds organisation labels: "{Student Name} Organization".
- * Code is stored separately as projectCode (ORG-XXXXXX) — not embedded in the name.
+ * Default organisation labels: "{Student Name} Organisation". `name` always keeps this default;
+ * `organizationName` is the display name the student may customise.
  * @param {{ firstName?: string | null; middleName?: string | null; lastName?: string | null }} user
  * @param {string} [_projectCode]
  */
 export function buildPersonalOrgLabels(user, _projectCode) {
-  const displayName = formatUserDisplayName(user) || "Student";
-  const organizationName = `${displayName} Organization`.slice(0, 255);
+  const organizationName = buildOrgDisplayName(formatUserDisplayName(user) || "Student");
   return {
     name: organizationName,
     organizationName,
@@ -61,9 +61,13 @@ export async function ensureStudentPersonalOrg(prisma, userId) {
     if (existing.status === ProjectStatus.NOT_STARTED) {
       patch.status = ProjectStatus.IN_PROGRESS;
     }
-    if (labels && (existing.name !== labels.name || existing.organizationName !== labels.organizationName)) {
-      patch.name = labels.name;
-      patch.organizationName = labels.organizationName;
+    if (labels) {
+      const display = String(existing.organizationName || "").trim();
+      const usesDefault = !display || display === existing.name;
+      if (existing.name !== labels.name) patch.name = labels.name;
+      if (usesDefault && display !== labels.organizationName) {
+        patch.organizationName = labels.organizationName;
+      }
     }
     if (Object.keys(patch).length > 0) {
       const updated = await prisma.project.update({

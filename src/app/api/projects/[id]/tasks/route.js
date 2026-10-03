@@ -19,6 +19,7 @@ import { actOnProcurementTask } from "@/lib/projects/procurement-tasks";
 import { healMissingStepTasks } from "@/lib/projects/workflow-engine";
 import {
   getActiveCommittee,
+  checkActingModeForTask,
   partitionTasksForActingMode,
   committeeModeWorkspaceHint,
 } from "@/lib/projects/committee-context";
@@ -180,12 +181,30 @@ export async function POST(request, context) {
   const taskMeta = await prisma.projectOrgWorkflowTask.findUnique({
     where: { id: taskId },
     select: {
+      projectId: true,
+      requiredRoleName: true,
+      title: true,
       processFlowItem: { select: { actionKey: true } },
       instance: {
         select: { procurementPlanId: true, requisitionId: true, budgetId: true, procurementId: true },
       },
     },
   });
+
+  if (!taskMeta || taskMeta.projectId !== projectId) {
+    return NextResponse.json({ error: "Task is not available." }, { status: 404 });
+  }
+
+  const actingMode = checkActingModeForTask(
+    taskMeta,
+    await getActiveCommittee(prisma, auth.orgUser.id),
+  );
+  if (!actingMode.ok) {
+    return NextResponse.json(
+      { error: actingMode.error, code: actingMode.code },
+      { status: actingMode.status },
+    );
+  }
 
   // Every process's first step (Raise/Prepare) is a SUBMIT action. Budgets,
   // procurement plans, and requisitions only reach that step through their own

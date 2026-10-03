@@ -3,6 +3,7 @@
 import { useState } from "react";
 import Button from "@mui/material/Button";
 import CircularProgress from "@mui/material/CircularProgress";
+import SwapHorizRounded from "@mui/icons-material/SwapHorizRounded";
 import { useAuthSession } from "@/components/providers/auth-session-provider";
 import { useToast } from "@/components/providers/toast-provider";
 import { formatCommitteeSeatLabel } from "@/lib/projects/committee-context";
@@ -44,15 +45,9 @@ export function ActiveCommitteeContextBanner() {
         return;
       }
       await refresh();
-      showToast({ message: "Back to organisational role only.", severity: "success" });
+      showToast({ message: `Switched back to ${orgRole}.`, severity: "success" });
     } finally {
       setClearing(false);
-    }
-  }
-
-  function openSwitch() {
-    if (typeof window !== "undefined") {
-      window.dispatchEvent(new CustomEvent(OPEN_COMMITTEE_CONTEXT_EVENT));
     }
   }
 
@@ -69,32 +64,24 @@ export function ActiveCommitteeContextBanner() {
           </p>
           <p className="truncate text-sm font-semibold">
             Acting as {committee.name} ({seat}). Only this committee’s work is shown — your org role
-            ({orgRole}) tasks are hidden until you clear the seat.
+            ({orgRole}) tasks are hidden until you switch back.
           </p>
         </div>
         <div className="flex flex-wrap gap-2 sm:justify-end">
           <Button
             type="button"
             size="small"
-            variant="outlined"
-            className="cursor-pointer"
-            onClick={openSwitch}
-            title="Switch committee seat"
-          >
-            Switch seat
-          </Button>
-          <Button
-            type="button"
-            size="small"
             variant="contained"
-            color="warning"
-            className="cursor-pointer disabled:cursor-not-allowed"
+            color="primary"
+            className="w-full cursor-pointer disabled:cursor-not-allowed sm:w-auto"
             disabled={clearing}
             onClick={() => void clearContext()}
-            startIcon={clearing ? <CircularProgress size={14} color="inherit" /> : null}
-            title="Return to organisation role only"
+            startIcon={
+              clearing ? <CircularProgress size={14} color="inherit" /> : <SwapHorizRounded />
+            }
+            title={`Leave committee mode and return to ${orgRole}`}
           >
-            Clear seat
+            {clearing ? "Switching back…" : "Switch back to organisation role"}
           </Button>
         </div>
       </div>

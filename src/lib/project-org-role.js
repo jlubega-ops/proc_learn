@@ -54,13 +54,29 @@ export const CORE_ORG_ROLE_DEFINITIONS = [
   {
     name: "Contracts Committee",
     description:
-      "Workflow routing role for Contracts Committee method approval (Form 5 Part II). Do not assign as a login role — seat members on the Contracts Committee instead.",
+      "Workflow routing role for Contracts Committee decisions (method approval, solicitation documents, evaluation committee, evaluation report and award). Do not assign as a login role — seat members on the Contracts Committee instead.",
     sortOrder: 200,
+  },
+  {
+    name: "Evaluation Committee",
+    description:
+      "Workflow routing role for Evaluation Committee work (technical/financial evaluation, evaluation report, post-qualification). Do not assign as a login role — seat members on the Evaluation Committee instead.",
+    sortOrder: 210,
+  },
+  {
+    name: "Inspection/Acceptance Committee",
+    description:
+      "Workflow routing role for inspection and acceptance of tender deliveries. Do not assign as a login role — seat members on the Inspection/Acceptance Committee instead.",
+    sortOrder: 220,
   },
 ];
 
 /** Roles used only for workflow routing / committee hats — not org user logins. */
-export const WORKFLOW_ONLY_ORG_ROLE_NAMES = new Set(["Contracts Committee"]);
+export const WORKFLOW_ONLY_ORG_ROLE_NAMES = new Set([
+  "Contracts Committee",
+  "Evaluation Committee",
+  "Inspection/Acceptance Committee",
+]);
 
 /**
  * @param {unknown} name

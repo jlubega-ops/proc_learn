@@ -19,14 +19,9 @@ export default async function OrganisationCommitteesPage() {
     notFound();
   }
 
-  const title = project.organizationName || project.name;
-
   return (
     <div className={BRAND_PAGE_SHELL_CLASS}>
-      <DashboardPageIntro
-        title="Committees"
-        description={`Assign existing organisation users for ${title} to committee seats (chair, member, secretary). One person keeps their org role and can switch into a seat when needed — do not create separate committee-only logins.`}
-      />
+      <DashboardPageIntro title="Committees" description="Committees and who sits on them." />
       <ProjectOrgCommitteesPanel projectId={project.id} />
     </div>
   );

@@ -3,6 +3,10 @@ import { prisma } from "@/lib/prisma";
 import { authorizeProjectApiAccess } from "@/lib/projects/project-api-auth";
 import { ORG_PERMISSION } from "@/lib/projects/org-role-permissions";
 import { actOnProcurementLifecycle } from "@/lib/projects/procurement-lifecycle-actions";
+import {
+  checkActingModeForLifecycleAction,
+  getActiveCommittee,
+} from "@/lib/projects/committee-context";
 
 export const runtime = "nodejs";
 
@@ -52,6 +56,15 @@ export async function POST(request, context) {
     return NextResponse.json({ error: "Not found." }, { status: 404 });
   }
 
+  const activeCommittee = await getActiveCommittee(prisma, auth.orgUser.id);
+  const actingMode = checkActingModeForLifecycleAction(action, activeCommittee);
+  if (!actingMode.ok) {
+    return NextResponse.json(
+      { error: actingMode.error, code: actingMode.code },
+      { status: actingMode.status },
+    );
+  }
+
   const result = await actOnProcurementLifecycle(prisma, {
     projectId,
     procurementId,
@@ -59,7 +72,11 @@ export async function POST(request, context) {
     actorOrgUserId: auth.orgUser.id,
     actorRoleName: auth.orgUser.projectOrgRole?.name || "",
     actorDepartmentId: auth.orgUser.departmentId || null,
-    body,
+    actingCommitteeType: activeCommittee?.committeeType || null,
+    body:
+      activeCommittee && action === "record_inspection"
+        ? { ...body, committeeId: activeCommittee.id }
+        : body,
   });
 
   if (!result.ok) {

@@ -19,18 +19,14 @@ export default async function OrganisationStructurePage() {
     notFound();
   }
 
-  const title = project.organizationName || project.name;
-
   return (
     <div className={BRAND_PAGE_SHELL_CLASS}>
       <DashboardPageIntro
         title="Organisation structure"
-        description={`Arrange departments for ${title} from top to bottom. Create units under Departments, then set parents and order here.`}
+        description="Order departments and nest subunits."
       />
       <OrganisationStructurePanel
         projectId={project.id}
-        organizationName={project.organizationName || project.name}
-        projectName={project.name}
         readOnly={false}
         departmentsHref="/organisation/org-admin/departments"
       />

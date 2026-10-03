@@ -4,6 +4,7 @@ import { getSessionUser, sessionActiveRole } from "@/lib/api/get-session-user";
 import { prisma } from "@/lib/prisma";
 import { ensureProjectCode } from "@/lib/projects/project-identity";
 import { ProjectOrgUsersPanel } from "@/components/projects/project-org-users-panel";
+import { DashboardPageIntro } from "@/components/layout/dashboard-page-intro";
 
 export default async function ProjectOrgUsersPage({ params }) {
   const user = await getSessionUser();
@@ -21,24 +22,11 @@ export default async function ProjectOrgUsersPage({ params }) {
   });
   if (!project) notFound();
 
-  const projectCode = await ensureProjectCode(prisma, project.id);
+  await ensureProjectCode(prisma, project.id);
 
   return (
     <div className="w-full space-y-4">
-      <div className="rounded-xl border border-zinc-200 bg-white p-4 dark:border-zinc-800 dark:bg-zinc-900">
-        <h1 className="text-lg font-semibold text-foreground sm:text-xl">User accounts</h1>
-        <p className="mt-2 text-sm text-zinc-600 dark:text-zinc-300">
-          Manage organisation user accounts for{" "}
-          <span className="font-semibold">{project.name}</span>
-          {projectCode ? (
-            <>
-              {" "}
-              (project code <span className="font-semibold">{projectCode}</span>)
-            </>
-          ) : null}
-          . All users are scoped to this project only.
-        </p>
-      </div>
+      <DashboardPageIntro title="User accounts" description="People who work in your organisation." />
       <ProjectOrgUsersPanel projectId={project.id} />
     </div>
   );

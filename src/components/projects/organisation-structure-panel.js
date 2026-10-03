@@ -29,8 +29,7 @@ import {
   adminTableSx,
   themedTextFieldSx,
 } from "@/lib/admin-mui-surfaces";
-import { BRAND_BTN_PRIMARY_CLASS, BRAND_TRICOLOR_STRIPE_CLASS } from "@/lib/brand-ui";
-import { buildDepartmentTree } from "@/lib/projects/org-department-tree";
+import { BRAND_BTN_PRIMARY_CLASS } from "@/lib/brand-ui";
 
 /**
  * @param {{ id: string; parentId: string | null; sortOrder: number }[]} units
@@ -76,29 +75,16 @@ function normalizeSiblingOrders(units) {
 /**
  * @param {{
  *   projectId: string;
- *   organizationName?: string | null;
- *   projectName?: string | null;
  *   readOnly?: boolean;
  *   departmentsHref?: string;
  * }} props
  */
-export function OrganisationStructurePanel({
-  projectId,
-  organizationName,
-  projectName,
-  readOnly = false,
-  departmentsHref,
-}) {
+export function OrganisationStructurePanel({ projectId, readOnly = false, departmentsHref }) {
   const { showToast } = useToast();
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [units, setUnits] = useState(/** @type {any[]} */ ([]));
   const [savedSignature, setSavedSignature] = useState("");
-
-  const orgLabel =
-    String(organizationName || "").trim() ||
-    String(projectName || "").trim() ||
-    "Organisation";
 
   const deptLink =
     departmentsHref ||
@@ -139,8 +125,6 @@ export function OrganisationStructurePanel({
     () => structureSignature(units) !== savedSignature,
     [units, savedSignature],
   );
-
-  const tree = useMemo(() => buildDepartmentTree(units), [units]);
 
   const topLevelOptions = useMemo(
     () => units.filter((u) => !u.parentId).sort((a, b) => (a.sortOrder ?? 0) - (b.sortOrder ?? 0)),
@@ -260,67 +244,19 @@ export function OrganisationStructurePanel({
     );
   }
 
+  if (!units.length) {
+    return (
+      <p className="rounded-xl border border-dashed border-[color:var(--border-subtle)] bg-[color:var(--surface-muted)] px-4 py-6 text-center text-sm text-zinc-600 dark:text-zinc-400">
+        No departments yet.{" "}
+        <Link href={deptLink} className="font-semibold text-primary underline-offset-2 hover:underline">
+          Create departments
+        </Link>
+      </p>
+    );
+  }
+
   return (
-    <div className="space-y-4">
-      <div className="overflow-hidden rounded-2xl border border-[color:var(--border-subtle)] bg-[color:var(--surface-elevated)] shadow-sm">
-        <div className={BRAND_TRICOLOR_STRIPE_CLASS} aria-hidden />
-        <div className="border-b border-[color:var(--border-subtle)] px-4 py-4 sm:px-6">
-          <p className="text-[11px] font-bold uppercase tracking-[0.14em] text-primary">
-            Your organisation hierarchy
-          </p>
-          <h2 className="mt-1 text-xl font-extrabold tracking-tight text-foreground sm:text-2xl">
-            {orgLabel}
-          </h2>
-          <p className="mt-2 max-w-3xl text-sm leading-relaxed text-zinc-600 dark:text-zinc-400">
-            Arrange departments from top to bottom. Nest subunits under a top-level department using
-            the parent dropdown
-            {readOnly ? " (view only)." : "."}
-          </p>
-        </div>
-
-        <div className="px-4 py-5 sm:px-6">
-          <p className="mb-3 text-xs font-semibold uppercase tracking-wide text-zinc-500 dark:text-zinc-400">
-            Preview
-          </p>
-          {!tree.length ? (
-            <p className="rounded-xl border border-dashed border-[color:var(--border-subtle)] bg-[color:var(--surface-muted)] px-4 py-6 text-center text-sm text-zinc-600 dark:text-zinc-400">
-              No departments yet.{" "}
-              <Link href={deptLink} className="font-semibold text-primary underline-offset-2 hover:underline">
-                Create departments
-              </Link>{" "}
-              first, then return here to set the order.
-            </p>
-          ) : (
-            <ul className="space-y-2">
-              {tree.map((root) => (
-                <li key={root.id}>
-                  <div className="rounded-xl border border-t-[3px] border-[color:var(--border-subtle)] border-t-brand-blue bg-[color-mix(in_oklab,var(--brand-blue)_8%,var(--surface-elevated))] px-4 py-3">
-                    <p className="font-bold text-foreground">{root.name}</p>
-                    {root.description ? (
-                      <p className="mt-0.5 text-xs text-zinc-600 dark:text-zinc-400">
-                        {root.description}
-                      </p>
-                    ) : null}
-                  </div>
-                  {(root.subunits || []).length > 0 ? (
-                    <ul className="ml-4 mt-2 space-y-2 border-l border-dashed border-primary/30 pl-4 sm:ml-6">
-                      {root.subunits.map((child) => (
-                        <li
-                          key={child.id}
-                          className="rounded-lg border border-[color:var(--border-subtle)] bg-[color:var(--surface-elevated)] px-3 py-2"
-                        >
-                          <p className="text-sm font-semibold text-foreground">{child.name}</p>
-                        </li>
-                      ))}
-                    </ul>
-                  ) : null}
-                </li>
-              ))}
-            </ul>
-          )}
-        </div>
-      </div>
-
+    <div className="space-y-3">
       <div className="flex flex-wrap gap-2">
         <Button
           type="button"
@@ -357,8 +293,7 @@ export function OrganisationStructurePanel({
         ) : null}
       </div>
 
-      {units.length > 0 ? (
-        <TableContainer sx={adminOutlinedTableContainerSx}>
+      <TableContainer sx={adminOutlinedTableContainerSx}>
           <Table size="small" sx={adminTableSx}>
             <TableHead>
               <TableRow>
@@ -400,7 +335,11 @@ export function OrganisationStructurePanel({
                             : "Top level"}
                         </span>
                       ) : (
-                        <FormControl fullWidth sx={themedTextFieldSx}>
+                        <FormControl
+                          fullWidth
+                          sx={themedTextFieldSx}
+                          title={hasChildren ? "Has subunits" : undefined}
+                        >
                           <InputLabel id={`parent-${row.id}`}>Parent</InputLabel>
                           <Select
                             labelId={`parent-${row.id}`}
@@ -421,11 +360,6 @@ export function OrganisationStructurePanel({
                           </Select>
                         </FormControl>
                       )}
-                      {!readOnly && hasChildren ? (
-                        <p className="mt-1 text-[11px] text-zinc-500">
-                          Move subunits off this unit before nesting it.
-                        </p>
-                      ) : null}
                     </TableCell>
                     <TableCell align="right">
                       {!readOnly ? (
@@ -467,7 +401,6 @@ export function OrganisationStructurePanel({
             </TableBody>
           </Table>
         </TableContainer>
-      ) : null}
     </div>
   );
 }

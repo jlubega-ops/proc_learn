@@ -4,6 +4,8 @@ import { getActiveOrderValue } from "@/lib/projects/contracts-lpo";
 import { hasAcceptedDelivery } from "@/lib/projects/deliveries";
 import { WORKFLOW_TRIGGERS } from "@/lib/projects/process-catalogue";
 import { startWorkflowFromTrigger } from "@/lib/projects/workflow-engine";
+import { serializeProviderSummary } from "@/lib/projects/providers";
+import { notifyOrgUsers, OrgNotificationType } from "@/lib/projects/org-notifications";
 
 /** @param {any} row */
 export function serializeInvoice(row) {
@@ -15,6 +17,12 @@ export function serializeInvoice(row) {
     invoiceNumber: row.invoiceNumber,
     amount: row.amount?.toString?.() ?? String(row.amount ?? ""),
     status: row.status,
+    source: row.source || "OFFICER",
+    supplierId: row.supplierId || null,
+    supplier: row.supplier ? serializeProviderSummary(row.supplier) : null,
+    supplierReference: row.supplierReference || null,
+    deliveryAddress: row.deliveryAddress || null,
+    notes: row.notes || null,
     invoiceDate: row.invoiceDate || null,
     certifiedAt: row.certifiedAt || null,
     verifiedAt: row.verifiedAt || null,
@@ -27,7 +35,12 @@ export function serializeInvoice(row) {
   };
 }
 
-export const invoiceInclude = { createdBy: { select: { id: true, firstName: true, lastName: true } } };
+export const invoiceInclude = {
+  createdBy: { select: { id: true, firstName: true, lastName: true } },
+  supplier: true,
+};
+
+export const INVOICE_SOURCE = Object.freeze({ OFFICER: "OFFICER", PORTAL: "PORTAL", AUTO: "AUTO" });
 
 const NON_CANCELLED_INVOICE_STATUSES = [
   OrgInvoiceStatus.RECEIVED,
@@ -68,13 +81,19 @@ async function nextInvoiceNumber(prisma, projectId, procurementId) {
  * @param {{
  *   projectId: string;
  *   procurementId: string;
- *   actorOrgUserId: string;
+ *   actorOrgUserId: string | null;
  *   actorRoleName: string;
  *   amount: string | number;
  *   invoiceDate?: string | Date | null;
+ *   deliveryId?: string | null;
+ *   source?: "OFFICER" | "PORTAL" | "AUTO";
+ *   supplierReference?: string | null;
+ *   notes?: string | null;
+ *   portalProviderId?: string | null;
  * }} opts
  */
 export async function createInvoice(prisma, opts) {
+  const source = Object.values(INVOICE_SOURCE).includes(opts.source) ? opts.source : INVOICE_SOURCE.OFFICER;
   const procurement = await prisma.projectOrgProcurement.findFirst({
     where: { id: opts.procurementId, projectId: opts.projectId },
   });
@@ -99,8 +118,15 @@ export async function createInvoice(prisma, opts) {
       code: "NO_ACTIVE_ORDER",
     };
   }
+  if (opts.portalProviderId && order.supplierId !== opts.portalProviderId) {
+    return { ok: false, error: "This order was not issued to your organisation.", status: 403 };
+  }
 
-  const amount = Number(opts.amount);
+  const supplierReference =
+    typeof opts.supplierReference === "string" ? opts.supplierReference.trim().slice(0, 64) || null : null;
+  const notes = typeof opts.notes === "string" ? opts.notes.trim().slice(0, 2000) || null : null;
+
+  const amount = Number(String(opts.amount ?? "").replace(/,/g, "").trim());
   if (!Number.isFinite(amount) || amount <= 0) {
     return { ok: false, error: "Enter a valid invoice amount.", status: 400, fieldErrors: { amount: "Enter a valid amount." } };
   }
@@ -120,8 +146,23 @@ export async function createInvoice(prisma, opts) {
   }
 
   const invoiceNumber = await nextInvoiceNumber(prisma, opts.projectId, procurement.id);
-  let deliveryId = typeof opts.deliveryId === "string" ? opts.deliveryId.trim() : null;
-  if (deliveryId) {
+  let deliveryId = typeof opts.deliveryId === "string" ? opts.deliveryId.trim() || null : null;
+  let deliveryAddress = order.deliveryAddress || null;
+  if (!deliveryId) {
+    const latestAccepted = await prisma.projectOrgDelivery.findFirst({
+      where: {
+        projectId: opts.projectId,
+        procurementId: procurement.id,
+        inspection: { status: { in: ["ACCEPTED", "PARTIAL"] } },
+      },
+      orderBy: { createdAt: "desc" },
+      select: { id: true, deliveryAddress: true },
+    });
+    if (latestAccepted) {
+      deliveryId = latestAccepted.id;
+      deliveryAddress = latestAccepted.deliveryAddress || deliveryAddress;
+    }
+  } else {
     const delivery = await prisma.projectOrgDelivery.findFirst({
       where: { id: deliveryId, projectId: opts.projectId, procurementId: procurement.id },
       include: { inspection: true },
@@ -145,6 +186,7 @@ export async function createInvoice(prisma, opts) {
         fieldErrors: { deliveryId: "Delivery must be accepted or partially accepted." },
       };
     }
+    deliveryAddress = delivery.deliveryAddress || deliveryAddress;
   }
 
   const row = await prisma.projectOrgInvoice.create({
@@ -156,7 +198,12 @@ export async function createInvoice(prisma, opts) {
       amount: new Prisma.Decimal(amount.toFixed(2)),
       status: OrgInvoiceStatus.RECEIVED,
       invoiceDate: opts.invoiceDate ? new Date(opts.invoiceDate) : new Date(),
-      createdByOrgUserId: opts.actorOrgUserId,
+      createdByOrgUserId: opts.actorOrgUserId || null,
+      supplierId: order.supplierId || null,
+      supplierReference,
+      source,
+      deliveryAddress,
+      notes,
     },
     include: invoiceInclude,
   });
@@ -167,7 +214,10 @@ export async function createInvoice(prisma, opts) {
   });
 
   await writeAuditLog({
-    eventType: AuditEvent.PROJECT_ORG_INVOICE_CREATED,
+    eventType:
+      source === INVOICE_SOURCE.OFFICER
+        ? AuditEvent.PROJECT_ORG_INVOICE_CREATED
+        : AuditEvent.PROJECT_ORG_INVOICE_RECEIVED,
     actorUserId: null,
     meta: {
       projectId: opts.projectId,
@@ -175,27 +225,52 @@ export async function createInvoice(prisma, opts) {
       invoiceId: row.id,
       invoiceNumber,
       amount: amount.toFixed(2),
-      actorOrgUserId: opts.actorOrgUserId,
+      orderValue: order.value.toFixed(2),
+      supplierId: order.supplierId || null,
+      source,
+      actorOrgUserId: opts.actorOrgUserId || null,
       actorRoleName: opts.actorRoleName,
     },
   });
 
-  try {
-    await startWorkflowFromTrigger(prisma, {
-      projectId: opts.projectId,
-      triggerKey: WORKFLOW_TRIGGERS.INVOICE_STARTED,
-      entityType: "procurement",
-      entityId: procurement.id,
-      procurementId: procurement.id,
-      entityTitle: `Invoice: ${invoiceNumber}`,
-      actorOrgUserId: opts.actorOrgUserId,
-      actorRoleName: opts.actorRoleName,
-    });
-  } catch {
-    // Best-effort tracking workflow.
+  const workflowActorId = opts.actorOrgUserId || procurement.officerOrgUserId || null;
+  if (workflowActorId) {
+    try {
+      await startWorkflowFromTrigger(prisma, {
+        projectId: opts.projectId,
+        triggerKey: WORKFLOW_TRIGGERS.INVOICE_STARTED,
+        entityType: "procurement",
+        entityId: procurement.id,
+        procurementId: procurement.id,
+        entityTitle: `Invoice: ${invoiceNumber}`,
+        actorOrgUserId: workflowActorId,
+        actorRoleName: opts.actorRoleName,
+      });
+    } catch {
+      // Best-effort tracking workflow.
+    }
   }
 
-  return { ok: true, invoice: serializeInvoice(row) };
+  if (source !== INVOICE_SOURCE.OFFICER && procurement.officerOrgUserId) {
+    const officer = await prisma.projectOrgUser.findUnique({
+      where: { id: procurement.officerOrgUserId },
+      select: { id: true, linkedUserId: true },
+    });
+    if (officer) {
+      await notifyOrgUsers(prisma, {
+        projectId: opts.projectId,
+        recipients: [officer],
+        type: OrgNotificationType.WORKFLOW_TASK,
+        title: `Invoice received: ${invoiceNumber}`,
+        body: `${row.supplier?.name || "The provider"} submitted an invoice of ${amount.toFixed(2)} for ${procurement.procurementNumber}.`,
+        linkUrl: `/projects/${opts.projectId}/procurements/${procurement.id}`,
+        relatedEntityType: "invoice",
+        relatedEntityId: row.id,
+      });
+    }
+  }
+
+  return { ok: true, invoice: serializeInvoice(row), order };
 }
 
 /**

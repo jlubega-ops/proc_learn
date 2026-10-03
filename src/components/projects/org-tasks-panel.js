@@ -34,7 +34,7 @@ import {
   clickableTableRowProps,
   stopRowClick,
 } from "@/lib/projects/clickable-table-row";
-import { formatCommitteeSeatLabel } from "@/lib/projects/committee-context";
+import { workflowStepActionLabel } from "@/lib/projects/workflow-decision-options";
 
 /**
  * @param {string | Date | null | undefined} value
@@ -67,15 +67,12 @@ function entityLabel(task) {
  */
 export function OrgTasksPanel({ projectId }) {
   const { showToast } = useToast();
-  const { session, refresh } = useAuthSession();
+  const { session } = useAuthSession();
   const router = useRouter();
   const [loading, setLoading] = useState(true);
   const [tasks, setTasks] = useState(/** @type {any[]} */ ([]));
   const [mode, setMode] = useState(/** @type {"org" | "committee"} */ ("org"));
   const [hiddenCount, setHiddenCount] = useState(0);
-  const [activeCommittee, setActiveCommittee] = useState(/** @type {any} */ (null));
-  const [clearing, setClearing] = useState(false);
-
   const load = useCallback(async () => {
     setLoading(true);
     try {
@@ -91,7 +88,6 @@ export function OrgTasksPanel({ projectId }) {
       setTasks(Array.isArray(data.tasks) ? data.tasks : []);
       setMode(data.mode === "committee" ? "committee" : "org");
       setHiddenCount(typeof data.hiddenCount === "number" ? data.hiddenCount : 0);
-      setActiveCommittee(data.activeCommittee || null);
     } finally {
       setLoading(false);
     }
@@ -100,32 +96,6 @@ export function OrgTasksPanel({ projectId }) {
   useEffect(() => {
     void load();
   }, [load, session?.activeCommitteeId]);
-
-  async function clearCommitteeSeat() {
-    setClearing(true);
-    try {
-      const res = await fetch(`/api/projects/${projectId}/my-committee-context`, {
-        method: "PATCH",
-        credentials: "include",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ committeeId: null }),
-      });
-      const data = await res.json().catch(() => ({}));
-      if (!res.ok) {
-        showToast({
-          message:
-            typeof data.error === "string" ? data.error : "Could not clear committee context.",
-          severity: "error",
-        });
-        return;
-      }
-      await refresh();
-      showToast({ message: "Back to organisational role tasks.", severity: "success" });
-      await load();
-    } finally {
-      setClearing(false);
-    }
-  }
 
   function openCommitteeSwitch() {
     if (typeof window !== "undefined") {
@@ -141,46 +111,9 @@ export function OrgTasksPanel({ projectId }) {
     );
   }
 
-  const committeeLabel = activeCommittee?.name
-    ? `${activeCommittee.name}${
-        session?.activeCommittee?.committeeRole
-          ? ` · ${formatCommitteeSeatLabel(session.activeCommittee.committeeRole)}`
-          : ""
-      }`
-    : "committee";
-
   return (
     <div className="space-y-3">
-      {mode === "committee" ? (
-        <Paper
-          variant="outlined"
-          className="border-brand-yellow/50 bg-[color-mix(in_oklab,var(--brand-yellow)_12%,var(--surface-elevated))] p-3"
-        >
-          <Typography variant="subtitle2" sx={{ fontWeight: 700 }}>
-            Committee mode: {committeeLabel}
-          </Typography>
-          <Typography variant="body2" sx={{ ...adminMutedTextSx, mt: 0.5 }}>
-            Only this committee’s tasks are listed. Your organisation-role work is hidden until you
-            clear the seat.
-            {hiddenCount > 0 ? ` (${hiddenCount} org-role task${hiddenCount === 1 ? "" : "s"} hidden.)` : ""}
-          </Typography>
-          <div className="mt-2 flex flex-wrap gap-2">
-            <Button size="small" variant="outlined" onClick={openCommitteeSwitch}>
-              Switch seat
-            </Button>
-            <Button
-              size="small"
-              variant="contained"
-              color="warning"
-              disabled={clearing}
-              onClick={() => void clearCommitteeSeat()}
-              startIcon={clearing ? <CircularProgress size={14} color="inherit" /> : null}
-            >
-              Clear seat
-            </Button>
-          </div>
-        </Paper>
-      ) : hiddenCount > 0 ? (
+      {mode !== "committee" && hiddenCount > 0 ? (
         <Paper variant="outlined" className="p-3">
           <Typography variant="subtitle2" sx={{ fontWeight: 700 }}>
             Committee work waiting
@@ -212,7 +145,7 @@ export function OrgTasksPanel({ projectId }) {
       {tasks.length === 0 ? (
         <Typography sx={adminMutedTextSx}>
           {mode === "committee"
-            ? "No pending tasks for this committee. Open Requisitions or Procurements if you need to continue committee work, or clear the seat to return to your organisation role."
+            ? "No pending tasks for this committee. Open Requisitions or Procurements if you need to continue committee work, or switch back to your organisation role from the banner."
             : "No pending organisation-role tasks."}
         </Typography>
       ) : (
@@ -236,12 +169,8 @@ export function OrgTasksPanel({ projectId }) {
                 return (
                   <TableRow
                     key={task.id}
-                    hover
-                    {...(href
-                      ? clickableTableRowProps(() => router.push(href), {
-                          "aria-label": `Open ${task.title}`,
-                        })
-                      : {})}
+                    {...clickableTableRowProps({ href, router })}
+                    aria-label={href ? `Open ${task.title}` : undefined}
                   >
                     <TableCell>{task.title}</TableCell>
                     <TableCell>{task.requiredRoleName || "—"}</TableCell>
@@ -250,7 +179,11 @@ export function OrgTasksPanel({ projectId }) {
                       <span className="text-zinc-500"> · {entity.title}</span>
                     </TableCell>
                     <TableCell>
-                      <Chip size="small" label={task.actionKey || "—"} color="info" />
+                      <Chip
+                        size="small"
+                        label={workflowStepActionLabel(task.title) || task.actionKey || "—"}
+                        color="info"
+                      />
                     </TableCell>
                     <TableCell>
                       <Chip size="small" color="warning" label={task.status || "PENDING"} />
