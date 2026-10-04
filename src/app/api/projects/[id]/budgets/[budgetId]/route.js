@@ -13,6 +13,12 @@ import {
   submitBudget,
   updateDraftBudget,
 } from "@/lib/projects/budgets";
+import {
+  WORKFLOW_HISTORY_ACTION_SELECT,
+  loadPrintOrganisation,
+  mapWorkflowHistoryActions,
+  printedByFromAuth,
+} from "@/lib/projects/print-context";
 
 export const runtime = "nodejs";
 
@@ -97,6 +103,34 @@ export async function GET(_request, context) {
   let lastDecision = null;
   let viewerHasPendingAction = false;
 
+  const [organisation, instance] = await Promise.all([
+    loadPrintOrganisation(prisma, projectId),
+    prisma.projectOrgWorkflowInstance.findFirst({
+      where: {
+        projectId,
+        budgetId,
+        status: { in: ["ACTIVE", "IN_PROGRESS", "SUSPENDED", "COMPLETED", "CANCELLED"] },
+      },
+      orderBy: { createdAt: "desc" },
+      select: {
+        actions: {
+          orderBy: { createdAt: "asc" },
+          select: WORKFLOW_HISTORY_ACTION_SELECT,
+        },
+      },
+    }),
+  ]);
+  workflowHistory = mapWorkflowHistoryActions(instance?.actions);
+  const latestAction = workflowHistory.length ? workflowHistory[workflowHistory.length - 1] : null;
+  if (latestAction) {
+    lastDecision = {
+      decision: latestAction.decision,
+      actorRoleName: latestAction.actorRoleName || null,
+    };
+  }
+
+  const printedBy = printedByFromAuth(auth.ok ? auth : adminAuth);
+
   if (auth.ok && auth.type === "org") {
     try {
       const { healMissingStepTasks } = await import("@/lib/projects/workflow-engine");
@@ -118,40 +152,6 @@ export async function GET(_request, context) {
       (row.status === "DRAFT" || row.status === "RETURNED") &&
       isCreator;
     canDeleteDraft = canPrepareBudget(role) && row.status === "DRAFT" && isCreator;
-
-    const instance = await prisma.projectOrgWorkflowInstance.findFirst({
-      where: {
-        projectId,
-        budgetId,
-        status: { in: ["ACTIVE", "IN_PROGRESS", "SUSPENDED", "COMPLETED", "CANCELLED"] },
-      },
-      orderBy: { createdAt: "desc" },
-      select: {
-        id: true,
-        actions: {
-          orderBy: { createdAt: "asc" },
-          select: {
-            id: true,
-            decision: true,
-            comment: true,
-            actorRoleName: true,
-            previousStatus: true,
-            newStatus: true,
-            createdAt: true,
-          },
-        },
-      },
-    });
-    workflowHistory = instance?.actions || [];
-    const latestAction = workflowHistory.length
-      ? workflowHistory[workflowHistory.length - 1]
-      : null;
-    if (latestAction) {
-      lastDecision = {
-        decision: latestAction.decision,
-        actorRoleName: latestAction.actorRoleName || null,
-      };
-    }
 
     const task = await prisma.projectOrgWorkflowTask.findFirst({
       where: {
@@ -183,6 +183,8 @@ export async function GET(_request, context) {
     pendingTask,
     workflowStage,
     workflowHistory,
+    organisation,
+    printedBy,
     canSubmit,
     canEditDraft,
     canDeleteDraft,

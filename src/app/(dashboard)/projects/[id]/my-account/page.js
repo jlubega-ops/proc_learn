@@ -1,4 +1,3 @@
-import { formatOrgUsername } from "@/lib/projects/org-user-identity";
 import { getProjectWorkspacePageContext } from "@/lib/projects/project-page-context";
 import { formatUserDisplayName } from "@/lib/user-display";
 import { orgUserPermissions } from "@/lib/projects/org-role-permissions";
@@ -14,7 +13,7 @@ export default async function ProjectOrgMemberAccountPage({ params }) {
   }
 
   const { orgUser } = ctx;
-  const username = formatOrgUsername(orgUser.email, orgUser.project?.projectCode);
+  const username = orgUser.email;
   const displayName = formatUserDisplayName(orgUser);
   const permissions = orgUserPermissions(orgUser.projectOrgRole?.name);
 

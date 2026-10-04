@@ -31,7 +31,7 @@ export default async function ProjectProcessWorkflowPage({ params }) {
   return (
     <div className={BRAND_PAGE_SHELL_CLASS}>
       <DashboardPageIntro
-        title="Process workflow"
+        title="Process Workflows"
         description={canManage ? "Processes your organisation runs." : `Processes ${project.name} runs.`}
       />
       <ProjectOrgProcessWorkflowPanel projectId={project.id} />

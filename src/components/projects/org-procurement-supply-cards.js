@@ -30,7 +30,7 @@ import { formatMoneyUGX, parseMoneyInput, validatePositiveMoney } from "@/lib/mo
 const SOURCE_META = {
   OFFICER: { label: "Recorded by officer", color: "info" },
   PORTAL: { label: "Provider portal", color: "primary" },
-  AUTO: { label: "Simulated provider", color: "warning" },
+  AUTO: { label: "Auto-response provider", color: "warning" },
 };
 
 /** @param {{ source?: string | null }} p */
@@ -66,7 +66,7 @@ export function OrgOffersCard({ offers, providerWord }) {
       </Typography>
       <Typography variant="body2" sx={{ ...adminMutedTextSx, mb: 1.5 }}>
         {active.length} active of {offers.length} received. Offers come from the officer, the {providerWord}
-        &apos;s own portal login, or simulated {providerWord}s responding automatically.
+        &apos;s own portal login, or auto-response {providerWord}s.
       </Typography>
       <ul className="space-y-2 text-sm">
         {offers.map((o) => (
@@ -326,7 +326,7 @@ export function OrgReceiveInvoiceForm({
           error={Boolean(errors.invoiceDate)}
           helperText={errors.invoiceDate || " "}
           fullWidth
-          InputLabelProps={{ shrink: true }}
+          slotProps={{ inputLabel: { shrink: true } }}
           sx={themedTextFieldSx}
         />
         <TextField

@@ -13,6 +13,12 @@ import {
 import { healMissingStepTasks } from "@/lib/projects/workflow-engine";
 import { fetchForm5OrgDefaults } from "@/lib/projects/form5-prefill";
 import { checkActingModeForTask, getActiveCommittee } from "@/lib/projects/committee-context";
+import {
+  WORKFLOW_HISTORY_ACTION_SELECT,
+  loadPrintOrganisation,
+  mapWorkflowHistoryActions,
+  printedByFromAuth,
+} from "@/lib/projects/print-context";
 
 export const runtime = "nodejs";
 
@@ -49,7 +55,7 @@ export async function GET(_request, context) {
       ...requisitionInclude,
       instances: {
         include: {
-          actions: { orderBy: { createdAt: "asc" } },
+          actions: { orderBy: { createdAt: "asc" }, select: WORKFLOW_HISTORY_ACTION_SELECT },
           tasks: { orderBy: { createdAt: "asc" } },
         },
         orderBy: { createdAt: "desc" },
@@ -98,47 +104,45 @@ export async function GET(_request, context) {
       }
     }
     viewerHasPendingAction = Boolean(pendingTask);
-
-    const openTask = await prisma.projectOrgWorkflowTask.findFirst({
-      where: {
-        projectId,
-        status: { in: ["PENDING", "IN_PROGRESS"] },
-        instance: { requisitionId },
-      },
-      orderBy: [{ stepNumber: "asc" }, { createdAt: "asc" }],
-      select: {
-        id: true,
-        title: true,
-        requiredRoleName: true,
-        status: true,
-        stepNumber: true,
-      },
-    });
-    if (openTask) {
-      workflowStage = {
-        taskId: openTask.id,
-        title: openTask.title,
-        requiredRoleName: openTask.requiredRoleName || null,
-        stepNumber: openTask.stepNumber,
-        status: openTask.status,
-      };
-    }
-
-    const historyFlat = (row.instances || []).flatMap((inst) =>
-      (inst.actions || []).map((a) => ({
-        decision: a.decision,
-        actorRoleName: a.actorRoleName,
-        createdAt: a.createdAt,
-      })),
-    );
-    if (historyFlat.length) {
-      const latest = historyFlat[historyFlat.length - 1];
-      lastDecision = {
-        decision: latest.decision,
-        actorRoleName: latest.actorRoleName || null,
-      };
-    }
   }
+
+  const openTask = await prisma.projectOrgWorkflowTask.findFirst({
+    where: {
+      projectId,
+      status: { in: ["PENDING", "IN_PROGRESS"] },
+      instance: { requisitionId },
+    },
+    orderBy: [{ stepNumber: "asc" }, { createdAt: "asc" }],
+    select: {
+      id: true,
+      title: true,
+      requiredRoleName: true,
+      status: true,
+      stepNumber: true,
+    },
+  });
+  if (openTask) {
+    workflowStage = {
+      taskId: openTask.id,
+      title: openTask.title,
+      requiredRoleName: openTask.requiredRoleName || null,
+      stepNumber: openTask.stepNumber,
+      status: openTask.status,
+    };
+  }
+
+  const history = [...(row.instances || [])]
+    .reverse()
+    .flatMap((inst) => mapWorkflowHistoryActions(inst.actions));
+  if (history.length) {
+    const latest = history[history.length - 1];
+    lastDecision = {
+      decision: latest.decision,
+      actorRoleName: latest.actorRoleName || null,
+    };
+  }
+
+  const organisation = await loadPrintOrganisation(prisma, projectId);
 
   const form5Defaults = await fetchForm5OrgDefaults(prisma, projectId, {
     departmentId: row.departmentId,
@@ -174,17 +178,9 @@ export async function GET(_request, context) {
     blockedTask,
     canEdit,
     canDelete,
-    history: (row.instances || []).flatMap((inst) =>
-      (inst.actions || []).map((a) => ({
-        id: a.id,
-        decision: a.decision,
-        comment: a.comment,
-        actorRoleName: a.actorRoleName,
-        previousStatus: a.previousStatus,
-        newStatus: a.newStatus,
-        createdAt: a.createdAt,
-      })),
-    ),
+    history,
+    organisation,
+    printedBy: printedByFromAuth(auth),
   });
 }
 
@@ -201,32 +197,6 @@ export async function POST(request, context) {
     body = await request.json();
   } catch {
     return NextResponse.json({ error: "Invalid request body." }, { status: 400 });
-  }
-
-  if (body?.action === "save_form5_part_i" || body?.action === "save_form5_part_ii") {
-    const auth = await authorizeProjectApiAccess(prisma, {
-      projectId,
-      orgPermission: ORG_PERMISSION.VIEW_REQUISITIONS,
-    });
-    if (!auth.ok || auth.type !== "org") {
-      return NextResponse.json({ error: "Forbidden." }, { status: 403 });
-    }
-    const { saveRequisitionForm5 } = await import("@/lib/projects/requisitions");
-    const saved = await saveRequisitionForm5(prisma, {
-      projectId,
-      requisitionId,
-      actorOrgUserId: auth.orgUser.id,
-      part: body.action === "save_form5_part_i" ? "I" : "II",
-      body: body.form5 || body,
-      method: typeof body.procurementMethod === "string" ? body.procurementMethod : null,
-    });
-    if (!saved.ok) {
-      return NextResponse.json(
-        { error: saved.error, fieldErrors: saved.fieldErrors },
-        { status: saved.status || 400 },
-      );
-    }
-    return NextResponse.json(saved);
   }
 
   const auth = await authorizeProjectApiAccess(prisma, {

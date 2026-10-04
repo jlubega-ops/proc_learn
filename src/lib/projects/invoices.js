@@ -6,6 +6,7 @@ import { WORKFLOW_TRIGGERS } from "@/lib/projects/process-catalogue";
 import { startWorkflowFromTrigger } from "@/lib/projects/workflow-engine";
 import { serializeProviderSummary } from "@/lib/projects/providers";
 import { notifyOrgUsers, OrgNotificationType } from "@/lib/projects/org-notifications";
+import { notifyProvider } from "@/lib/projects/provider-notifications";
 
 /** @param {any} row */
 export function serializeInvoice(row) {
@@ -320,6 +321,14 @@ export async function verifyInvoice(prisma, opts) {
     meta: { projectId: opts.projectId, procurementId: row.procurementId, invoiceId: row.id, actorOrgUserId: opts.actorOrgUserId, actorRoleName: opts.actorRoleName },
   });
 
+  await notifyProvider(prisma, {
+    projectId: opts.projectId,
+    providerId: row.supplierId,
+    procurementId: row.procurementId,
+    title: `Invoice verified: ${row.invoiceNumber}`,
+    body: "Your invoice has been verified and is going for payment.",
+  });
+
   return { ok: true, invoice: serializeInvoice(updated) };
 }
 
@@ -375,6 +384,14 @@ export async function rejectInvoice(prisma, opts) {
       actorOrgUserId: opts.actorOrgUserId,
       actorRoleName: opts.actorRoleName,
     },
+  });
+
+  await notifyProvider(prisma, {
+    projectId: opts.projectId,
+    providerId: row.supplierId,
+    procurementId: row.procurementId,
+    title: `Invoice rejected: ${row.invoiceNumber}`,
+    body: `Reason: ${reason}`,
   });
 
   return { ok: true, invoice: serializeInvoice(updated) };

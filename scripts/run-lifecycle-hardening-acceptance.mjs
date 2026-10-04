@@ -34,6 +34,7 @@ import {
   acceptLpo,
 } from "../src/lib/projects/contracts-lpo.js";
 import { recordDelivery, recordInspection } from "../src/lib/projects/deliveries.js";
+import { submitDeliveryNote } from "../src/lib/projects/delivery-notes.js";
 import { createInvoice, certifyInvoice, verifyInvoice } from "../src/lib/projects/invoices.js";
 import { createPayment, approvePayment, markPaymentPaid } from "../src/lib/projects/payments.js";
 import {
@@ -457,6 +458,24 @@ async function main() {
     }
   } else {
     pass("Wrong department — single department seed (skipped)");
+  }
+
+  if (!(await prisma.projectOrgDeliveryNote.count({ where: { procurementId, status: "SUBMITTED" } }))) {
+    const blocked = await recordDelivery(prisma, {
+      projectId,
+      procurementId,
+      actorOrgUserId: users.John.id,
+      actorRoleName: users.John.projectOrgRole.name,
+      lines: [{ itemName: "Laptop computer", receivedQuantity: 1 }],
+    });
+    assert(!blocked.ok, "Receipt blocked until provider dispatches", blocked.error);
+    const note = await submitDeliveryNote(prisma, {
+      projectId,
+      procurementId,
+      providerId: lpo.lpo.supplierId,
+      body: { lines: [{ itemName: "Laptop computer", quantity: "1" }] },
+    });
+    assert(note.ok, "Provider dispatched", note.error);
   }
 
   const delivery = await recordDelivery(prisma, {

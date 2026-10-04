@@ -1,7 +1,13 @@
 "use client";
 
 import { useState } from "react";
+import Link from "next/link";
+import { useRouter } from "next/navigation";
 import Alert from "@mui/material/Alert";
+import MenuItem from "@mui/material/MenuItem";
+import DoneAllRounded from "@mui/icons-material/DoneAllRounded";
+import ChevronRightRounded from "@mui/icons-material/ChevronRightRounded";
+import { PORTAL_NOTIFICATIONS_CHANGED } from "@/components/provider-portal/provider-portal-shell";
 import Button from "@mui/material/Button";
 import Chip from "@mui/material/Chip";
 import CircularProgress from "@mui/material/CircularProgress";
@@ -35,7 +41,7 @@ const OFFER_STATUS = {
   WITHDRAWN: { color: "warning", label: "Withdrawn" },
   REJECTED: { color: "error", label: "Rejected" },
 };
-const INVOICE_STATUS = {
+export const INVOICE_STATUS = {
   RECEIVED: { color: "warning", label: "Received — pending review" },
   CERTIFIED: { color: "info", label: "Certified" },
   VERIFIED: { color: "info", label: "Verified" },
@@ -43,14 +49,14 @@ const INVOICE_STATUS = {
   REJECTED: { color: "error", label: "Rejected" },
   DRAFT: { color: "warning", label: "Draft" },
 };
-const PAYMENT_STATUS = {
+export const PAYMENT_STATUS = {
   PENDING: { color: "warning", label: "Pending" },
   APPROVED: { color: "info", label: "Approved" },
   PAID: { color: "success", label: "Paid" },
   REJECTED: { color: "error", label: "Rejected" },
   CANCELLED: { color: "error", label: "Cancelled" },
 };
-const ORDER_KIND = {
+export const ORDER_KIND = {
   PURCHASE_INSTRUCTION: "Purchase instruction",
   LPO: "Local purchase order",
   CONTRACT: "Contract",
@@ -59,7 +65,7 @@ const ORDER_KIND = {
 /**
  * @param {{ map: Record<string, { color: string; label: string }>; status: string }} p
  */
-function StatusChip({ map, status }) {
+export function StatusChip({ map, status }) {
   const s = map[status] || { color: "info", label: status };
   return <Chip size="small" color={/** @type {any} */ (s.color)} label={s.label} />;
 }
@@ -67,7 +73,7 @@ function StatusChip({ map, status }) {
 /**
  * @param {{ loading: boolean; error: string; empty: boolean; emptyText: string; children: import("react").ReactNode }} p
  */
-function ListState({ loading, error, empty, emptyText, children }) {
+export function ListState({ loading, error, empty, emptyText, children }) {
   if (loading && empty) {
     return (
       <div className="flex items-center gap-2 py-8 text-sm text-zinc-600" role="status" aria-busy>
@@ -78,6 +84,27 @@ function ListState({ loading, error, empty, emptyText, children }) {
   if (error) return <Alert severity="error">{error}</Alert>;
   if (empty) return <p className="py-8 text-center text-sm text-zinc-600">{emptyText}</p>;
   return <div className={loading ? "opacity-60 transition-opacity" : ""}>{children}</div>;
+}
+
+const CARD_CLICKABLE_CLASS =
+  "cursor-pointer transition hover:border-primary/40 hover:shadow-md focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary";
+
+/**
+ * Whole-card link to an item page; renders a plain card when there is no target.
+ * @param {{ href?: string | null; label: string; children: import("react").ReactNode }} p
+ */
+function CardLink({ href, label, children }) {
+  if (!href) return <div className={`${BRAND_CARD_CLASS} p-4`}>{children}</div>;
+  return (
+    <Link href={href} title={label} aria-label={label} className={`${BRAND_CARD_CLASS} ${CARD_CLICKABLE_CLASS} block p-4`}>
+      {children}
+    </Link>
+  );
+}
+
+/** @param {string | null | undefined} procurementId */
+function assignmentHref(procurementId) {
+  return procurementId ? `/provider-portal/assignments/${procurementId}` : null;
 }
 
 /**
@@ -269,8 +296,30 @@ export function PortalOpportunities() {
         emptyText="No opportunities right now. Invitations and advertised tenders will appear here."
       >
         <ul className="space-y-3">
-          {list.items.map((o) => (
-            <li key={o.id} className={`${BRAND_CARD_CLASS} p-4`}>
+          {list.items.map((o) => {
+            const actionable = o.canSubmit || o.canEdit;
+            const openLabel = o.canEdit ? "Edit offer" : o.type === "RFQ" ? "Submit quotation" : "Submit bid";
+            return (
+            <li
+              key={o.id}
+              className={`${BRAND_CARD_CLASS} p-4 ${actionable ? CARD_CLICKABLE_CLASS : ""}`}
+              {...(actionable
+                ? {
+                    role: "button",
+                    tabIndex: 0,
+                    title: openLabel,
+                    "aria-label": `${openLabel}: ${o.title}`,
+                    onClick: () => setEditing(o),
+                    onKeyDown: (/** @type {import("react").KeyboardEvent} */ e) => {
+                      if (e.target !== e.currentTarget) return;
+                      if (e.key === "Enter" || e.key === " ") {
+                        e.preventDefault();
+                        setEditing(o);
+                      }
+                    },
+                  }
+                : {})}
+            >
               <div className="flex flex-wrap items-start justify-between gap-2">
                 <div className="min-w-0">
                   <p className="font-semibold wrap-break-word">{o.title}</p>
@@ -278,7 +327,12 @@ export function PortalOpportunities() {
                     {o.type === "RFQ" ? "Request for quotation" : "Open tender"} · {o.procurement?.number}
                   </p>
                 </div>
-                <div className="flex shrink-0 items-center gap-1">
+                <div
+                  className="flex shrink-0 items-center gap-1"
+                  onClick={(e) => e.stopPropagation()}
+                  onKeyDown={(e) => e.stopPropagation()}
+                  role="presentation"
+                >
                   {o.canSubmit ? (
                     <Tooltip title={o.type === "RFQ" ? "Submit quotation" : "Submit bid"}>
                       <IconButton
@@ -330,7 +384,8 @@ export function PortalOpportunities() {
                 </p>
               ) : null}
             </li>
-          ))}
+            );
+          })}
         </ul>
       </ListState>
       <Pager total={list.total} page={page} pageSize={pageSize} setPage={setPage} setPageSize={setPageSize} />
@@ -381,7 +436,7 @@ export function PortalOpportunities() {
 /**
  * @param {{ order: any; onClose: () => void; onSaved: () => void }} p
  */
-function InvoiceDialog({ order, onClose, onSaved }) {
+export function InvoiceDialog({ order, onClose, onSaved }) {
   const { showToast } = useToast();
   const [supplierReference, setSupplierReference] = useState("");
   const [amount, setAmount] = useState(String(order.remaining || ""));
@@ -504,95 +559,135 @@ function InvoiceDialog({ order, onClose, onSaved }) {
   );
 }
 
-/**
- * @param {{ onInvoiced: () => void }} p
- */
-export function PortalOrders({ onInvoiced }) {
+export function PortalAssignments() {
   const [page, setPage] = useState(0);
   const [pageSize, setPageSize] = useState(10);
-  const [reloadKey, setReloadKey] = useState(0);
-  const list = usePortalList("/api/provider-portal/orders", { page, pageSize, reloadKey });
-  const [invoicing, setInvoicing] = useState(/** @type {any} */ (null));
+  const list = usePortalList("/api/provider-portal/assignments", { page, pageSize });
 
   return (
-    <section aria-labelledby="pp-orders" className="space-y-3">
-      <h2 id="pp-orders" className="text-base font-semibold text-primary">
-        Orders
+    <section aria-labelledby="pp-assignments" className="space-y-3">
+      <h2 id="pp-assignments" className="text-base font-semibold text-primary">
+        Assignments
       </h2>
-      <p className="text-sm text-zinc-600">
-        Purchase instructions, local purchase orders and contracts issued to you. You can invoice once a
-        delivery has passed inspection.
-      </p>
       <ListState
         loading={list.loading}
         error={list.error}
         empty={!list.items.length}
-        emptyText="No orders have been issued to you yet."
+        emptyText="No assignments yet."
       >
         <ul className="space-y-3">
-          {list.items.map((o) => (
-            <li key={`${o.kind}-${o.id}`} className={`${BRAND_CARD_CLASS} p-4`}>
-              <div className="flex flex-wrap items-start justify-between gap-2">
-                <div className="min-w-0">
-                  <p className="font-semibold wrap-break-word">
-                    {ORDER_KIND[o.kind]} {o.number}
-                  </p>
-                  <p className="text-xs text-zinc-600 wrap-break-word">
-                    {o.procurement?.number}
-                    {o.procurement?.title ? ` · ${o.procurement.title}` : ""}
-                  </p>
+          {list.items.map((a) => (
+            <li key={a.procurementId}>
+              <CardLink href={assignmentHref(a.procurementId)} label={`Open ${a.procurementNumber}`}>
+                <div className="flex items-start justify-between gap-2">
+                  <div className="min-w-0">
+                    <p className="font-semibold wrap-break-word">{a.title}</p>
+                    <p className="text-xs text-zinc-600 wrap-break-word">
+                      {a.procurementNumber}
+                      {a.order ? ` · ${ORDER_KIND[a.order.kind]} ${a.order.number}` : ""}
+                    </p>
+                  </div>
+                  <ChevronRightRounded color="primary" className="shrink-0" aria-hidden />
                 </div>
-                <Tooltip
-                  title={
-                    o.canInvoice
-                      ? "Submit invoice"
-                      : o.hasAcceptedDelivery
-                        ? "Fully invoiced"
-                        : "Available after a delivery passes inspection"
-                  }
-                >
-                  <span>
-                    <IconButton
-                      color="success"
-                      aria-label="Submit invoice"
-                      disabled={!o.canInvoice}
-                      onClick={() => setInvoicing(o)}
-                    >
-                      <ReceiptLongRounded />
-                    </IconButton>
-                  </span>
-                </Tooltip>
-              </div>
-              <div className="mt-2 flex flex-wrap items-center gap-2 text-sm">
-                <Chip size="small" color="info" label={o.status} />
-                <span>
-                  Value <span className="font-semibold">{formatMoneyUGX(o.value)}</span>
-                </span>
-                <span className="text-zinc-600">Invoiced {formatMoneyUGX(o.alreadyInvoiced)}</span>
-                {o.issuedAt ? <span className="text-zinc-600">Issued {formatPortalDate(o.issuedAt)}</span> : null}
-              </div>
-              {o.deliveryAddress ? (
-                <p className="mt-1 flex items-center gap-1 text-xs text-zinc-700">
-                  <PlaceRounded fontSize="inherit" aria-hidden /> Deliver to: {o.deliveryAddress}
-                </p>
-              ) : null}
+                <div className="mt-2 flex flex-wrap items-center gap-2 text-sm">
+                  <Chip size="small" color={a.status.color} label={a.status.label} />
+                  {a.value ? (
+                    <span>
+                      Value <span className="font-semibold">{formatMoneyUGX(a.value)}</span>
+                    </span>
+                  ) : null}
+                  <span className="text-zinc-600">Updated {formatPortalDate(a.updatedAt)}</span>
+                </div>
+              </CardLink>
             </li>
           ))}
         </ul>
       </ListState>
       <Pager total={list.total} page={page} pageSize={pageSize} setPage={setPage} setPageSize={setPageSize} />
-      {invoicing ? (
-        <InvoiceDialog
-          key={invoicing.id}
-          order={invoicing}
-          onClose={() => setInvoicing(null)}
-          onSaved={() => {
-            setInvoicing(null);
-            setReloadKey((k) => k + 1);
-            onInvoiced();
-          }}
-        />
-      ) : null}
+    </section>
+  );
+}
+
+export function PortalNotifications() {
+  const router = useRouter();
+  const [page, setPage] = useState(0);
+  const [pageSize, setPageSize] = useState(10);
+  const [filter, setFilter] = useState("all");
+  const [reloadKey, setReloadKey] = useState(0);
+  const path = filter === "all" ? "/api/provider-portal/notifications" : `/api/provider-portal/notifications?filter=${filter}`;
+  const list = usePortalList(path, { page, pageSize, reloadKey });
+  const [open, setOpen] = useState(/** @type {any} */ (null));
+
+  async function markRead(body) {
+    await portalFetch("/api/provider-portal/notifications", { method: "PATCH", body: JSON.stringify(body) });
+    setReloadKey((k) => k + 1);
+    window.dispatchEvent(new Event(PORTAL_NOTIFICATIONS_CHANGED));
+  }
+
+  return (
+    <section aria-labelledby="pp-notifications" className="space-y-3">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <h2 id="pp-notifications" className="text-base font-semibold text-primary">
+          Notifications
+        </h2>
+        <div className="flex flex-wrap items-center gap-2">
+          <TextField
+            select
+            label="Show"
+            value={filter}
+            onChange={(e) => {
+              setFilter(e.target.value);
+              setPage(0);
+            }}
+            sx={{ minWidth: 140 }}
+          >
+            <MenuItem value="all">All</MenuItem>
+            <MenuItem value="unread">Unread</MenuItem>
+            <MenuItem value="read">Read</MenuItem>
+          </TextField>
+          <Button variant="outlined" startIcon={<DoneAllRounded />} onClick={() => void markRead({ all: true })}>
+            Mark all read
+          </Button>
+        </div>
+      </div>
+      <ListState loading={list.loading} error={list.error} empty={!list.items.length} emptyText="No notifications.">
+        <ul className="space-y-2">
+          {list.items.map((n) => (
+            <li key={n.id}>
+              <button
+                type="button"
+                onClick={() => {
+                  setOpen(n);
+                  if (!n.readAt) void markRead({ ids: [n.id] });
+                }}
+                className={`${BRAND_CARD_CLASS} w-full cursor-pointer p-3 text-left ${n.readAt ? "" : "border-l-4 border-l-primary"}`}
+              >
+                <div className="flex flex-wrap items-start justify-between gap-2">
+                  <p className={`text-sm wrap-break-word ${n.readAt ? "" : "font-semibold"}`}>{n.title}</p>
+                  <span className="text-xs text-zinc-500">{formatPortalDateTime(n.createdAt)}</span>
+                </div>
+                <p className="line-clamp-2 text-xs text-zinc-600">{n.body}</p>
+              </button>
+            </li>
+          ))}
+        </ul>
+      </ListState>
+      <Pager total={list.total} page={page} pageSize={pageSize} setPage={setPage} setPageSize={setPageSize} />
+      <Dialog open={Boolean(open)} onClose={() => setOpen(null)} maxWidth="sm" fullWidth>
+        <DialogTitle>{open?.title}</DialogTitle>
+        <DialogContent dividers>
+          <p className="whitespace-pre-wrap text-sm">{open?.body}</p>
+          <p className="mt-2 text-xs text-zinc-500">{formatPortalDateTime(open?.createdAt)}</p>
+        </DialogContent>
+        <DialogActions className="flex-wrap gap-2">
+          <Button onClick={() => setOpen(null)}>Close</Button>
+          {open?.linkUrl ? (
+            <Button variant="contained" onClick={() => router.push(open.linkUrl)}>
+              Open
+            </Button>
+          ) : null}
+        </DialogActions>
+      </Dialog>
     </section>
   );
 }
@@ -602,9 +697,9 @@ export function PortalOrders({ onInvoiced }) {
 /* ------------------------------------------------------------------ */
 
 /**
- * @param {{ reloadKey: number }} p
+ * @param {{ reloadKey?: number }} p
  */
-export function PortalInvoices({ reloadKey }) {
+export function PortalInvoices({ reloadKey = 0 }) {
   const [page, setPage] = useState(0);
   const [pageSize, setPageSize] = useState(10);
   const list = usePortalList("/api/provider-portal/invoices", { page, pageSize, reloadKey });
@@ -618,34 +713,41 @@ export function PortalInvoices({ reloadKey }) {
         loading={list.loading}
         error={list.error}
         empty={!list.items.length}
-        emptyText="No invoices yet. Submit one from an order once your delivery has passed inspection."
+        emptyText="No invoices yet."
       >
         <ul className="space-y-3">
           {list.items.map((inv) => (
-            <li key={inv.id} className={`${BRAND_CARD_CLASS} p-4`}>
-              <div className="flex flex-wrap items-start justify-between gap-2">
-                <div className="min-w-0">
-                  <p className="font-semibold wrap-break-word">
-                    {inv.supplierReference ? `Your ref ${inv.supplierReference}` : inv.invoiceNumber}
-                  </p>
-                  <p className="text-xs text-zinc-600">
-                    {inv.invoiceNumber} · {inv.procurement?.number} · {formatPortalDate(inv.invoiceDate)}
-                  </p>
+            <li key={inv.id}>
+              <CardLink
+                href={assignmentHref(inv.procurement?.id)}
+                label={`Open ${inv.procurement?.number || inv.invoiceNumber}`}
+              >
+                <div className="flex flex-wrap items-start justify-between gap-2">
+                  <div className="min-w-0">
+                    <p className="font-semibold wrap-break-word">
+                      {inv.supplierReference ? `Your ref ${inv.supplierReference}` : inv.invoiceNumber}
+                    </p>
+                    <p className="text-xs text-zinc-600">
+                      {inv.invoiceNumber} · {inv.procurement?.number} · {formatPortalDate(inv.invoiceDate)}
+                    </p>
+                  </div>
+                  <StatusChip map={INVOICE_STATUS} status={inv.status} />
                 </div>
-                <StatusChip map={INVOICE_STATUS} status={inv.status} />
-              </div>
-              <div className="mt-2 flex flex-wrap gap-3 text-sm">
-                <span>
-                  Amount <span className="font-semibold">{formatMoneyUGX(inv.amount)}</span>
-                </span>
-                <span className="text-zinc-600">Paid {formatMoneyUGX(inv.paidAmount)}</span>
-                {inv.source === "OFFICER" ? <span className="text-zinc-600">Recorded by the procurement unit</span> : null}
-              </div>
-              {inv.rejectionReason ? (
-                <Alert severity="error" variant="outlined" sx={{ mt: 1 }}>
-                  {inv.rejectionReason}
-                </Alert>
-              ) : null}
+                <div className="mt-2 flex flex-wrap gap-3 text-sm">
+                  <span>
+                    Amount <span className="font-semibold">{formatMoneyUGX(inv.amount)}</span>
+                  </span>
+                  <span className="text-zinc-600">Paid {formatMoneyUGX(inv.paidAmount)}</span>
+                  {inv.source === "OFFICER" ? (
+                    <span className="text-zinc-600">Recorded by the procurement unit</span>
+                  ) : null}
+                </div>
+                {inv.rejectionReason ? (
+                  <Alert severity="error" variant="outlined" sx={{ mt: 1 }}>
+                    {inv.rejectionReason}
+                  </Alert>
+                ) : null}
+              </CardLink>
             </li>
           ))}
         </ul>
@@ -673,20 +775,22 @@ export function PortalPayments() {
       >
         <ul className="space-y-3">
           {list.items.map((p) => (
-            <li key={p.id} className={`${BRAND_CARD_CLASS} p-4`}>
-              <div className="flex flex-wrap items-start justify-between gap-2">
-                <div className="min-w-0">
-                  <p className="font-semibold">{formatMoneyUGX(p.amount)}</p>
-                  <p className="text-xs text-zinc-600 wrap-break-word">
-                    Invoice {p.invoice?.supplierReference || p.invoice?.invoiceNumber} · {p.procurement?.number}
-                  </p>
+            <li key={p.id}>
+              <CardLink href={assignmentHref(p.procurement?.id)} label={`Open ${p.procurement?.number || "payment"}`}>
+                <div className="flex flex-wrap items-start justify-between gap-2">
+                  <div className="min-w-0">
+                    <p className="font-semibold">{formatMoneyUGX(p.amount)}</p>
+                    <p className="text-xs text-zinc-600 wrap-break-word">
+                      Invoice {p.invoice?.supplierReference || p.invoice?.invoiceNumber} · {p.procurement?.number}
+                    </p>
+                  </div>
+                  <StatusChip map={PAYMENT_STATUS} status={p.status} />
                 </div>
-                <StatusChip map={PAYMENT_STATUS} status={p.status} />
-              </div>
-              <div className="mt-2 flex flex-wrap gap-3 text-sm text-zinc-700">
-                <span>Reference: {p.paymentReference || "—"}</span>
-                <span>Paid on: {formatPortalDate(p.paymentDate)}</span>
-              </div>
+                <div className="mt-2 flex flex-wrap gap-3 text-sm text-zinc-700">
+                  <span>Reference: {p.paymentReference || "—"}</span>
+                  <span>Paid on: {formatPortalDate(p.paymentDate)}</span>
+                </div>
+              </CardLink>
             </li>
           ))}
         </ul>

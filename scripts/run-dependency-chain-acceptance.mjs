@@ -74,7 +74,6 @@ async function ensureOrgUser(prismaClient, {
   lastName,
   roleName,
   departmentId,
-  unitIdentifier,
 }) {
   const role = await prismaClient.projectOrgRole.findUnique({ where: { name: roleName } });
   if (!role) throw new Error(`Missing role ${roleName}`);
@@ -91,7 +90,6 @@ async function ensureOrgUser(prismaClient, {
         lastName,
         projectOrgRoleId: role.id,
         departmentId,
-        unitIdentifier,
         passwordHash: await hashOrgUserPassword(PROJECT_ORG_LEARN_PASSWORD),
       },
       include: { projectOrgRole: true },
@@ -188,7 +186,6 @@ async function main() {
     lastName: "Nabirye",
     roleName: "Contracts Officer",
     departmentId: procurementDept.id,
-    unitIdentifier: "GRACE1",
   });
   const helen = await ensureOrgUser(prisma, {
     projectId,
@@ -197,7 +194,6 @@ async function main() {
     lastName: "Akello",
     roleName: "Finance/Budget Officer",
     departmentId: financeDept.id,
-    unitIdentifier: "HELEN1",
   });
   pass("Contracts Officer Grace + Finance Officer Helen ready");
 

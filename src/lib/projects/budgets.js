@@ -13,6 +13,7 @@ import {
   startWorkflowFromTrigger,
 } from "@/lib/projects/workflow-engine";
 import { ORG_REF_DOC, nextOrgDocumentReference } from "@/lib/projects/org-reference";
+import { validateLineText } from "@/lib/projects/line-item-options";
 import {
   resolveCurrentOrgSlate,
   resolveSlateIdForOrgCreate,
@@ -85,10 +86,22 @@ export const budgetInclude = {
   financialYear: { select: { id: true, label: true } },
   department: { select: { id: true, name: true, code: true } },
   createdBy: {
-    select: { id: true, firstName: true, lastName: true, email: true },
+    select: {
+      id: true,
+      firstName: true,
+      lastName: true,
+      email: true,
+      projectOrgRole: { select: { name: true } },
+    },
   },
   approvedBy: {
-    select: { id: true, firstName: true, lastName: true, email: true },
+    select: {
+      id: true,
+      firstName: true,
+      lastName: true,
+      email: true,
+      projectOrgRole: { select: { name: true } },
+    },
   },
   lines: { orderBy: [{ code: "asc" }, { createdAt: "asc" }] },
 };
@@ -128,6 +141,7 @@ function orgUserBrief(u) {
     lastName: u.lastName,
     email: u.email,
     displayName: `${u.firstName || ""} ${u.lastName || ""}`.trim() || u.email,
+    roleName: u.projectOrgRole?.name || null,
   };
 }
 
@@ -143,6 +157,9 @@ export function serializeBudget(row) {
     viewerHasPendingAction: Boolean(row.viewerHasPendingAction),
     lastDecision: row.lastDecision || null,
   });
+  const neutral = presentBudgetStatus(row.status, workflowStage, {
+    lastDecision: row.lastDecision || null,
+  });
   return {
     id: row.id,
     title: row.title,
@@ -152,6 +169,7 @@ export function serializeBudget(row) {
     status: row.status,
     statusLabel: presentation.label,
     statusColor: presentation.color,
+    stageLabel: neutral.label,
     workflowStage,
     viewerHasPendingAction: Boolean(row.viewerHasPendingAction),
     submittedAt: row.submittedAt || null,
@@ -381,8 +399,9 @@ export async function createBudgetWithLines(prisma, opts) {
     const amounts = resolveLineAmounts(raw);
     const lineDescription =
       typeof raw?.description === "string" ? raw.description.trim() || null : null;
-    if (!identity.category) {
-      fieldErrors[`lines.${idx}.category`] = "Enter a category.";
+    const categoryErr = validateLineText(identity.category, "Category");
+    if (categoryErr) {
+      fieldErrors[`lines.${idx}.category`] = categoryErr;
     }
     if (!amounts.quantity || Number(amounts.quantity) <= 0) {
       fieldErrors[`lines.${idx}.quantity`] = "Enter a quantity greater than zero.";
@@ -396,8 +415,9 @@ export async function createBudgetWithLines(prisma, opts) {
     if (!amounts.approvedAmount || Number(amounts.approvedAmount) <= 0) {
       fieldErrors[`lines.${idx}.approvedAmount`] = "Enter or compute a total amount greater than zero.";
     }
-    if (!amounts.fundingSource) {
-      fieldErrors[`lines.${idx}.fundingSource`] = "Enter a funding source.";
+    const fundingErr = validateLineText(amounts.fundingSource, "Source of funding");
+    if (fundingErr) {
+      fieldErrors[`lines.${idx}.fundingSource`] = fundingErr;
     }
     if (!identity.code || !identity.name || !amounts.approvedAmount) {
       fieldErrors[`lines.${idx}`] =
@@ -537,8 +557,9 @@ export async function updateDraftBudget(prisma, opts) {
     const amounts = resolveLineAmounts(raw);
     const lineDescription =
       typeof raw?.description === "string" ? raw.description.trim() || null : null;
-    if (!identity.category) {
-      fieldErrors[`lines.${idx}.category`] = "Enter a category.";
+    const categoryErr = validateLineText(identity.category, "Category");
+    if (categoryErr) {
+      fieldErrors[`lines.${idx}.category`] = categoryErr;
     }
     if (!amounts.quantity || Number(amounts.quantity) <= 0) {
       fieldErrors[`lines.${idx}.quantity`] = "Enter a quantity greater than zero.";
@@ -553,8 +574,9 @@ export async function updateDraftBudget(prisma, opts) {
       fieldErrors[`lines.${idx}.approvedAmount`] =
         "Enter or compute a total amount greater than zero.";
     }
-    if (!amounts.fundingSource) {
-      fieldErrors[`lines.${idx}.fundingSource`] = "Enter a funding source.";
+    const fundingErr = validateLineText(amounts.fundingSource, "Source of funding");
+    if (fundingErr) {
+      fieldErrors[`lines.${idx}.fundingSource`] = fundingErr;
     }
     if (!identity.code || !identity.name || !amounts.approvedAmount) {
       fieldErrors[`lines.${idx}`] =

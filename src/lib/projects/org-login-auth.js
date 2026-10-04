@@ -8,7 +8,7 @@ import { hashOrgUserPassword, verifyOrgUserPassword } from "@/lib/projects/org-u
  */
 export async function authenticateProjectOrgUserLogin({ identifier, password }) {
   const parsed = parseOrgLoginIdentifier(identifier);
-  if (!parsed) return { ok: false, code: "invalid_format" };
+  if (parsed?.kind !== "org") return { ok: false, code: "invalid_format" };
 
   const project = await prisma.project.findFirst({
     where: { projectCode: parsed.projectCode, isPublished: true },
@@ -18,11 +18,10 @@ export async function authenticateProjectOrgUserLogin({ identifier, password }) 
     return { ok: false, code: "project_unavailable" };
   }
 
-  const baseEmail = normalizeEmail(parsed.baseEmail);
   const candidates = await prisma.projectOrgUser.findMany({
     where: {
       projectId: project.id,
-      email: baseEmail,
+      email: normalizeEmail(parsed.email),
       isProjectAdmin: false,
       linkedUserId: null,
     },

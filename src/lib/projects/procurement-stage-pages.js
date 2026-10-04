@@ -1,63 +1,89 @@
+import { NAV_LABELS } from "@/lib/nav-labels";
+
 /**
- * Procurements sidebar sub-pages. `section` maps to `procurementSectionAccess` keys;
- * null = any viewer of procurements.
+ * Procurements sidebar sub-pages, in lifecycle order. `section` maps to
+ * `procurementSectionAccess` keys (null = any viewer of procurements); `stage` is the
+ * single-procurement stage shown when a row is opened from the page.
  */
 export const PROCUREMENT_STAGE_PAGES = {
-  "review-tasks": {
-    label: "Review tasks",
-    title: "Where every procurement is in its workflow and which steps are waiting for you",
-    section: null,
-    description:
-      "Every procurement's current workflow step. Rows marked “Your turn” are waiting for you; the rest show who the case is waiting on.",
-    recordedLabel: "In progress",
-    pendingLabel: "In progress",
+  solicitations: {
+    label: NAV_LABELS.solicitations,
+    title: "Requests for quotations and bidding",
+    section: "sourcing",
+    stage: "sourcing",
+    description: "Requests for quotations and bids.",
+    recordedLabel: "Issued",
+    pendingLabel: "Not issued",
+  },
+  evaluations: {
+    label: NAV_LABELS.evaluations,
+    title: "Evaluation of quotations and bids",
+    section: "evaluation",
+    stage: "evaluation",
+    description: "Evaluation of quotations and bids.",
+    recordedLabel: "Evaluated",
+    pendingLabel: "Not evaluated",
   },
   awards: {
-    label: "Awards",
+    label: NAV_LABELS.awards,
     title: "Contract awards from approved evaluations",
     section: "award",
-    description: "Award decisions per procurement (Micro procurements have no award stage).",
+    stage: "award",
+    description: "Award decisions.",
     recordedLabel: "Awarded",
     pendingLabel: "Not yet awarded",
   },
-  contracts: {
-    label: "Contracts / LPO",
-    title: "Contracts, LPOs and purchase instructions",
+  "purchase-instructions": {
+    label: NAV_LABELS.purchaseInstructions,
+    title: "Purchase instructions for Micro procurements",
     section: "contract",
-    description:
-      "The order document for each procurement — contract or LPO, or the purchase instruction for Micro.",
+    stage: "contract",
+    description: "Purchase instructions for Micro procurements.",
+    recordedLabel: "Issued",
+    pendingLabel: "Not issued",
+  },
+  contracts: {
+    label: NAV_LABELS.contracts,
+    title: "Contracts and local purchase orders",
+    section: "contract",
+    stage: "contract",
+    description: "Contracts and local purchase orders.",
     recordedLabel: "Order issued",
     pendingLabel: "No order yet",
   },
   deliveries: {
-    label: "Delivery & inspections",
-    title: "Goods/works received and their inspection results",
+    label: NAV_LABELS.deliveries,
+    title: "Goods/works received and their inspection",
     section: "delivery",
-    description: "Latest delivery per procurement and whether it has been inspected and accepted.",
+    stage: "delivery",
+    description: "Deliveries and inspections.",
     recordedLabel: "Delivered",
     pendingLabel: "Awaiting delivery",
   },
   invoices: {
-    label: "Invoices",
-    title: "Provider invoices and their certification/verification",
+    label: NAV_LABELS.invoices,
+    title: "Provider invoices and their verification",
     section: "invoice",
-    description: "Latest invoice per procurement and how far it has been processed.",
+    stage: "invoice",
+    description: "Provider invoices.",
     recordedLabel: "Invoiced",
     pendingLabel: "No invoice yet",
   },
   payments: {
-    label: "Payments",
+    label: NAV_LABELS.payments,
     title: "Payment approvals and payments made",
     section: "payment",
-    description: "Latest payment per procurement — pending approval, approved or paid.",
+    stage: "payment",
+    description: "Payment approvals and payments.",
     recordedLabel: "Payment raised",
     pendingLabel: "No payment yet",
   },
   closures: {
-    label: "Closures",
+    label: NAV_LABELS.closures,
     title: "Closed procurements and those still open",
     section: "closure",
-    description: "Closure status per procurement. Closing is final for the simulation case.",
+    stage: "closure",
+    description: "Procurement closure.",
     recordedLabel: "Closed",
     pendingLabel: "Still open",
   },
@@ -72,4 +98,19 @@ export function canViewProcurementStage(stage, sections) {
   if (!page) return false;
   if (!page.section || !sections) return true;
   return Boolean(sections[page.section]?.view);
+}
+
+/**
+ * Sidebar page that holds a procurement stage (contract splits by method).
+ * @param {string | null | undefined} stage
+ * @param {string | null | undefined} method
+ * @returns {string | null}
+ */
+export function procurementSectionSlug(stage, method) {
+  if (!stage) return null;
+  if (stage === "contract") return method === "MICRO" ? "purchase-instructions" : "contracts";
+  for (const [slug, page] of Object.entries(PROCUREMENT_STAGE_PAGES)) {
+    if (page.stage === stage) return slug;
+  }
+  return null;
 }

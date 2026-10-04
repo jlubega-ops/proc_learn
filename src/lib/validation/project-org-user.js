@@ -1,9 +1,3 @@
-import { normalizeEmail } from "@/lib/validation/email";
-import {
-  isBlockedPublicEmailDomain,
-  isOrgLearnEmail,
-} from "@/lib/projects/org-user-identity";
-
 /**
  * @param {unknown} value
  */
@@ -12,25 +6,23 @@ function cleanText(value) {
 }
 
 /**
- * Organisation learning emails only (@org.learn) — never public providers.
- * @param {unknown} email
+ * @param {string} value
+ * @param {"First" | "Last"} label
  */
-export function isWellFormedOrgEmail(email) {
-  const v = cleanText(email).toLowerCase();
-  if (!v || v.length > 255) return false;
-  if (isBlockedPublicEmailDomain(v)) return false;
-  if (!isOrgLearnEmail(v)) return false;
-  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(v);
+function nameError(value, label) {
+  if (!value) return `${label} name is required.`;
+  if (value.length > 100) return `${label} name is too long.`;
+  if (!/[a-z0-9]/i.test(value)) return `${label} name needs letters.`;
+  return null;
 }
 
 /**
- * Create payload — email is allocated server-side (not collected on the form).
+ * Create payload — login email is generated server-side from first + last name.
  * @param {unknown} body
  * @returns {{
  *   ok: true;
  *   data: {
  *     firstName: string;
- *     middleName: string | null;
  *     lastName: string;
  *     projectOrgRoleId: string;
  *     departmentId: string;
@@ -43,11 +35,6 @@ export function validateProjectOrgUserInput(body) {
   const errors = {};
 
   const firstName = cleanText(body?.firstName);
-  const middleNameRaw = body?.middleName;
-  const middleName =
-    middleNameRaw === undefined || middleNameRaw === null
-      ? null
-      : cleanText(middleNameRaw) || null;
   const lastName = cleanText(body?.lastName);
   const projectOrgRoleId = cleanText(body?.projectOrgRoleId);
   const departmentId = cleanText(body?.departmentId);
@@ -57,15 +44,10 @@ export function validateProjectOrgUserInput(body) {
       ? null
       : cleanText(subunitIdRaw);
 
-  if (!firstName) errors.firstName = "First name is required.";
-  else if (firstName.length > 100) errors.firstName = "First name is too long.";
-
-  if (middleName && middleName.length > 100) {
-    errors.middleName = "Middle name is too long.";
-  }
-
-  if (!lastName) errors.lastName = "Last name is required.";
-  else if (lastName.length > 100) errors.lastName = "Last name is too long.";
+  const firstErr = nameError(firstName, "First");
+  if (firstErr) errors.firstName = firstErr;
+  const lastErr = nameError(lastName, "Last");
+  if (lastErr) errors.lastName = lastErr;
 
   if (!projectOrgRoleId) errors.projectOrgRoleId = "Role is required.";
   if (!departmentId) errors.departmentId = "Department is required.";
@@ -73,19 +55,12 @@ export function validateProjectOrgUserInput(body) {
   if (Object.keys(errors).length > 0) return { ok: false, errors };
   return {
     ok: true,
-    data: {
-      firstName,
-      middleName,
-      lastName,
-      projectOrgRoleId,
-      departmentId,
-      subunitId,
-    },
+    data: { firstName, lastName, projectOrgRoleId, departmentId, subunitId },
   };
 }
 
 /**
- * Patch payload — login email is not editable (auto-generated on create).
+ * Patch payload — login email follows the name and is regenerated server-side.
  * @param {unknown} body
  */
 export function validateProjectOrgUserPatch(body) {
@@ -96,30 +71,16 @@ export function validateProjectOrgUserPatch(body) {
 
   if (body?.firstName !== undefined) {
     const firstName = cleanText(body.firstName);
-    if (!firstName) errors.firstName = "First name is required.";
-    else if (firstName.length > 100) errors.firstName = "First name is too long.";
+    const err = nameError(firstName, "First");
+    if (err) errors.firstName = err;
     else data.firstName = firstName;
-  }
-
-  if (body?.middleName !== undefined) {
-    if (body.middleName === null) data.middleName = null;
-    else {
-      const middleName = cleanText(body.middleName) || null;
-      if (middleName && middleName.length > 100) errors.middleName = "Middle name is too long.";
-      else data.middleName = middleName;
-    }
   }
 
   if (body?.lastName !== undefined) {
     const lastName = cleanText(body.lastName);
-    if (!lastName) errors.lastName = "Last name is required.";
-    else if (lastName.length > 100) errors.lastName = "Last name is too long.";
+    const err = nameError(lastName, "Last");
+    if (err) errors.lastName = err;
     else data.lastName = lastName;
-  }
-
-  // Ignore client email — login email is system-generated and stable.
-  if (body?.email !== undefined && normalizeEmail(body.email)) {
-    // no-op: keep identity stable after create
   }
 
   if (body?.projectOrgRoleId !== undefined) {

@@ -48,7 +48,7 @@ export default async function StudentProjectOverviewPage() {
   }
 
   if (!project.isAttemptOrg || !project.sourceAcademicProject) {
-    redirect("/organisation");
+    redirect("/");
   }
 
   const academic = project.sourceAcademicProject;

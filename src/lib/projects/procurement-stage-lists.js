@@ -1,6 +1,8 @@
 import { checkActingModeForTask } from "@/lib/projects/committee-context";
 import { orgOpsSlateListWhere, resolveCurrentOrgSlateId } from "@/lib/academic/org-academic-slate";
 import { PROCUREMENT_STAGE_PAGES } from "@/lib/projects/procurement-stage-pages";
+import { describeProcurementStage } from "@/lib/projects/procurement-stage-status";
+import { isReceiveGoodsStep, procurementTaskStage } from "@/lib/projects/procurement-task-stage";
 
 const DEPARTMENT_SCOPED_ROLES = new Set([
   "User Department Officer",
@@ -24,15 +26,98 @@ function money(v) {
 }
 
 /**
+ * Status of one section only: "Pending {step} by {role}" while that section's workflow step
+ * is open, otherwise derived from the section's records.
+ * @param {string | null} stageKey
+ * @param {any} r
+ * @param {any} inst
+ * @param {any} head
+ * @returns {{ label: string; color: string; outlined?: boolean } | null}
+ */
+function sectionStatus(stageKey, r, inst, head) {
+  if (!stageKey) return null;
+  if (
+    stageKey === "delivery" &&
+    !r.deliveries?.length &&
+    (r.purchaseInstructions?.[0]?.status === "ISSUED" || r.lpos?.[0]?.status === "ISSUED")
+  ) {
+    return { label: "Awaiting provider acceptance", color: "warning" };
+  }
+  if (
+    stageKey === "delivery" &&
+    head &&
+    isReceiveGoodsStep(head.title) &&
+    Array.isArray(r.deliveryNotes) &&
+    !r.deliveryNotes.length
+  ) {
+    return { label: "Awaiting delivery", color: "warning" };
+  }
+  const active = inst && ["ACTIVE", "IN_PROGRESS"].includes(inst.status);
+  if (active && head && procurementTaskStage(head.title) === stageKey) {
+    const step = String(head.title).split(":")[0].trim();
+    const action = step ? step.charAt(0).toLowerCase() + step.slice(1) : "action";
+    return {
+      label: `Pending ${action}${head.requiredRoleName ? ` by ${head.requiredRoleName}` : ""}`,
+      color: "warning",
+    };
+  }
+  return describeProcurementStage(stageKey, r).status;
+}
+
+/**
  * Per stage: which procurements belong on the page, what "recorded" means, the
  * relation to load and how to summarise the stage record for the row.
  * @type {Record<string, { where?: object; recorded: object; include: object; record: (row: any) => any }>}
  */
 const STAGE_QUERIES = {
-  "review-tasks": {
-    recorded: {},
-    include: {},
-    record: () => null,
+  solicitations: {
+    where: { procurementMethod: { not: "MICRO" } },
+    recorded: { solicitations: { some: { status: { notIn: ["DRAFT", "REVIEW", "APPROVED"] } } } },
+    include: {
+      solicitations: { ...latest, select: { title: true, status: true, closingDate: true, createdAt: true } },
+      offers: { select: { status: true } },
+      evaluationReports: { ...latest, select: { status: true } },
+      awards: { ...latest, select: { status: true } },
+    },
+    record: (r) => {
+      const s = r.solicitations?.[0];
+      if (!s) return null;
+      const offers = (r.offers || []).filter((o) => o.status !== "WITHDRAWN").length;
+      return {
+        reference: `${s.title} · ${offers} offer${offers === 1 ? "" : "s"}`,
+        status: s.status,
+        date: s.closingDate || s.createdAt,
+      };
+    },
+  },
+  evaluations: {
+    where: { procurementMethod: { not: "MICRO" } },
+    recorded: { evaluationReports: { some: {} } },
+    include: {
+      solicitations: { ...latest, select: { status: true } },
+      evaluationReports: {
+        ...latest,
+        select: {
+          status: true,
+          evaluatedAmount: true,
+          approvedAt: true,
+          createdAt: true,
+          recommendedSupplier: supplierName,
+        },
+      },
+      awards: { ...latest, select: { status: true } },
+    },
+    record: (r) => {
+      const e = r.evaluationReports?.[0];
+      return e
+        ? {
+            reference: e.recommendedSupplier?.name || "No recommendation",
+            amount: money(e.evaluatedAmount),
+            status: e.status,
+            date: e.approvedAt || e.createdAt,
+          }
+        : null;
+    },
   },
   awards: {
     where: { procurementMethod: { not: "MICRO" } },
@@ -50,14 +135,28 @@ const STAGE_QUERIES = {
         : null;
     },
   },
-  contracts: {
-    recorded: {
-      OR: [{ lpos: { some: {} } }, { contracts: { some: {} } }, { purchaseInstructions: { some: {} } }],
+  "purchase-instructions": {
+    where: { procurementMethod: "MICRO" },
+    recorded: { purchaseInstructions: { some: {} } },
+    include: { purchaseInstructions: { ...latest, include: { supplier: supplierName } } },
+    record: (r) => {
+      const pi = r.purchaseInstructions?.[0];
+      return pi
+        ? {
+            reference: `${pi.instructionNumber} · ${pi.supplier?.name || "—"}`,
+            amount: money(pi.amount),
+            status: pi.status,
+            date: pi.issuedAt || pi.createdAt,
+          }
+        : null;
     },
+  },
+  contracts: {
+    where: { procurementMethod: { not: "MICRO" } },
+    recorded: { OR: [{ lpos: { some: {} } }, { contracts: { some: {} } }] },
     include: {
       lpos: { ...latest, include: { supplier: supplierName } },
       contracts: { ...latest, include: { supplier: supplierName } },
-      purchaseInstructions: { ...latest, include: { supplier: supplierName } },
     },
     record: (r) => {
       const c = r.contracts?.[0];
@@ -80,16 +179,6 @@ const STAGE_QUERIES = {
           date: l.issuedAt || l.createdAt,
         };
       }
-      const pi = r.purchaseInstructions?.[0];
-      if (pi) {
-        return {
-          kind: "Purchase instruction",
-          reference: `${pi.instructionNumber} · ${pi.supplier?.name || "—"}`,
-          amount: money(pi.amount),
-          status: pi.status,
-          date: pi.issuedAt || pi.createdAt,
-        };
-      }
       return null;
     },
   },
@@ -97,9 +186,17 @@ const STAGE_QUERIES = {
     recorded: { deliveries: { some: {} } },
     include: {
       deliveries: {
-        ...latest,
+        orderBy: { createdAt: "desc" },
+        take: 20,
         include: { inspection: { select: { status: true } }, recordedBy: personName },
       },
+      deliveryNotes: {
+        where: { status: "SUBMITTED" },
+        ...latest,
+        select: { status: true, noteNumber: true, dispatchedAt: true },
+      },
+      purchaseInstructions: { ...latest, select: { status: true } },
+      lpos: { ...latest, select: { status: true } },
     },
     record: (r) => {
       const d = r.deliveries?.[0];
@@ -115,7 +212,9 @@ const STAGE_QUERIES = {
   },
   invoices: {
     recorded: { invoices: { some: {} } },
-    include: { invoices: { ...latest, include: { supplier: supplierName } } },
+    include: {
+      invoices: { orderBy: { createdAt: "desc" }, take: 20, include: { supplier: supplierName } },
+    },
     record: (r) => {
       const i = r.invoices?.[0];
       return i
@@ -130,7 +229,9 @@ const STAGE_QUERIES = {
   },
   payments: {
     recorded: { payments: { some: {} } },
-    include: { payments: { ...latest, include: { approvedBy: personName } } },
+    include: {
+      payments: { orderBy: { createdAt: "desc" }, take: 20, include: { approvedBy: personName } },
+    },
     record: (r) => {
       const p = r.payments?.[0];
       return p
@@ -195,14 +296,13 @@ export async function listProcurementStage(prisma, opts) {
   const openTask = { status: { in: ["PENDING", "IN_PROGRESS"] } };
   if (opts.filter === "mine" && opts.orgUser) {
     and.push({ instances: { some: { tasks: { some: { ...openTask, assigneeOrgUserId: opts.orgUser.id } } } } });
-  } else if (opts.stage === "review-tasks" && opts.filter === "pending") {
-    and.push({ instances: { some: { status: { in: ["ACTIVE", "IN_PROGRESS"] } } } });
   } else if (opts.filter === "recorded") {
     and.push(q.recorded);
   } else if (opts.filter === "pending") {
     and.push({ NOT: q.recorded });
   }
 
+  const stageKey = PROCUREMENT_STAGE_PAGES[opts.stage].stage;
   const where = { projectId: opts.projectId, AND: and };
   const [total, rows] = await Promise.all([
     prisma.projectOrgProcurement.count({ where }),
@@ -256,6 +356,7 @@ export async function listProcurementStage(prisma, opts) {
       }
       const head = tasks[0];
       return {
+        sectionStatus: sectionStatus(stageKey, r, inst, head),
         id: r.id,
         procurementNumber: r.procurementNumber,
         title: r.title,

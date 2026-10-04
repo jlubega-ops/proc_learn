@@ -24,7 +24,7 @@ export default async function OrganisationPlanningPeriodPage() {
   return (
     <div className={BRAND_PAGE_SHELL_CLASS}>
       <DashboardPageIntro
-        title="Planning period"
+        title="Planning Periods"
         description={`Manage planning periods for ${title} in this organisation.`}
       />
       <ProjectOrgPlanningPeriodsPanel projectId={project.id} />

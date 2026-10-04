@@ -25,6 +25,39 @@ export function validateDeliveryAddressInput(value) {
 }
 
 /**
+ * Suggested delivery location for a new requisition: the department's last used
+ * location, else "<organisation> — <department>" (organisations have no address field).
+ *
+ * @param {import("@prisma/client").PrismaClient} prisma
+ * @param {{ projectId: string; departmentId?: string | null; departmentName?: string | null }} opts
+ */
+export async function resolveDefaultDeliveryLocation(prisma, opts) {
+  const [last, project] = await Promise.all([
+    prisma.projectOrgRequisition.findFirst({
+      where: {
+        projectId: opts.projectId,
+        ...(opts.departmentId ? { departmentId: opts.departmentId } : {}),
+        deliveryLocation: { not: null },
+        NOT: { deliveryLocation: "" },
+      },
+      orderBy: { createdAt: "desc" },
+      select: { deliveryLocation: true },
+    }),
+    prisma.project.findUnique({
+      where: { id: opts.projectId },
+      select: { name: true, organizationName: true },
+    }),
+  ]);
+  const fromHistory = normalizeDeliveryAddress(last?.deliveryLocation);
+  if (fromHistory) return fromHistory;
+  const orgName = String(project?.organizationName || project?.name || "").trim();
+  const dept = String(opts.departmentName || "").trim();
+  if (orgName && dept) return `${orgName} — ${dept}`;
+  if (orgName) return `${orgName} — main stores`;
+  return dept || null;
+}
+
+/**
  * Delivery address for a procurement: the requisition's delivery location, falling
  * back to the organisation's main stores (organisations have no postal address field).
  *

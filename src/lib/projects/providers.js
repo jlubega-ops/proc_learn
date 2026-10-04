@@ -12,18 +12,15 @@ import {
   MAX_GENERATE_COUNT,
   normalizeProviderBehaviour,
   providerBehaviourLabel,
-  providerNameSlug,
 } from "@/lib/projects/provider-behaviours";
 import {
   normalizeProviderCategories,
   normalizeProviderCategory,
 } from "@/lib/projects/provider-terms";
-import { formatOrgUsername, PROJECT_ORG_LEARN_PASSWORD } from "@/lib/projects/org-user-identity";
+import { PROJECT_ORG_LEARN_PASSWORD } from "@/lib/projects/org-user-identity";
+import { buildProviderPortalEmail, providerNameKey } from "@/lib/projects/org-login-identity";
 import { hashOrgUserPassword } from "@/lib/projects/org-user-password";
 import { generateShortAlphanumericCode, ensureProjectCode } from "@/lib/projects/project-identity";
-
-/** Synthetic domain for simulated provider portal logins. */
-export const PROVIDER_PORTAL_EMAIL_DOMAIN = "provider.learn";
 
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const TIN_RE = /^\d{10}$/;
@@ -55,7 +52,6 @@ export function serializeProviderSummary(row) {
 /**
  * @param {any} row
  * @param {{
- *   projectCode?: string | null;
  *   includeCredentials?: boolean;
  *   method?: string | null;
  *   category?: string | null;
@@ -90,10 +86,7 @@ export function serializeProvider(row, opts = {}) {
   };
   if (opts.includeCredentials) {
     out.portal = row.portalEmail
-      ? {
-          loginEmail: formatOrgUsername(row.portalEmail, opts.projectCode),
-          password: PROJECT_ORG_LEARN_PASSWORD,
-        }
+      ? { loginEmail: row.portalEmail, password: PROJECT_ORG_LEARN_PASSWORD }
       : null;
   }
   return out;
@@ -103,24 +96,47 @@ const PROVIDER_INCLUDE = {
   createdBy: { select: { id: true, firstName: true, lastName: true } },
 };
 
+const PROVIDER_EXISTS = {
+  ok: false,
+  status: 409,
+  error: "A provider with this name already exists.",
+  fieldErrors: { name: "A provider with this name already exists." },
+  code: "PROVIDER_NAME_TAKEN",
+};
+
 /**
- * Unique base portal email within the project (login scopes it with the project code).
+ * Another provider in this organisation whose name reduces to the same login label
+ * ("Mukwano Group Ltd" = "Mukwano Group"). Providers in other organisations never clash.
  * @param {import("@prisma/client").PrismaClient | any} db
  * @param {string} projectId
  * @param {string} name
+ * @param {string | null} [excludeId]
  */
-async function allocatePortalEmail(db, projectId, name) {
-  const slug = providerNameSlug(name);
-  for (let attempt = 0; attempt < 12; attempt += 1) {
-    const code = generateShortAlphanumericCode(4).toLowerCase();
-    const portalEmail = `${slug}.${code}@${PROVIDER_PORTAL_EMAIL_DOMAIN}`;
-    const clash = await db.projectOrgProvider.findFirst({
-      where: { projectId, portalEmail },
-      select: { id: true },
-    });
-    if (!clash) return portalEmail;
-  }
-  throw new Error("Could not allocate a provider portal login.");
+async function findProviderNameClash(db, projectId, name, excludeId = null) {
+  const key = providerNameKey(name);
+  const rows = await db.projectOrgProvider.findMany({
+    where: { projectId, ...(excludeId ? { NOT: { id: excludeId } } : {}) },
+    select: { id: true, name: true },
+  });
+  return rows.find((r) => r.name.toLowerCase() === name.toLowerCase() || (key && providerNameKey(r.name) === key)) || null;
+}
+
+/**
+ * `sales@<providername>.<orgcode>.<appname>.test`, or null when taken in this organisation.
+ * @param {import("@prisma/client").PrismaClient | any} db
+ * @param {string} projectId
+ * @param {string} name
+ * @param {string | null} [excludeId]
+ */
+async function allocatePortalEmail(db, projectId, name, excludeId = null) {
+  const projectCode = await ensureProjectCode(db, projectId);
+  if (!projectCode) return null;
+  const portalEmail = buildProviderPortalEmail({ name, projectCode });
+  const clash = await db.projectOrgProvider.findFirst({
+    where: { projectId, portalEmail, ...(excludeId ? { NOT: { id: excludeId } } : {}) },
+    select: { id: true },
+  });
+  return clash ? null : portalEmail;
 }
 
 /**
@@ -227,20 +243,16 @@ export async function listProviders(prisma, opts) {
     ];
   }
 
-  const [rows, projectCode] = await Promise.all([
-    prisma.projectOrgProvider.findMany({
-      where,
-      include: PROVIDER_INCLUDE,
-      orderBy: [{ name: "asc" }],
-    }),
-    opts.includeCredentials ? ensureProjectCode(prisma, opts.projectId) : Promise.resolve(null),
-  ]);
+  const rows = await prisma.projectOrgProvider.findMany({
+    where,
+    include: PROVIDER_INCLUDE,
+    orderBy: [{ name: "asc" }],
+  });
 
   const category = normalizeProviderCategory(opts.category);
   const checkCategory = normalizeProviderCategory(opts.checkCategory);
   let serialized = rows.map((r) =>
     serializeProvider(r, {
-      projectCode,
       includeCredentials: opts.includeCredentials,
       method: opts.method || null,
       category: category || checkCategory,
@@ -282,22 +294,7 @@ export async function getProvider(prisma, projectId, providerId, opts = {}) {
     include: PROVIDER_INCLUDE,
   });
   if (!row) return null;
-  const projectCode = opts.includeCredentials ? await ensureProjectCode(prisma, projectId) : null;
-  return serializeProvider(row, { ...opts, projectCode });
-}
-
-/**
- * @param {import("@prisma/client").PrismaClient} prisma
- * @param {string} projectId
- * @param {string} name
- * @param {string | null} [excludeId]
- */
-async function nameTaken(prisma, projectId, name, excludeId = null) {
-  const existing = await prisma.projectOrgProvider.findFirst({
-    where: { projectId, name, ...(excludeId ? { NOT: { id: excludeId } } : {}) },
-    select: { id: true },
-  });
-  return Boolean(existing);
+  return serializeProvider(row, opts);
 }
 
 /**
@@ -308,17 +305,9 @@ export async function createProvider(prisma, opts) {
   const v = validateProviderInput(opts.body);
   if (!v.ok) return v;
 
-  if (await nameTaken(prisma, opts.projectId, v.data.name)) {
-    return {
-      ok: false,
-      status: 400,
-      error: "A provider with this name is already in the register.",
-      fieldErrors: { name: "This provider name is already registered." },
-      code: "PROVIDER_NAME_TAKEN",
-    };
-  }
-
+  if (await findProviderNameClash(prisma, opts.projectId, v.data.name)) return PROVIDER_EXISTS;
   const portalEmail = await allocatePortalEmail(prisma, opts.projectId, v.data.name);
+  if (!portalEmail) return PROVIDER_EXISTS;
   const portalPasswordHash = await hashOrgUserPassword(PROJECT_ORG_LEARN_PASSWORD);
 
   const row = await prisma.projectOrgProvider.create({
@@ -355,26 +344,28 @@ export async function createProvider(prisma, opts) {
 export async function updateProvider(prisma, opts) {
   const existing = await prisma.projectOrgProvider.findFirst({
     where: { id: opts.providerId, projectId: opts.projectId },
-    select: { id: true },
+    select: { id: true, name: true, portalEmail: true },
   });
   if (!existing) return { ok: false, status: 404, error: "Not found." };
 
   const v = validateProviderInput(opts.body);
   if (!v.ok) return v;
 
-  if (await nameTaken(prisma, opts.projectId, v.data.name, opts.providerId)) {
-    return {
-      ok: false,
-      status: 400,
-      error: "A provider with this name is already in the register.",
-      fieldErrors: { name: "This provider name is already registered." },
-      code: "PROVIDER_NAME_TAKEN",
-    };
+  if (await findProviderNameClash(prisma, opts.projectId, v.data.name, opts.providerId)) {
+    return PROVIDER_EXISTS;
+  }
+
+  /** @type {Record<string, unknown>} */
+  const data = { ...v.data };
+  if (!existing.portalEmail || providerNameKey(v.data.name) !== providerNameKey(existing.name)) {
+    const portalEmail = await allocatePortalEmail(prisma, opts.projectId, v.data.name, opts.providerId);
+    if (!portalEmail) return PROVIDER_EXISTS;
+    data.portalEmail = portalEmail;
   }
 
   const row = await prisma.projectOrgProvider.update({
     where: { id: opts.providerId },
-    data: v.data,
+    data,
     include: PROVIDER_INCLUDE,
   });
 
@@ -519,13 +510,13 @@ export async function generateProviders(prisma, opts) {
   const category = normalizeProviderCategory(opts.category);
 
   const passwordHash = await hashOrgUserPassword(PROJECT_ORG_LEARN_PASSWORD);
-  const existingNames = new Set(
+  const takenKeys = new Set(
     (
       await prisma.projectOrgProvider.findMany({
         where: { projectId: opts.projectId },
         select: { name: true },
       })
-    ).map((r) => r.name.toLowerCase()),
+    ).map((r) => providerNameKey(r.name)),
   );
 
   const behaviours = behavioursForBatch(count, mix);
@@ -535,15 +526,18 @@ export async function generateProviders(prisma, opts) {
 
   for (const behaviour of behaviours) {
     let profile = buildGeneratedProviderProfile({ behaviour, category, today });
-    for (let attempt = 0; attempt < 10 && existingNames.has(profile.name.toLowerCase()); attempt += 1) {
+    for (let attempt = 0; attempt < 10 && takenKeys.has(providerNameKey(profile.name)); attempt += 1) {
       profile = buildGeneratedProviderProfile({ behaviour, category, today });
     }
-    if (existingNames.has(profile.name.toLowerCase())) {
-      profile = { ...profile, name: `${profile.name} ${generateShortAlphanumericCode(3)}` };
+    const baseName = profile.name;
+    for (let attempt = 0; attempt < 10 && takenKeys.has(providerNameKey(profile.name)); attempt += 1) {
+      profile = { ...profile, name: `${baseName} ${generateShortAlphanumericCode(3)}` };
     }
-    existingNames.add(profile.name.toLowerCase());
+    if (takenKeys.has(providerNameKey(profile.name))) continue;
+    takenKeys.add(providerNameKey(profile.name));
 
     const portalEmail = await allocatePortalEmail(prisma, opts.projectId, profile.name);
+    if (!portalEmail) continue;
     const row = await prisma.projectOrgProvider.create({
       data: {
         projectId: opts.projectId,
@@ -603,14 +597,14 @@ export async function createOrGetProvider(prisma, opts) {
     };
   }
 
-  const existing = await prisma.projectOrgProvider.findFirst({
-    where: { projectId: opts.projectId, name },
-  });
-  if (existing) {
+  const clash = await findProviderNameClash(prisma, opts.projectId, name);
+  if (clash) {
+    const existing = await prisma.projectOrgProvider.findUnique({ where: { id: clash.id } });
     return { ok: true, supplier: serializeProviderSummary(existing), created: false };
   }
 
   const portalEmail = await allocatePortalEmail(prisma, opts.projectId, name);
+  if (!portalEmail) return PROVIDER_EXISTS;
   const row = await prisma.projectOrgProvider.create({
     data: {
       projectId: opts.projectId,

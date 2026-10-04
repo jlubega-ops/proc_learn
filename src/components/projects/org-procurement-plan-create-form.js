@@ -13,7 +13,7 @@ import Typography from "@mui/material/Typography";
 import AddRounded from "@mui/icons-material/AddRounded";
 import ArrowBackRounded from "@mui/icons-material/ArrowBackRounded";
 import DeleteOutlineRounded from "@mui/icons-material/DeleteOutlineRounded";
-import DownloadRounded from "@mui/icons-material/DownloadRounded";
+import Autocomplete from "@mui/material/Autocomplete";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useToast } from "@/components/providers/toast-provider";
@@ -42,12 +42,14 @@ import {
   PPDA_PLAN_METHOD_OPTIONS,
   PPDA_RESERVATION_SCHEME_OPTIONS,
   PPDA_YES_NO,
-  buildOrgPdfContext,
-  circularPlanItemToPdfSpec,
-  downloadOrgFormPdf,
   normalizeCircularPlanItemFields,
-  procurementPlanFormToPdfSpec,
 } from "@/lib/projects/ppda-forms";
+import {
+  DEFAULT_FUNDING_SOURCE,
+  FUNDING_SOURCES,
+  LINE_TEXT_MAX,
+  validateLineText,
+} from "@/lib/projects/line-item-options";
 import { usePersistedFormDraft } from "@/hooks/use-persisted-form-draft";
 
 function emptyItem() {
@@ -63,7 +65,7 @@ function emptyItem() {
     priority: "Normal",
     justification: "",
     currency: "UGX",
-    sourceOfFunding: "",
+    sourceOfFunding: DEFAULT_FUNDING_SOURCE,
     plannedProcurementMethod: "",
     contractType: "",
     prequalification: "",
@@ -136,7 +138,10 @@ export function OrgProcurementPlanCreateForm({ projectId }) {
           items:
             Array.isArray(/** @type {any} */ (payload).items) &&
             /** @type {any} */ (payload).items.length
-              ? /** @type {any} */ (payload).items
+              ? /** @type {any} */ (payload).items.map((item) => ({
+                  ...item,
+                  sourceOfFunding: item?.sourceOfFunding || DEFAULT_FUNDING_SOURCE,
+                }))
               : prev.items,
         }));
       }
@@ -279,6 +284,8 @@ export function OrgProcurementPlanCreateForm({ projectId }) {
       if (qtyErr) errors[`items.${idx}.quantity`] = qtyErr;
       const priceErr = validatePositiveMoney(item.estimatedUnitPrice, "Unit price");
       if (priceErr) errors[`items.${idx}.estimatedUnitPrice`] = priceErr;
+      const fundingErr = validateLineText(item.sourceOfFunding, "Source of funding");
+      if (fundingErr) errors[`items.${idx}.sourceOfFunding`] = fundingErr;
       if (!item.budgetLineId) {
         errors[`items.${idx}.budgetLineId`] = budgetLinesEmpty
           ? "No approved budget lines for this financial year. An approved department budget must exist first."
@@ -674,12 +681,29 @@ export function OrgProcurementPlanCreateForm({ projectId }) {
               <Typography variant="subtitle2" sx={{ fontWeight: 600 }} className="sm:col-span-2">
                 Circular 1/2024 fields
               </Typography>
-              <TextField
-                label="Source of funding"
-                value={item.sourceOfFunding}
-                onChange={(e) => updateItem(idx, { sourceOfFunding: e.target.value })}
-                fullWidth
-                sx={themedTextFieldSx}
+              <Autocomplete
+                freeSolo
+                options={FUNDING_SOURCES}
+                value={item.sourceOfFunding || ""}
+                inputValue={item.sourceOfFunding || ""}
+                onChange={(_e, value) =>
+                  updateItem(idx, { sourceOfFunding: typeof value === "string" ? value : "" })
+                }
+                onInputChange={(_e, value) => updateItem(idx, { sourceOfFunding: value })}
+                renderInput={(params) => (
+                  <TextField
+                    {...params}
+                    label="Source of funding"
+                    fullWidth
+                    error={Boolean(fieldErrors[`items.${idx}.sourceOfFunding`])}
+                    helperText={fieldErrors[`items.${idx}.sourceOfFunding`] || ""}
+                    sx={themedTextFieldSx}
+                    slotProps={{
+                      ...params.slotProps,
+                      htmlInput: { ...params.slotProps?.htmlInput, maxLength: LINE_TEXT_MAX },
+                    }}
+                  />
+                )}
               />
               <TextField
                 select
@@ -801,7 +825,7 @@ export function OrgProcurementPlanCreateForm({ projectId }) {
                     value={item.bidInvitationDate}
                     onChange={(e) => updateItem(idx, { bidInvitationDate: e.target.value })}
                     fullWidth
-                    InputLabelProps={{ shrink: true }}
+                    slotProps={{ inputLabel: { shrink: true } }}
                     sx={themedTextFieldSx}
                   />
                   <TextField
@@ -810,7 +834,7 @@ export function OrgProcurementPlanCreateForm({ projectId }) {
                     value={item.bidClosingOpeningDate}
                     onChange={(e) => updateItem(idx, { bidClosingOpeningDate: e.target.value })}
                     fullWidth
-                    InputLabelProps={{ shrink: true }}
+                    slotProps={{ inputLabel: { shrink: true } }}
                     sx={themedTextFieldSx}
                   />
                   <TextField
@@ -821,7 +845,7 @@ export function OrgProcurementPlanCreateForm({ projectId }) {
                       updateItem(idx, { evaluationReportApprovalDate: e.target.value })
                     }
                     fullWidth
-                    InputLabelProps={{ shrink: true }}
+                    slotProps={{ inputLabel: { shrink: true } }}
                     sx={themedTextFieldSx}
                   />
                   <TextField
@@ -830,7 +854,7 @@ export function OrgProcurementPlanCreateForm({ projectId }) {
                     value={item.awardNotificationDate}
                     onChange={(e) => updateItem(idx, { awardNotificationDate: e.target.value })}
                     fullWidth
-                    InputLabelProps={{ shrink: true }}
+                    slotProps={{ inputLabel: { shrink: true } }}
                     sx={themedTextFieldSx}
                   />
                 </>
@@ -842,7 +866,7 @@ export function OrgProcurementPlanCreateForm({ projectId }) {
                     value={item.eoiInvitationDate}
                     onChange={(e) => updateItem(idx, { eoiInvitationDate: e.target.value })}
                     fullWidth
-                    InputLabelProps={{ shrink: true }}
+                    slotProps={{ inputLabel: { shrink: true } }}
                     sx={themedTextFieldSx}
                   />
                   <TextField
@@ -851,7 +875,7 @@ export function OrgProcurementPlanCreateForm({ projectId }) {
                     value={item.eoiClosingOpeningDate}
                     onChange={(e) => updateItem(idx, { eoiClosingOpeningDate: e.target.value })}
                     fullWidth
-                    InputLabelProps={{ shrink: true }}
+                    slotProps={{ inputLabel: { shrink: true } }}
                     sx={themedTextFieldSx}
                   />
                   <TextField
@@ -860,7 +884,7 @@ export function OrgProcurementPlanCreateForm({ projectId }) {
                     value={item.eoiShortlistApprovalDate}
                     onChange={(e) => updateItem(idx, { eoiShortlistApprovalDate: e.target.value })}
                     fullWidth
-                    InputLabelProps={{ shrink: true }}
+                    slotProps={{ inputLabel: { shrink: true } }}
                     sx={themedTextFieldSx}
                   />
                   <TextField
@@ -869,7 +893,7 @@ export function OrgProcurementPlanCreateForm({ projectId }) {
                     value={item.proposalNotificationDate}
                     onChange={(e) => updateItem(idx, { proposalNotificationDate: e.target.value })}
                     fullWidth
-                    InputLabelProps={{ shrink: true }}
+                    slotProps={{ inputLabel: { shrink: true } }}
                     sx={themedTextFieldSx}
                   />
                   <TextField
@@ -878,7 +902,7 @@ export function OrgProcurementPlanCreateForm({ projectId }) {
                     value={item.proposalDeadlineDate}
                     onChange={(e) => updateItem(idx, { proposalDeadlineDate: e.target.value })}
                     fullWidth
-                    InputLabelProps={{ shrink: true }}
+                    slotProps={{ inputLabel: { shrink: true } }}
                     sx={themedTextFieldSx}
                   />
                   <TextField
@@ -887,7 +911,7 @@ export function OrgProcurementPlanCreateForm({ projectId }) {
                     value={item.proposalOpeningDate}
                     onChange={(e) => updateItem(idx, { proposalOpeningDate: e.target.value })}
                     fullWidth
-                    InputLabelProps={{ shrink: true }}
+                    slotProps={{ inputLabel: { shrink: true } }}
                     sx={themedTextFieldSx}
                   />
                   <TextField
@@ -896,7 +920,7 @@ export function OrgProcurementPlanCreateForm({ projectId }) {
                     value={item.proposalEvalApprovalDate}
                     onChange={(e) => updateItem(idx, { proposalEvalApprovalDate: e.target.value })}
                     fullWidth
-                    InputLabelProps={{ shrink: true }}
+                    slotProps={{ inputLabel: { shrink: true } }}
                     sx={themedTextFieldSx}
                   />
                   <TextField
@@ -907,7 +931,7 @@ export function OrgProcurementPlanCreateForm({ projectId }) {
                       updateItem(idx, { proposalAwardNotificationDate: e.target.value })
                     }
                     fullWidth
-                    InputLabelProps={{ shrink: true }}
+                    slotProps={{ inputLabel: { shrink: true } }}
                     sx={themedTextFieldSx}
                   />
                 </>
@@ -918,7 +942,7 @@ export function OrgProcurementPlanCreateForm({ projectId }) {
                 value={item.contractSigningDate}
                 onChange={(e) => updateItem(idx, { contractSigningDate: e.target.value })}
                 fullWidth
-                InputLabelProps={{ shrink: true }}
+                slotProps={{ inputLabel: { shrink: true } }}
                 sx={themedTextFieldSx}
               />
               <TextField
@@ -927,51 +951,9 @@ export function OrgProcurementPlanCreateForm({ projectId }) {
                 value={item.completionDate}
                 onChange={(e) => updateItem(idx, { completionDate: e.target.value })}
                 fullWidth
-                InputLabelProps={{ shrink: true }}
+                slotProps={{ inputLabel: { shrink: true } }}
                 sx={themedTextFieldSx}
               />
-              <div className="sm:col-span-2">
-                <Button
-                  type="button"
-                  size="small"
-                  variant="outlined"
-                  startIcon={<DownloadRounded />}
-                  disabled={!String(item.title || "").trim()}
-                  title={
-                    String(item.title || "").trim()
-                      ? "Download this plan item as PDF"
-                      : "Enter an item title before downloading"
-                  }
-                  onClick={() => {
-                    if (!String(item.title || "").trim()) {
-                      showToast({
-                        message: "Enter an item title before downloading the PDF.",
-                        severity: "error",
-                      });
-                      return;
-                    }
-                    const cf = normalizeCircularPlanItemFields(item, form.sheetType);
-                    const ctx = buildOrgPdfContext(null, {
-                      departmentName: actorDepartment?.name || "",
-                      departmentCode: actorDepartment?.code || "",
-                      financialYear: selectedFy?.label || "",
-                      referenceNumber: form.planReference || "",
-                      statusLabel: "Draft",
-                      statusColor: "info",
-                    });
-                    void downloadOrgFormPdf(
-                      circularPlanItemToPdfSpec(
-                        { title: item.title, circularFields: cf },
-                        form.sheetType,
-                        ctx,
-                        { itemIndex: idx },
-                      ),
-                    );
-                  }}
-                >
-                  Download item PDF
-                </Button>
-              </div>
             </div>
           ))}
           <Button
@@ -1002,39 +984,6 @@ export function OrgProcurementPlanCreateForm({ projectId }) {
         </div>
 
         <div className="flex flex-wrap gap-2 sm:col-span-2">
-          <Button
-            type="button"
-            variant="outlined"
-            startIcon={<DownloadRounded />}
-            disabled={!String(form.planReference || "").trim()}
-            title={
-              String(form.planReference || "").trim()
-                ? "Download the full plan as PDF (named from plan reference)"
-                : "Enter a plan reference first"
-            }
-            onClick={() => {
-              if (!String(form.planReference || "").trim()) {
-                showToast({
-                  message: "Enter a plan reference before downloading the PDF.",
-                  severity: "error",
-                });
-                return;
-              }
-              const ctx = buildOrgPdfContext(null, {
-                departmentName: actorDepartment?.name || "",
-                departmentCode: actorDepartment?.code || "",
-                financialYear: selectedFy?.label || "",
-                referenceNumber: form.planReference,
-                statusLabel: "Draft",
-                statusColor: "info",
-              });
-              void downloadOrgFormPdf(
-                procurementPlanFormToPdfSpec(form, ctx, budgetLines),
-              );
-            }}
-          >
-            Download plan PDF
-          </Button>
           <Button type="submit" variant="contained" disabled={busy}>
             {busy ? "Saving…" : "Save draft"}
           </Button>

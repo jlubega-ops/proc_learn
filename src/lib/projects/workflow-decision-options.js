@@ -67,6 +67,7 @@ const STEP_ACTION_LABELS = [
   [/^approve payment|^payment approval/i, "Approve payment and forward"],
   [/^record payment|^payment recording/i, "Record payment and forward"],
   [/^close procurement|^procurement closure/i, "Close procurement"],
+  [/^decide pdu recommendation/i, "Decide recommendation"],
 ];
 
 /**

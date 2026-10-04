@@ -2,6 +2,8 @@ import { OrgDeliveryStatus, OrgInspectionStatus, OrgProcurementStatus, Prisma } 
 import { writeAuditLog, AuditEvent } from "@/lib/audit-log";
 import { notifyOrgUsers, OrgNotificationType } from "@/lib/projects/org-notifications";
 import { getActiveOrderValue } from "@/lib/projects/contracts-lpo";
+import { notifyProvider } from "@/lib/projects/provider-notifications";
+import { orderNotOpenForDelivery } from "@/lib/projects/delivery-notes";
 
 /** @param {any} row */
 export function serializeDelivery(row) {
@@ -13,6 +15,9 @@ export function serializeDelivery(row) {
     deliveryDate: row.deliveryDate || null,
     deliveryAddress: row.deliveryAddress || null,
     remarks: row.remarks || null,
+    deliveryNote: row.deliveryNote
+      ? { id: row.deliveryNote.id, noteNumber: row.deliveryNote.noteNumber, dispatchedAt: row.deliveryNote.dispatchedAt }
+      : null,
     recordedBy: row.recordedBy
       ? { id: row.recordedBy.id, displayName: `${row.recordedBy.firstName || ""} ${row.recordedBy.lastName || ""}`.trim() }
       : null,
@@ -50,14 +55,15 @@ export function serializeDelivery(row) {
 
 export const deliveryInclude = {
   recordedBy: { select: { id: true, firstName: true, lastName: true } },
+  deliveryNote: { select: { id: true, noteNumber: true, dispatchedAt: true } },
   lines: true,
   inspection: { include: { inspectedBy: { select: { id: true, firstName: true, lastName: true } } } },
 };
 
 /**
  * Record a delivery (partial deliveries are allowed) against the procurement's
- * requisition line items. Requires an active order (Purchase Instruction, LPO, or
- * contract) — you cannot deliver against an unordered procurement.
+ * requisition line items. Requires an accepted order and a delivery note the provider
+ * has dispatched — goods cannot be received before the provider delivers them.
  *
  * @param {import("@prisma/client").PrismaClient} prisma
  * @param {{
@@ -67,6 +73,7 @@ export const deliveryInclude = {
  *   actorRoleName: string;
  *   deliveryDate?: string | Date | null;
  *   remarks?: string | null;
+ *   deliveryNoteId?: string | null;
  *   lines: { itemName: string; receivedQuantity: string | number }[];
  * }} opts
  */
@@ -90,6 +97,33 @@ export async function recordDelivery(prisma, opts) {
       code: "NO_ACTIVE_ORDER",
     };
   }
+  const notOpen = orderNotOpenForDelivery(order);
+  if (notOpen) return { ok: false, error: notOpen, status: 400, code: "ORDER_NOT_ACCEPTED" };
+
+  const deliveryNoteId = typeof opts.deliveryNoteId === "string" ? opts.deliveryNoteId.trim() : "";
+  const deliveryNote = await prisma.projectOrgDeliveryNote.findFirst({
+    where: {
+      projectId: opts.projectId,
+      procurementId: procurement.id,
+      ...(deliveryNoteId ? { id: deliveryNoteId } : { status: "SUBMITTED" }),
+    },
+    orderBy: { createdAt: "desc" },
+    select: { id: true, status: true, noteNumber: true, supplierId: true, lines: true },
+  });
+  if (!deliveryNote) {
+    return {
+      ok: false,
+      error: "The provider has not delivered yet.",
+      status: 400,
+      code: "NOT_DISPATCHED",
+    };
+  }
+  if (deliveryNote.status !== "SUBMITTED") {
+    return { ok: false, error: "This delivery note has already been received.", status: 409 };
+  }
+  const dispatchedByItem = new Map(
+    (Array.isArray(deliveryNote.lines) ? deliveryNote.lines : []).map((l) => [String(l?.itemName || ""), Number(l?.quantity || 0)]),
+  );
 
   const reqItems = procurement.requisition?.items || [];
   if (reqItems.length === 0) {
@@ -129,6 +163,11 @@ export async function recordDelivery(prisma, opts) {
       fieldErrors.lines = `Received quantity for "${itemName}" (${already + qty}) exceeds ordered quantity (${ordered}).`;
       continue;
     }
+    const dispatched = Number(dispatchedByItem.get(itemName) || 0);
+    if (qty > dispatched + 0.009) {
+      fieldErrors.lines = `"${itemName}": only ${dispatched} dispatched on ${deliveryNote.noteNumber}.`;
+      continue;
+    }
     lineRows.push({
       itemName,
       orderedQuantity: reqItem.quantity,
@@ -162,11 +201,34 @@ export async function recordDelivery(prisma, opts) {
       },
       include: deliveryInclude,
     });
+    if (deliveryNote) {
+      const linked = await tx.projectOrgDeliveryNote.updateMany({
+        where: { id: deliveryNote.id, status: "SUBMITTED" },
+        data: { status: "RECEIVED", deliveryId: created.id },
+      });
+      if (linked.count !== 1) throw new Error("NOTE_ALREADY_RECEIVED");
+    }
     await tx.projectOrgProcurement.update({
       where: { id: procurement.id },
       data: { status: OrgProcurementStatus.DELIVERY },
     });
     return created;
+  }).catch((e) => {
+    if (e instanceof Error && e.message === "NOTE_ALREADY_RECEIVED") return null;
+    throw e;
+  });
+  if (!row) return { ok: false, error: "This delivery note has already been received.", status: 409 };
+
+  await notifyProvider(prisma, {
+    projectId: opts.projectId,
+    providerId: order.supplierId,
+    procurementId: procurement.id,
+    title: `Goods received: ${procurement.procurementNumber}`,
+    body: `${fullyDelivered ? "Full" : "Partial"} delivery received against ${order.number}${
+      deliveryNote ? ` (delivery note ${deliveryNote.noteNumber})` : ""
+    }. Awaiting inspection.`,
+    relatedEntityType: "delivery",
+    relatedEntityId: row.id,
   });
 
   await writeAuditLog({
@@ -176,6 +238,7 @@ export async function recordDelivery(prisma, opts) {
       projectId: opts.projectId,
       procurementId: procurement.id,
       deliveryId: row.id,
+      deliveryNoteId: deliveryNote?.id || null,
       status: row.status,
       lineCount: lineRows.length,
       actorOrgUserId: opts.actorOrgUserId,
@@ -334,6 +397,24 @@ export async function recordInspection(prisma, opts) {
       relatedEntityId: delivery.id,
     });
   }
+
+  const order = await getActiveOrderValue(prisma, opts.projectId, delivery.procurementId);
+  const inspectionCopy = {
+    [OrgInspectionStatus.ACCEPTED]: "accepted. You can now submit your invoice.",
+    [OrgInspectionStatus.PARTIAL]: "partly accepted. You can invoice the accepted quantities.",
+    [OrgInspectionStatus.REJECTED]: "rejected on inspection. Contact the procurement office about re-delivery.",
+  };
+  await notifyProvider(prisma, {
+    projectId: opts.projectId,
+    providerId: order?.supplierId,
+    procurementId: delivery.procurementId,
+    title: `Delivery ${inspectionStatus === OrgInspectionStatus.REJECTED ? "rejected" : "accepted"}${order?.number ? `: ${order.number}` : ""}`,
+    body: `Your delivery was ${inspectionCopy[inspectionStatus] || "inspected."}${
+      typeof opts.resultNotes === "string" && opts.resultNotes.trim() ? ` ${opts.resultNotes.trim()}` : ""
+    }`,
+    relatedEntityType: "delivery",
+    relatedEntityId: delivery.id,
+  });
 
   return { ok: true, delivery: serializeDelivery(updated) };
 }

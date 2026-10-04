@@ -4,7 +4,9 @@ import { getProjectWorkspacePageContext } from "@/lib/projects/project-page-cont
 import { prisma } from "@/lib/prisma";
 import { formatUserDisplayName } from "@/lib/user-display";
 import { sanitizeRichHtml } from "@/lib/sanitize-rich-html";
+import { loadOrgProfile } from "@/lib/projects/org-profile";
 import { OrgPendingTasksCard } from "@/components/projects/org-pending-tasks-card";
+import { OrgProfileView } from "@/components/projects/org-profile-view";
 import { BRAND_CARD_CLASS } from "@/lib/brand-ui";
 
 export const metadata = {
@@ -34,6 +36,7 @@ export default async function ProjectDetailsPage({ params }) {
     const roleName = ctx.orgUser.projectOrgRole?.name || "Organisation role";
     const departmentName = ctx.orgUser.department?.name || null;
     const showAssignmentBadges = Boolean(project.isAttemptOrg);
+    const profile = await loadOrgProfile(prisma, id);
 
     return (
       <div className="w-full space-y-4">
@@ -65,6 +68,8 @@ export default async function ProjectDetailsPage({ params }) {
         </div>
 
         <OrgPendingTasksCard projectId={id} />
+
+        {profile ? <OrgProfileView profile={profile} /> : null}
       </div>
     );
   }

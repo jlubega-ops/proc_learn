@@ -1,9 +1,6 @@
 import { Role } from "@prisma/client";
 import { getProjectOrgAdminRole, isProjectOrgAdminRole, isWorkflowOnlyOrgRole } from "@/lib/project-org-role";
-import {
-  formatOrgUsername,
-  PROJECT_ORG_LEARN_PASSWORD,
-} from "@/lib/projects/org-user-identity";
+import { PROJECT_ORG_LEARN_PASSWORD } from "@/lib/projects/org-user-identity";
 
 import { canManageProjectOrgWorkspace } from "@/lib/projects/access";
 
@@ -28,26 +25,16 @@ const orgUserInclude = {
 /**
  * @param {any} row
  * @param {string | null | undefined} studentNumber
- * @param {string | null | undefined} [projectCode]
  */
-export function serializeProjectOrgUser(row, studentNumber = null, projectCode = null) {
-  const unitIdentifier = row.unitIdentifier || null;
-  const code = String(projectCode || "").trim();
-  const loginEmail =
-    !row.isProjectAdmin && code ? formatOrgUsername(row.email, code) : null;
+export function serializeProjectOrgUser(row, studentNumber = null) {
+  const loginEmail = row.isProjectAdmin ? null : row.email;
 
   return {
     id: row.id,
     firstName: row.firstName,
-    middleName: row.middleName,
     lastName: row.lastName,
-    /** Stored base email (synthetic). Prefer loginEmail for sign-in copy. */
     email: row.email,
-    /** Project-scoped login identifier (lowercase). Same as former username. */
     loginEmail,
-    /** @deprecated use loginEmail */
-    username: loginEmail,
-    unitIdentifier,
     password: !row.isProjectAdmin ? PROJECT_ORG_LEARN_PASSWORD : null,
     isProjectAdmin: row.isProjectAdmin,
     linkedUserId: row.linkedUserId,
@@ -95,7 +82,6 @@ export async function ensureProjectOwnerOrgUser(prisma, projectId, ownerUserId) 
 
   const profile = {
     firstName: user.firstName,
-    middleName: user.middleName,
     lastName: user.lastName,
     email: user.email,
     projectOrgRoleId: adminRole.id,
@@ -108,7 +94,6 @@ export async function ensureProjectOwnerOrgUser(prisma, projectId, ownerUserId) 
       where: { id: existing.id },
       data: {
         firstName: profile.firstName,
-        middleName: profile.middleName,
         lastName: profile.lastName,
         email: profile.email,
         projectOrgRoleId: profile.projectOrgRoleId,

@@ -11,11 +11,19 @@ import Paper from "@mui/material/Paper";
 import TextField from "@mui/material/TextField";
 import Typography from "@mui/material/Typography";
 import ArrowBackRounded from "@mui/icons-material/ArrowBackRounded";
-import DownloadRounded from "@mui/icons-material/DownloadRounded";
 import RefreshRounded from "@mui/icons-material/RefreshRounded";
 import SendRounded from "@mui/icons-material/SendRounded";
+import {
+  PrintButton,
+  PrintDocument,
+  formatPrintDate,
+  formatPrintDateTime,
+} from "@/components/print/print-document";
 import { OrgLineItemsTable } from "@/components/projects/org-line-items-table";
+import { RecordDetailsGrid, recordPersonLine } from "@/components/projects/record-details-grid";
+import { WorkflowHistoryPanel } from "@/components/projects/workflow-history-panel";
 import { useToast } from "@/components/providers/toast-provider";
+import { notifyOrgTasksChanged } from "@/hooks/use-pending-task-counts";
 import {
   adminCenteredLoadingBoxSx,
   adminLoadingSpinnerSx,
@@ -23,14 +31,26 @@ import {
   adminOutlinedTableContainerSx,
   themedTextFieldSx,
 } from "@/lib/admin-mui-surfaces";
-import { formatMoneyAmount } from "@/lib/money";
-import { downloadOrgFormPdf, procurementPlanRecordToPdfSpec } from "@/lib/projects/ppda-forms";
+import { DEFAULT_CURRENCY, formatMoneyAmount, formatMoneyUGX } from "@/lib/money";
 import {
   defaultWorkflowDecision,
   workflowDecisionHelp,
   workflowDecisionOptions,
 } from "@/lib/projects/workflow-decision-options";
-import { workflowDecisionButtonLabel } from "@/lib/projects/workflow-status-presentation";
+import {
+  workflowDecisionButtonLabel,
+  workflowDecisionPastLabel,
+} from "@/lib/projects/workflow-status-presentation";
+
+const SHEET_LABELS = {
+  CONSULTANCY: "Consultancy services",
+  GOODS_WORKS_NON_CONSULTANCY: "Goods, works and non-consultancy services",
+};
+
+/** @param {any} row */
+function planItemFunding(row) {
+  return row.circularFields?.sourceOfFunding || "—";
+}
 
 const PLAN_ITEM_COLUMNS = [
   {
@@ -58,11 +78,161 @@ const PLAN_ITEM_COLUMNS = [
   { id: "estimatedUnitPrice", label: "Unit price", align: "right", money: true },
   { id: "estimatedTotal", label: "Line total", align: "right", money: true },
   {
+    id: "sourceOfFunding",
+    label: "Source of funding",
+    render: planItemFunding,
+  },
+  {
     id: "budgetLine",
     label: "Budget line",
     render: (row) => (row.budgetLine?.code ? row.budgetLine.code : "—"),
   },
 ];
+
+/**
+ * @param {any} plan
+ * @param {any[]} history
+ */
+function planPrintSections(plan, history) {
+  const currency = plan.items?.[0]?.circularFields?.currency || DEFAULT_CURRENCY;
+  const dept = plan.department;
+  const period = plan.planningPeriod;
+  return [
+    {
+      type: "fields",
+      title: "Section A: Plan details",
+      fields: [
+        { label: "Plan title", value: plan.title, full: true },
+        { label: "Reference", value: plan.planReference },
+        { label: "Financial year", value: plan.financialYear?.label },
+        {
+          label: "Department",
+          value: dept ? `${dept.name}${dept.code ? ` (${dept.code})` : ""}` : null,
+        },
+        { label: "Plan type", value: plan.isEmergency ? "Emergency plan" : "Annual plan" },
+        { label: "Circular sheet", value: SHEET_LABELS[plan.sheetType] || plan.sheetType },
+        {
+          label: "Planning period",
+          value:
+            period?.startDate && period?.endDate
+              ? `${formatPrintDate(period.startDate)} – ${formatPrintDate(period.endDate)}`
+              : null,
+        },
+        { label: "Currency", value: currency },
+        { label: "Current stage", value: plan.stageLabel || plan.status },
+        { label: "Number of items", value: String(plan.totals?.itemCount ?? 0) },
+        { label: "Created on", value: formatPrintDateTime(plan.createdAt) },
+        {
+          label: "Submitted on",
+          value: plan.submittedAt ? formatPrintDateTime(plan.submittedAt) : null,
+        },
+        {
+          label: "Prepared by",
+          value: plan.createdBy
+            ? `${plan.createdBy.displayName}${plan.createdBy.roleName ? ` — ${plan.createdBy.roleName}` : ""}`
+            : null,
+        },
+        {
+          label: "Approved by",
+          value: plan.approvedBy
+            ? `${plan.approvedBy.displayName}${plan.approvedAt ? `, ${formatPrintDate(plan.approvedAt)}` : ""}`
+            : null,
+        },
+      ],
+    },
+    {
+      type: "table",
+      title: "Section B: Plan items",
+      columns: [
+        { id: "no", label: "No.", width: "5%" },
+        { id: "item", label: "Item" },
+        { id: "category", label: "Category" },
+        { id: "quantity", label: "Qty", align: "right" },
+        { id: "unit", label: "Unit" },
+        { id: "unitPrice", label: `Unit price (${currency})`, align: "right" },
+        { id: "total", label: `Total (${currency})`, align: "right" },
+        { id: "funding", label: "Source of funding" },
+        { id: "budgetLine", label: "Budget line" },
+        { id: "period", label: "Period" },
+      ],
+      rows: (plan.items || []).map((item, idx) => ({
+        key: item.id,
+        note: item.description,
+        cells: {
+          no: `${idx + 1}.`,
+          item: item.title || "—",
+          category: item.category || "—",
+          quantity: formatMoneyAmount(item.quantity) || "—",
+          unit: item.unitOfMeasure || "—",
+          unitPrice: formatMoneyAmount(item.estimatedUnitPrice) || "—",
+          total: formatMoneyAmount(item.estimatedTotal) || "—",
+          funding: planItemFunding(item),
+          budgetLine: item.budgetLine?.code || "—",
+          period: item.expectedProcurementPeriod || "—",
+        },
+      })),
+      empty: "No plan items.",
+      footer: { label: "Grand total", value: formatMoneyUGX(plan.totals?.estimatedTotal) },
+    },
+    {
+      type: "table",
+      title: "Section C: Approval trail",
+      columns: [
+        { id: "no", label: "No.", width: "5%" },
+        { id: "date", label: "Date", width: "18%" },
+        { id: "action", label: "Action" },
+        { id: "by", label: "By" },
+        { id: "role", label: "Role" },
+        { id: "comment", label: "Comment" },
+      ],
+      rows: history.map((h, idx) => ({
+        key: h.id,
+        cells: {
+          no: `${idx + 1}.`,
+          date: formatPrintDateTime(h.createdAt),
+          action: workflowDecisionPastLabel(h.decision),
+          by: h.actorName || "—",
+          role: h.actorRoleName || "—",
+          comment: h.comment || "—",
+        },
+      })),
+      empty: "Not yet submitted for review.",
+    },
+  ];
+}
+
+/**
+ * @param {{ plan: any }} p
+ */
+function PlanDetailsGrid({ plan }) {
+  const dept = plan.department;
+  const period = plan.planningPeriod;
+  const fields = [
+    { label: "Financial year", value: plan.financialYear?.label },
+    {
+      label: "Department",
+      value: dept ? `${dept.name}${dept.code ? ` (${dept.code})` : ""}` : null,
+    },
+    { label: "Current stage", value: plan.stageLabel || plan.status },
+    { label: "Circular sheet", value: SHEET_LABELS[plan.sheetType] || plan.sheetType, wide: true },
+    {
+      label: "Planning period",
+      value:
+        period?.startDate && period?.endDate
+          ? `${formatPrintDate(period.startDate)} – ${formatPrintDate(period.endDate)}`
+          : null,
+    },
+    { label: "Currency", value: plan.items?.[0]?.circularFields?.currency || DEFAULT_CURRENCY },
+    { label: "Items", value: String(plan.totals?.itemCount ?? plan.items?.length ?? 0) },
+    { label: "Estimated total", value: formatMoneyUGX(plan.totals?.estimatedTotal) },
+    { label: "Created on", value: plan.createdAt ? formatPrintDate(plan.createdAt) : null },
+    { label: "Submitted on", value: plan.submittedAt ? formatPrintDate(plan.submittedAt) : null },
+    { label: "Prepared by", value: recordPersonLine(plan.createdBy), wide: true },
+    { label: "Approved by", value: recordPersonLine(plan.approvedBy, plan.approvedAt), wide: true },
+  ];
+
+  return <RecordDetailsGrid fields={fields} />;
+}
 
 /**
  * @param {{ projectId: string; planId: string }} p
@@ -75,6 +245,8 @@ export function OrgProcurementPlanDetailPanel({ projectId, planId }) {
   const [pendingTask, setPendingTask] = useState(/** @type {any} */ (null));
   const [history, setHistory] = useState(/** @type {any[]} */ ([]));
   const [canSubmit, setCanSubmit] = useState(false);
+  const [organisation, setOrganisation] = useState(/** @type {any} */ (null));
+  const [printedBy, setPrintedBy] = useState(/** @type {any} */ (null));
   const [decision, setDecision] = useState("APPROVE");
   const [comment, setComment] = useState("");
 
@@ -97,6 +269,8 @@ export function OrgProcurementPlanDetailPanel({ projectId, planId }) {
       setPendingTask(data.pendingTask || null);
       setHistory(Array.isArray(data.workflowHistory) ? data.workflowHistory : []);
       setCanSubmit(Boolean(data.canSubmit));
+      setOrganisation(data.organisation || null);
+      setPrintedBy(data.printedBy || null);
       const key = String(data.pendingTask?.actionKey || "").toUpperCase();
       setDecision(defaultWorkflowDecision(key));
       setComment("");
@@ -152,6 +326,7 @@ export function OrgProcurementPlanDetailPanel({ projectId, planId }) {
         return;
       }
       showToast({ message: "Decision recorded.", severity: "success" });
+      notifyOrgTasksChanged();
       await load();
     } finally {
       setBusy(false);
@@ -186,27 +361,35 @@ export function OrgProcurementPlanDetailPanel({ projectId, planId }) {
           Back to plans
         </Button>
         <div className="flex flex-wrap gap-2">
-          <Button
-            startIcon={<DownloadRounded />}
-            variant="outlined"
-            disabled={!plan?.planReference}
-            title={
-              plan?.planReference
-                ? "Download plan as PDF (named from plan reference)"
-                : "Plan reference required"
-            }
-            onClick={() => {
-              if (!plan) return;
-              void downloadOrgFormPdf(procurementPlanRecordToPdfSpec(plan));
-            }}
-          >
-            Download PDF
-          </Button>
+          <PrintButton fileName={`Procurement plan ${plan.planReference || plan.title}`} />
           <Button startIcon={<RefreshRounded />} variant="outlined" onClick={() => load()}>
             Refresh
           </Button>
         </div>
       </div>
+
+      <PrintDocument
+        documentTitle={plan.isEmergency ? "Emergency procurement plan" : "Procurement plan"}
+        reference={plan.planReference}
+        status={plan.stageLabel || plan.status}
+        organisation={organisation}
+        sections={planPrintSections(plan, history)}
+        signatures={[
+          {
+            label: "Prepared by",
+            name: plan.createdBy?.displayName,
+            role: plan.createdBy?.roleName,
+            date: plan.submittedAt || plan.createdAt,
+          },
+          {
+            label: "Approved by",
+            name: plan.approvedBy?.displayName,
+            role: plan.approvedBy?.roleName,
+            date: plan.approvedAt,
+          },
+        ]}
+        printedBy={printedBy}
+      />
 
       <Paper variant="outlined" sx={{ p: 2, ...adminOutlinedTableContainerSx }}>
         <div className="flex flex-wrap items-start justify-between gap-2">
@@ -214,20 +397,11 @@ export function OrgProcurementPlanDetailPanel({ projectId, planId }) {
             <Typography variant="h6" sx={{ fontWeight: 700 }}>
               {plan.title}
             </Typography>
-            <Typography variant="body2" sx={adminMutedTextSx}>
-              {plan.financialYear?.label || "—"} · {plan.department?.name || "—"}
-              {plan.planReference ? ` · ${plan.planReference}` : ""}
-            </Typography>
-            <Typography variant="body2" sx={{ ...adminMutedTextSx, mt: 0.5 }}>
-              Circular sheet:{" "}
-              {plan.sheetType === "CONSULTANCY"
-                ? "Consultancy services"
-                : "Goods, works and non-consultancy services"}
-            </Typography>
-            <Typography variant="body2" sx={{ ...adminMutedTextSx, mt: 0.5 }}>
-              Created by {plan.createdBy?.displayName || "—"}
-              {plan.approvedBy?.displayName ? ` · Approved by ${plan.approvedBy.displayName}` : ""}
-            </Typography>
+            {plan.planReference ? (
+              <Typography variant="body2" sx={adminMutedTextSx}>
+                {plan.planReference}
+              </Typography>
+            ) : null}
           </div>
           <div className="flex flex-wrap gap-1">
             {plan.isEmergency ? (
@@ -243,11 +417,7 @@ export function OrgProcurementPlanDetailPanel({ projectId, planId }) {
           </div>
         </div>
 
-        <Typography variant="body2" sx={{ ...adminMutedTextSx, mt: 1 }}>
-          {plan.isEmergency
-            ? "Uses the Emergency Planning Process (UD → HOD → Head PDU → AO). Activate that process under Process workflow before submit."
-            : "Uses the annual Procurement Planning Process. Requires an open planning period and that process activated."}
-        </Typography>
+        <PlanDetailsGrid plan={plan} />
 
         <div className="mt-3">
           <OrgLineItemsTable
@@ -255,6 +425,7 @@ export function OrgProcurementPlanDetailPanel({ projectId, planId }) {
             columns={PLAN_ITEM_COLUMNS}
             rows={plan.items || []}
             getRowKey={(row) => row.id}
+            getRowNote={(row) => row.description}
             emptyMessage="No plan items."
             footerLabel="Grand total"
             footerTotal={plan.totals?.estimatedTotal ?? null}
@@ -329,25 +500,7 @@ export function OrgProcurementPlanDetailPanel({ projectId, planId }) {
         </Paper>
       ) : null}
 
-      {history.length > 0 ? (
-        <Paper variant="outlined" sx={{ p: 2, ...adminOutlinedTableContainerSx }}>
-          <Typography variant="subtitle2" sx={{ fontWeight: 600, mb: 1 }}>
-            Workflow history
-          </Typography>
-          <ul className="space-y-1 text-sm">
-            {history.map((h) => (
-              <li key={h.id}>
-                {String(h.createdAt).slice(0, 19).replace("T", " ")} · {h.actorRoleName || "—"} ·{" "}
-                {h.decision}
-                {h.previousStatus || h.newStatus
-                  ? ` (${h.previousStatus || "—"} → ${h.newStatus || "—"})`
-                  : ""}
-                {h.comment ? ` — ${h.comment}` : ""}
-              </li>
-            ))}
-          </ul>
-        </Paper>
-      ) : null}
+      <WorkflowHistoryPanel history={history} showStatusChange />
     </div>
   );
 }

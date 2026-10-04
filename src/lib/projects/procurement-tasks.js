@@ -7,7 +7,10 @@ import {
   OrgOfferType,
 } from "@prisma/client";
 import { completeWorkflowTask, computeBudgetAvailability } from "@/lib/projects/workflow-engine";
-import { issuePurchaseInstruction } from "@/lib/projects/purchase-instructions";
+import {
+  afterPurchaseInstructionIssued,
+  issuePurchaseInstruction,
+} from "@/lib/projects/purchase-instructions";
 import { assessProviderSelection, createOrGetProvider } from "@/lib/projects/providers";
 import {
   getOrCreateDraftSolicitation,
@@ -26,8 +29,14 @@ import { listPayments } from "@/lib/projects/payments";
 import { autoRespondToSolicitation } from "@/lib/projects/provider-auto-responses";
 import {
   committeeTypeForWorkflowRole,
+  isCommitteeWorkflowRole,
   requireCommitteeMembership,
 } from "@/lib/projects/committee-context";
+import {
+  findPendingRecommendation,
+  recommendationStage,
+} from "@/lib/projects/procurement-recommendations";
+import { isRecommendationDecisionTask } from "@/lib/projects/procurement-recommendation-options";
 
 /**
  * Step-title matchers keyed to the exact wording used in the Micro/Quotation/
@@ -110,6 +119,8 @@ export async function actOnProcurementTask(prisma, opts) {
       title: true,
       requiredRoleName: true,
       status: true,
+      stepNumber: true,
+      processFlowItemId: true,
       assigneeOrgUserId: true,
       processFlowItem: { select: { actionKey: true } },
       instance: { select: { id: true, projectId: true, procurementId: true, requisitionId: true } },
@@ -133,6 +144,33 @@ export async function actOnProcurementTask(prisma, opts) {
   // Titles are "<step>: <PROC no>: <procurement title>" — match on the step part only.
   const title = String(taskPreview.title || "").split(":")[0].trim();
   const decision = opts.decision;
+
+  if (isRecommendationDecisionTask(title)) {
+    return {
+      ok: false,
+      error: "Decide the PDU recommendation on the procurement page.",
+      status: 400,
+    };
+  }
+  if (await findPendingRecommendation(prisma, { projectId, procurementId })) {
+    return {
+      ok: false,
+      error: "Waiting for the Contracts Committee decision on the PDU recommendation.",
+      code: "RECOMMENDATION_PENDING",
+      status: 409,
+    };
+  }
+  if (
+    (decision === OrgWorkflowDecision.RETURN || decision === OrgWorkflowDecision.REJECT) &&
+    !isCommitteeWorkflowRole(taskPreview.requiredRoleName) &&
+    (await recommendationStage(prisma, { projectId, procurementId })).allowed
+  ) {
+    return {
+      ok: false,
+      error: "Recommend cancellation to the Contracts Committee instead.",
+      status: 400,
+    };
+  }
 
   const committeeType = committeeTypeForWorkflowRole(taskPreview.requiredRoleName);
   if (committeeType) {
@@ -208,6 +246,27 @@ export async function actOnProcurementTask(prisma, opts) {
   // ---------------------------------------------------------------------
 
   if (STEP.MICRO_ISSUE_PI.test(title) && isPositive) {
+    const approvedProc = await prisma.projectOrgProcurement.findFirst({
+      where: { id: procurementId, projectId },
+      select: { requisition: { select: { form5PartII: true } } },
+    });
+    const approvedShortlist = Array.isArray(approvedProc?.requisition?.form5PartII?.shortlist)
+      ? approvedProc.requisition.form5PartII.shortlist.map((s) => s?.id).filter(Boolean)
+      : [];
+    if (approvedShortlist.length) {
+      const requested = typeof body.supplierId === "string" ? body.supplierId.trim() : "";
+      if (requested && !approvedShortlist.includes(requested)) {
+        return {
+          ok: false,
+          error:
+            "Only the provider approved by the Contracts Committee can receive this purchase instruction.",
+          status: 400,
+          fieldErrors: { supplierId: "Use the approved provider." },
+        };
+      }
+      if (!requested) body.supplierId = approvedShortlist[0];
+      body.supplier = null;
+    }
     const resolved = await resolveSupplierId(body.supplierId, body.supplier);
     if (!resolved) {
       return {
@@ -230,17 +289,53 @@ export async function actOnProcurementTask(prisma, opts) {
       actorRoleName: opts.actorRoleName,
       remarks: typeof body.remarks === "string" ? body.remarks : null,
       deliveryAddress: typeof body.deliveryAddress === "string" ? body.deliveryAddress : null,
+      requiredDeliveryDate: body.requiredDeliveryDate,
+      paymentTerms: body.paymentTerms,
+      specialInstructions: body.specialInstructions,
     });
     if (!issued.ok) return issued;
+    const notifyIssued = () =>
+      afterPurchaseInstructionIssued(prisma, {
+        projectId,
+        procurementId,
+        purchaseInstruction: issued.purchaseInstruction,
+      });
 
-    const result = await complete({
+    const piMeta = {
       purchaseInstructionId: issued.purchaseInstruction.id,
       instructionNumber: issued.purchaseInstruction.instructionNumber,
       supplierId: resolved.supplierId,
       supplierConfirmed: true,
       amount: issued.purchaseInstruction.amount,
       ...(eligibility.warnings.length ? { eligibilityWarnings: eligibility.warnings } : {}),
-    });
+    };
+    // Re-issue after a provider declined is an ad-hoc task outside the step sequence.
+    if (!taskPreview.processFlowItemId) {
+      const now = new Date();
+      await prisma.$transaction([
+        prisma.projectOrgWorkflowTask.update({
+          where: { id: taskPreview.id },
+          data: { status: OrgWorkflowTaskStatus.COMPLETED, completedAt: now },
+        }),
+        prisma.projectOrgWorkflowAction.create({
+          data: {
+            projectId,
+            instanceId: taskPreview.instance.id,
+            taskId: taskPreview.id,
+            actorOrgUserId: opts.actorOrgUserId,
+            actorRoleName: opts.actorRoleName,
+            decision: OrgWorkflowDecision.COMPLETE,
+            comment: opts.comment?.trim() || null,
+            metadata: { ...piMeta, stepNumber: 0, taskTitle: taskPreview.title },
+          },
+        }),
+      ]);
+      await notifyIssued();
+      return { ok: true, purchaseInstruction: issued.purchaseInstruction };
+    }
+
+    const result = await complete(piMeta);
+    await notifyIssued();
     if (!result.ok) {
       return {
         ...result,
@@ -249,8 +344,6 @@ export async function actOnProcurementTask(prisma, opts) {
           "The purchase instruction was issued, but the task could not be closed automatically. Refresh My Tasks to continue.",
       };
     }
-    // Micro procurements remain IN_PROGRESS after the instruction is issued —
-    // closure (delivery/invoicing/payment) is handled in a later phase.
     return { ...result, purchaseInstruction: issued.purchaseInstruction };
   }
 
@@ -787,10 +880,12 @@ export async function actOnProcurementTask(prisma, opts) {
     if (!Array.isArray(body.lines) || body.lines.length === 0) {
       const recorded = (await listDeliveries(prisma, projectId, procurementId)).slice(-1)[0];
       if (recorded) return complete({ deliveryId: recorded.id });
+      const dispatched = await prisma.projectOrgDeliveryNote.count({
+        where: { projectId, procurementId, status: "SUBMITTED" },
+      });
       return {
         ok: false,
-        error:
-          "Record the delivery first: Delivery & inspection → enter the received quantities → Record delivery. Then receive the delivered items.",
+        error: dispatched ? "Enter the received quantities." : "The provider has not delivered yet.",
         status: 400,
         fieldErrors: { lines: "Add at least one delivery line." },
       };
@@ -820,9 +915,7 @@ export async function actOnProcurementTask(prisma, opts) {
       if (latestDelivery?.inspection) return complete({ deliveryId: latestDelivery.id });
       return {
         ok: false,
-        error: latestDelivery
-          ? "Inspect the delivery first: Delivery & inspection → Accept all received (or Record inspection). Then accept the delivery."
-          : "No delivery has been recorded yet for this procurement.",
+        error: latestDelivery ? "Mark each item accepted or rejected." : "No goods have been received yet.",
         status: 400,
       };
     }

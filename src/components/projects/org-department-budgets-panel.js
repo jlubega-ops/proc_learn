@@ -44,10 +44,12 @@ import {
 } from "@/lib/projects/clickable-table-row";
 
 /**
- * Operational department budget list (create on /budgets/new).
- * @param {{ projectId: string }} p
+ * Department budget list (create on /budgets/new). `readOnly` (Organization Administrator) hides
+ * create/edit/submit; `detailHrefBase` points rows at that viewer's detail route.
+ * @param {{ projectId: string; readOnly?: boolean; detailHrefBase?: string }} p
  */
-export function OrgDepartmentBudgetsPanel({ projectId }) {
+export function OrgDepartmentBudgetsPanel({ projectId, readOnly = false, detailHrefBase }) {
+  const detailBase = detailHrefBase || `/projects/${projectId}/budgets`;
   const { showToast } = useToast();
   const router = useRouter();
   const [loading, setLoading] = useState(true);
@@ -70,11 +72,11 @@ export function OrgDepartmentBudgetsPanel({ projectId }) {
         return;
       }
       setBudgets(Array.isArray(bData.budgets) ? bData.budgets : []);
-      setCanCreate(Boolean(bData.canCreate));
+      setCanCreate(!readOnly && Boolean(bData.canCreate));
     } finally {
       setLoading(false);
     }
-  }, [projectId, showToast]);
+  }, [projectId, showToast, readOnly]);
 
   useEffect(() => {
     void load();
@@ -163,10 +165,7 @@ export function OrgDepartmentBudgetsPanel({ projectId }) {
       </div>
 
       {budgets.length === 0 ? (
-        <Typography sx={adminMutedTextSx}>
-          No department budgets yet. After the Organization Administrator opens a financial year and
-          activates the Budgeting Process, prepare a department budget requirement here.
-        </Typography>
+        <Typography sx={adminMutedTextSx}>No budgets yet.</Typography>
       ) : (
         <TableContainer component={Paper} variant="outlined" sx={adminOutlinedTableContainerSx}>
           <Table size="small" sx={adminTableSx}>
@@ -186,7 +185,7 @@ export function OrgDepartmentBudgetsPanel({ projectId }) {
               {budgets.map((b) => {
                 const canEdit = canCreate && (b.status === "DRAFT" || b.status === "RETURNED");
                 const canDelete = canCreate && b.status === "DRAFT";
-                const detailHref = `/projects/${projectId}/budgets/${b.id}`;
+                const detailHref = `${detailBase}/${b.id}`;
                 return (
                   <TableRow
                     key={b.id}

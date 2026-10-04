@@ -7,6 +7,7 @@ import {
 } from "@prisma/client";
 import { writeAuditLog, AuditEvent } from "@/lib/audit-log";
 import { notifyOrgUsers, OrgNotificationType } from "@/lib/projects/org-notifications";
+import { notifyProvider } from "@/lib/projects/provider-notifications";
 import { financialYearRefToken } from "@/lib/projects/org-reference";
 import { serializeProviderSummary } from "@/lib/projects/providers";
 import { WORKFLOW_TRIGGERS } from "@/lib/projects/process-catalogue";
@@ -297,7 +298,29 @@ export async function issueContract(prisma, opts) {
   await writeAuditLog({
     eventType: AuditEvent.PROJECT_ORG_CONTRACT_ISSUED,
     actorUserId: null,
-    meta: { projectId: opts.projectId, procurementId: row.procurementId, contractId: row.id },
+    meta: {
+      projectId: opts.projectId,
+      procurementId: row.procurementId,
+      contractId: row.id,
+      supplierId: row.supplierId,
+      actorOrgUserId: opts.actorOrgUserId || null,
+      actorRoleName: opts.actorRoleName || null,
+    },
+  });
+
+  await notifyProvider(prisma, {
+    projectId: opts.projectId,
+    providerId: row.supplierId,
+    procurementId: row.procurementId,
+    title: `Contract issued: ${row.contractNumber}`,
+    body: "Your contract is active. You can now deliver.",
+  });
+
+  const { autoDispatchIfAutoResponse } = await import("@/lib/projects/delivery-notes");
+  await autoDispatchIfAutoResponse(prisma, {
+    projectId: opts.projectId,
+    procurementId: row.procurementId,
+    providerId: row.supplierId,
   });
 
   return { ok: true, contract: serializeContract(updated) };
@@ -430,7 +453,22 @@ export async function issueLpo(prisma, opts) {
   await writeAuditLog({
     eventType: AuditEvent.PROJECT_ORG_LPO_ISSUED,
     actorUserId: null,
-    meta: { projectId: opts.projectId, procurementId: row.procurementId, lpoId: row.id },
+    meta: {
+      projectId: opts.projectId,
+      procurementId: row.procurementId,
+      lpoId: row.id,
+      supplierId: row.supplierId,
+      actorOrgUserId: opts.actorOrgUserId || null,
+      actorRoleName: opts.actorRoleName || null,
+    },
+  });
+
+  await notifyProvider(prisma, {
+    projectId: opts.projectId,
+    providerId: row.supplierId,
+    procurementId: row.procurementId,
+    title: `LPO issued: ${row.lpoNumber}`,
+    body: "A local purchase order has been issued to you.",
   });
 
   return { ok: true, lpo: serializeLpo(updated) };
@@ -464,7 +502,14 @@ export async function acceptLpo(prisma, opts) {
   await writeAuditLog({
     eventType: AuditEvent.PROJECT_ORG_LPO_ACCEPTED,
     actorUserId: null,
-    meta: { projectId: opts.projectId, procurementId: row.procurementId, lpoId: row.id },
+    meta: {
+      projectId: opts.projectId,
+      procurementId: row.procurementId,
+      lpoId: row.id,
+      supplierId: row.supplierId,
+      actorOrgUserId: opts.actorOrgUserId || null,
+      actorRoleName: opts.actorRoleName || null,
+    },
   });
 
   const officer = await prisma.projectOrgProcurement.findUnique({
@@ -477,12 +522,19 @@ export async function acceptLpo(prisma, opts) {
       recipients: [officer.officer],
       type: OrgNotificationType.WORKFLOW_APPROVED,
       title: "LPO accepted",
-      body: "The supplier accepted the LPO. You may now record delivery.",
+      body: "The supplier accepted the LPO. Delivery follows.",
       linkUrl: `/projects/${opts.projectId}/procurements/${row.procurementId}`,
       relatedEntityType: "lpo",
       relatedEntityId: row.id,
     });
   }
+
+  const { autoDispatchIfAutoResponse } = await import("@/lib/projects/delivery-notes");
+  await autoDispatchIfAutoResponse(prisma, {
+    projectId: opts.projectId,
+    procurementId: row.procurementId,
+    providerId: row.supplierId,
+  });
 
   return { ok: true, lpo: serializeLpo(updated) };
 }
@@ -507,6 +559,7 @@ export async function getActiveOrderValue(prisma, projectId, procurementId) {
       value: Number(contract.contractValue),
       supplierId: contract.supplierId,
       deliveryAddress: contract.deliveryAddress || null,
+      status: contract.status,
     };
   }
 
@@ -522,11 +575,12 @@ export async function getActiveOrderValue(prisma, projectId, procurementId) {
       value: Number(lpo.lpoValue),
       supplierId: lpo.supplierId,
       deliveryAddress: lpo.deliveryAddress || null,
+      status: lpo.status,
     };
   }
 
   const pi = await prisma.projectOrgPurchaseInstruction.findFirst({
-    where: { projectId, procurementId, status: "ISSUED" },
+    where: { projectId, procurementId, status: { in: ["ISSUED", "ACCEPTED"] } },
     orderBy: { createdAt: "desc" },
   });
   if (pi) {
@@ -537,6 +591,7 @@ export async function getActiveOrderValue(prisma, projectId, procurementId) {
       value: Number(pi.amount),
       supplierId: pi.supplierId,
       deliveryAddress: pi.deliveryAddress || null,
+      status: pi.status,
     };
   }
 

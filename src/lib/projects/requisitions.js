@@ -153,10 +153,16 @@ export function serializeRequisition(row) {
     viewerHasPendingAction: Boolean(row.viewerHasPendingAction),
     lastDecision: row.lastDecision || null,
   });
+  const neutral = presentOrgWorkflowStatus({
+    status: row.status,
+    workflowStage: row.workflowStage || null,
+    lastDecision: row.lastDecision || null,
+  });
 
   return {
     id: row.id,
     title: row.title,
+    stageLabel: neutral.label,
     requisitionReference: row.requisitionReference || null,
     category: row.category || null,
     justification: row.justification,
@@ -180,6 +186,7 @@ export function serializeRequisition(row) {
           firstName: row.requester.firstName,
           lastName: row.requester.lastName,
           displayName: `${row.requester.firstName || ""} ${row.requester.lastName || ""}`.trim(),
+          roleName: row.requester.projectOrgRole?.name || null,
         }
       : null,
     approvedBy: row.approvedBy
@@ -188,6 +195,7 @@ export function serializeRequisition(row) {
           firstName: row.approvedBy.firstName,
           lastName: row.approvedBy.lastName,
           displayName: `${row.approvedBy.firstName || ""} ${row.approvedBy.lastName || ""}`.trim(),
+          roleName: row.approvedBy.projectOrgRole?.name || null,
         }
       : null,
     financialYear: row.financialYear
@@ -258,8 +266,24 @@ export const requisitionInclude = {
       committedAmount: true,
     },
   },
-  requester: { select: { id: true, firstName: true, lastName: true, email: true } },
-  approvedBy: { select: { id: true, firstName: true, lastName: true, email: true } },
+  requester: {
+    select: {
+      id: true,
+      firstName: true,
+      lastName: true,
+      email: true,
+      projectOrgRole: { select: { name: true } },
+    },
+  },
+  approvedBy: {
+    select: {
+      id: true,
+      firstName: true,
+      lastName: true,
+      email: true,
+      projectOrgRole: { select: { name: true } },
+    },
+  },
   items: { orderBy: { lineNumber: "asc" } },
 };
 
@@ -523,6 +547,16 @@ export async function createOrUpdateRequisitionDraft(prisma, opts) {
   }
   if (!String(form5Body.marketPrice || "").trim()) {
     form5Body.marketPrice = total.toString();
+  }
+  form5Body.voteHeadNo = await loadProjectVoteCode(prisma, opts.projectId);
+  // Funds availability (Vote book): item = budget line, balance = available − this request.
+  if (budgetLine) {
+    const funding = computeBudgetAvailability(budgetLine, total);
+    form5Body.fundingItem = [budgetLine.code, budgetLine.name].filter(Boolean).join(" — ");
+    form5Body.balanceRemaining = (funding.availableBalance - funding.requestedAmount).toFixed(2);
+  } else {
+    form5Body.fundingItem = "";
+    form5Body.balanceRemaining = "";
   }
   const form5Snap = buildForm5PartI(
     {
@@ -1218,110 +1252,23 @@ export async function actOnRequisitionTask(prisma, opts) {
 }
 
 /**
+ * Vote/Head No. on Form 5 always comes from organisation settings.
+ * @param {import("@prisma/client").PrismaClient} prisma
+ * @param {string} projectId
+ */
+export async function loadProjectVoteCode(prisma, projectId) {
+  const project = await prisma.project.findUnique({
+    where: { id: projectId },
+    select: { voteCode: true },
+  });
+  return project?.voteCode || "";
+}
+
+/**
  * Build plan/budget evidence for a requisition (for verification tasks).
  * @param {import("@prisma/client").PrismaClient} prisma
  * @param {any} requisition
  */
-/**
- * Save Form 5 Part I or Part II (Fill-and-submit teaching forms).
- * @param {import("@prisma/client").PrismaClient} prisma
- * @param {{
- *   projectId: string;
- *   requisitionId: string;
- *   actorOrgUserId: string;
- *   part: "I" | "II";
- *   body: any;
- *   method?: string | null;
- * }} opts
- */
-export async function saveRequisitionForm5(prisma, opts) {
-  const row = await prisma.projectOrgRequisition.findFirst({
-    where: { id: opts.requisitionId, projectId: opts.projectId },
-    include: requisitionInclude,
-  });
-  if (!row) return { ok: false, error: "Requisition not found.", status: 404 };
-
-  const { buildForm5PartI, buildForm5PartII } = await import("@/lib/projects/ppda-forms");
-  const now = new Date();
-
-  if (opts.part === "I") {
-    const snapshot = buildForm5PartI(serializeRequisition(row), opts.body || {});
-    if (!snapshot.subjectOfProcurement) {
-      return {
-        ok: false,
-        error: "Validation failed.",
-        fieldErrors: { subjectOfProcurement: "Enter the subject of procurement." },
-        status: 400,
-      };
-    }
-    const updated = await prisma.projectOrgRequisition.update({
-      where: { id: row.id },
-      data: { form5PartI: snapshot, form5PartIAt: now },
-      include: requisitionInclude,
-    });
-    await writeAuditLog({
-      eventType: AuditEvent.PROJECT_ORG_REQUISITION_SUBMITTED,
-      actorUserId: null,
-      meta: {
-        projectId: opts.projectId,
-        requisitionId: row.id,
-        form: "FORM_5_PART_I",
-        actorOrgUserId: opts.actorOrgUserId,
-        outcome: "form_saved",
-      },
-    });
-    return { ok: true, requisition: serializeRequisition(updated) };
-  }
-
-  const prevPartII = row.form5PartII && typeof row.form5PartII === "object" ? row.form5PartII : {};
-  const snapshot = buildForm5PartII(opts.body || {}, {
-    method: opts.method || row.procurementMethod || null,
-    shortlist: Array.isArray(prevPartII.shortlist) ? prevPartII.shortlist : [],
-    shortlistValidatedAt: prevPartII.shortlistValidatedAt || null,
-  });
-  if (!snapshot.recommendedMethod) {
-    return {
-      ok: false,
-      error: "Validation failed.",
-      fieldErrors: { recommendedMethod: "Enter the recommended procurement method." },
-      status: 400,
-    };
-  }
-  if (!snapshot.methodJustification) {
-    return {
-      ok: false,
-      error: "Validation failed.",
-      fieldErrors: { methodJustification: "Enter the justification for the method." },
-      status: 400,
-    };
-  }
-  if (!snapshot.pduOfficerName) {
-    return {
-      ok: false,
-      error: "Validation failed.",
-      fieldErrors: { pduOfficerName: "Enter the PDU officer name." },
-      status: 400,
-    };
-  }
-  const updated = await prisma.projectOrgRequisition.update({
-    where: { id: row.id },
-    data: { form5PartII: snapshot, form5PartIIAt: now },
-    include: requisitionInclude,
-  });
-  await writeAuditLog({
-    eventType: AuditEvent.PROJECT_ORG_REQUISITION_SUBMITTED,
-    actorUserId: null,
-    meta: {
-      projectId: opts.projectId,
-      requisitionId: row.id,
-      form: "FORM_5_PART_II",
-      actorOrgUserId: opts.actorOrgUserId,
-      outcome: "form_saved",
-    },
-  });
-  return { ok: true, requisition: serializeRequisition(updated) };
-}
-
 export async function buildRequisitionVerificationEvidence(prisma, requisition) {
   if (!requisition) return null;
   /** @type {Record<string, unknown>} */

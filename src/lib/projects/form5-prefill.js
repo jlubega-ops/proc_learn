@@ -117,19 +117,3 @@ export async function fetchForm5OrgDefaults(prisma, projectId, requisition = {})
     },
   };
 }
-
-/**
- * Merge saved / typed values with org defaults (defaults only fill blanks).
- * @param {Record<string, string>} current
- * @param {Record<string, string>} defaults
- */
-export function mergeForm5Defaults(current, defaults) {
-  /** @type {Record<string, string>} */
-  const out = { ...current };
-  for (const [key, value] of Object.entries(defaults || {})) {
-    if (!String(out[key] || "").trim() && String(value || "").trim()) {
-      out[key] = String(value).trim();
-    }
-  }
-  return out;
-}

@@ -12,7 +12,12 @@ import {
 } from "@/lib/projects/org-users";
 import { validateProjectOrgUserPatch } from "@/lib/validation/project-org-user";
 import { ensureProjectCode } from "@/lib/projects/project-identity";
-import { findDuplicateOrgDisplayName } from "@/lib/projects/org-user-identity";
+import {
+  allocateOrgUserLoginEmail,
+  ORG_USER_EXISTS_ERROR,
+  ORG_USER_EXISTS_FIELD_ERRORS,
+} from "@/lib/projects/org-user-identity";
+import { orgUserNameKey } from "@/lib/projects/org-login-identity";
 
 export const runtime = "nodejs";
 
@@ -116,43 +121,28 @@ export async function PATCH(request, context) {
   }
 
   const nextFirst =
-    validated.data.firstName !== undefined
-      ? String(validated.data.firstName)
-      : existing.firstName;
-  const nextMiddle =
-    validated.data.middleName !== undefined
-      ? validated.data.middleName
-      : existing.middleName;
+    validated.data.firstName !== undefined ? String(validated.data.firstName) : existing.firstName;
   const nextLast =
-    validated.data.lastName !== undefined
-      ? String(validated.data.lastName)
-      : existing.lastName;
+    validated.data.lastName !== undefined ? String(validated.data.lastName) : existing.lastName;
 
-  if (
-    validated.data.firstName !== undefined ||
-    validated.data.middleName !== undefined ||
-    validated.data.lastName !== undefined
-  ) {
-    const nameClash = await findDuplicateOrgDisplayName(prisma, {
-      projectId,
-      firstName: nextFirst,
-      middleName: nextMiddle,
-      lastName: nextLast,
-      excludeOrgUserId: orgUserId,
-    });
-    if (nameClash) {
+  if (orgUserNameKey({ firstName: nextFirst, lastName: nextLast }) !== orgUserNameKey(existing)) {
+    const projectCode = await ensureProjectCode(prisma, projectId);
+    const email = projectCode
+      ? await allocateOrgUserLoginEmail(prisma, {
+          projectId,
+          projectCode,
+          firstName: nextFirst,
+          lastName: nextLast,
+          excludeOrgUserId: orgUserId,
+        })
+      : null;
+    if (!email) {
       return NextResponse.json(
-        {
-          error:
-            "An organisation member with this exact name already exists. Change the middle name or use a distinct full name.",
-          fieldErrors: {
-            firstName: "This full name is already used in this organisation.",
-            lastName: "This full name is already used in this organisation.",
-          },
-        },
-        { status: 400 },
+        { error: ORG_USER_EXISTS_ERROR, fieldErrors: ORG_USER_EXISTS_FIELD_ERRORS },
+        { status: 409 },
       );
     }
+    validated.data.email = email;
   }
 
   const row = await prisma.projectOrgUser.update({
@@ -161,15 +151,18 @@ export async function PATCH(request, context) {
     include: orgUserInclude,
   });
 
-  const projectCode = await ensureProjectCode(prisma, projectId);
-
   await writeAuditLog({
     eventType: AuditEvent.PROJECT_ORG_USER_UPDATED,
     actorUserId: user.id,
-    meta: { projectId, projectOrgUserId: row.id, email: row.email, unitIdentifier: row.unitIdentifier },
+    meta: {
+      projectId,
+      projectOrgUserId: row.id,
+      email: row.email,
+      ...(existing.email !== row.email ? { previousEmail: existing.email } : {}),
+    },
   });
 
-  return NextResponse.json({ user: serializeProjectOrgUser(row, null, projectCode) });
+  return NextResponse.json({ user: serializeProjectOrgUser(row, null) });
 }
 
 export async function DELETE(_request, context) {

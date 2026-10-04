@@ -30,7 +30,7 @@ export default async function ProjectOrganisationStructurePage({ params }) {
   return (
     <div className="w-full space-y-4">
       <DashboardPageIntro
-        title="Organisation structure"
+        title="Organisation Structure"
         description="Order departments and nest subunits."
       />
 

@@ -13,7 +13,7 @@ export default async function OrganisationProcessWorkflowPage() {
   return (
     <div className={BRAND_PAGE_SHELL_CLASS}>
       <DashboardPageIntro
-        title="Process workflow"
+        title="Process Workflows"
         description="Processes your organisation runs."
       />
       <ProjectOrgProcessWorkflowPanel projectId={org.projectId} />

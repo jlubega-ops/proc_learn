@@ -315,7 +315,7 @@ export function OrgProviderFormDialog({ open, projectId, provider = null, onClos
           <section className="space-y-2">
             <div className="flex flex-wrap items-center justify-between gap-2">
               <Typography variant="subtitle2" sx={{ fontWeight: 700 }}>
-                Registrations and compliance documents (simulated)
+                Registrations and compliance documents
               </Typography>
               <Button
                 size="small"
@@ -390,7 +390,7 @@ export function OrgProviderFormDialog({ open, projectId, provider = null, onClos
 
           <section className="space-y-2">
             <Typography variant="subtitle2" sx={{ fontWeight: 700 }}>
-              Simulated behaviour
+              Provider behaviour
             </Typography>
             <TextField
               select
@@ -399,7 +399,7 @@ export function OrgProviderFormDialog({ open, projectId, provider = null, onClos
               onChange={(e) => setField("behaviour", e.target.value)}
               fullWidth
               sx={themedTextFieldSx}
-              helperText="How this provider responds to invitations, delivers and invoices in the simulation."
+              helperText="How it responds, delivers and invoices"
             >
               <MenuItem value="">Not set</MenuItem>
               {PROVIDER_BEHAVIOUR_OPTIONS.map((o) => (

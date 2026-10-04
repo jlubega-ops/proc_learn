@@ -12,7 +12,7 @@ export default async function ProjectRequisitionsPage({ params }) {
   return (
     <div className={BRAND_PAGE_SHELL_CLASS}>
       <DashboardPageIntro
-        title="Procurement requisitions"
+        title="Requisitions"
         description="Create and track procurement requisitions for your organisation role."
       />
       <OrgRequisitionsPanel projectId={id} />

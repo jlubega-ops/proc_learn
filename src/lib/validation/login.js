@@ -1,6 +1,6 @@
 import { normalizeEmail } from "@/lib/validation/email";
 import { schoolEmailFieldError } from "@/lib/validation/school-email";
-import { isOrgLoginIdentifier } from "@/lib/projects/org-login-identity";
+import { parseOrgLoginIdentifier } from "@/lib/projects/org-login-identity";
 
 /**
  * Canonical login email (trim + lower case). Empty if input is blank.
@@ -21,17 +21,12 @@ export function validateLoginFields(values) {
   const errors = {};
   const identifier = values.identifier ?? values.email ?? "";
 
-  if (isOrgLoginIdentifier(identifier)) {
-    if (!String(identifier).trim()) {
-      errors.identifier = "organisation login email is required.";
-    }
-  } else {
+  if (!parseOrgLoginIdentifier(identifier)) {
     const schoolErr = schoolEmailFieldError(identifier);
     if (schoolErr) {
-      errors.identifier =
-        String(identifier).includes("_") && String(identifier).toLowerCase().includes("org-")
-          ? "Enter the organisation login email exactly as shown (lowercase, e.g. john.doe.ab12c_org-xxxxxx@org.learn)."
-          : schoolErr;
+      errors.identifier = String(identifier).toLowerCase().includes("org-")
+        ? "Enter the organisation login email exactly as shown."
+        : schoolErr;
     }
   }
 

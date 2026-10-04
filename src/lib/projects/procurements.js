@@ -18,6 +18,8 @@ import {
 } from "@/lib/projects/procurement-timeline";
 import { serializeAward, awardInclude } from "@/lib/projects/awards";
 import { serializeDelivery, deliveryInclude } from "@/lib/projects/deliveries";
+import { serializeDeliveryNote } from "@/lib/projects/delivery-notes";
+import { notifyProvider } from "@/lib/projects/provider-notifications";
 import { serializeInvoice, invoiceInclude } from "@/lib/projects/invoices";
 import { serializePayment, paymentInclude } from "@/lib/projects/payments";
 import { serializeContract, serializeLpo } from "@/lib/projects/contracts-lpo";
@@ -51,6 +53,7 @@ export const procurementInclude = {
           id: true,
           lineNumber: true,
           itemName: true,
+          description: true,
           quantity: true,
           unitOfMeasure: true,
           estimatedUnitPrice: true,
@@ -58,6 +61,10 @@ export const procurementInclude = {
         },
       },
     },
+  },
+  deliveryNotes: {
+    orderBy: { createdAt: "desc" },
+    include: { supplier: { select: { id: true, name: true } } },
   },
   procurementPlanItem: {
     select: {
@@ -250,6 +257,7 @@ export function serializeProcurement(row, opts = {}) {
                 id: it.id,
                 lineNumber: it.lineNumber,
                 itemName: it.itemName,
+                description: it.description || null,
                 quantity: it.quantity?.toString?.() ?? String(it.quantity ?? ""),
                 unitOfMeasure: it.unitOfMeasure || null,
                 estimatedUnitPrice:
@@ -299,6 +307,7 @@ export function serializeProcurement(row, opts = {}) {
     contract: latestContract,
     contracts: Array.isArray(row.contracts) ? row.contracts.map(serializeContract) : [],
     deliveries: Array.isArray(row.deliveries) ? row.deliveries.map(serializeDelivery) : [],
+    deliveryNotes: Array.isArray(row.deliveryNotes) ? row.deliveryNotes.map(serializeDeliveryNote) : [],
     invoices: Array.isArray(row.invoices) ? row.invoices.map(serializeInvoice) : [],
     payments: Array.isArray(row.payments) ? row.payments.map(serializePayment) : [],
     evaluationReports: Array.isArray(row.evaluationReports)
@@ -605,6 +614,18 @@ export async function createProcurementFromApprovedRequisition(prisma, opts) {
         orgAcademicSlateId ? await resolveCurrentOrgSlate(prisma, opts.projectId) : null,
       ),
     });
+
+    if (method === "MICRO") {
+      const partII = /** @type {any} */ (req.form5PartII);
+      const selected = Array.isArray(partII?.shortlist) ? partII.shortlist[0] : null;
+      await notifyProvider(prisma, {
+        projectId: opts.projectId,
+        providerId: selected?.id ? String(selected.id) : null,
+        procurementId: procurement.id,
+        title: `You have been selected: ${procurement.procurementNumber}`,
+        body: `${procurement.title}. A purchase instruction will follow.`,
+      });
+    }
 
     const full = await prisma.projectOrgProcurement.findUnique({
       where: { id: procurement.id },

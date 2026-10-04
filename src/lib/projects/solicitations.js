@@ -6,7 +6,9 @@ import {
   OrgProviderStatus,
   Prisma,
 } from "@prisma/client";
+import { format } from "date-fns";
 import { writeAuditLog, AuditEvent } from "@/lib/audit-log";
+import { notifyProvider } from "@/lib/projects/provider-notifications";
 import { serializeProviderSummary } from "@/lib/projects/providers";
 import { buildBidDocument } from "@/lib/projects/ppda-forms";
 
@@ -434,6 +436,19 @@ export async function issueSolicitation(prisma, opts) {
       actorRoleName: opts.actorRoleName,
     },
   });
+
+  const docLabel = isRfq ? "Request for quotation" : "Invitation to bid";
+  for (const providerId of inviteIds) {
+    await notifyProvider(prisma, {
+      projectId: opts.projectId,
+      providerId,
+      linkUrl: "/provider-portal/opportunities",
+      relatedEntityType: "procurement",
+      relatedEntityId: opts.procurementId,
+      title: `${docLabel}: ${updated.title}`,
+      body: `Submit your offer by ${format(closingDate, "MMM d, yyyy")}.`,
+    });
+  }
 
   return { ok: true, solicitation: serializeSolicitation(updated) };
 }

@@ -25,6 +25,8 @@ import { getDashboardPageMeta } from "@/lib/dashboard-page-meta";
 import { DASHBOARD_MAIN_INNER_CLASS } from "@/lib/dashboard-content-width";
 import { PROJECT_ORG_ENTRY_ROLE_NAME } from "@/lib/project-org-role";
 import { PROCUREMENT_STAGE_PAGES } from "@/lib/projects/procurement-stage-pages";
+import { ORG_PERMISSION } from "@/lib/projects/org-role-permissions";
+import { usePendingTaskCounts } from "@/hooks/use-pending-task-counts";
 import {
   BRAND_NAV_ACTIVE_CLASS,
   BRAND_NAV_INACTIVE_CLASS,
@@ -91,6 +93,21 @@ function navItemIsActive(navPathname, searchParams, href) {
   return false;
 }
 
+/** @param {{ count?: number }} p */
+function NavCountBadge({ count }) {
+  if (!count) return null;
+  const label = `${count} pending ${count === 1 ? "task" : "tasks"}`;
+  return (
+    <span
+      title={label}
+      aria-label={label}
+      className="ml-auto inline-flex h-5 min-w-5 shrink-0 items-center justify-center rounded-full bg-brand-yellow px-1.5 text-[11px] font-bold leading-none text-zinc-900"
+    >
+      {count > 99 ? "99+" : count}
+    </span>
+  );
+}
+
 /**
  * @param {{
  *   label: string;
@@ -140,6 +157,7 @@ function NavLinks({
   activeCommittee = null,
   personalOrgProjectId = "",
   orgContext = "PERSONAL",
+  taskCounts = {},
 }) {
   const navPathname = usePathname();
   const sections = sidebarNavForContext(activeRole, navPathname || "/", {
@@ -227,6 +245,7 @@ function NavLinks({
             >
               <Icon aria-hidden sx={primaryIconSx} />
               <span className="flex-1">{label}</span>
+              <NavCountBadge count={taskCounts[href]} />
               <ExpandMoreRounded
                 aria-hidden
                 sx={{ fontSize: 20 }}
@@ -248,7 +267,8 @@ function NavLinks({
                       }`}
                     >
                       <ChildIcon aria-hidden sx={childNavIconSx} />
-                      {childLabel}
+                      <span className="min-w-0 flex-1">{childLabel}</span>
+                      <NavCountBadge count={taskCounts[childHref]} />
                     </Link>
                   </li>
                 );
@@ -271,7 +291,8 @@ function NavLinks({
           }`}
         >
           <Icon aria-hidden sx={primaryIconSx} />
-          {label}
+          <span className="min-w-0 flex-1">{label}</span>
+          <NavCountBadge count={taskCounts[href]} />
         </Link>
       </li>
     );
@@ -323,6 +344,7 @@ function NavLinksWithSearch({
   activeCommittee,
   personalOrgProjectId,
   orgContext,
+  taskCounts,
   ...props
 }) {
   const searchParams = useSearchParams();
@@ -338,6 +360,7 @@ function NavLinksWithSearch({
       activeCommittee={activeCommittee}
       personalOrgProjectId={personalOrgProjectId}
       orgContext={orgContext}
+      taskCounts={taskCounts}
     />
   );
 }
@@ -366,6 +389,10 @@ export default function DashboardLayoutClient({ children }) {
   const [projectOrgLabel, setProjectOrgLabel] = useState("");
   const [canManageOrgAdmin, setCanManageOrgAdmin] = useState(false);
   const [projectOrgLoading, setProjectOrgLoading] = useState(false);
+  const taskCounts = usePendingTaskCounts(
+    orgProjectId,
+    isOrgSession && orgPermissions.includes(ORG_PERMISSION.VIEW_TASKS),
+  );
 
   const authed = Boolean(session?.authenticated);
   const showSidebarSignIn = !authed;
@@ -488,6 +515,7 @@ export default function DashboardLayoutClient({ children }) {
               activeCommittee={isOrgSession ? session?.activeCommittee || null : null}
               personalOrgProjectId={personalOrgProjectId}
               orgContext={orgContext}
+              taskCounts={taskCounts}
             />
           </Suspense>
         </nav>

@@ -22,8 +22,8 @@ export default async function ProjectProvidersPage({ params }) {
   return (
     <div className={BRAND_PAGE_SHELL_CLASS}>
       <DashboardPageIntro
-        title="Provider register"
-        description="Suppliers, contractors, service providers and consultants this organisation can shortlist, invite or select. Eligibility is checked against each provider's simulated registrations and compliance documents."
+        title="Providers"
+        description="Suppliers, contractors, service providers and consultants."
       />
       <OrgProvidersPanel projectId={projectId} detailBase={`/projects/${projectId}/providers`} />
     </div>

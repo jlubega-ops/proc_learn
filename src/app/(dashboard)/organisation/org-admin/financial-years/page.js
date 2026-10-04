@@ -24,7 +24,7 @@ export default async function OrganisationFinancialYearsPage() {
   return (
     <div className={BRAND_PAGE_SHELL_CLASS}>
       <DashboardPageIntro
-        title="Financial years"
+        title="Financial Years"
         description={`Manage financial years for ${title} in this organisation.`}
       />
       <ProjectOrgFinancialYearsPanel projectId={project.id} />

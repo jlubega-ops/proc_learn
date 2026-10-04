@@ -252,6 +252,13 @@ enum OrgProviderStatus {
 enum OrgPurchaseInstructionStatus {
   DRAFT
   ISSUED
+  ACCEPTED
+  DECLINED
+}
+
+enum OrgDeliveryNoteStatus {
+  SUBMITTED
+  RECEIVED
 }
 
 enum OrgSolicitationType {
@@ -653,6 +660,8 @@ model Project {
   name                    String            @db.VarChar(255)
   description             String?           @db.Text
   organizationName        String?           @map("organization_name") @db.VarChar(255)
+  /// Government vote / head number assigned to the entity (prints on requisitions as Vote/Head No.).
+  voteCode                String?           @map("vote_code") @db.VarChar(8)
   purpose                 ProjectPurpose    @default(PRACTICE)
   status                  ProjectStatus     @default(NOT_STARTED)
   visibility              ProjectVisibility @default(PRIVATE)
@@ -687,28 +696,31 @@ model Project {
   createdAt               DateTime          @default(now()) @map("created_at")
   updatedAt               DateTime          @updatedAt @map("updated_at")
 
-  enrollments             ProjectEnrollment[]
-  orgUsers                ProjectOrgUser[]
-  orgDepartments          ProjectOrgDepartment[]
-  orgFinancialYears       ProjectOrgFinancialYear[]
-  orgPlanningPeriods      ProjectOrgPlanningPeriod[]
-  orgProcessFlowAdoptions ProjectOrgProcessFlowAdoption[]
-  orgCommittees           ProjectOrgCommittee[]
-  orgProcurementPlans     ProjectOrgProcurementPlan[]
-  orgBudgets              ProjectOrgBudget[]
-  orgBudgetLines          ProjectOrgBudgetLine[]
-  orgRequisitions         ProjectOrgRequisition[]
-  orgProcurements         ProjectOrgProcurement[]
-  orgProviders            ProjectOrgProvider[]
-  orgNotifications        ProjectOrgNotification[]
-  orgWorkflowInstances    ProjectOrgWorkflowInstance[]
-  orgWorkflowTasks        ProjectOrgWorkflowTask[]
-  orgWorkflowActions      ProjectOrgWorkflowAction[]
-  orgAcademicSlates       OrgAcademicSlate[]
-  orgFormDrafts           ProjectOrgFormDraft[]
-  assessment              ProjectAssessment?
-  workspaceAttempts       ProjectAttempt[]                @relation("AttemptWorkspace")
-  activeOrgForUsers       UserSettings[]                  @relation("UserActiveOrg")
+  enrollments                   ProjectEnrollment[]
+  orgUsers                      ProjectOrgUser[]
+  orgDepartments                ProjectOrgDepartment[]
+  orgFinancialYears             ProjectOrgFinancialYear[]
+  orgPlanningPeriods            ProjectOrgPlanningPeriod[]
+  orgProcessFlowAdoptions       ProjectOrgProcessFlowAdoption[]
+  orgCommittees                 ProjectOrgCommittee[]
+  orgProcurementPlans           ProjectOrgProcurementPlan[]
+  orgBudgets                    ProjectOrgBudget[]
+  orgBudgetLines                ProjectOrgBudgetLine[]
+  orgRequisitions               ProjectOrgRequisition[]
+  orgProcurements               ProjectOrgProcurement[]
+  orgProcurementRecommendations ProjectOrgProcurementRecommendation[]
+  orgDeliveryNotes              ProjectOrgDeliveryNote[]
+  orgProviderNotifications      ProjectOrgProviderNotification[]
+  orgProviders                  ProjectOrgProvider[]
+  orgNotifications              ProjectOrgNotification[]
+  orgWorkflowInstances          ProjectOrgWorkflowInstance[]
+  orgWorkflowTasks              ProjectOrgWorkflowTask[]
+  orgWorkflowActions            ProjectOrgWorkflowAction[]
+  orgAcademicSlates             OrgAcademicSlate[]
+  orgFormDrafts                 ProjectOrgFormDraft[]
+  assessment                    ProjectAssessment?
+  workspaceAttempts             ProjectAttempt[]                      @relation("AttemptWorkspace")
+  activeOrgForUsers             UserSettings[]                        @relation("UserActiveOrg")
 
   @@index([ownerUserId, createdAt])
   @@index([ownerUserId, isPersonalOrg])
@@ -932,15 +944,13 @@ model ProjectOrgUser {
   isProjectAdmin   Boolean               @default(false) @map("is_project_admin")
   /// Platform user id when this row represents the project owner.
   linkedUserId     String?               @map("linked_user_id") @db.VarChar(36)
-  /// Short immutable code that keeps login emails unique when display names match.
-  unitIdentifier   String?               @map("unit_identifier") @db.VarChar(16)
   departmentId     String?               @map("department_id")
   department       ProjectOrgDepartment? @relation("OrgUserDepartment", fields: [departmentId], references: [id], onDelete: SetNull)
   subunitId        String?               @map("subunit_id")
   subunit          ProjectOrgDepartment? @relation("OrgUserSubunit", fields: [subunitId], references: [id], onDelete: SetNull)
   firstName        String                @map("first_name") @db.VarChar(100)
-  middleName       String?               @map("middle_name") @db.VarChar(100)
   lastName         String                @map("last_name") @db.VarChar(100)
+  /// Org users: `firstname.lastname@<orgcode>.<appname>` (the login). Admin row: the owner's platform email.
   email            String                @db.VarChar(255)
   /// Bcrypt hash for simulated org logins (null for project-owner Admin row).
   passwordHash     String?               @map("password_hash") @db.VarChar(255)
@@ -950,30 +960,31 @@ model ProjectOrgUser {
   updatedAt        DateTime              @updatedAt @map("updated_at")
 
   committeeMemberships       ProjectOrgCommitteeMember[]
-  assignedTasks              ProjectOrgWorkflowTask[]        @relation("WorkflowTaskAssignee")
-  workflowActions            ProjectOrgWorkflowAction[]      @relation("WorkflowActionActor")
-  requisitionsCreated        ProjectOrgRequisition[]         @relation("RequisitionRequester")
-  procurementPlansCreated    ProjectOrgProcurementPlan[]     @relation("ProcurementPlanCreator")
-  budgetsCreated             ProjectOrgBudget[]              @relation("BudgetCreator")
-  budgetsApproved            ProjectOrgBudget[]              @relation("BudgetApprover")
-  procurementPlansApproved   ProjectOrgProcurementPlan[]     @relation("ProcurementPlanApprover")
-  requisitionsApproved       ProjectOrgRequisition[]         @relation("RequisitionApprover")
-  procurementsAsOfficer      ProjectOrgProcurement[]         @relation("ProcurementOfficer")
-  procurementsClosed         ProjectOrgProcurement[]         @relation("ProcurementCloser")
-  purchaseInstructionsIssued ProjectOrgPurchaseInstruction[] @relation("PurchaseInstructionIssuer")
-  awardsApproved             ProjectOrgAward[]               @relation("AwardApprover")
-  deliveriesRecorded         ProjectOrgDelivery[]            @relation("DeliveryRecorder")
-  providersCreated           ProjectOrgProvider[]            @relation("ProviderCreator")
-  inspectionsRecorded        ProjectOrgInspection[]          @relation("InspectionRecorder")
-  invoicesCreated            ProjectOrgInvoice[]             @relation("InvoiceCreator")
-  paymentsApproved           ProjectOrgPayment[]             @relation("PaymentApprover")
+  assignedTasks              ProjectOrgWorkflowTask[]              @relation("WorkflowTaskAssignee")
+  workflowActions            ProjectOrgWorkflowAction[]            @relation("WorkflowActionActor")
+  requisitionsCreated        ProjectOrgRequisition[]               @relation("RequisitionRequester")
+  procurementPlansCreated    ProjectOrgProcurementPlan[]           @relation("ProcurementPlanCreator")
+  budgetsCreated             ProjectOrgBudget[]                    @relation("BudgetCreator")
+  budgetsApproved            ProjectOrgBudget[]                    @relation("BudgetApprover")
+  procurementPlansApproved   ProjectOrgProcurementPlan[]           @relation("ProcurementPlanApprover")
+  requisitionsApproved       ProjectOrgRequisition[]               @relation("RequisitionApprover")
+  procurementsAsOfficer      ProjectOrgProcurement[]               @relation("ProcurementOfficer")
+  procurementsClosed         ProjectOrgProcurement[]               @relation("ProcurementCloser")
+  purchaseInstructionsIssued ProjectOrgPurchaseInstruction[]       @relation("PurchaseInstructionIssuer")
+  awardsApproved             ProjectOrgAward[]                     @relation("AwardApprover")
+  deliveriesRecorded         ProjectOrgDelivery[]                  @relation("DeliveryRecorder")
+  providersCreated           ProjectOrgProvider[]                  @relation("ProviderCreator")
+  inspectionsRecorded        ProjectOrgInspection[]                @relation("InspectionRecorder")
+  invoicesCreated            ProjectOrgInvoice[]                   @relation("InvoiceCreator")
+  paymentsApproved           ProjectOrgPayment[]                   @relation("PaymentApprover")
+  recommendationsMade        ProjectOrgProcurementRecommendation[] @relation("RecommendationRecommender")
+  recommendationsDecided     ProjectOrgProcurementRecommendation[] @relation("RecommendationDecider")
   orgNotifications           ProjectOrgNotification[]
   formDrafts                 ProjectOrgFormDraft[]
   /// Committee currently "active" for this user's session (evaluation/PQ report authoring context).
-  activeCommitteeId          String?                         @map("active_committee_id")
-  activeCommittee            ProjectOrgCommittee?            @relation("OrgUserActiveCommittee", fields: [activeCommitteeId], references: [id], onDelete: SetNull)
+  activeCommitteeId          String?                               @map("active_committee_id")
+  activeCommittee            ProjectOrgCommittee?                  @relation("OrgUserActiveCommittee", fields: [activeCommitteeId], references: [id], onDelete: SetNull)
 
-  @@unique([projectId, unitIdentifier])
   @@unique([projectId, email])
   @@unique([projectId, linkedUserId])
   @@index([projectId, isProjectAdmin, createdAt])
@@ -1430,6 +1441,8 @@ model ProjectOrgProcurement {
   deliveries               ProjectOrgDelivery[]
   invoices                 ProjectOrgInvoice[]
   payments                 ProjectOrgPayment[]
+  recommendations          ProjectOrgProcurementRecommendation[]
+  deliveryNotes            ProjectOrgDeliveryNote[]
 
   @@unique([projectId, procurementNumber])
   @@index([projectId, status, createdAt])
@@ -1474,14 +1487,18 @@ model ProjectOrgProvider {
   createdAt          DateTime          @default(now()) @map("created_at")
   updatedAt          DateTime          @updatedAt @map("updated_at")
 
-  purchaseInstructions ProjectOrgPurchaseInstruction[]
-  solicitationInvites  ProjectOrgSolicitationInvite[]
-  offers               ProjectOrgOffer[]
-  evaluationReports    ProjectOrgEvaluationReport[]    @relation("EvaluationRecommendedSupplier")
-  awards               ProjectOrgAward[]
-  contracts            ProjectOrgContract[]
-  lpos                 ProjectOrgLpo[]
-  invoices             ProjectOrgInvoice[]             @relation("InvoiceSupplier")
+  purchaseInstructions      ProjectOrgPurchaseInstruction[]
+  solicitationInvites       ProjectOrgSolicitationInvite[]
+  offers                    ProjectOrgOffer[]
+  evaluationReports         ProjectOrgEvaluationReport[]          @relation("EvaluationRecommendedSupplier")
+  awards                    ProjectOrgAward[]
+  contracts                 ProjectOrgContract[]
+  lpos                      ProjectOrgLpo[]
+  invoices                  ProjectOrgInvoice[]                   @relation("InvoiceSupplier")
+  deliveryNotes             ProjectOrgDeliveryNote[]
+  portalNotifications       ProjectOrgProviderNotification[]
+  recommendationsAsCurrent  ProjectOrgProcurementRecommendation[] @relation("RecommendationCurrentProvider")
+  recommendationsAsProposed ProjectOrgProcurementRecommendation[] @relation("RecommendationProposedProvider")
 
   @@unique([projectId, name])
   @@unique([projectId, portalEmail])
@@ -1490,27 +1507,77 @@ model ProjectOrgProvider {
 }
 
 model ProjectOrgPurchaseInstruction {
-  id                String                       @id @default(uuid())
-  projectId         String                       @map("project_id")
-  procurementId     String                       @unique @map("procurement_id")
-  procurement       ProjectOrgProcurement        @relation(fields: [procurementId], references: [id], onDelete: Cascade)
-  supplierId        String                       @map("supplier_id")
-  supplier          ProjectOrgProvider           @relation(fields: [supplierId], references: [id], onDelete: Restrict)
-  instructionNumber String                       @map("instruction_number") @db.VarChar(32)
-  amount            Decimal                      @db.Decimal(18, 2)
-  status            OrgPurchaseInstructionStatus @default(DRAFT)
-  issuedAt          DateTime?                    @map("issued_at")
-  issuedByOrgUserId String?                      @map("issued_by_org_user_id")
-  issuedBy          ProjectOrgUser?              @relation("PurchaseInstructionIssuer", fields: [issuedByOrgUserId], references: [id], onDelete: SetNull)
-  remarks           String?                      @db.Text
-  deliveryAddress   String?                      @map("delivery_address") @db.VarChar(255)
-  createdAt         DateTime                     @default(now()) @map("created_at")
-  updatedAt         DateTime                     @updatedAt @map("updated_at")
+  id                   String                       @id @default(uuid())
+  projectId            String                       @map("project_id")
+  procurementId        String                       @unique @map("procurement_id")
+  procurement          ProjectOrgProcurement        @relation(fields: [procurementId], references: [id], onDelete: Cascade)
+  supplierId           String                       @map("supplier_id")
+  supplier             ProjectOrgProvider           @relation(fields: [supplierId], references: [id], onDelete: Restrict)
+  instructionNumber    String                       @map("instruction_number") @db.VarChar(32)
+  amount               Decimal                      @db.Decimal(18, 2)
+  status               OrgPurchaseInstructionStatus @default(DRAFT)
+  issuedAt             DateTime?                    @map("issued_at")
+  issuedByOrgUserId    String?                      @map("issued_by_org_user_id")
+  issuedBy             ProjectOrgUser?              @relation("PurchaseInstructionIssuer", fields: [issuedByOrgUserId], references: [id], onDelete: SetNull)
+  remarks              String?                      @db.Text
+  deliveryAddress      String?                      @map("delivery_address") @db.VarChar(255)
+  requiredDeliveryDate DateTime?                    @map("required_delivery_date")
+  paymentTerms         String?                      @map("payment_terms") @db.Text
+  specialInstructions  String?                      @map("special_instructions") @db.Text
+  acceptedAt           DateTime?                    @map("accepted_at")
+  acceptedByName       String?                      @map("accepted_by_name") @db.VarChar(160)
+  declinedAt           DateTime?                    @map("declined_at")
+  declineReason        String?                      @map("decline_reason") @db.Text
+  createdAt            DateTime                     @default(now()) @map("created_at")
+  updatedAt            DateTime                     @updatedAt @map("updated_at")
 
   @@unique([projectId, instructionNumber])
   @@index([projectId, status])
   @@index([supplierId])
   @@map("project_org_purchase_instruction")
+}
+
+enum OrgProcurementRecommendationKind {
+  CANCEL
+  CHANGE_PROVIDER
+}
+
+enum OrgProcurementRecommendationStatus {
+  PENDING
+  APPROVED
+  DECLINED
+}
+
+/// PDU recommendation to the Contracts Committee (PPDA PDE Regulations 2023, reg. 14).
+model ProjectOrgProcurementRecommendation {
+  id                     String                             @id @default(uuid())
+  projectId              String                             @map("project_id")
+  project                Project                            @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  procurementId          String                             @map("procurement_id")
+  procurement            ProjectOrgProcurement              @relation(fields: [procurementId], references: [id], onDelete: Cascade)
+  kind                   OrgProcurementRecommendationKind
+  reason                 String                             @db.VarChar(48)
+  details                String                             @db.Text
+  alternative            String?                            @db.Text
+  currentProviderId      String?                            @map("current_provider_id")
+  currentProvider        ProjectOrgProvider?                @relation("RecommendationCurrentProvider", fields: [currentProviderId], references: [id], onDelete: SetNull)
+  proposedProviderId     String?                            @map("proposed_provider_id")
+  proposedProvider       ProjectOrgProvider?                @relation("RecommendationProposedProvider", fields: [proposedProviderId], references: [id], onDelete: SetNull)
+  status                 OrgProcurementRecommendationStatus @default(PENDING)
+  recommendedByOrgUserId String?                            @map("recommended_by_org_user_id")
+  recommendedBy          ProjectOrgUser?                    @relation("RecommendationRecommender", fields: [recommendedByOrgUserId], references: [id], onDelete: SetNull)
+  recommendedByRoleName  String?                            @map("recommended_by_role_name") @db.VarChar(128)
+  decidedByOrgUserId     String?                            @map("decided_by_org_user_id")
+  decidedBy              ProjectOrgUser?                    @relation("RecommendationDecider", fields: [decidedByOrgUserId], references: [id], onDelete: SetNull)
+  decidedByRoleName      String?                            @map("decided_by_role_name") @db.VarChar(128)
+  committeeId            String?                            @map("committee_id") @db.VarChar(36)
+  decisionComment        String?                            @map("decision_comment") @db.Text
+  decidedAt              DateTime?                          @map("decided_at")
+  createdAt              DateTime                           @default(now()) @map("created_at")
+  updatedAt              DateTime                           @updatedAt @map("updated_at")
+
+  @@index([projectId, procurementId, status])
+  @@map("project_org_procurement_recommendation")
 }
 
 model ProjectOrgSolicitation {
@@ -1729,12 +1796,57 @@ model ProjectOrgDelivery {
   createdAt           DateTime              @default(now()) @map("created_at")
   updatedAt           DateTime              @updatedAt @map("updated_at")
 
-  lines      ProjectOrgDeliveryLine[]
-  inspection ProjectOrgInspection?
-  invoices   ProjectOrgInvoice[]
+  lines        ProjectOrgDeliveryLine[]
+  inspection   ProjectOrgInspection?
+  invoices     ProjectOrgInvoice[]
+  deliveryNote ProjectOrgDeliveryNote?
 
   @@index([projectId, procurementId, status])
   @@map("project_org_delivery")
+}
+
+/// Provider's delivery note (dispatch) sent from the provider portal; the user department confirms receipt.
+model ProjectOrgDeliveryNote {
+  id            String                @id @default(uuid())
+  projectId     String                @map("project_id")
+  project       Project               @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  procurementId String                @map("procurement_id")
+  procurement   ProjectOrgProcurement @relation(fields: [procurementId], references: [id], onDelete: Cascade)
+  supplierId    String                @map("supplier_id")
+  supplier      ProjectOrgProvider    @relation(fields: [supplierId], references: [id], onDelete: Cascade)
+  noteNumber    String                @map("note_number") @db.VarChar(48)
+  dispatchedAt  DateTime              @map("dispatched_at")
+  remarks       String?               @db.Text
+  /// [{ itemName, quantity, unitOfMeasure }]
+  lines         Json
+  status        OrgDeliveryNoteStatus @default(SUBMITTED)
+  deliveryId    String?               @unique @map("delivery_id")
+  delivery      ProjectOrgDelivery?   @relation(fields: [deliveryId], references: [id], onDelete: SetNull)
+  createdAt     DateTime              @default(now()) @map("created_at")
+  updatedAt     DateTime              @updatedAt @map("updated_at")
+
+  @@index([projectId, procurementId, status])
+  @@index([supplierId, createdAt])
+  @@map("project_org_delivery_note")
+}
+
+/// In-portal notifications for providers (bell in the provider portal).
+model ProjectOrgProviderNotification {
+  id                String             @id @default(uuid())
+  projectId         String             @map("project_id")
+  project           Project            @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  providerId        String             @map("provider_id")
+  provider          ProjectOrgProvider @relation(fields: [providerId], references: [id], onDelete: Cascade)
+  title             String             @db.VarChar(255)
+  body              String             @db.Text
+  linkUrl           String?            @map("link_url") @db.VarChar(512)
+  relatedEntityType String?            @map("related_entity_type") @db.VarChar(64)
+  relatedEntityId   String?            @map("related_entity_id") @db.VarChar(36)
+  readAt            DateTime?          @map("read_at")
+  createdAt         DateTime           @default(now()) @map("created_at")
+
+  @@index([providerId, readAt, createdAt])
+  @@map("project_org_provider_notification")
 }
 
 model ProjectOrgDeliveryLine {

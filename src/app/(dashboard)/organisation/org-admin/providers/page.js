@@ -13,7 +13,7 @@ export default async function OrganisationProvidersPage() {
   return (
     <div className={BRAND_PAGE_SHELL_CLASS}>
       <DashboardPageIntro
-        title="Provider register (read-only)"
+        title="Providers"
         description="Organisation Administrator view. The Procurement Officer and Head PDU maintain the register; here you can review providers and their portal logins."
       />
       <OrgProvidersPanel

@@ -18,7 +18,8 @@ import bcrypt from "bcryptjs";
 import { ensureCoreProjectOrgRoles, PROJECT_ORG_ENTRY_ROLE_NAME } from "../src/lib/project-org-role.js";
 import { ensureBaselineProcessTemplates, PROCESS_FLOW_CODES } from "../src/lib/projects/process-catalogue.js";
 import { ensureStudentPersonalOrg } from "../src/lib/projects/student-personal-org.js";
-import { PROJECT_ORG_LEARN_PASSWORD, formatOrgUsername } from "../src/lib/projects/org-user-identity.js";
+import { PROJECT_ORG_LEARN_PASSWORD } from "../src/lib/projects/org-user-identity.js";
+import { buildOrgUserLoginEmail } from "../src/lib/projects/org-login-identity.js";
 import { hashOrgUserPassword } from "../src/lib/projects/org-user-password.js";
 
 const prisma = new PrismaClient();
@@ -46,33 +47,24 @@ async function upsertDept(projectId, name, code) {
   });
 }
 
-async function upsertOrgUser({
-  projectId,
-  email,
-  firstName,
-  lastName,
-  roleName,
-  departmentId,
-  unitIdentifier,
-}) {
+async function upsertOrgUser({ projectId, projectCode, firstName, lastName, roleName, departmentId }) {
   const role = await prisma.projectOrgRole.findUnique({ where: { name: roleName } });
   if (!role) throw new Error(`Missing role ${roleName}`);
   const passwordHash = await hashOrgUserPassword(PROJECT_ORG_LEARN_PASSWORD);
+  const email = buildOrgUserLoginEmail({ firstName, lastName, projectCode });
 
   const existing = await prisma.projectOrgUser.findFirst({
-    where: { projectId, email, isProjectAdmin: false },
+    where: { projectId, firstName, lastName, isProjectAdmin: false },
   });
   if (existing) {
     return prisma.projectOrgUser.update({
       where: { id: existing.id },
       data: {
-        firstName,
-        lastName,
+        email,
         projectOrgRoleId: role.id,
         departmentId,
         subunitId: null,
         passwordHash,
-        unitIdentifier: existing.unitIdentifier || unitIdentifier,
       },
       include: { projectOrgRole: true },
     });
@@ -86,7 +78,6 @@ async function upsertOrgUser({
       projectOrgRoleId: role.id,
       departmentId,
       passwordHash,
-      unitIdentifier,
       isProjectAdmin: false,
     },
     include: { projectOrgRole: true },
@@ -157,48 +148,43 @@ async function main() {
 
   const john = await upsertOrgUser({
     projectId,
-    email: "john.udo@example.test",
+    projectCode: org.projectCode,
     firstName: "John",
     lastName: "Okello",
     roleName: "User Department Officer",
     departmentId: ict.id,
-    unitIdentifier: "JOHN1",
   });
   const mary = await upsertOrgUser({
     projectId,
-    email: "mary.hod@example.test",
+    projectCode: org.projectCode,
     firstName: "Mary",
     lastName: "Nakato",
     roleName: "Head User Department",
     departmentId: ict.id,
-    unitIdentifier: "MARY1",
   });
   const peter = await upsertOrgUser({
     projectId,
-    email: "peter.po@example.test",
+    projectCode: org.projectCode,
     firstName: "Peter",
     lastName: "Ssempijja",
     roleName: "Procurement Officer",
     departmentId: procurement.id,
-    unitIdentifier: "PETE1",
   });
   const david = await upsertOrgUser({
     projectId,
-    email: "david.pdu@example.test",
+    projectCode: org.projectCode,
     firstName: "David",
     lastName: "Mugisha",
     roleName: "Head PDU",
     departmentId: procurement.id,
-    unitIdentifier: "DAVE1",
   });
   const sarah = await upsertOrgUser({
     projectId,
-    email: "sarah.ao@example.test",
+    projectCode: org.projectCode,
     firstName: "Sarah",
     lastName: "Achieng",
     roleName: "Accounting Officer",
     departmentId: finance.id,
-    unitIdentifier: "SARA1",
   });
 
   let fy = await prisma.projectOrgFinancialYear.findFirst({
@@ -406,7 +392,7 @@ async function main() {
       u.firstName,
       u.projectOrgRole.name,
       "→",
-      formatOrgUsername(u.email, code),
+      u.email,
     );
   }
   console.log("\nWorkspace URL: /projects/" + projectId);

@@ -1,6 +1,8 @@
 import { OrgInvoiceStatus, OrgPaymentStatus, OrgProcurementStatus, Prisma } from "@prisma/client";
 import { writeAuditLog, AuditEvent } from "@/lib/audit-log";
 import { notifyOrgUsers, OrgNotificationType } from "@/lib/projects/org-notifications";
+import { notifyProvider } from "@/lib/projects/provider-notifications";
+import { formatMoneyUGX } from "@/lib/money";
 import { WORKFLOW_TRIGGERS } from "@/lib/projects/process-catalogue";
 import { startWorkflowFromTrigger } from "@/lib/projects/workflow-engine";
 
@@ -24,6 +26,25 @@ export function serializePayment(row) {
 }
 
 export const paymentInclude = { approvedBy: { select: { id: true, firstName: true, lastName: true } } };
+
+/**
+ * @param {import("@prisma/client").PrismaClient} prisma
+ * @param {{ projectId: string; payment: { invoiceId: string; procurementId: string; amount: any }; title: string; body: string }} p
+ */
+async function notifyPaymentProvider(prisma, p) {
+  const invoice = await prisma.projectOrgInvoice.findUnique({
+    where: { id: p.payment.invoiceId },
+    select: { supplierId: true, invoiceNumber: true },
+  });
+  if (!invoice?.supplierId) return;
+  await notifyProvider(prisma, {
+    projectId: p.projectId,
+    providerId: invoice.supplierId,
+    procurementId: p.payment.procurementId,
+    title: `${p.title}: ${invoice.invoiceNumber}`,
+    body: p.body,
+  });
+}
 
 /**
  * Sum of non-cancelled/rejected payments already recorded against an invoice.
@@ -163,6 +184,13 @@ export async function approvePayment(prisma, opts) {
     meta: { projectId: opts.projectId, procurementId: row.procurementId, paymentId: row.id, actorOrgUserId: opts.actorOrgUserId, actorRoleName: opts.actorRoleName },
   });
 
+  await notifyPaymentProvider(prisma, {
+    projectId: opts.projectId,
+    payment: row,
+    title: "Payment approved",
+    body: `A payment of ${formatMoneyUGX(row.amount?.toString?.())} has been approved.`,
+  });
+
   return { ok: true, payment: serializePayment(updated) };
 }
 
@@ -189,6 +217,13 @@ export async function markPaymentPaid(prisma, opts) {
     eventType: AuditEvent.PROJECT_ORG_PAYMENT_PAID,
     actorUserId: null,
     meta: { projectId: opts.projectId, procurementId: row.procurementId, paymentId: row.id, actorOrgUserId: opts.actorOrgUserId, actorRoleName: opts.actorRoleName },
+  });
+
+  await notifyPaymentProvider(prisma, {
+    projectId: opts.projectId,
+    payment: row,
+    title: "Payment made",
+    body: `${formatMoneyUGX(row.amount?.toString?.())} has been paid to you.`,
   });
 
   const invoice = await prisma.projectOrgInvoice.findUnique({ where: { id: row.invoiceId } });

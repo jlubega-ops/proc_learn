@@ -233,7 +233,7 @@ export function OrgBidDocumentFillDialog({ open, onClose, projectId, procurement
             value={form.closingDate || ""}
             onChange={(e) => patch("closingDate", e.target.value)}
             fullWidth
-            InputLabelProps={{ shrink: true }}
+            slotProps={{ inputLabel: { shrink: true } }}
             error={Boolean(fieldErrors.closingDate)}
             helperText={fieldErrors.closingDate}
             sx={themedTextFieldSx}
@@ -244,7 +244,7 @@ export function OrgBidDocumentFillDialog({ open, onClose, projectId, procurement
             value={form.issueDate || ""}
             onChange={(e) => patch("issueDate", e.target.value)}
             fullWidth
-            InputLabelProps={{ shrink: true }}
+            slotProps={{ inputLabel: { shrink: true } }}
             sx={themedTextFieldSx}
           />
           <TextField

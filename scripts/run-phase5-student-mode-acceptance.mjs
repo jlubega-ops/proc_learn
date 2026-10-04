@@ -157,7 +157,7 @@ async function main() {
     "Student Mode nav has no /admin routes",
   );
   assert(studentLabels.includes("Dashboard"), "Student nav includes Dashboard");
-  assert(studentLabels.includes("Overview"), "Student nav includes Organisation Overview");
+  assert(studentLabels.includes("Settings"), "Student nav includes organisation Settings");
   assert(studentLabels.includes("Practice"), "Student nav includes Practice");
   assert(studentLabels.includes("Assessments"), "Student nav includes Assessments");
   const examNav = sidebarNavForContext(ROLE.EXAMINER, "/");

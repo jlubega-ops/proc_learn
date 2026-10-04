@@ -134,7 +134,7 @@ export async function autoRespondToSolicitation(prisma, opts) {
         status: OrgOfferStatus.SUBMITTED,
         source: OFFER_SOURCE.AUTO,
         deliveryDays,
-        remarks: `Simulated response (${providerBehaviourLabel(provider.behaviour)}).`,
+        remarks: `Auto response (${providerBehaviourLabel(provider.behaviour)}).`,
       },
     });
     responded.push({ offerId: offer.id, supplierId: provider.id, name: provider.name, amount: amount.toFixed(2) });
@@ -235,7 +235,7 @@ export async function autoInvoiceFromGeneratedProvider(prisma, opts) {
     projectId: opts.projectId,
     procurementId: opts.procurementId,
     actorOrgUserId: null,
-    actorRoleName: "Provider (simulated)",
+    actorRoleName: "Provider (auto-response)",
     amount,
     source: INVOICE_SOURCE.AUTO,
     supplierReference: reference,

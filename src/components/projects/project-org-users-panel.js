@@ -38,6 +38,7 @@ import {
   validateProjectOrgUserInput,
   validateProjectOrgUserPatch,
 } from "@/lib/validation/project-org-user";
+import { buildOrgUserLoginEmail, orgUserNameKey } from "@/lib/projects/org-login-identity";
 import {
   adminCenteredLoadingBoxSx,
   adminDialogPaperSx,
@@ -52,7 +53,6 @@ import {
 function emptyForm() {
   return {
     firstName: "",
-    middleName: "",
     lastName: "",
     projectOrgRoleId: "",
     departmentId: "",
@@ -207,7 +207,6 @@ export function ProjectOrgUsersPanel({ projectId }) {
     setEditRow(row);
     setEditForm({
       firstName: row.firstName || "",
-      middleName: row.middleName || "",
       lastName: row.lastName || "",
       projectOrgRoleId: row.role?.id || "",
       departmentId: row.department?.id || "",
@@ -417,7 +416,7 @@ export function ProjectOrgUsersPanel({ projectId }) {
                     <TableCell>{row.department?.name || "—"}</TableCell>
                     <TableCell>{row.subunit?.name || "—"}</TableCell>
                     <TableCell sx={{ wordBreak: "break-all" }}>
-                      {row.isProjectAdmin ? "—" : row.loginEmail || row.username || "—"}
+                      {row.isProjectAdmin ? "—" : row.loginEmail || "—"}
                     </TableCell>
                     <TableCell align="right" onClick={(e) => e.stopPropagation()}>
                       <Box sx={{ display: "inline-flex", gap: 0.25 }}>
@@ -512,6 +511,7 @@ export function ProjectOrgUsersPanel({ projectId }) {
         errors={createErrors}
         roles={roles}
         departments={departments}
+        projectCode={projectCode}
         onClose={() => {
           if (createBusy) return;
           setOpenCreate(false);
@@ -538,6 +538,7 @@ export function ProjectOrgUsersPanel({ projectId }) {
         roles={roles}
         departments={departments}
         savedUser={editRow}
+        projectCode={projectCode}
         onClose={() => {
           if (editBusy) return;
           setEditRow(null);
@@ -626,8 +627,8 @@ function OrgUserDetailsDialog({ user, projectCode = "", onClose, onEdit }) {
       ? [
           {
             label: "Login email",
-            value: user.loginEmail || user.username || "—",
-            copyable: Boolean(user.loginEmail || user.username),
+            value: user.loginEmail || "—",
+            copyable: Boolean(user.loginEmail),
           },
           {
             label: "Password",
@@ -706,6 +707,7 @@ function OrgUserDetailsDialog({ user, projectCode = "", onClose, onEdit }) {
  *   roles: { id: string; name: string }[];
  *   departments: any[];
  *   savedUser?: any;
+ *   projectCode?: string;
  *   isCreate?: boolean;
  *   onClose: () => void;
  *   onChange: (patch: Partial<ReturnType<typeof emptyForm>>) => void;
@@ -722,6 +724,7 @@ function OrgUserFormDialog({
   roles,
   departments,
   savedUser,
+  projectCode = "",
   isCreate = false,
   onClose,
   onChange,
@@ -730,6 +733,13 @@ function OrgUserFormDialog({
 }) {
   const subunits =
     departments.find((d) => d.id === form.departmentId)?.subunits || [];
+  const nameKey = orgUserNameKey(form);
+  const loginPreview =
+    !isCreate && savedUser?.loginEmail && nameKey === orgUserNameKey(savedUser)
+      ? savedUser.loginEmail
+      : nameKey && projectCode
+        ? buildOrgUserLoginEmail({ ...form, projectCode })
+        : "";
 
   return (
     <Dialog
@@ -763,18 +773,6 @@ function OrgUserFormDialog({
             sx={themedTextFieldSx}
           />
           <TextField
-            label="Middle name"
-            value={form.middleName}
-            onChange={(e) => {
-              onChange({ middleName: e.target.value });
-              onClearError("middleName");
-            }}
-            error={Boolean(errors.middleName)}
-            helperText={errors.middleName}
-            fullWidth
-            sx={themedTextFieldSx}
-          />
-          <TextField
             label="Last name"
             value={form.lastName}
             onChange={(e) => {
@@ -786,19 +784,15 @@ function OrgUserFormDialog({
             fullWidth
             sx={themedTextFieldSx}
           />
-          {!isCreate && (savedUser?.loginEmail || savedUser?.username) ? (
-            <TextField
-              label="Login email"
-              value={savedUser.loginEmail || savedUser.username}
-              fullWidth
-              disabled
-              sx={themedTextFieldSx}
-            />
-          ) : isCreate ? (
-            <Typography variant="body2" sx={adminMutedTextSx}>
-              Login email is generated automatically.
-            </Typography>
-          ) : null}
+          <TextField
+            label="Login email"
+            value={loginPreview}
+            placeholder="firstname.lastname@…"
+            helperText="Generated"
+            fullWidth
+            disabled
+            sx={themedTextFieldSx}
+          />
           <FormControl
             fullWidth
             error={Boolean(errors.departmentId)}

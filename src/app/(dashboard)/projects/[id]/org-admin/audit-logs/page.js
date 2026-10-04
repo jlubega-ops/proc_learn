@@ -8,7 +8,7 @@ import {
 } from "@/components/layout/dashboard-page-intro";
 import { ProjectOrgAuditLogsPanel } from "@/components/projects/project-org-audit-logs-panel";
 
-export const metadata = { title: "Activity logs" };
+export const metadata = { title: "Activity Logs" };
 
 /**
  * @param {{ params: Promise<{ id: string }> }} props
@@ -35,7 +35,7 @@ export default async function ProjectOrgAuditLogsPage({ params }) {
   return (
     <div className={BRAND_PAGE_SHELL_CLASS}>
       <DashboardPageIntro
-        title="Organisation activity logs"
+        title="Activity Logs"
         description={`Security and business actions for ${project.organizationName || project.name}.`}
       />
       <ProjectOrgAuditLogsPanel projectId={project.id} />

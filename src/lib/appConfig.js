@@ -9,6 +9,9 @@ export const ORG_NAME =
   process.env.NEXT_PUBLIC_ORG_NAME?.trim() ||
   "Makerere University Business School";
 
+/** Product label used in printouts and generated copy, e.g. "MUBS Proc Learn". */
+export const APP_BRAND_LABEL = `${ORG_SHORT} ${APP_NAME}`;
+
 export const COPYRIGHT_YEAR =
   process.env.NEXT_PUBLIC_COPYRIGHT_YEAR?.trim() ||
   String(new Date().getFullYear());

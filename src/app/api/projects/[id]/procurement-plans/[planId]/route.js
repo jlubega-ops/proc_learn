@@ -9,6 +9,12 @@ import {
   submitProcurementPlan,
 } from "@/lib/projects/procurement-plans";
 import { healMissingStepTasks } from "@/lib/projects/workflow-engine";
+import {
+  WORKFLOW_HISTORY_ACTION_SELECT,
+  loadPrintOrganisation,
+  mapWorkflowHistoryActions,
+  printedByFromAuth,
+} from "@/lib/projects/print-context";
 
 export const runtime = "nodejs";
 
@@ -69,15 +75,9 @@ export async function GET(_request, context) {
   let lastDecision = null;
   let viewerHasPendingAction = false;
 
-  if (auth.type === "org") {
-    const orgUserId = auth.orgUser.id;
-    const role = auth.orgUser.projectOrgRole?.name || "";
-    canSubmit =
-      (role === "User Department Officer" || role === "User Department") &&
-      (row.status === "DRAFT" || row.status === "RETURNED") &&
-      (!row.createdByOrgUserId || row.createdByOrgUserId === orgUserId);
-
-    const instance = await prisma.projectOrgWorkflowInstance.findFirst({
+  const [organisation, instance, openTask] = await Promise.all([
+    loadPrintOrganisation(prisma, projectId),
+    prisma.projectOrgWorkflowInstance.findFirst({
       where: {
         projectId,
         procurementPlanId: planId,
@@ -88,30 +88,11 @@ export async function GET(_request, context) {
         id: true,
         actions: {
           orderBy: { createdAt: "asc" },
-          select: {
-            id: true,
-            decision: true,
-            comment: true,
-            actorRoleName: true,
-            previousStatus: true,
-            newStatus: true,
-            createdAt: true,
-          },
+          select: WORKFLOW_HISTORY_ACTION_SELECT,
         },
       },
-    });
-    workflowHistory = instance?.actions || [];
-    const latestAction = workflowHistory.length
-      ? workflowHistory[workflowHistory.length - 1]
-      : null;
-    if (latestAction) {
-      lastDecision = {
-        decision: latestAction.decision,
-        actorRoleName: latestAction.actorRoleName || null,
-      };
-    }
-
-    const openTask = await prisma.projectOrgWorkflowTask.findFirst({
+    }),
+    prisma.projectOrgWorkflowTask.findFirst({
       where: {
         projectId,
         status: { in: ["PENDING", "IN_PROGRESS"] },
@@ -124,18 +105,35 @@ export async function GET(_request, context) {
         requiredRoleName: true,
         status: true,
         stepNumber: true,
-        assigneeOrgUserId: true,
       },
-    });
-    if (openTask) {
-      workflowStage = {
-        taskId: openTask.id,
-        title: openTask.title,
-        requiredRoleName: openTask.requiredRoleName || null,
-        stepNumber: openTask.stepNumber,
-        status: openTask.status,
-      };
-    }
+    }),
+  ]);
+
+  workflowHistory = mapWorkflowHistoryActions(instance?.actions);
+  const latestAction = workflowHistory.length ? workflowHistory[workflowHistory.length - 1] : null;
+  if (latestAction) {
+    lastDecision = {
+      decision: latestAction.decision,
+      actorRoleName: latestAction.actorRoleName || null,
+    };
+  }
+  if (openTask) {
+    workflowStage = {
+      taskId: openTask.id,
+      title: openTask.title,
+      requiredRoleName: openTask.requiredRoleName || null,
+      stepNumber: openTask.stepNumber,
+      status: openTask.status,
+    };
+  }
+
+  if (auth.type === "org") {
+    const orgUserId = auth.orgUser.id;
+    const role = auth.orgUser.projectOrgRole?.name || "";
+    canSubmit =
+      (role === "User Department Officer" || role === "User Department") &&
+      (row.status === "DRAFT" || row.status === "RETURNED") &&
+      (!row.createdByOrgUserId || row.createdByOrgUserId === orgUserId);
 
     pendingTask = await prisma.projectOrgWorkflowTask.findFirst({
       where: {
@@ -171,6 +169,8 @@ export async function GET(_request, context) {
         }
       : null,
     workflowHistory,
+    organisation,
+    printedBy: printedByFromAuth(auth),
     canSubmit,
   });
 }

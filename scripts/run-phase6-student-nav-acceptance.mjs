@@ -62,7 +62,8 @@ async function main() {
   assert(sectionIds.includes("manage-organisation"), "Manage Organisation section present");
   assert(sectionIds.includes("my-academic-work"), "My Academic Work section present");
   assert(labels.includes("Dashboard"), "Dashboard label");
-  assert(labels.includes("Overview"), "Organisation Overview label");
+  assert(!labels.includes("Overview"), "Personal org has no separate Overview");
+  assert(labels.includes("Settings"), "Manage Organisation settings link");
   assert(
     studentNav.some((s) => s.label === "System Administration"),
     "System Administration section label",
@@ -74,8 +75,8 @@ async function main() {
   assert(labels.includes("Departments/Units"), "System Admin departments link");
   assert(labels.includes("Users"), "System Admin users link");
   assert(labels.includes("Roles & Permissions"), "System Admin roles link");
-  assert(labels.includes("Activity logs"), "System Admin activity logs link");
-  assert(labels.includes("Organisation"), "Manage Organisation structure link");
+  assert(labels.includes("Activity Logs"), "System Admin activity logs link");
+  assert(labels.includes("Organisation Structure"), "Manage Organisation structure link");
   assert(labels.includes("Financial Years"), "Manage Organisation financial years");
   assert(labels.includes("Practice"), "Practice label");
   assert(labels.includes("Assessments"), "Assessments label");
@@ -86,7 +87,7 @@ async function main() {
   );
   assert(!sectionIds.includes("my-organisation"), "Legacy My Organisation section removed");
   assert(hrefs.includes("/"), "Dashboard href /");
-  assert(hrefs.includes("/organisation"), "Overview href /organisation");
+  assert(hrefs.includes("/organisation/org-admin/settings"), "Settings href");
   assert(hrefs.includes("/academic/practice"), "Practice href");
   assert(hrefs.includes("/academic/assessments"), "Assessments href");
   assert(
@@ -111,7 +112,7 @@ async function main() {
   assert(adminLabels.includes("Staff"), "System Admin keeps Staff");
   assert(!adminLabels.includes("My Academic Work"), "System Admin nav has no My Academic Work");
 
-  assert(getDashboardPageMeta("/").title === "Home", "Home page meta");
+  assert(getDashboardPageMeta("/").title === "Dashboard", "Dashboard page meta");
   assert(getDashboardPageMeta("/organisation").subtitle === "My Organisation", "Org meta subtitle");
   assert(getDashboardPageMeta("/academic/practice").title === "Practice", "Practice page meta");
   assert(

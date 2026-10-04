@@ -197,7 +197,7 @@ export function OrgProviderDetail({ projectId, providerId, backHref }) {
             <Field label="URSB registration number" value={provider.registrationRef} />
             <Field label="URA TIN" value={provider.tin} />
             <Field label="Lines of business" value={provider.linesOfBusiness} />
-            <Field label="Simulated behaviour" value={provider.behaviourLabel} />
+            <Field label="Behaviour" value={provider.behaviourLabel} />
             <Field label="Added by" value={provider.createdBy?.displayName} />
             <Field
               label="Added on"
@@ -248,8 +248,8 @@ export function OrgProviderDetail({ projectId, providerId, backHref }) {
               Provider portal login
             </Typography>
             <Typography variant="body2" sx={{ ...adminMutedTextSx, mb: 2 }}>
-              Simulated login for acting as this provider (bids, invoices, payments). It only works
-              for this organisation.
+              Login for acting as this provider (bids, invoices, payments). It only works for this
+              organisation.
             </Typography>
             {provider.portal ? (
               <dl className="space-y-3">

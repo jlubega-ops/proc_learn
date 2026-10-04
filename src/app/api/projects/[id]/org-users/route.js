@@ -13,9 +13,9 @@ import {
   serializeProjectOrgUser,
 } from "@/lib/projects/org-users";
 import {
-  allocateOrgUserIdentity,
-  findDuplicateOrgDisplayName,
-  formatOrgUsername,
+  allocateOrgUserLoginEmail,
+  ORG_USER_EXISTS_ERROR,
+  ORG_USER_EXISTS_FIELD_ERRORS,
   PROJECT_ORG_LEARN_PASSWORD,
 } from "@/lib/projects/org-user-identity";
 import { hashOrgUserPassword } from "@/lib/projects/org-user-password";
@@ -78,7 +78,7 @@ export async function GET(request, context) {
       row.isProjectAdmin && row.linkedUserId === user.id
         ? ownerSeed?.studentNumber || null
         : null;
-    return serializeProjectOrgUser(row, studentNumber, projectCode);
+    return serializeProjectOrgUser(row, studentNumber);
   });
 
   return NextResponse.json({
@@ -157,44 +157,29 @@ export async function POST(request, context) {
     );
   }
 
-  const nameClash = await findDuplicateOrgDisplayName(prisma, {
+  const email = await allocateOrgUserLoginEmail(prisma, {
     projectId,
+    projectCode,
     firstName: validated.data.firstName,
-    middleName: validated.data.middleName,
     lastName: validated.data.lastName,
   });
-  if (nameClash) {
+  if (!email) {
     return NextResponse.json(
-      {
-        error:
-          "An organisation member with this exact name already exists. Change the middle name or use a distinct full name so accounts stay easy to tell apart. Login emails are always unique.",
-        fieldErrors: {
-          firstName: "This full name is already used in this organisation.",
-          lastName: "This full name is already used in this organisation.",
-        },
-      },
-      { status: 400 },
+      { error: ORG_USER_EXISTS_ERROR, fieldErrors: ORG_USER_EXISTS_FIELD_ERRORS },
+      { status: 409 },
     );
   }
-
-  const unitIdentity = await allocateOrgUserIdentity(prisma, {
-    projectId,
-    firstName: validated.data.firstName,
-    lastName: validated.data.lastName,
-  });
   const passwordHash = await hashOrgUserPassword(PROJECT_ORG_LEARN_PASSWORD);
 
   const row = await prisma.projectOrgUser.create({
     data: {
       projectId,
       firstName: validated.data.firstName,
-      middleName: validated.data.middleName,
       lastName: validated.data.lastName,
-      email: unitIdentity.email,
+      email,
       projectOrgRoleId: role.id,
       departmentId: dept.data.departmentId,
       subunitId: dept.data.subunitId,
-      unitIdentifier: unitIdentity.unitIdentifier,
       isProjectAdmin: false,
       linkedUserId: null,
       passwordHash,
@@ -209,17 +194,12 @@ export async function POST(request, context) {
       projectId,
       projectOrgUserId: row.id,
       email: row.email,
-      unitIdentifier: row.unitIdentifier,
       roleName: role.name,
     },
   });
 
-  const serialized = serializeProjectOrgUser(row, null, projectCode);
   return NextResponse.json(
-    {
-      user: serialized,
-      loginEmail: serialized.loginEmail || formatOrgUsername(row.email, projectCode),
-    },
+    { user: serializeProjectOrgUser(row, null), loginEmail: row.email },
     { status: 201 },
   );
 }

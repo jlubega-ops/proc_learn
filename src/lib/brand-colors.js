@@ -12,6 +12,9 @@ export const BRAND_YELLOW_DARK_MODE = "#f5e642";
 /** Enriched gold for row action icons on light surfaces (suspend, unenroll, etc.). */
 export const BRAND_YELLOW_ON_LIGHT = "#b89400";
 
+/** Deep gold for yellow button text/borders on light surfaces (meets AA contrast on white). */
+export const BRAND_YELLOW_TEXT_ON_LIGHT = "#7a6200";
+
 /** Semantic mapping: org colours + accessible success green (toasts / completed). */
 export const SEMANTIC = {
   primary: BRAND_BLUE,

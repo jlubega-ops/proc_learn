@@ -26,7 +26,7 @@ export default async function ProjectOrgUsersPage({ params }) {
 
   return (
     <div className="w-full space-y-4">
-      <DashboardPageIntro title="User accounts" description="People who work in your organisation." />
+      <DashboardPageIntro title="Users" description="People who work in your organisation." />
       <ProjectOrgUsersPanel projectId={project.id} />
     </div>
   );

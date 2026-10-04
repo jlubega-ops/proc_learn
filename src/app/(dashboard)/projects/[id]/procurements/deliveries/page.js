@@ -1,6 +1,6 @@
 import { ProcurementStagePage } from "@/components/projects/procurement-stage-page";
 
-export const metadata = { title: "Delivery & inspections" };
+export const metadata = { title: "Deliveries & Inspections" };
 
 /** @param {{ params: Promise<{ id: string }> }} props */
 export default function Page({ params }) {

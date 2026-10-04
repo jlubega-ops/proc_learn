@@ -84,6 +84,77 @@ export function presentOrgWorkflowStatus(opts) {
 }
 
 /**
+ * Status chip + neutral stage line for a procurement case, driven by its open workflow step.
+ * @param {{
+ *   status?: string | null;
+ *   progress?: { status?: string | null; currentStep?: { label?: string | null; roleName?: string | null } | null; waitingOnRole?: string | null } | null;
+ *   viewerHasPendingAction?: boolean;
+ *   viewerTaskInOtherMode?: boolean;
+ *   awaitingProviderOn?: string | null;
+ *   awaitingDelivery?: boolean;
+ * }} opts
+ * @returns {{ label: string; color: "success" | "error" | "warning" | "info" | "primary"; stageLabel: string }}
+ */
+export function presentProcurementStatus(opts) {
+  const status = String(opts?.status || "").trim().toUpperCase();
+  const progress = opts?.progress || null;
+  const step = progress?.currentStep || null;
+  const role = shortOrgRoleName(progress?.waitingOnRole || step?.roleName);
+  const stepLabel = String(step?.label || "").trim();
+  const stageLabel =
+    stepLabel && role ? `Pending ${stepLabel.toLowerCase()} by ${role}` : role ? `Pending ${role}` : "";
+
+  if (status === "CLOSED") return { label: "Closed", color: "success", stageLabel: "Closed" };
+  if (status === "CANCELLED") return { label: "Cancelled", color: "error", stageLabel: "Cancelled" };
+  if (status === "REJECTED") return { label: "Rejected", color: "error", stageLabel: "Rejected" };
+
+  // Delivery cannot be recorded until the provider accepts the order, so the provider is the blocker.
+  if (opts?.awaitingProviderOn) {
+    return {
+      label: "Awaiting provider acceptance",
+      color: "warning",
+      stageLabel: `Awaiting provider acceptance of the ${opts.awaitingProviderOn}`,
+    };
+  }
+  if (opts?.awaitingDelivery) {
+    return { label: "Awaiting delivery", color: "warning", stageLabel: "Awaiting delivery from the provider" };
+  }
+
+  if (step && String(progress?.status || "").toUpperCase() !== "COMPLETED") {
+    if (opts?.viewerHasPendingAction) return { label: "Your turn", color: "primary", stageLabel };
+    if (opts?.viewerTaskInOtherMode) {
+      return { label: "Yours — switch role", color: "warning", stageLabel };
+    }
+    if (role) return { label: `Pending ${role}`, color: "warning", stageLabel };
+  }
+
+  const human = status ? status.replace(/_/g, " ").toLowerCase() : "";
+  const label = human ? human[0].toUpperCase() + human.slice(1) : "—";
+  return { label, color: "info", stageLabel: stageLabel || label };
+}
+
+/** @type {Record<string, string>} */
+const DECISION_PAST = {
+  APPROVE: "Approved",
+  RETURN: "Returned for correction",
+  REJECT: "Rejected",
+  VERIFY: "Verified",
+  FLAG_EXCEPTION: "Exception flagged",
+  SUBMIT: "Submitted",
+  COMPLETE: "Completed",
+  SELECT_METHOD: "Method selected",
+};
+
+/**
+ * Past-tense label for a recorded workflow decision (history / print trail).
+ * @param {unknown} decision
+ */
+export function workflowDecisionPastLabel(decision) {
+  const d = String(decision || "").trim().toUpperCase();
+  return DECISION_PAST[d] || d || "—";
+}
+
+/**
  * Primary action button label for workflow decision forms.
  * @param {string} decision
  * @param {{ busy?: boolean }} [opts]

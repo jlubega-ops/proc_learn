@@ -13,7 +13,6 @@ import Tooltip from "@mui/material/Tooltip";
 import Typography from "@mui/material/Typography";
 import ArrowBackRounded from "@mui/icons-material/ArrowBackRounded";
 import DeleteOutlineRounded from "@mui/icons-material/DeleteOutlineRounded";
-import DescriptionRounded from "@mui/icons-material/DescriptionRounded";
 import EditRounded from "@mui/icons-material/EditRounded";
 import RefreshRounded from "@mui/icons-material/RefreshRounded";
 import Dialog from "@mui/material/Dialog";
@@ -22,8 +21,16 @@ import DialogContent from "@mui/material/DialogContent";
 import DialogTitle from "@mui/material/DialogTitle";
 import { useRouter } from "next/navigation";
 import { OrgLineItemsTable } from "@/components/projects/org-line-items-table";
-import { OrgForm5FillDialog } from "@/components/projects/org-form5-fill-dialog";
+import { WorkflowHistoryPanel } from "@/components/projects/workflow-history-panel";
+import { RecordDetailsGrid, recordPersonLine } from "@/components/projects/record-details-grid";
+import {
+  PrintButton,
+  PrintDocument,
+  formatPrintDate,
+  formatPrintDateTime,
+} from "@/components/print/print-document";
 import { useToast } from "@/components/providers/toast-provider";
+import { notifyOrgTasksChanged } from "@/hooks/use-pending-task-counts";
 import {
   adminCenteredLoadingBoxSx,
   adminLoadingSpinnerSx,
@@ -32,7 +39,6 @@ import {
   themedTextFieldSx,
 } from "@/lib/admin-mui-surfaces";
 import { formatMoneyAmount, formatMoneyUGX } from "@/lib/money";
-import { format, isValid, parseISO } from "date-fns";
 import {
   defaultWorkflowDecision,
   isPositiveWorkflowDecision,
@@ -40,7 +46,10 @@ import {
   workflowDecisionOptions,
   workflowStepActionLabel,
 } from "@/lib/projects/workflow-decision-options";
-import { workflowDecisionButtonLabel } from "@/lib/projects/workflow-status-presentation";
+import {
+  workflowDecisionButtonLabel,
+  workflowDecisionPastLabel,
+} from "@/lib/projects/workflow-status-presentation";
 import { providerTerm } from "@/lib/projects/provider-terms";
 import {
   OrgMethodEligibility,
@@ -74,6 +83,184 @@ const REQUISITION_ITEM_COLUMNS = [
   { id: "estimatedTotal", label: "Line total", align: "right", money: true },
 ];
 
+const METHOD_LABELS = {
+  MICRO: "Micro Procurement",
+  QUOTATION: "Quotation",
+  TENDER: "Tender",
+};
+
+/** @param {any} row */
+function deptLabel(row) {
+  const d = row.department;
+  return d ? `${d.name}${d.code ? ` (${d.code})` : ""}` : null;
+}
+
+/** @param {any} row */
+function planLabel(row) {
+  const p = row.procurementPlan;
+  return p ? `${p.title}${p.planReference ? ` · ${p.planReference}` : ""}` : null;
+}
+
+/** @param {any} row */
+function budgetLineLabel(row) {
+  const b = row.budgetLine;
+  return b ? [b.code, b.name].filter(Boolean).join(" — ") : null;
+}
+
+/** @param {any} row */
+function requisitionDetailFields(row) {
+  const fields = [
+    { label: "Financial year", value: row.financialYear?.label },
+    { label: "Department", value: deptLabel(row) },
+    { label: "Current stage", value: row.stageLabel || row.statusLabel || row.status, wide: true },
+    { label: "Category", value: row.category },
+    { label: "Procurement method", value: METHOD_LABELS[row.procurementMethod] || row.procurementMethod },
+    { label: "Required by", value: row.requiredByDate ? formatPrintDate(row.requiredByDate) : null },
+    { label: "Items", value: String(row.items?.length || 0) },
+    { label: "Procurement plan", value: planLabel(row), wide: true },
+    { label: "Plan item", value: row.procurementPlanItem?.title, wide: true },
+    { label: "Budget line", value: budgetLineLabel(row), wide: true },
+    {
+      label: "Available on line",
+      value: row.budgetLine ? formatMoneyUGX(row.budgetLine.availableBalance) : null,
+    },
+    { label: "Estimated total", value: formatMoneyUGX(row.estimatedTotalValue) },
+    { label: "Delivery location", value: row.deliveryLocation, wide: true },
+    { label: "Created on", value: row.createdAt ? formatPrintDate(row.createdAt) : null },
+    { label: "Submitted on", value: row.submittedAt ? formatPrintDate(row.submittedAt) : null },
+    { label: "Requested by", value: recordPersonLine(row.requester), wide: true },
+    { label: "Approved by", value: recordPersonLine(row.approvedBy, row.approvedAt), wide: true },
+    { label: "Justification", value: row.justification, full: true },
+    { label: "Need", value: row.needDescription, full: true },
+  ];
+  if (row.remarks) fields.push({ label: "Remarks", value: row.remarks, full: true });
+  return fields;
+}
+
+/**
+ * @param {any} row
+ * @param {any[]} history
+ */
+function requisitionPrintSections(row, history) {
+  const partI = row.form5PartI && typeof row.form5PartI === "object" ? row.form5PartI : {};
+  const shortlist = Array.isArray(row.form5PartII?.shortlist) ? row.form5PartII.shortlist : [];
+  /** @type {any[]} */
+  const sections = [
+    {
+      type: "fields",
+      title: "Section A: Requisition details",
+      fields: [
+        { label: "Subject of procurement", value: row.title, full: true },
+        { label: "Reference", value: row.requisitionReference },
+        { label: "Financial year", value: row.financialYear?.label },
+        { label: "Department", value: deptLabel(row) },
+        { label: "Category", value: row.category },
+        { label: "Current stage", value: row.stageLabel || row.statusLabel || row.status },
+        {
+          label: "Procurement method",
+          value: METHOD_LABELS[row.procurementMethod] || row.procurementMethod,
+        },
+        { label: "Required by", value: row.requiredByDate ? formatPrintDate(row.requiredByDate) : null },
+        { label: "Delivery location", value: row.deliveryLocation },
+        { label: "Procurement plan", value: planLabel(row), full: true },
+        { label: "Plan item", value: row.procurementPlanItem?.title, full: true },
+        { label: "Created on", value: formatPrintDateTime(row.createdAt) },
+        { label: "Submitted on", value: row.submittedAt ? formatPrintDateTime(row.submittedAt) : null },
+        { label: "Justification", value: row.justification, full: true },
+        { label: "Description of need", value: row.needDescription, full: true },
+      ],
+    },
+    {
+      type: "fields",
+      title: "Section B: Funds availability",
+      fields: [
+        { label: "Vote / head no.", value: partI.voteHeadNo },
+        { label: "Programme", value: partI.programme },
+        { label: "Sub-programme", value: partI.subProgramme },
+        { label: "Funding item", value: partI.fundingItem || budgetLineLabel(row) },
+        { label: "Estimated total cost", value: formatMoneyUGX(row.estimatedTotalValue) },
+        { label: "Market price", value: partI.marketPrice ? formatMoneyUGX(partI.marketPrice) : null },
+        {
+          label: "Balance remaining",
+          value: partI.balanceRemaining ? formatMoneyUGX(partI.balanceRemaining) : null,
+        },
+        { label: "Multi-year contracting", value: partI.multiYearContracting },
+      ],
+    },
+    {
+      type: "table",
+      title: "Section C: Items",
+      columns: [
+        { id: "no", label: "No.", width: "5%" },
+        { id: "item", label: "Item" },
+        { id: "quantity", label: "Qty", align: "right" },
+        { id: "unit", label: "Unit" },
+        { id: "unitPrice", label: "Unit price (UGX)", align: "right" },
+        { id: "total", label: "Total (UGX)", align: "right" },
+      ],
+      rows: (row.items || []).map((item, idx) => ({
+        key: item.id || idx,
+        note: [item.description, item.specification].filter(Boolean).join(" — ") || null,
+        cells: {
+          no: `${idx + 1}.`,
+          item: item.itemName || "—",
+          quantity: formatMoneyAmount(item.quantity) || "—",
+          unit: item.unitOfMeasure || "—",
+          unitPrice: formatMoneyAmount(item.estimatedUnitPrice) || "—",
+          total: formatMoneyAmount(item.estimatedTotal) || "—",
+        },
+      })),
+      empty: "No items.",
+      footer: { label: "Estimated total", value: formatMoneyUGX(row.estimatedTotalValue) },
+    },
+  ];
+  if (shortlist.length) {
+    sections.push({
+      type: "table",
+      title: `Section D: Shortlisted ${providerTerm(row.category, { plural: true })}`,
+      columns: [
+        { id: "no", label: "No.", width: "5%" },
+        { id: "name", label: providerTerm(row.category, { capitalize: true }) },
+        { id: "checks", label: "Qualification" },
+      ],
+      rows: shortlist.map((s, idx) => ({
+        key: s.id || idx,
+        cells: {
+          no: `${idx + 1}.`,
+          name: s.name || "—",
+          checks: s.qualifies ? "Passed" : (s.failedReasons || []).join("; ") || "Warnings",
+        },
+      })),
+      empty: "None.",
+    });
+  }
+  sections.push({
+    type: "table",
+    title: `Section ${shortlist.length ? "E" : "D"}: Approval trail`,
+    columns: [
+      { id: "no", label: "No.", width: "5%" },
+      { id: "date", label: "Date", width: "18%" },
+      { id: "action", label: "Action" },
+      { id: "by", label: "By" },
+      { id: "role", label: "Role" },
+      { id: "comment", label: "Comment" },
+    ],
+    rows: history.map((h, idx) => ({
+      key: h.id,
+      cells: {
+        no: `${idx + 1}.`,
+        date: formatPrintDateTime(h.createdAt),
+        action: workflowDecisionPastLabel(h.decision),
+        by: h.actorName || "—",
+        role: h.actorRoleName || "—",
+        comment: h.comment || "—",
+      },
+    })),
+    empty: "Not yet submitted for review.",
+  });
+  return sections;
+}
+
 /**
  * @param {{ projectId: string; requisitionId: string }} p
  */
@@ -92,8 +279,8 @@ export function OrgRequisitionDetailPanel({ projectId, requisitionId }) {
   const [decision, setDecision] = useState("APPROVE");
   const [comment, setComment] = useState("");
   const [procurementMethod, setProcurementMethod] = useState("");
-  const [form5Part, setForm5Part] = useState(/** @type {"I" | "II" | null} */ (null));
-  const [form5Defaults, setForm5Defaults] = useState(/** @type {any} */ (null));
+  const [organisation, setOrganisation] = useState({ name: "", code: null });
+  const [printedBy, setPrintedBy] = useState(/** @type {any} */ (null));
   const [form5PartII, setForm5PartII] = useState(/** @type {Record<string, string>} */ ({}));
   const [shortlistIds, setShortlistIds] = useState(/** @type {string[]} */ ([]));
   const [shortlistConfirmed, setShortlistConfirmed] = useState(false);
@@ -146,7 +333,8 @@ export function OrgRequisitionDetailPanel({ projectId, requisitionId }) {
       setRow(data.requisition || null);
       setCanEdit(Boolean(data.canEdit));
       setCanDelete(Boolean(data.canDelete));
-      setForm5Defaults(data.form5Defaults || null);
+      setOrganisation(data.organisation || { name: "", code: null });
+      setPrintedBy(data.printedBy || null);
       setPendingTask(data.pendingTask || null);
       setBlockedTask(data.blockedTask || null);
       setHistory(Array.isArray(data.history) ? data.history : []);
@@ -272,6 +460,7 @@ export function OrgRequisitionDetailPanel({ projectId, requisitionId }) {
           ? "Method approved. Procurement process started."
           : "Decision recorded.";
       showToast({ message: msg, severity: "success" });
+      notifyOrgTasksChanged();
       await load();
     } finally {
       setBusy(false);
@@ -352,64 +541,68 @@ export function OrgRequisitionDetailPanel({ projectId, requisitionId }) {
               Delete
             </Button>
           ) : null}
+          <PrintButton
+            fileName={`Requisition ${row.requisitionReference || row.title}`}
+          />
           <Button startIcon={<RefreshRounded />} variant="outlined" onClick={() => load()}>
             Refresh
           </Button>
         </div>
       </div>
 
+      <PrintDocument
+        documentTitle="Requisition for procurement (PP Form 5)"
+        reference={row.requisitionReference}
+        status={row.stageLabel || row.statusLabel || row.status}
+        organisation={organisation}
+        sections={requisitionPrintSections(row, history)}
+        signatures={[
+          {
+            label: "Requested by",
+            name: row.requester?.displayName,
+            role: row.requester?.roleName,
+            date: row.submittedAt || row.createdAt,
+          },
+          {
+            label: "Approved by",
+            name: row.approvedBy?.displayName,
+            role: row.approvedBy?.roleName,
+            date: row.approvedAt,
+          },
+        ]}
+        printedBy={printedBy}
+      />
+
       <Paper variant="outlined" sx={{ p: 2, ...adminOutlinedTableContainerSx }}>
         <div className="flex flex-wrap items-start justify-between gap-2">
-          <div>
+          <div className="min-w-0">
             <Typography variant="h6" sx={{ fontWeight: 700 }}>
               {row.title}
             </Typography>
-            <Typography variant="body2" sx={adminMutedTextSx}>
-              {row.financialYear?.label || "—"} · {row.department?.name || "—"}
-              {row.requisitionReference ? ` · ${row.requisitionReference}` : ""}
-            </Typography>
-            <Typography variant="body2" sx={{ ...adminMutedTextSx, mt: 0.5 }}>
-              Created by {row.requester?.displayName || "—"}
-              {row.requesterRoleName ? ` — ${row.requesterRoleName}` : ""}
-              {row.approvedBy?.displayName
-                ? ` · Approved by ${row.approvedBy.displayName}${
-                    row.approvedByRoleName ? ` — ${row.approvedByRoleName}` : " — Accounting Officer"
-                  }`
-                : ""}
-            </Typography>
+            {row.requisitionReference ? (
+              <Typography variant="body2" sx={adminMutedTextSx}>
+                {row.requisitionReference}
+              </Typography>
+            ) : null}
           </div>
-          <Chip
-            size="small"
-            color={row.statusColor || (row.status === "APPROVED" ? "success" : "warning")}
-            label={row.statusLabel || row.status}
-          />
+          <div className="flex flex-wrap gap-1">
+            {row.procurementMethod ? (
+              <Chip
+                size="small"
+                color="info"
+                variant="outlined"
+                label={METHOD_LABELS[row.procurementMethod] || row.procurementMethod}
+              />
+            ) : null}
+            <Chip
+              size="small"
+              color={row.statusColor || (row.status === "APPROVED" ? "success" : "warning")}
+              label={row.statusLabel || row.status}
+            />
+          </div>
         </div>
 
-        <div className="mt-3 space-y-1 text-sm">
-          <p>
-            <span className="font-semibold">Plan:</span> {row.procurementPlan?.title || "—"}
-          </p>
-          <p>
-            <span className="font-semibold">Plan item:</span>{" "}
-            {row.procurementPlanItem?.title || "—"}
-          </p>
-          <p>
-            <span className="font-semibold">Budget line:</span>{" "}
-            {row.budgetLine
-              ? `${row.budgetLine.code} — ${row.budgetLine.name} (avail. ${formatMoneyUGX(row.budgetLine.availableBalance)})`
-              : "—"}
-          </p>
-          <p>
-            <span className="font-semibold">Estimated total:</span>{" "}
-            {formatMoneyUGX(row.estimatedTotalValue)}
-          </p>
-          <p>
-            <span className="font-semibold">Justification:</span> {row.justification}
-          </p>
-          <p>
-            <span className="font-semibold">Need:</span> {row.needDescription}
-          </p>
-        </div>
+        <RecordDetailsGrid fields={requisitionDetailFields(row)} />
 
         <div className="mt-3">
           <OrgLineItemsTable
@@ -422,44 +615,16 @@ export function OrgRequisitionDetailPanel({ projectId, requisitionId }) {
             footerTotal={row.estimatedTotalValue ?? null}
           />
         </div>
-      </Paper>
 
-      <Paper variant="outlined" sx={{ p: 2, ...adminOutlinedTableContainerSx }}>
-        <Typography variant="subtitle1" sx={{ fontWeight: 600, mb: 1 }}>
-          Form 5 (PPDA)
-        </Typography>
-        <div className="space-y-1 text-sm">
-          <p>
-            <span className="font-semibold">Part I:</span>{" "}
-            {row.form5PartIAt ? `Saved ${formatDateShort(row.form5PartIAt)}` : "Not saved"}
-          </p>
-          <p>
-            <span className="font-semibold">Part II:</span>{" "}
-            {row.form5PartIIAt
-              ? `Saved ${formatDateShort(row.form5PartIIAt)}${
-                  row.procurementMethod ? ` · ${row.procurementMethod}` : ""
-                }`
-              : "Pending"}
-          </p>
-        </div>
-        {Array.isArray(row.form5PartII?.shortlist) && row.form5PartII.shortlist.length ? (
+        {pendingTask?.requiredRoleName !== "Contracts Committee" &&
+        Array.isArray(row.form5PartII?.shortlist) &&
+        row.form5PartII.shortlist.length ? (
           <div className="mt-3">
             <OrgProviderShortlistSummary
               shortlist={row.form5PartII.shortlist}
               category={row.category}
               justification={row.form5PartII?.shortlistJustification}
             />
-          </div>
-        ) : null}
-        {row.form5PartI ? (
-          <div className="mt-3">
-            <Button
-              variant="outlined"
-              startIcon={<DescriptionRounded />}
-              onClick={() => setForm5Part("I")}
-            >
-              View / download Part I PDF
-            </Button>
           </div>
         ) : null}
       </Paper>
@@ -477,7 +642,11 @@ export function OrgRequisitionDetailPanel({ projectId, requisitionId }) {
           </Typography>
           {decision === "SELECT_METHOD" || pendingTask.requiredRoleName === "Contracts Committee" ? (
             <div className="mb-3">
-              <OrgMethodEligibility requisition={row} />
+              <OrgMethodEligibility
+                requisition={row}
+                selecting={decision === "SELECT_METHOD"}
+                selectedMethod={procurementMethod}
+              />
             </div>
           ) : null}
           <div className="grid gap-3 sm:grid-cols-2">
@@ -749,37 +918,7 @@ export function OrgRequisitionDetailPanel({ projectId, requisitionId }) {
         </Paper>
       ) : null}
 
-      {history.length > 0 ? (
-        <Paper variant="outlined" sx={{ p: 2, ...adminOutlinedTableContainerSx }}>
-          <Typography variant="subtitle2" sx={{ fontWeight: 600, mb: 1 }}>
-            Workflow history
-          </Typography>
-          <ul className="space-y-1 text-sm">
-            {history.map((h) => (
-              <li key={h.id}>
-                {String(h.createdAt).slice(0, 19).replace("T", " ")} · {h.actorRoleName || "—"} ·{" "}
-                {h.decision}
-                {h.comment ? ` — ${h.comment}` : ""}
-              </li>
-            ))}
-          </ul>
-        </Paper>
-      ) : null}
-
-      {form5Part === "I" && row.form5PartI ? (
-        <OrgForm5FillDialog
-          open
-          part="I"
-          projectId={projectId}
-          requisition={row}
-          form5Defaults={form5Defaults}
-          onClose={() => setForm5Part(null)}
-          onSaved={(next) => {
-            if (next) setRow(next);
-            else void load();
-          }}
-        />
-      ) : null}
+      <WorkflowHistoryPanel history={history} showStatusChange />
 
       <Dialog
         open={deleteOpen}
@@ -816,15 +955,4 @@ export function OrgRequisitionDetailPanel({ projectId, requisitionId }) {
       </Dialog>
     </div>
   );
-}
-
-/**
- * @param {unknown} value
- */
-function formatDateShort(value) {
-  if (!value) return "—";
-  const raw = String(value);
-  const d = raw.includes("T") ? parseISO(raw) : new Date(raw);
-  if (!isValid(d)) return raw.slice(0, 10);
-  return format(d, "MMM d, yyyy");
 }

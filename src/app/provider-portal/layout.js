@@ -4,6 +4,7 @@ import { ForceAuthLightHtml } from "@/components/auth/force-auth-light-html";
 import { buildIronSessionOptions } from "@/lib/auth/session-options";
 import { prisma } from "@/lib/prisma";
 import { getReadableProviderSessionId } from "@/lib/projects/provider-portal";
+import { ProviderPortalShell } from "@/components/provider-portal/provider-portal-shell";
 
 export const metadata = {
   title: "Provider portal",
@@ -27,7 +28,9 @@ export default async function ProviderPortalLayout({ children }) {
   return (
     <>
       <ForceAuthLightHtml />
-      <div className="min-h-dvh bg-zinc-50">{children}</div>
+      <div className="min-h-dvh bg-zinc-50">
+        <ProviderPortalShell>{children}</ProviderPortalShell>
+      </div>
     </>
   );
 }

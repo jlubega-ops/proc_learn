@@ -22,7 +22,7 @@ export default async function OrganisationStructurePage() {
   return (
     <div className={BRAND_PAGE_SHELL_CLASS}>
       <DashboardPageIntro
-        title="Organisation structure"
+        title="Organisation Structure"
         description="Order departments and nest subunits."
       />
       <OrganisationStructurePanel

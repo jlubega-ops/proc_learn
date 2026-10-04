@@ -15,6 +15,7 @@ import ArrowBackRounded from "@mui/icons-material/ArrowBackRounded";
 import DeleteOutlineRounded from "@mui/icons-material/DeleteOutlineRounded";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
+import { format } from "date-fns";
 import { useAuthSession } from "@/components/providers/auth-session-provider";
 import { useToast } from "@/components/providers/toast-provider";
 import { OrgLineItemsTable } from "@/components/projects/org-line-items-table";
@@ -38,6 +39,22 @@ import {
 import { ORG_REF_DOC, nextOrgDocumentReference } from "@/lib/projects/org-reference";
 import { PPDA_YES_NO } from "@/lib/projects/ppda-forms";
 import { usePersistedFormDraft } from "@/hooks/use-persisted-form-draft";
+
+/**
+ * @param {unknown} current
+ * @param {unknown} value
+ */
+function fillIfBlank(current, value) {
+  if (String(current ?? "").trim()) return /** @type {string} */ (current);
+  return typeof value === "string" ? value : current ? String(current) : "";
+}
+
+/** @param {unknown} value `yyyy-MM-dd` */
+function futureDateOrEmpty(value) {
+  const s = typeof value === "string" ? value.slice(0, 10) : "";
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(s)) return "";
+  return s >= format(new Date(), "yyyy-MM-dd") ? s : "";
+}
 
 /**
  * @param {{ projectId: string; requisitionId?: string }} p
@@ -105,6 +122,7 @@ export function OrgRequisitionCreateForm({ projectId, requisitionId = "" }) {
     },
   });
   const [metaReady, setMetaReady] = useState(false);
+  const [orgVoteCode, setOrgVoteCode] = useState("");
 
   const { serverSyncState, clearDraft } = usePersistedFormDraft({
     formKey: isEdit ? `requisition:edit:${requisitionId}` : "requisition:new",
@@ -135,6 +153,9 @@ export function OrgRequisitionCreateForm({ projectId, requisitionId = "" }) {
           return {
             ...prev,
             ...p,
+            deliveryLocation: String(p.deliveryLocation || "").trim()
+              ? p.deliveryLocation
+              : prev.deliveryLocation,
             items,
             form5: {
               ...prev.form5,
@@ -255,6 +276,7 @@ export function OrgRequisitionCreateForm({ projectId, requisitionId = "" }) {
       const actorName =
         typeof rData.actorDisplayName === "string" ? rData.actorDisplayName.trim() : "";
       setActorDisplayName(actorName);
+      setOrgVoteCode(typeof rData.voteCode === "string" ? rData.voteCode : "");
       const requisitions = Array.isArray(rData.requisitions) ? rData.requisitions : [];
       const refs = requisitions.map((r) => r.requisitionReference).filter(Boolean);
       setExistingRefs(refs);
@@ -363,10 +385,13 @@ export function OrgRequisitionCreateForm({ projectId, requisitionId = "" }) {
                 fyLabel: firstFyLabel,
               })
             : "";
+        const defaultLocation =
+          typeof rData.defaultDeliveryLocation === "string" ? rData.defaultDeliveryLocation : "";
         setForm((f) => ({
           ...f,
           financialYearId: firstFyId,
           requisitionReference: autoRef || f.requisitionReference,
+          deliveryLocation: f.deliveryLocation || defaultLocation,
           form5: {
             ...f.form5,
             memberName: f.form5.memberName || actorName,
@@ -496,14 +521,29 @@ export function OrgRequisitionCreateForm({ projectId, requisitionId = "" }) {
   );
   const estimatedTotalDisplay = footerTotal > 0 ? formatMoneyAmount(footerTotal) : "";
 
-  // Keep Form 5 market price in sync with estimated line total (unless user edited it).
+  const selectedBudgetLine = fyBudgetLines.find((b) => b.id === form.budgetLineId) || null;
+  const fundingItemDisplay = selectedBudgetLine
+    ? [selectedBudgetLine.code, selectedBudgetLine.name].filter(Boolean).join(" — ")
+    : "";
+  const availableOnLine = selectedBudgetLine
+    ? toMoneyNumber(selectedBudgetLine.availableBalance ?? selectedBudgetLine.approvedAmount)
+    : null;
+  const balanceAfterRequest =
+    typeof availableOnLine === "number" ? availableOnLine - footerTotal : null;
+  const balanceRemainingDisplay =
+    balanceAfterRequest == null ? "" : formatMoneyAmount(balanceAfterRequest) || "0.00";
+
+  const selectedPlanItem = planItems.find((i) => i.id === form.procurementPlanItemId) || null;
+  const planItemCost = selectedPlanItem ? formatMoneyAmount(selectedPlanItem.estimatedTotal) : "";
+  const marketPriceDefault = planItemCost || estimatedTotalDisplay || "";
+
   useEffect(() => {
     if (marketPriceManual) return;
     setForm((f) => {
-      if (String(f.form5?.marketPrice || "") === String(estimatedTotalDisplay || "")) return f;
-      return { ...f, form5: { ...f.form5, marketPrice: estimatedTotalDisplay } };
+      if (String(f.form5?.marketPrice || "") === String(marketPriceDefault)) return f;
+      return { ...f, form5: { ...f.form5, marketPrice: marketPriceDefault } };
     });
-  }, [estimatedTotalDisplay, marketPriceManual]);
+  }, [marketPriceDefault, marketPriceManual]);
 
   function applyPlanItem(planItemId) {
     const item = planItems.find((i) => i.id === planItemId);
@@ -527,23 +567,57 @@ export function OrgRequisitionCreateForm({ projectId, requisitionId = "" }) {
             {
               itemName: item.title || first.itemName || "",
               quantity: qty || first.quantity || "1",
-              unitOfMeasure: first.unitOfMeasure || "Unit",
+              unitOfMeasure: item.unitOfMeasure || first.unitOfMeasure || "Unit",
               estimatedUnitPrice: unitPrice || first.estimatedUnitPrice || "",
               lineTotal: total != null ? formatMoneyAmount(total) : "",
             },
             ...f.items.slice(1),
           ]
         : f.items;
+      const cf = item.circularFields || {};
+      next.title = fillIfBlank(f.title, item.title);
+      next.category = fillIfBlank(f.category, item.category);
+      next.justification = fillIfBlank(f.justification, item.justification);
+      next.needDescription = fillIfBlank(
+        f.needDescription,
+        item.description || item.specification,
+      );
+      next.requiredByDate = fillIfBlank(
+        f.requiredByDate,
+        futureDateOrEmpty(cf.completionDate) || futureDateOrEmpty(cf.contractSigningDate),
+      );
       if (item.budgetLineId && !f.budgetLineId) {
         next.budgetLineId = item.budgetLineId;
-      }
-      if (!String(f.title || "").trim() && item.title) {
-        next.title = item.title;
       }
       return next;
     });
     clearFieldError("procurementPlanItemId");
+    for (const key of ["title", "justification", "needDescription", "requiredByDate"]) {
+      clearFieldError(key);
+    }
     if (item?.budgetLineId) clearFieldError("budgetLineId");
+  }
+
+  function applyBudgetLine(budgetLineId) {
+    setForm((f) => ({ ...f, budgetLineId }));
+    clearFieldError("budgetLineId");
+  }
+
+  function applyPlan(procurementPlanId) {
+    const plan = meta.plans.find((p) => p.id === procurementPlanId);
+    const planFyId = plan?.financialYear?.id || "";
+    const fyChanged = Boolean(planFyId) && planFyId !== form.financialYearId;
+    const nextRef = fyChanged ? applyReferenceForFy(planFyId) : null;
+    setForm((f) => ({
+      ...f,
+      procurementPlanId,
+      procurementPlanItemId: "",
+      ...(fyChanged ? { financialYearId: planFyId, budgetLineId: "" } : {}),
+      ...(nextRef ? { requisitionReference: nextRef } : {}),
+    }));
+    clearFieldError("procurementPlanId");
+    clearFieldError("procurementPlanItemId");
+    if (fyChanged) clearFieldError("financialYearId");
   }
 
   const saveOnly = isEdit && (awaitingHodReview || existingStatus === "SUBMITTED");
@@ -571,6 +645,8 @@ export function OrgRequisitionCreateForm({ projectId, requisitionId = "" }) {
           ...form.form5,
           marketPrice: form.form5.marketPrice || formatMoneyAmount(footerTotal) || "",
           estimatedTotalCost: formatMoneyAmount(footerTotal) || "",
+          fundingItem: fundingItemDisplay,
+          balanceRemaining: balanceRemainingDisplay,
           memberName: form.form5.memberName || resolvedMemberName || "",
         },
       };
@@ -841,15 +917,7 @@ export function OrgRequisitionCreateForm({ projectId, requisitionId = "" }) {
           select
           label="Procurement plan"
           value={form.procurementPlanId}
-          onChange={(e) => {
-            setForm((f) => ({
-              ...f,
-              procurementPlanId: e.target.value,
-              procurementPlanItemId: "",
-            }));
-            clearFieldError("procurementPlanId");
-            clearFieldError("procurementPlanItemId");
-          }}
+          onChange={(e) => applyPlan(e.target.value)}
           fullWidth
           error={Boolean(fieldErrors.procurementPlanId) || !hasApprovedPlans}
           helperText={
@@ -891,7 +959,7 @@ export function OrgRequisitionCreateForm({ projectId, requisitionId = "" }) {
             fieldErrors.procurementPlanItemId ||
             (selectedPlan && !hasPlanItems
               ? "No approved procurement plan items are available on this plan."
-              : "Selecting a plan item prefills qty and unit price when the first line is empty.")
+              : "Fills in details from the plan")
           }
         >
           {planItems.map((i) => (
@@ -910,10 +978,7 @@ export function OrgRequisitionCreateForm({ projectId, requisitionId = "" }) {
           select
           label="Budget line"
           value={form.budgetLineId}
-          onChange={(e) => {
-            setForm((f) => ({ ...f, budgetLineId: e.target.value }));
-            clearFieldError("budgetLineId");
-          }}
+          onChange={(e) => applyBudgetLine(e.target.value)}
           fullWidth
           error={Boolean(fieldErrors.budgetLineId) || !hasBudgetLines}
           sx={themedTextFieldSx}
@@ -1145,14 +1210,9 @@ export function OrgRequisitionCreateForm({ projectId, requisitionId = "" }) {
           />
         </div>
 
-        <div className="sm:col-span-2 mt-2 space-y-1">
+        <div className="sm:col-span-2 mt-2">
           <Typography variant="subtitle2" sx={{ fontWeight: 700 }}>
             Form 5 Part I — additional PPDA fields
-          </Typography>
-          <Typography variant="caption" sx={adminMutedTextSx}>
-            Market price mirrors the estimated total from line items. Member defaults to the
-            signed-in User Department Officer. HOD and Accounting Officer confirmations are recorded
-            when they approve the workflow task — not typed here.
           </Typography>
         </div>
         <TextField
@@ -1172,8 +1232,10 @@ export function OrgRequisitionCreateForm({ projectId, requisitionId = "" }) {
           fullWidth
           helperText={
             marketPriceManual
-              ? "Edited manually — clear the field to resume auto-fill from estimated total."
-              : "Auto-filled from estimated total (sum of line totals)."
+              ? "Edited · clear to reset"
+              : planItemCost
+                ? "From plan · editable"
+                : "From line items · editable"
           }
           sx={themedTextFieldSx}
         />
@@ -1198,11 +1260,11 @@ export function OrgRequisitionCreateForm({ projectId, requisitionId = "" }) {
         </TextField>
         <TextField
           label="Vote / head no."
-          value={form.form5.voteHeadNo}
-          onChange={(e) =>
-            setForm((f) => ({ ...f, form5: { ...f.form5, voteHeadNo: e.target.value } }))
-          }
+          value={orgVoteCode}
+          placeholder="Not set"
           fullWidth
+          helperText="From organisation settings"
+          slotProps={{ input: { readOnly: true }, inputLabel: { shrink: true } }}
           sx={themedTextFieldSx}
         />
         <TextField
@@ -1225,20 +1287,25 @@ export function OrgRequisitionCreateForm({ projectId, requisitionId = "" }) {
         />
         <TextField
           label="Funding item"
-          value={form.form5.fundingItem}
-          onChange={(e) =>
-            setForm((f) => ({ ...f, form5: { ...f.form5, fundingItem: e.target.value } }))
-          }
+          value={fundingItemDisplay}
+          placeholder="Choose a budget line"
           fullWidth
+          helperText="From the budget line"
+          slotProps={{ input: { readOnly: true }, inputLabel: { shrink: true } }}
           sx={themedTextFieldSx}
         />
         <TextField
           label="Balance remaining"
-          value={form.form5.balanceRemaining}
-          onChange={(e) =>
-            setForm((f) => ({ ...f, form5: { ...f.form5, balanceRemaining: e.target.value } }))
-          }
+          value={balanceRemainingDisplay}
+          placeholder="Choose a budget line"
           fullWidth
+          error={typeof balanceAfterRequest === "number" && balanceAfterRequest < 0}
+          helperText={
+            typeof balanceAfterRequest === "number" && balanceAfterRequest < 0
+              ? "Exceeds funds available on this budget line"
+              : "Available on budget line minus this request"
+          }
+          slotProps={{ input: { readOnly: true }, inputLabel: { shrink: true } }}
           sx={themedTextFieldSx}
         />
         <TextField

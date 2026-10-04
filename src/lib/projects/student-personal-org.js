@@ -1,5 +1,6 @@
 import { ProjectPurpose, ProjectStatus, ProjectVisibility, Role } from "@prisma/client";
 import { formatUserDisplayName } from "@/lib/user-display";
+import { APP_BRAND_LABEL } from "@/lib/appConfig";
 import { generateUniqueProjectCode } from "@/lib/projects/project-identity";
 import { ensureProjectOwnerOrgUser } from "@/lib/projects/org-users";
 import { buildOrgDisplayName } from "@/lib/validation/org-display-name";
@@ -134,8 +135,8 @@ export async function ensureStudentPersonalOrg(prisma, userId) {
       name: labels.name,
       organizationName: labels.organizationName,
       description: studentNumber
-        ? `Simulated organisation for student ${studentNumber}.`
-        : "Simulated organisation for procurement training.",
+        ? `${APP_BRAND_LABEL} organisation for student ${studentNumber}.`
+        : `${APP_BRAND_LABEL} organisation.`,
       purpose: ProjectPurpose.PRACTICE,
       status: ProjectStatus.IN_PROGRESS,
       visibility: ProjectVisibility.PRIVATE,

@@ -19,8 +19,8 @@
 - **Provider portal:** same layout as the organisation side — **sidebar** on the left with **Opportunities, Orders, Invoices, Payments** and **Sign out** at the bottom (on a phone, open it with the ☰ menu button).
 
 **Shared password for simulated users and providers:** `password123`  
-**Org user logins:** auto-generated on **Org Admin → Users** (lowercase, includes project code, e.g. `amina.nalwoga.ab12c_org-xxxxxx@org.learn`). Copy from the user list after create — do not invent emails.  
-**Provider portal logins:** auto-generated when a provider is added (e.g. `pearl-notebooks-ltd.ab12_org-xxxxxx@provider.learn`). Copy from the provider's detail page (or Org Admin → **Providers (read-only)**). Providers sign in on the same `/login` page and land on the **Provider portal**.  
+**Org user logins:** auto-generated on **Org Admin → Users** as `firstname.lastname@<orgcode>.proclearn` (e.g. `amina.nalwoga@org-x7k2m9.proclearn`). No two users in one organisation may share the same first + last name ("User already exists"). Renaming a user changes their login.  
+**Provider portal logins:** auto-generated when a provider is added as `sales@<providername>.<orgcode>.proclearn.test` (e.g. `sales@pearlnotebooks.org-x7k2m9.proclearn.test`; "Ltd", "Limited" etc. are dropped). Provider names are unique per organisation. Copy from the provider's detail page (or Org Admin → **Providers (read-only)**). Providers sign in on the same `/login` page and land on the **Provider portal**.  
 Always **log out** of one persona before logging in as the next.
 
 ---
@@ -814,7 +814,7 @@ Approvals (6.2) → Joan recommends **MICRO** with justification *Emergency — 
 | MICRO refused on Form 5 Part II | The requisition is above UGX 10,000,000 — recommend QUOTATION or TENDER |
 | Evaluation / inspection blocked | Wrong seat or still in another committee mode |
 | Quotation invite rejected | Provider missing or inactive / suspended in the register |
-| Portal: "Invalid username or password" | Use the **portal login** from the provider detail page (ends `@provider.learn`), password `password123` |
+| Portal: "Invalid username or password" | Use the **portal login** from the provider detail page (starts `sales@`, ends `.test`), password `password123` |
 | Portal: account suspended or inactive | Joan / Michael reactivates the provider in the register |
 | Provider cannot submit / edit / withdraw | Closing date passed, or (RFQ) the provider was not invited |
 | "Open quotations / bids" refused | Closing date not reached yet — wait or set a shorter closing date next time |

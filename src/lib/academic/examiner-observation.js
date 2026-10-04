@@ -146,7 +146,6 @@ export async function getExaminerStudentObservation(studentUserId, opts = {}) {
           actor: {
             select: {
               firstName: true,
-              middleName: true,
               lastName: true,
               email: true,
               isProjectAdmin: true,
@@ -173,7 +172,6 @@ export async function getExaminerStudentObservation(studentUserId, opts = {}) {
           assignee: {
             select: {
               firstName: true,
-              middleName: true,
               lastName: true,
               email: true,
               projectOrgRole: { select: { name: true } },

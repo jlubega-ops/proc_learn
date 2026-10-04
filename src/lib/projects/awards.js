@@ -1,6 +1,8 @@
 import { OrgAwardStatus, OrgEvaluationReportStatus, OrgProcurementStatus } from "@prisma/client";
 import { writeAuditLog, AuditEvent } from "@/lib/audit-log";
 import { notifyOrgUsers, OrgNotificationType } from "@/lib/projects/org-notifications";
+import { notifyProvider } from "@/lib/projects/provider-notifications";
+import { formatMoneyUGX } from "@/lib/money";
 import { postQualificationRequired } from "@/lib/projects/post-qualification";
 import { serializeProviderSummary } from "@/lib/projects/providers";
 
@@ -184,6 +186,14 @@ export async function communicateAward(prisma, opts) {
     },
   });
 
+  await notifyProvider(prisma, {
+    projectId: opts.projectId,
+    providerId: row.supplierId,
+    procurementId: row.procurementId,
+    title: "Contract awarded to you",
+    body: `You have been awarded this procurement at ${formatMoneyUGX(row.awardedAmount?.toString?.())}.`,
+  });
+
   return { ok: true, award: serializeAward(updated) };
 }
 
@@ -279,7 +289,7 @@ export async function cancelAward(prisma, opts) {
     return {
       ok: false,
       error:
-        "Cannot cancel this award because an LPO or contract has already been created. Cancel or reverse those documents first where the simulation allows.",
+        "Cannot cancel this award because an LPO or contract has already been created. Cancel or reverse those documents first.",
       status: 400,
       code: "ORDER_EXISTS",
     };
@@ -315,6 +325,18 @@ export async function cancelAward(prisma, opts) {
       actorRoleName: opts.actorRoleName,
     },
   });
+
+  if (row.status === OrgAwardStatus.COMMUNICATED || row.status === OrgAwardStatus.ACCEPTED) {
+    await notifyProvider(prisma, {
+      projectId: opts.projectId,
+      providerId: row.supplierId,
+      linkUrl: "/provider-portal",
+      relatedEntityType: "procurement",
+      relatedEntityId: row.procurementId,
+      title: "Award cancelled",
+      body: `Reason: ${reason}`,
+    });
+  }
 
   return { ok: true, award: serializeAward(updated) };
 }

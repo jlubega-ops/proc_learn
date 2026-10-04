@@ -39,25 +39,6 @@ import {
 import { clickableTableRowProps, stopRowClick } from "@/lib/projects/clickable-table-row";
 import { formatMoneyUGX } from "@/lib/money";
 import { PROCUREMENT_STAGE_PAGES } from "@/lib/projects/procurement-stage-pages";
-
-const SUCCESS_STATUSES = new Set(["ACCEPTED", "PAID", "VERIFIED", "APPROVED_FOR_PAYMENT", "CLOSED", "COMPLETE", "ACTIVE", "SIGNED"]);
-const ERROR_STATUSES = new Set(["REJECTED", "CANCELLED", "DISPUTED"]);
-const PENDING_STATUSES = new Set(["DRAFT", "PENDING", "UNDER_REVIEW", "RECEIVED", "PARTIAL"]);
-
-/** @param {string} status */
-function statusChipColor(status) {
-  if (SUCCESS_STATUSES.has(status)) return "success";
-  if (ERROR_STATUSES.has(status)) return "error";
-  if (PENDING_STATUSES.has(status)) return "warning";
-  return "info";
-}
-
-/** @param {string} status */
-function humanStatus(status) {
-  const s = String(status || "").replace(/_/g, " ").toLowerCase();
-  return s ? s[0].toUpperCase() + s.slice(1) : "—";
-}
-
 /** @param {string | null | undefined} value */
 function shortDate(value) {
   if (!value) return null;
@@ -80,15 +61,13 @@ function TurnChip({ turn, message }) {
 }
 
 /**
- * Paginated Procurements sub-page (review tasks, awards, contracts/LPO, deliveries,
- * invoices, payments, closures).
+ * Paginated Procurements sub-page: one section with its section-only status.
  * @param {{ projectId: string; stage: keyof typeof PROCUREMENT_STAGE_PAGES }} p
  */
 export function OrgProcurementStageList({ projectId, stage }) {
   const router = useRouter();
   const { showToast } = useToast();
   const config = PROCUREMENT_STAGE_PAGES[stage];
-  const isReview = stage === "review-tasks";
 
   const [loading, setLoading] = useState(true);
   const [refetching, setRefetching] = useState(false);
@@ -98,7 +77,7 @@ export function OrgProcurementStageList({ projectId, stage }) {
   const [access, setAccess] = useState(/** @type {any} */ (null));
   const [page, setPage] = useState(0);
   const [rowsPerPage, setRowsPerPage] = useState(10);
-  const [filter, setFilter] = useState(isReview ? "mine" : "all");
+  const [filter, setFilter] = useState("all");
   const [searchInput, setSearchInput] = useState("");
   const [search, setSearch] = useState("");
 
@@ -174,18 +153,12 @@ export function OrgProcurementStageList({ projectId, stage }) {
     );
   }
 
-  const filterOptions = isReview
-    ? [
-        { value: "mine", label: "Waiting for me" },
-        { value: "pending", label: "All in progress" },
-        { value: "all", label: "All procurements" },
-      ]
-    : [
-        { value: "all", label: "All procurements" },
-        { value: "recorded", label: config.recordedLabel },
-        { value: "pending", label: config.pendingLabel },
-        { value: "mine", label: "Waiting for me" },
-      ];
+  const filterOptions = [
+    { value: "all", label: "All procurements" },
+    { value: "recorded", label: config.recordedLabel },
+    { value: "pending", label: config.pendingLabel },
+    { value: "mine", label: "Waiting for me" },
+  ];
 
   return (
     <div className="space-y-3">
@@ -245,9 +218,8 @@ export function OrgProcurementStageList({ projectId, stage }) {
             <TableHead>
               <TableRow>
                 <TableCell>Procurement</TableCell>
-                {isReview ? null : <TableCell>{config.label}</TableCell>}
-                {isReview ? null : <TableCell>Status</TableCell>}
-                <TableCell>Workflow stage</TableCell>
+                <TableCell>Record</TableCell>
+                <TableCell>Status</TableCell>
                 <TableCell>Your part</TableCell>
                 <TableCell align="right">Actions</TableCell>
               </TableRow>
@@ -255,7 +227,7 @@ export function OrgProcurementStageList({ projectId, stage }) {
             <TableBody>
               {rows.length === 0 ? (
                 <TableRow>
-                  <TableCell colSpan={isReview ? 4 : 6}>
+                  <TableCell colSpan={5}>
                     <Typography sx={adminMutedTextSx}>
                       {filter === "mine"
                         ? "Nothing is waiting for you here right now."
@@ -265,9 +237,9 @@ export function OrgProcurementStageList({ projectId, stage }) {
                 </TableRow>
               ) : (
                 rows.map((r) => {
-                  const href = `/projects/${projectId}/procurements/${r.id}`;
-                  const wf = r.workflow;
+                  const href = `/projects/${projectId}/procurements/${stage}/${r.id}`;
                   const rec = r.record;
+                  const status = r.sectionStatus;
                   return (
                     <TableRow key={r.id} {...clickableTableRowProps({ href, router })}>
                       <TableCell sx={{ minWidth: 200 }}>
@@ -278,8 +250,7 @@ export function OrgProcurementStageList({ projectId, stage }) {
                           {r.department ? <span className="text-xs opacity-70">{r.department}</span> : null}
                         </div>
                       </TableCell>
-                      {isReview ? null : (
-                        <TableCell sx={{ minWidth: 180 }}>
+                      <TableCell sx={{ minWidth: 180 }}>
                           {rec ? (
                             <>
                               {rec.kind ? <div className="text-xs font-semibold">{rec.kind}</div> : null}
@@ -294,43 +265,22 @@ export function OrgProcurementStageList({ projectId, stage }) {
                             <span className="text-xs opacity-70">Nothing recorded yet</span>
                           )}
                         </TableCell>
-                      )}
-                      {isReview ? null : (
-                        <TableCell>
-                          {rec ? (
-                            <>
-                              <Chip size="small" color={statusChipColor(rec.status)} label={humanStatus(rec.status)} />
-                              {rec.secondaryStatus ? (
-                                <div className="mt-1 max-w-48 truncate text-xs opacity-80" title={rec.secondaryStatus}>
-                                  {rec.secondaryStatus}
-                                </div>
-                              ) : null}
-                            </>
-                          ) : (
-                            <Chip size="small" color="warning" variant="outlined" label="Not started" />
-                          )}
-                        </TableCell>
-                      )}
-                      <TableCell sx={{ minWidth: 220 }}>
-                        {!wf ? (
-                          <span className="text-xs opacity-70">No workflow started</span>
-                        ) : wf.status === "COMPLETED" ? (
-                          <span className="text-sm">All {wf.totalSteps} steps complete</span>
-                        ) : (
-                          <>
-                            <div className="text-sm font-semibold">
-                              Step {wf.currentStepNumber ?? "—"} of {wf.totalSteps}
-                              {wf.currentStepLabel ? `: ${wf.currentStepLabel}` : ""}
+                        <TableCell sx={{ minWidth: 180 }}>
+                          {status ? (
+                            <Chip
+                              size="small"
+                              color={status.color}
+                              variant={status.outlined ? "outlined" : "filled"}
+                              label={status.label}
+                              sx={{ height: "auto", "& .MuiChip-label": { whiteSpace: "normal", py: 0.25 } }}
+                            />
+                          ) : null}
+                          {rec?.secondaryStatus ? (
+                            <div className="mt-1 max-w-48 truncate text-xs opacity-80" title={rec.secondaryStatus}>
+                              {rec.secondaryStatus}
                             </div>
-                            {wf.waitingOnRole ? (
-                              <div className="text-xs opacity-80">
-                                Pending {wf.waitingOnRole}
-                                {wf.waitingOnPeople?.length ? ` (${wf.waitingOnPeople.join(", ")})` : ""}
-                              </div>
-                            ) : null}
-                          </>
-                        )}
-                      </TableCell>
+                          ) : null}
+                        </TableCell>
                       <TableCell>
                         <TurnChip turn={r.turn} message={r.turnMessage} />
                       </TableCell>
@@ -340,7 +290,7 @@ export function OrgProcurementStageList({ projectId, stage }) {
                         onClick={stopRowClick}
                         onKeyDown={stopRowClick}
                       >
-                        <Tooltip title="Open procurement">
+                        <Tooltip title={`Open ${config.label.toLowerCase()}`}>
                           <IconButton
                             component={Link}
                             href={href}

@@ -45,18 +45,23 @@ export async function GET(_request, context) {
   }
   Object.assign(where, orgOpsSlateListWhere(await resolveCurrentOrgSlateId(prisma, projectId)));
 
-  const rows = await prisma.projectOrgProcurement.findMany({
-    where,
-    orderBy: [{ createdAt: "desc" }],
-    take: 100,
-    include: procurementInclude,
-  });
-
-  const grouped = await prisma.projectOrgProcurement.groupBy({
-    by: ["status"],
-    where,
-    _count: { _all: true },
-  });
+  const [rows, grouped] = await Promise.all([
+    prisma.projectOrgProcurement.findMany({
+      where,
+      orderBy: [{ createdAt: "desc" }],
+      take: 100,
+      include: {
+        financialYear: procurementInclude.financialYear,
+        department: procurementInclude.department,
+        requisition: { select: { id: true, title: true, status: true, requisitionReference: true, estimatedTotalValue: true } },
+      },
+    }),
+    prisma.projectOrgProcurement.groupBy({
+      by: ["status"],
+      where,
+      _count: { _all: true },
+    }),
+  ]);
   /** @type {Record<string, number>} */
   const stats = { total: 0 };
   for (const g of grouped) {

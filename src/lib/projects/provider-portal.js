@@ -9,21 +9,23 @@ import {
 import { getAppSession } from "@/lib/auth/session";
 import { sessionIdleMs, touchSessionActivity } from "@/lib/auth/session-idle";
 import { writeAuditLog, AuditEvent } from "@/lib/audit-log";
-import { parseOrgLoginIdentifier } from "@/lib/projects/org-login-identity";
+import {
+  isProviderPortalIdentifier,
+  parseOrgLoginIdentifier,
+} from "@/lib/projects/org-login-identity";
 import { verifyOrgUserPassword } from "@/lib/projects/org-user-password";
 import { notifyOrgUsers, OrgNotificationType } from "@/lib/projects/org-notifications";
-import { PROVIDER_PORTAL_EMAIL_DOMAIN } from "@/lib/projects/providers";
-import { providerTerm } from "@/lib/projects/provider-terms";
+import { providerCategoryLabel, providerTerm } from "@/lib/projects/provider-terms";
+import {
+  PROVIDER_DOCUMENTS,
+  evaluateProviderQualification,
+  normalizeProviderCompliance,
+} from "@/lib/projects/provider-compliance";
 import { serializeInvoice, invoiceInclude } from "@/lib/projects/invoices";
 
 const ACCEPTING_STATUSES = [OrgSolicitationStatus.ISSUED, OrgSolicitationStatus.ADVERTISED, OrgSolicitationStatus.OPEN];
 
-/** @param {unknown} raw */
-export function isProviderPortalIdentifier(raw) {
-  const parsed = parseOrgLoginIdentifier(raw);
-  if (!parsed) return false;
-  return parsed.baseEmail.endsWith(`@${PROVIDER_PORTAL_EMAIL_DOMAIN}`);
-}
+export { isProviderPortalIdentifier };
 
 /**
  * @param {import("@prisma/client").PrismaClient} prisma
@@ -31,7 +33,7 @@ export function isProviderPortalIdentifier(raw) {
  */
 export async function authenticateProviderPortalLogin(prisma, { identifier, password }) {
   const parsed = parseOrgLoginIdentifier(identifier);
-  if (!parsed) return { ok: false, code: "invalid_format" };
+  if (parsed?.kind !== "provider") return { ok: false, code: "invalid_format" };
 
   const project = await prisma.project.findFirst({
     where: { projectCode: parsed.projectCode, isPublished: true },
@@ -40,7 +42,7 @@ export async function authenticateProviderPortalLogin(prisma, { identifier, pass
   if (!project) return { ok: false, code: "project_unavailable" };
 
   const provider = await prisma.projectOrgProvider.findFirst({
-    where: { projectId: project.id, portalEmail: parsed.baseEmail.toLowerCase() },
+    where: { projectId: project.id, portalEmail: parsed.email },
   });
   if (!provider || !provider.portalPasswordHash) return { ok: false, code: "invalid_credentials" };
 
@@ -124,6 +126,58 @@ export function serializePortalProvider(provider) {
     providerWord: providerTerm(categories[0] || null),
     portalLastLoginAt: provider.portalLastLoginAt || null,
     organisation: provider.project ? { id: provider.project.id, name: provider.project.name } : null,
+  };
+}
+
+const ELIGIBILITY_METHODS = [
+  { method: "MICRO", label: "Micro procurement" },
+  { method: "QUOTATION", label: "Quotation (RFQ)" },
+  { method: "TENDER", label: "Open tender" },
+];
+
+/**
+ * What the organisation holds about the provider and how it qualifies per method.
+ * @param {any} provider
+ */
+export function serializePortalProfile(provider) {
+  const compliance = normalizeProviderCompliance(provider.compliance);
+  return {
+    ...serializePortalProvider(provider),
+    phone: provider.phone || null,
+    registrationRef: provider.registrationRef || null,
+    tin: provider.tin || null,
+    linesOfBusiness: provider.linesOfBusiness || null,
+    status: provider.status,
+    statusReason: provider.statusReason || null,
+    ppdaSuspended: Boolean(provider.ppdaSuspended),
+    categoryLabels: (Array.isArray(provider.categories) ? provider.categories : []).map((c) =>
+      providerCategoryLabel(c),
+    ),
+    documents: PROVIDER_DOCUMENTS.map((d) => ({
+      key: d.key,
+      label: d.label,
+      numberLabel: d.numberLabel,
+      hasExpiry: d.hasExpiry,
+      held: Boolean(compliance[d.key]?.held),
+      number: compliance[d.key]?.number || null,
+      expiresAt: compliance[d.key]?.expiresAt || null,
+    })),
+    eligibility: ELIGIBILITY_METHODS.map((m) => {
+      const q = evaluateProviderQualification(provider, { method: m.method });
+      return {
+        method: m.method,
+        label: m.label,
+        qualifies: q.qualifies,
+        warningCount: q.warningCount,
+        checks: q.checks.map((c) => ({
+          key: c.key,
+          label: c.label,
+          passed: c.passed,
+          warning: c.warning,
+          reason: c.reason,
+        })),
+      };
+    }),
   };
 }
 
@@ -265,7 +319,7 @@ export async function listPortalOrders(prisma, opts) {
   const procSelect = { select: { id: true, procurementNumber: true, title: true, status: true } };
   const [pis, lpos, contracts] = await Promise.all([
     prisma.projectOrgPurchaseInstruction.findMany({
-      where: { projectId: opts.projectId, supplierId: opts.providerId, status: "ISSUED" },
+      where: { projectId: opts.projectId, supplierId: opts.providerId, status: { in: ["ISSUED", "ACCEPTED"] } },
       include: { procurement: procSelect },
     }),
     prisma.projectOrgLpo.findMany({

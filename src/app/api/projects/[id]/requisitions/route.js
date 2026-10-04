@@ -8,12 +8,14 @@ import {
   serializeRequisition,
   submitRequisition,
   getRequesterRequisitionMutationFlags,
+  loadProjectVoteCode,
 } from "@/lib/projects/requisitions";
 import {
   orgOpsSlateListWhere,
   resolveCurrentOrgSlateId,
 } from "@/lib/academic/org-academic-slate";
 import { mapEntityWorkflowContexts } from "@/lib/projects/workflow-status-presentation";
+import { resolveDefaultDeliveryLocation } from "@/lib/projects/delivery-address";
 
 export const runtime = "nodejs";
 
@@ -75,6 +77,14 @@ export async function GET(request, context) {
     });
     actorDepartment = dept;
   }
+  const defaultDeliveryLocation =
+    auth.type === "org"
+      ? await resolveDefaultDeliveryLocation(prisma, {
+          projectId,
+          departmentId: actorDepartment?.id || null,
+          departmentName: actorDepartment?.name || null,
+        })
+      : null;
 
   const mutationFlags =
     auth.type === "org"
@@ -116,6 +126,8 @@ export async function GET(request, context) {
         ? `${auth.orgUser.firstName || ""} ${auth.orgUser.lastName || ""}`.trim()
         : null,
     actorRoleName: auth.type === "org" ? auth.orgUser.projectOrgRole?.name || null : null,
+    defaultDeliveryLocation,
+    voteCode: auth.type === "org" ? await loadProjectVoteCode(prisma, projectId) : "",
   });
 }
 

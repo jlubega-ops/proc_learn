@@ -1,21 +1,23 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import Box from "@mui/material/Box";
 import Button from "@mui/material/Button";
 import CircularProgress from "@mui/material/CircularProgress";
-import IconButton from "@mui/material/IconButton";
 import Paper from "@mui/material/Paper";
 import TextField from "@mui/material/TextField";
-import Tooltip from "@mui/material/Tooltip";
 import Typography from "@mui/material/Typography";
 import AddRounded from "@mui/icons-material/AddRounded";
 import ArrowBackRounded from "@mui/icons-material/ArrowBackRounded";
-import DeleteOutlineRounded from "@mui/icons-material/DeleteOutlineRounded";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useToast } from "@/components/providers/toast-provider";
-import { OrgLineItemsTable } from "@/components/projects/org-line-items-table";
+import { OrgBudgetLinesEditor, budgetLineTotal } from "@/components/projects/org-budget-lines-editor";
+import {
+  DEFAULT_FUNDING_SOURCE,
+  DEFAULT_UNIT_OF_MEASURE,
+  validateLineText,
+} from "@/lib/projects/line-item-options";
 import {
   adminCenteredLoadingBoxSx,
   adminLoadingSpinnerSx,
@@ -28,7 +30,6 @@ import {
   computeLineTotal,
   formatMoneyAmount,
   parseMoneyInput,
-  toMoneyNumber,
   validatePositiveMoney,
   validatePositiveNumber,
 } from "@/lib/money";
@@ -40,12 +41,20 @@ function emptyLine() {
     category: "",
     description: "",
     quantity: "1",
-    unitOfMeasure: "Lot",
+    unitOfMeasure: DEFAULT_UNIT_OF_MEASURE,
     unitCost: "",
     approvedAmount: "",
-    fundingSource: "",
-    totalManual: false,
+    fundingSource: DEFAULT_FUNDING_SOURCE,
   };
+}
+
+/** @param {any} line */
+function withLineDefaults(line) {
+  const base = { ...emptyLine(), ...(line && typeof line === "object" ? line : {}) };
+  delete base.totalManual;
+  if (!String(base.unitOfMeasure || "").trim()) base.unitOfMeasure = DEFAULT_UNIT_OF_MEASURE;
+  if (!String(base.fundingSource || "").trim()) base.fundingSource = DEFAULT_FUNDING_SOURCE;
+  return base;
 }
 
 /**
@@ -92,7 +101,7 @@ export function OrgBudgetCreateForm({ projectId, budgetId = "" }) {
           lines:
             Array.isArray(/** @type {any} */ (payload).lines) &&
             /** @type {any} */ (payload).lines.length
-              ? /** @type {any} */ (payload).lines
+              ? /** @type {any} */ (payload).lines.map(withLineDefaults)
               : prev.lines,
         }));
       }
@@ -185,8 +194,7 @@ export function OrgBudgetCreateForm({ projectId, budgetId = "" }) {
                     line.approvedAmount != null
                       ? formatMoneyAmount(line.approvedAmount) || String(line.approvedAmount)
                       : "",
-                  fundingSource: line.fundingSource || "",
-                  totalManual: true,
+                  fundingSource: line.fundingSource || DEFAULT_FUNDING_SOURCE,
                 }))
               : [emptyLine()],
         });
@@ -239,15 +247,8 @@ export function OrgBudgetCreateForm({ projectId, budgetId = "" }) {
         if (i !== idx) return line;
         const next = { ...line, ...patch };
         if ("unitCost" in patch || "quantity" in patch) {
-          if (!next.totalManual) {
-            const total = computeLineTotal(next.quantity, next.unitCost);
-            if (total !== null) {
-              next.approvedAmount = formatMoneyAmount(total);
-            }
-          }
-        }
-        if ("approvedAmount" in patch) {
-          next.totalManual = true;
+          const total = computeLineTotal(next.quantity, next.unitCost);
+          next.approvedAmount = total !== null ? formatMoneyAmount(total) : "";
         }
         return next;
       });
@@ -259,6 +260,7 @@ export function OrgBudgetCreateForm({ projectId, budgetId = "" }) {
         delete next[`lines.${idx}.${k}`];
         delete next[`lines.${idx}`];
       });
+      if ("unitCost" in patch || "quantity" in patch) delete next[`lines.${idx}.approvedAmount`];
       return next;
     });
   }
@@ -282,18 +284,15 @@ export function OrgBudgetCreateForm({ projectId, budgetId = "" }) {
       errors.financialYearId = fyEmptyMessage || "Choose a financial year.";
     }
     form.lines.forEach((line, idx) => {
-      if (!line.category.trim()) errors[`lines.${idx}.category`] = "Enter a category.";
-      if (!line.description.trim()) errors[`lines.${idx}.description`] = "Enter a description.";
+      const categoryErr = validateLineText(line.category, "Category");
+      if (categoryErr) errors[`lines.${idx}.category`] = categoryErr;
       const qtyErr = validatePositiveNumber(line.quantity, "Quantity");
       if (qtyErr) errors[`lines.${idx}.quantity`] = qtyErr;
-      if (!line.unitOfMeasure.trim()) errors[`lines.${idx}.unitOfMeasure`] = "Enter a unit.";
+      if (!line.unitOfMeasure.trim()) errors[`lines.${idx}.unitOfMeasure`] = "Choose a unit.";
       const costErr = validatePositiveMoney(line.unitCost, "Unit cost");
       if (costErr) errors[`lines.${idx}.unitCost`] = costErr;
-      const totalErr = validatePositiveMoney(line.approvedAmount, "Total");
-      if (totalErr) errors[`lines.${idx}.approvedAmount`] = totalErr;
-      if (!line.fundingSource.trim()) {
-        errors[`lines.${idx}.fundingSource`] = "Enter a funding source.";
-      }
+      const fundingErr = validateLineText(line.fundingSource, "Source of funding");
+      if (fundingErr) errors[`lines.${idx}.fundingSource`] = fundingErr;
     });
     return errors;
   }
@@ -311,15 +310,18 @@ export function OrgBudgetCreateForm({ projectId, budgetId = "" }) {
       const payload = {
         title: form.title.trim(),
         description: form.description.trim() || null,
-        lines: form.lines.map((line) => ({
-          category: line.category.trim(),
-          description: line.description.trim(),
-          quantity: parseMoneyInput(line.quantity),
-          unitOfMeasure: line.unitOfMeasure.trim(),
-          unitCost: parseMoneyInput(line.unitCost),
-          approvedAmount: parseMoneyInput(line.approvedAmount),
-          fundingSource: line.fundingSource.trim(),
-        })),
+        lines: form.lines.map((line) => {
+          const total = budgetLineTotal(line);
+          return {
+            category: line.category.trim(),
+            description: line.description.trim() || null,
+            quantity: parseMoneyInput(line.quantity),
+            unitOfMeasure: line.unitOfMeasure.trim(),
+            unitCost: parseMoneyInput(line.unitCost),
+            approvedAmount: total != null ? String(total) : "",
+            fundingSource: line.fundingSource.trim(),
+          };
+        }),
       };
       const res = isEdit
         ? await fetch(`/api/projects/${projectId}/budgets/${budgetId}`, {
@@ -364,20 +366,6 @@ export function OrgBudgetCreateForm({ projectId, budgetId = "" }) {
       setBusy(false);
     }
   }
-
-  const previewRows = useMemo(() => {
-    return form.lines.map((line, idx) => ({
-      id: idx,
-      category: line.category.trim() || `Line ${idx + 1}`,
-      quantity: toMoneyNumber(line.quantity),
-      unit: line.unitOfMeasure.trim() || "—",
-      unitCost: toMoneyNumber(line.unitCost),
-      total: toMoneyNumber(line.approvedAmount) ?? computeLineTotal(line.quantity, line.unitCost),
-      funding: line.fundingSource.trim() || "—",
-    }));
-  }, [form.lines]);
-
-  const footerTotal = previewRows.reduce((sum, row) => sum + (row.total || 0), 0);
 
   if (loading) {
     return (
@@ -510,145 +498,17 @@ export function OrgBudgetCreateForm({ projectId, budgetId = "" }) {
           sx={themedTextFieldSx}
         />
 
-        {form.lines.map((line, idx) => (
-          <div
-            key={idx}
-            className="sm:col-span-2 grid gap-2 rounded-lg border border-[color:var(--border-subtle)] p-3 sm:grid-cols-3"
-          >
-            <div className="sm:col-span-3 flex items-center justify-between gap-2">
-              <Typography variant="subtitle2" sx={{ fontWeight: 600 }}>
-                Budget line {idx + 1}
-              </Typography>
-              <Tooltip title="Remove line">
-                <span>
-                  <IconButton
-                    size="small"
-                    color="error"
-                    aria-label={`Remove budget line ${idx + 1}`}
-                    disabled={form.lines.length <= 1 || busy}
-                    onClick={() => removeLine(idx)}
-                  >
-                    <DeleteOutlineRounded fontSize="small" />
-                  </IconButton>
-                </span>
-              </Tooltip>
-            </div>
-            <TextField
-              label="Category"
-              value={line.category}
-              onChange={(e) => updateLine(idx, { category: e.target.value })}
-              fullWidth
-              className="sm:col-span-3"
-              error={Boolean(fieldErrors[`lines.${idx}.category`])}
-              helperText={fieldErrors[`lines.${idx}.category`] || undefined}
-              sx={themedTextFieldSx}
-              placeholder="Computer Equipment"
-            />
-            <TextField
-              label="Description"
-              value={line.description}
-              onChange={(e) => updateLine(idx, { description: e.target.value })}
-              fullWidth
-              multiline
-              minRows={2}
-              className="sm:col-span-3"
-              error={Boolean(fieldErrors[`lines.${idx}.description`])}
-              helperText={fieldErrors[`lines.${idx}.description`] || undefined}
-              sx={themedTextFieldSx}
-              placeholder="Computer equipment for ICT operations"
-            />
-            <TextField
-              label="Quantity"
-              value={line.quantity}
-              onChange={(e) => updateLine(idx, { quantity: e.target.value, totalManual: false })}
-              onBlur={(e) => {
-                const formatted = formatMoneyAmount(e.target.value);
-                if (formatted) updateLine(idx, { quantity: formatted, totalManual: false });
-              }}
-              fullWidth
-              error={Boolean(fieldErrors[`lines.${idx}.quantity`])}
-              helperText={fieldErrors[`lines.${idx}.quantity`] || undefined}
-              sx={themedTextFieldSx}
-            />
-            <TextField
-              label="Unit"
-              value={line.unitOfMeasure}
-              onChange={(e) => updateLine(idx, { unitOfMeasure: e.target.value })}
-              fullWidth
-              error={Boolean(fieldErrors[`lines.${idx}.unitOfMeasure`])}
-              helperText={fieldErrors[`lines.${idx}.unitOfMeasure`] || undefined}
-              sx={themedTextFieldSx}
-              placeholder="Lot"
-            />
-            <TextField
-              label="Unit cost (UGX)"
-              value={line.unitCost}
-              onChange={(e) => updateLine(idx, { unitCost: e.target.value, totalManual: false })}
-              onBlur={(e) => {
-                const formatted = formatMoneyAmount(e.target.value);
-                if (formatted) updateLine(idx, { unitCost: formatted, totalManual: false });
-              }}
-              fullWidth
-              error={Boolean(fieldErrors[`lines.${idx}.unitCost`])}
-              helperText={fieldErrors[`lines.${idx}.unitCost`] || undefined}
-              sx={themedTextFieldSx}
-              placeholder="100,000,000"
-            />
-            <TextField
-              label="Total (UGX)"
-              value={line.approvedAmount}
-              onChange={(e) => updateLine(idx, { approvedAmount: e.target.value })}
-              onBlur={(e) => {
-                const formatted = formatMoneyAmount(e.target.value);
-                if (formatted) updateLine(idx, { approvedAmount: formatted });
-              }}
-              fullWidth
-              error={Boolean(fieldErrors[`lines.${idx}.approvedAmount`])}
-              helperText={
-                fieldErrors[`lines.${idx}.approvedAmount`] ||
-                "Auto-computed from quantity × unit cost; you may edit"
-              }
-              sx={themedTextFieldSx}
-            />
-            <TextField
-              label="Funding source"
-              value={line.fundingSource}
-              onChange={(e) => updateLine(idx, { fundingSource: e.target.value })}
-              fullWidth
-              className="sm:col-span-2"
-              error={Boolean(fieldErrors[`lines.${idx}.fundingSource`])}
-              helperText={fieldErrors[`lines.${idx}.fundingSource`] || undefined}
-              sx={themedTextFieldSx}
-              placeholder="Institutional Budget"
-            />
-          </div>
-        ))}
-
-        <div className="sm:col-span-2 space-y-3">
-          <Button
-            type="button"
-            variant="outlined"
-            startIcon={<AddRounded />}
-            onClick={() => setForm((f) => ({ ...f, lines: [...f.lines, emptyLine()] }))}
-          >
-            Add line
-          </Button>
-
-          <OrgLineItemsTable
-            title="Line items computation"
-            columns={[
-              { id: "category", label: "Category" },
-              { id: "quantity", label: "Qty", align: "right", money: true },
-              { id: "unit", label: "Unit" },
-              { id: "unitCost", label: "Unit cost", align: "right", money: true },
-              { id: "total", label: "Total", align: "right", money: true },
-              { id: "funding", label: "Funding" },
-            ]}
-            rows={previewRows}
-            getRowKey={(row) => row.id}
-            footerLabel="Grand total"
-            footerTotal={footerTotal}
-            emptyMessage="Add budget lines to see totals."
+        <div className="sm:col-span-2">
+          <Typography variant="subtitle2" sx={{ fontWeight: 600, mb: 1 }}>
+            Budget lines
+          </Typography>
+          <OrgBudgetLinesEditor
+            lines={form.lines}
+            errors={fieldErrors}
+            disabled={busy}
+            onChange={updateLine}
+            onAdd={() => setForm((f) => ({ ...f, lines: [...f.lines, emptyLine()] }))}
+            onRemove={removeLine}
           />
         </div>
 
@@ -666,3 +526,4 @@ export function OrgBudgetCreateForm({ projectId, budgetId = "" }) {
     </Paper>
   );
 }
+

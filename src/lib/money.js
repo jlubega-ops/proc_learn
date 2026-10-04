@@ -97,6 +97,21 @@ export function validatePositiveNumber(value, label = "Quantity") {
 }
 
 /**
+ * Keep only digits, commas and a single decimal point while typing.
+ * @param {string} value
+ * @param {{ maxFractionDigits?: number }} [opts]
+ */
+export function sanitizeNumericInput(value, opts = {}) {
+  const maxFractionDigits = opts.maxFractionDigits ?? 2;
+  const cleaned = String(value ?? "").replace(/[^\d.,]/g, "");
+  const dot = cleaned.indexOf(".");
+  if (dot === -1) return cleaned;
+  const whole = cleaned.slice(0, dot);
+  const fraction = cleaned.slice(dot + 1).replace(/[.,]/g, "");
+  return maxFractionDigits > 0 ? `${whole}.${fraction.slice(0, maxFractionDigits)}` : whole;
+}
+
+/**
  * Line total from qty × unit price (comma-safe).
  * @param {string | number} quantity
  * @param {string | number} unitPrice

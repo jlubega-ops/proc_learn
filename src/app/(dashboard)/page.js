@@ -13,7 +13,7 @@ import {
 import { prisma } from "@/lib/prisma";
 
 export const metadata = {
-  title: "Home",
+  title: "Dashboard",
   description: `Dashboard home for ${APP_NAME}.`,
 };
 
@@ -45,7 +45,7 @@ export default async function DashboardHomePage() {
           return (
             <StudentDashboardHome
               user={user}
-              personalOrgName={payload.personalOrgName || null}
+              personalOrgProjectId={payload.personalOrgProjectId || null}
             />
           );
         }

@@ -6,8 +6,26 @@ import {
   BRAND_YELLOW,
   BRAND_YELLOW_DARK_MODE,
   BRAND_YELLOW_ON_LIGHT,
+  BRAND_YELLOW_TEXT_ON_LIGHT,
   SEMANTIC,
 } from "@/lib/brand-colors";
+
+const yellowTextOnLight = {
+  color: BRAND_YELLOW_TEXT_ON_LIGHT,
+  "&:hover": {
+    backgroundColor: "color-mix(in oklab, #fff200 22%, transparent)",
+  },
+};
+
+const yellowOutlinedOnLight = {
+  ...yellowTextOnLight,
+  borderColor: BRAND_YELLOW_ON_LIGHT,
+  backgroundColor: "color-mix(in oklab, #fff200 10%, transparent)",
+  "&:hover": {
+    borderColor: BRAND_YELLOW_TEXT_ON_LIGHT,
+    backgroundColor: "color-mix(in oklab, #fff200 28%, transparent)",
+  },
+};
 
 /**
  * @param {"light" | "dark"} mode
@@ -88,15 +106,39 @@ export function createProcLearnMuiTheme(mode) {
       },
       MuiButton: {
         styleOverrides: {
-          root: { textTransform: "none", fontWeight: 600 },
+          root: {
+            textTransform: "none",
+            fontWeight: 600,
+            ...(isDark
+              ? {}
+              : {
+                  "&.MuiButton-outlined.MuiButton-colorWarning:not(.Mui-disabled), &.MuiButton-outlined.MuiButton-colorSecondary:not(.Mui-disabled)":
+                    yellowOutlinedOnLight,
+                  "&.MuiButton-text.MuiButton-colorWarning:not(.Mui-disabled), &.MuiButton-text.MuiButton-colorSecondary:not(.Mui-disabled)":
+                    yellowTextOnLight,
+                }),
+          },
           contained: {
             boxShadow: "none",
             "&:hover": { boxShadow: "none" },
           },
         },
       },
+      MuiSvgIcon: {
+        styleOverrides: {
+          root: isDark ? {} : { "&.MuiSvgIcon-colorWarning": { color: BRAND_YELLOW_ON_LIGHT } },
+        },
+      },
       MuiChip: {
         styleOverrides: {
+          root: isDark
+            ? {}
+            : {
+                "&.MuiChip-outlined.MuiChip-colorWarning": {
+                  borderColor: BRAND_YELLOW_ON_LIGHT,
+                  backgroundColor: "color-mix(in oklab, #fff200 18%, white)",
+                },
+              },
           colorWarning: {
             backgroundColor: isDark
               ? "color-mix(in oklab, #fff200 30%, #18181b)"

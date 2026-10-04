@@ -472,7 +472,7 @@ export function ExaminerStudentObservePanel({
           <section className={`${BRAND_CARD_CLASS} p-4 sm:p-5`}>
             <h2 className={BRAND_SECTION_TITLE_CLASS}>Players in this organisation</h2>
             <p className={`mt-1 ${BRAND_PAGE_LEAD_CLASS}`}>
-              Simulated organisation users the student created (roles such as Procurement Officer).
+              Organisation users the student created.
             </p>
             {!data.players?.length ? (
               <p className={`mt-2 ${BRAND_PAGE_LEAD_CLASS}`}>No organisation users yet.</p>

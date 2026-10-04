@@ -31,9 +31,22 @@ export const DOMAIN_TIMELINE_EVENT_LABELS = {
   PROJECT_ORG_LPO_ISSUED: "Issued LPO",
   PROJECT_ORG_LPO_ACCEPTED: "Recorded LPO acceptance",
   PROJECT_ORG_PURCHASE_INSTRUCTION_ISSUED: "Issued purchase instruction",
+  PROJECT_ORG_PURCHASE_INSTRUCTION_ACCEPTED: "Provider accepted purchase instruction",
+  PROJECT_ORG_PURCHASE_INSTRUCTION_DECLINED: "Provider declined purchase instruction",
+  PROJECT_ORG_DELIVERY_NOTE_SUBMITTED: "Provider sent delivery note",
   PROJECT_ORG_DELIVERY_RECORDED: "Recorded delivery",
   PROJECT_ORG_DELIVERY_INSPECTED: "Recorded inspection / acceptance",
   PROJECT_ORG_INVOICE_CREATED: "Received invoice",
+  PROJECT_ORG_INVOICE_RECEIVED: "Provider submitted invoice",
+  PROJECT_ORG_SOLICITATION_CREATED: "Prepared solicitation",
+  PROJECT_ORG_SOLICITATION_UPDATED: "Updated solicitation",
+  PROJECT_ORG_SOLICITATION_ISSUED: "Issued solicitation",
+  PROJECT_ORG_SOLICITATION_OPENED: "Opened offers",
+  PROJECT_ORG_SOLICITATION_CLOSED: "Closed solicitation",
+  PROJECT_ORG_OFFER_RECORDED: "Quotation / bid submitted",
+  PROJECT_ORG_OFFER_UPDATED: "Provider revised offer",
+  PROJECT_ORG_OFFER_WITHDRAWN: "Provider withdrew offer",
+  PROJECT_ORG_OFFER_AUTO_RESPONDED: "Auto-response providers submitted offers",
   PROJECT_ORG_INVOICE_CERTIFIED: "Certified invoice",
   PROJECT_ORG_INVOICE_VERIFIED: "Verified invoice",
   PROJECT_ORG_INVOICE_REJECTED: "Rejected invoice",
@@ -42,6 +55,11 @@ export const DOMAIN_TIMELINE_EVENT_LABELS = {
   PROJECT_ORG_PAYMENT_PAID: "Recorded payment as paid",
   PROJECT_ORG_PAYMENT_REJECTED: "Rejected payment",
   PROJECT_ORG_PROCUREMENT_CLOSED: "Closed procurement",
+  PROJECT_ORG_PROCUREMENT_CANCELLED: "Cancelled procurement",
+  PROJECT_ORG_PROCUREMENT_PROVIDER_CHANGED: "Changed approved provider",
+  PROJECT_ORG_RECOMMENDATION_SUBMITTED: "Recommended to Contracts Committee",
+  PROJECT_ORG_RECOMMENDATION_APPROVED: "Contracts Committee approved recommendation",
+  PROJECT_ORG_RECOMMENDATION_DECLINED: "Contracts Committee declined recommendation",
   PROJECT_ORG_EVALUATION_SUBMITTED: "Submitted evaluation report",
   PROJECT_ORG_EVALUATION_APPROVED: "Approved evaluation report",
   PROJECT_ORG_EVALUATION_RETURNED: "Returned evaluation report",
@@ -167,11 +185,33 @@ export function serializeTimelineAction(action, ctx = {}) {
   };
 }
 
+const PROVIDER_EVENTS = new Set([
+  "PROJECT_ORG_PURCHASE_INSTRUCTION_ACCEPTED",
+  "PROJECT_ORG_PURCHASE_INSTRUCTION_DECLINED",
+  "PROJECT_ORG_DELIVERY_NOTE_SUBMITTED",
+  "PROJECT_ORG_INVOICE_RECEIVED",
+  "PROJECT_ORG_OFFER_UPDATED",
+  "PROJECT_ORG_OFFER_WITHDRAWN",
+  "PROJECT_ORG_OFFER_AUTO_RESPONDED",
+]);
+
+/**
+ * True when the provider (portal user or auto-response) performed the action.
+ * @param {string} eventType
+ * @param {Record<string, any>} meta
+ */
+function isProviderActedEvent(eventType, meta) {
+  if (PROVIDER_EVENTS.has(eventType)) return true;
+  if (typeof meta.actorRoleName === "string" && /^provider/i.test(meta.actorRoleName)) return true;
+  return eventType === "PROJECT_ORG_OFFER_RECORDED" && ["PORTAL", "AUTO"].includes(String(meta.source || ""));
+}
+
 /**
  * @param {any} auditRow — AuditLog row
  * @param {{
  *   procurementNumber?: string | null;
  *   actorById?: Record<string, { id: string; displayName: string; departmentName?: string | null }>;
+ *   providerNameById?: Record<string, string>;
  * }} ctx
  */
 export function serializeDomainAuditTimelineEntry(auditRow, ctx = {}) {
@@ -179,11 +219,27 @@ export function serializeDomainAuditTimelineEntry(auditRow, ctx = {}) {
     auditRow?.meta && typeof auditRow.meta === "object" && !Array.isArray(auditRow.meta)
       ? auditRow.meta
       : {};
+  const eventType = String(auditRow?.eventType || "");
+  const supplierId = typeof meta.supplierId === "string" ? meta.supplierId : null;
+  const byProvider = isProviderActedEvent(eventType, meta);
   const actorOrgUserId =
     typeof meta.actorOrgUserId === "string" ? meta.actorOrgUserId : null;
   const actorRoleName =
-    typeof meta.actorRoleName === "string" ? meta.actorRoleName : null;
+    typeof meta.actorRoleName === "string" && meta.actorRoleName
+      ? meta.actorRoleName
+      : byProvider
+        ? "Provider"
+        : null;
   const orgActor = actorOrgUserId && ctx.actorById ? ctx.actorById[actorOrgUserId] : null;
+  const autoResponders = Array.isArray(meta.responded)
+    ? meta.responded.map((r) => (r && typeof r.name === "string" ? r.name : "")).filter(Boolean)
+    : [];
+  const providerName =
+    eventType === "PROJECT_ORG_OFFER_AUTO_RESPONDED"
+      ? "Auto-response providers"
+      : supplierId && ctx.providerNameById?.[supplierId]
+        ? `${ctx.providerNameById[supplierId]}${meta.source === "AUTO" ? " (auto-response)" : ""}`
+        : null;
   const amountRaw =
     meta.amount != null
       ? meta.amount
@@ -207,12 +263,16 @@ export function serializeDomainAuditTimelineEntry(auditRow, ctx = {}) {
         ? meta.comment
         : typeof meta.recommendation === "string"
           ? meta.recommendation
-          : null;
+          : autoResponders.length
+            ? autoResponders.join(", ")
+            : null;
 
   return {
     id: `audit:${auditRow.id}`,
     source: "domain",
     eventType: auditRow.eventType || null,
+    supplierId,
+    byProvider,
     decision: null,
     comment: remarks,
     actorRoleName,
@@ -231,7 +291,11 @@ export function serializeDomainAuditTimelineEntry(auditRow, ctx = {}) {
     actionText: humanizeDomainEvent(auditRow.eventType),
     actor: orgActor
       ? { id: orgActor.id, displayName: orgActor.displayName || "—" }
-      : null,
+      : typeof meta.actorName === "string" && meta.actorName.trim()
+        ? { id: null, displayName: meta.actorName.trim() }
+        : byProvider && providerName
+          ? { id: null, displayName: providerName }
+          : null,
     statusTransition:
       previousStatus || newStatus
         ? {
@@ -340,10 +404,30 @@ export async function loadProcurementDomainTimeline(prisma, opts) {
     };
   }
 
+  const supplierIds = [
+    ...new Set(
+      matched
+        .map((row) => {
+          const meta = row.meta && typeof row.meta === "object" ? row.meta : {};
+          return typeof meta.supplierId === "string" ? meta.supplierId : null;
+        })
+        .filter(Boolean),
+    ),
+  ];
+  const providers = supplierIds.length
+    ? await prisma.projectOrgProvider.findMany({
+        where: { id: { in: supplierIds }, projectId: opts.projectId },
+        select: { id: true, name: true },
+      })
+    : [];
+  /** @type {Record<string, string>} */
+  const providerNameById = Object.fromEntries(providers.map((p) => [p.id, p.name]));
+
   return matched.map((row) =>
     serializeDomainAuditTimelineEntry(row, {
       procurementNumber: opts.procurementNumber || null,
       actorById,
+      providerNameById,
     }),
   );
 }

@@ -69,6 +69,49 @@ body {
   );
 }
 
+.print-portal {
+  display: none;
+}
+
+.print-portal .print-section {
+  margin-top: -1px;
+}
+
+.print-portal .print-section + .print-section {
+  margin-top: 8px;
+}
+
+@media print {
+  @page {
+    size: A4;
+    margin: 12mm;
+  }
+
+  html:has(body > .print-portal),
+  body:has(> .print-portal) {
+    background: #fff !important;
+    color: #000 !important;
+  }
+
+  body:has(> .print-portal) > *:not(.print-portal) {
+    display: none !important;
+  }
+
+  .print-portal {
+    display: block !important;
+    -webkit-print-color-adjust: exact;
+    print-color-adjust: exact;
+  }
+
+  .print-portal thead {
+    display: table-header-group;
+  }
+
+  .print-portal .print-avoid-break {
+    break-inside: avoid;
+  }
+}
+
 /* MUI defaults use the light palette; align portaled surfaces + tables with `html.dark` tokens. */
 html.dark .MuiDialog-paper {
   background-color: var(--background);

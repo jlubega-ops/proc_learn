@@ -540,7 +540,6 @@ async function main() {
         lastName: "Hod",
         projectOrgRoleId: financeHodRole.id,
         departmentId: finance.id,
-        unitIdentifier: "FHOD1",
         passwordHash: mary.passwordHash,
       },
     });
@@ -790,7 +789,7 @@ async function main() {
   const adminNav = sidebarNavForContext("STUDENT", "/organisation", {});
   const adminLabels = flattenNavLabels(adminNav);
   assert(
-    ["Organisation", "Departments/Units", "Users", "Roles & Permissions", "Financial Years", "Planning Periods", "Committees", "Process Workflows"].every(
+    ["Organisation Structure", "Departments/Units", "Users", "Roles & Permissions", "Financial Years", "Planning Periods", "Committees", "Process Workflows"].every(
       (l) => adminLabels.includes(l),
     ),
     "Org Admin sidebar labels",
@@ -798,10 +797,10 @@ async function main() {
   );
 
   for (const [u, expected] of [
-    [john, ["Dashboard", "My Requisitions", "Procurement Plans", "My Tasks"]],
+    [john, ["Dashboard", "Requisitions", "Procurement Plans", "My Tasks"]],
     [peter, ["Dashboard", "Requisitions", "Procurement Plans", "Procurement Processes", "My Tasks"]],
-    [david, ["Dashboard", "Pending Tasks", "Plans", "Requisitions"]],
-    [sarah, ["Dashboard", "Approvals", "Procurement Overview", "Approval History"]],
+    [david, ["Dashboard", "My Tasks", "Procurement Plans", "Requisitions"]],
+    [sarah, ["Dashboard", "My Tasks", "Requisitions"]],
   ]) {
     const labels = sidebarNavForOrgMember(projectId, orgUserPermissions(u.projectOrgRole.name), {
       roleName: u.projectOrgRole.name,

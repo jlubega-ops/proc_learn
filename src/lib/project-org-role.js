@@ -12,7 +12,7 @@ export const CORE_ORG_ROLE_DEFINITIONS = [
   {
     name: PROJECT_ORG_ENTRY_ROLE_NAME,
     description:
-      "Simulated ICT/system administrator. Configures organisation structure, users, and workflows — no procurement approval authority by default.",
+      "ICT/system administrator. Configures organisation structure, users, and workflows — no procurement approval authority by default.",
     sortOrder: 0,
   },
   {
@@ -114,7 +114,7 @@ export async function ensureProjectOrgAdminRole(prisma) {
         data: {
           name: PROJECT_ORG_ENTRY_ROLE_NAME,
           description:
-            "Simulated ICT/system administrator. Configures organisation structure, users, and workflows — no procurement approval authority by default.",
+            "ICT/system administrator. Configures organisation structure, users, and workflows — no procurement approval authority by default.",
           sortOrder: 0,
           isActive: true,
         },
@@ -132,7 +132,7 @@ export async function ensureProjectOrgAdminRole(prisma) {
     create: {
       name: PROJECT_ORG_ENTRY_ROLE_NAME,
       description:
-        "Simulated ICT/system administrator. Configures organisation structure, users, and workflows — no procurement approval authority by default.",
+        "ICT/system administrator. Configures organisation structure, users, and workflows — no procurement approval authority by default.",
       sortOrder: 0,
       isActive: true,
     },

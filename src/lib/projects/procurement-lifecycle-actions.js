@@ -283,6 +283,7 @@ export async function actOnProcurementLifecycle(prisma, opts) {
         procurementId: opts.procurementId,
         deliveryDate: body.deliveryDate || null,
         remarks: typeof body.remarks === "string" ? body.remarks : null,
+        deliveryNoteId: typeof body.deliveryNoteId === "string" ? body.deliveryNoteId : null,
         lines: Array.isArray(body.lines) ? body.lines : [],
       });
 

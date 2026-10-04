@@ -21,6 +21,7 @@ import {
   withAcademicAuditMeta,
 } from "@/lib/academic/org-academic-slate";
 import { presentOrgWorkflowStatus } from "@/lib/projects/workflow-status-presentation";
+import { validateLineText } from "@/lib/projects/line-item-options";
 
 /**
  * @param {unknown} value
@@ -37,8 +38,24 @@ export const procurementPlanInclude = {
     select: { id: true, startDate: true, endDate: true, status: true, financialYearId: true },
   },
   department: { select: { id: true, name: true, code: true } },
-  createdBy: { select: { id: true, firstName: true, lastName: true, email: true } },
-  approvedBy: { select: { id: true, firstName: true, lastName: true, email: true } },
+  createdBy: {
+    select: {
+      id: true,
+      firstName: true,
+      lastName: true,
+      email: true,
+      projectOrgRole: { select: { name: true } },
+    },
+  },
+  approvedBy: {
+    select: {
+      id: true,
+      firstName: true,
+      lastName: true,
+      email: true,
+      projectOrgRole: { select: { name: true } },
+    },
+  },
   items: {
     orderBy: { itemNumber: "asc" },
     include: {
@@ -116,10 +133,16 @@ export function serializeProcurementPlan(row) {
     viewerHasPendingAction: Boolean(row.viewerHasPendingAction),
     lastDecision: row.lastDecision || null,
   });
+  const neutral = presentOrgWorkflowStatus({
+    status: row.status,
+    workflowStage: row.workflowStage || null,
+    lastDecision: row.lastDecision || null,
+  });
   return {
     id: row.id,
     title: row.title,
     planReference: row.planReference || null,
+    stageLabel: neutral.label,
     sheetType: row.sheetType || "GOODS_WORKS_NON_CONSULTANCY",
     isEmergency: Boolean(row.isEmergency),
     status: row.status,
@@ -135,6 +158,8 @@ export function serializeProcurementPlan(row) {
     planningPeriod: row.planningPeriod
       ? {
           id: row.planningPeriod.id,
+          startDate: row.planningPeriod.startDate,
+          endDate: row.planningPeriod.endDate,
           status: periodStatus,
           financialYearId: row.planningPeriod.financialYearId,
         }
@@ -152,6 +177,7 @@ export function serializeProcurementPlan(row) {
           firstName: row.createdBy.firstName,
           lastName: row.createdBy.lastName,
           displayName: `${row.createdBy.firstName || ""} ${row.createdBy.lastName || ""}`.trim(),
+          roleName: row.createdBy.projectOrgRole?.name || null,
         }
       : null,
     approvedBy: row.approvedBy
@@ -160,6 +186,7 @@ export function serializeProcurementPlan(row) {
           firstName: row.approvedBy.firstName,
           lastName: row.approvedBy.lastName,
           displayName: `${row.approvedBy.firstName || ""} ${row.approvedBy.lastName || ""}`.trim(),
+          roleName: row.approvedBy.projectOrgRole?.name || null,
         }
       : null,
     items,
@@ -249,6 +276,8 @@ async function validateAndBuildPlanItems(prisma, projectId, itemsIn, financialYe
     }
 
     const circularFields = normalizeCircularPlanItemFields(raw, sheetType);
+    const fundingErr = validateLineText(circularFields.sourceOfFunding, "Source of funding");
+    if (fundingErr) fieldErrors[`items.${idx}.sourceOfFunding`] = fundingErr;
 
     itemRows.push({
       itemNumber: idx + 1,

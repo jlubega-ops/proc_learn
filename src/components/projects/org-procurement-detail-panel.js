@@ -6,18 +6,26 @@ import Box from "@mui/material/Box";
 import Button from "@mui/material/Button";
 import Chip from "@mui/material/Chip";
 import CircularProgress from "@mui/material/CircularProgress";
+import Dialog from "@mui/material/Dialog";
+import DialogActions from "@mui/material/DialogActions";
+import DialogContent from "@mui/material/DialogContent";
+import DialogTitle from "@mui/material/DialogTitle";
 import MenuItem from "@mui/material/MenuItem";
+import WarningAmberRounded from "@mui/icons-material/WarningAmberRounded";
 import Paper from "@mui/material/Paper";
 import TextField from "@mui/material/TextField";
+import Tooltip from "@mui/material/Tooltip";
 import Typography from "@mui/material/Typography";
 import ArrowBackRounded from "@mui/icons-material/ArrowBackRounded";
 import DescriptionRounded from "@mui/icons-material/DescriptionRounded";
 import RefreshRounded from "@mui/icons-material/RefreshRounded";
-import { format, isValid, parseISO } from "date-fns";
 import { useToast } from "@/components/providers/toast-provider";
+import { WorkflowHistoryPanel } from "@/components/projects/workflow-history-panel";
+import { notifyOrgTasksChanged } from "@/hooks/use-pending-task-counts";
 import { OrgBidDocumentFillDialog } from "@/components/projects/org-bid-document-fill-dialog";
 import {
   adminCenteredLoadingBoxSx,
+  adminDialogPaperSx,
   adminLoadingSpinnerSx,
   adminMutedTextSx,
   adminOutlinedTableContainerSx,
@@ -42,24 +50,140 @@ import {
 } from "@/components/projects/org-procurement-supply-cards";
 import { OrgEvaluationPanel } from "@/components/projects/org-evaluation-panel";
 import Alert from "@mui/material/Alert";
+import { ProcurementSectionGate } from "@/components/projects/org-procurement-stage-tracker";
+import { RecordDetailsGrid } from "@/components/projects/record-details-grid";
+import { PrintButton, formatPrintDate } from "@/components/print/print-document";
+import { ProcurementPrint } from "@/components/projects/org-procurement-print";
 import {
-  OrgProcurementStageTracker,
-  ProcurementSectionGate,
-} from "@/components/projects/org-procurement-stage-tracker";
+  PurchaseInstructionPrint,
+  PurchaseInstructionView,
+} from "@/components/procurement/purchase-instruction-document";
+import {
+  OrgRecommendationDialog,
+  OrgRecommendationsCard,
+} from "@/components/projects/org-procurement-recommendation";
+import { isRecommendationDecisionTask } from "@/lib/projects/procurement-recommendation-options";
+import GavelRounded from "@mui/icons-material/GavelRounded";
+import {
+  DEFAULT_PI_PAYMENT_TERMS,
+  validatePurchaseInstructionTerms,
+} from "@/lib/validation/purchase-instruction";
+import { toDateInputValue } from "@/lib/financial-year-dates";
+import { ProcurementStageCards } from "@/components/projects/org-procurement-stage-cards";
+import {
+  isAcceptGoodsStep,
+  isReceiveGoodsStep,
+  procurementStageHref,
+  procurementStageLabel,
+  procurementTaskStage,
+} from "@/lib/projects/procurement-task-stage";
+import {
+  LIFECYCLE_ACTION_ROLES,
+  committeeMayPerformLifecycleAction,
+} from "@/lib/projects/procurement-lifecycle-roles";
+import AssignmentTurnedInRounded from "@mui/icons-material/AssignmentTurnedInRounded";
+import CheckCircleRounded from "@mui/icons-material/CheckCircleRounded";
+import FactCheckRounded from "@mui/icons-material/FactCheckRounded";
+
+const METHOD_LABELS = {
+  MICRO: "Micro Procurement",
+  QUOTATION: "Quotation",
+  TENDER: "Tender",
+};
+
+/** @param {string | null | undefined} value */
+function dateOrNull(value) {
+  return value ? formatPrintDate(value) : null;
+}
 
 /**
- * @param {{ projectId: string; procurementId: string }} p
+ * @param {any} row
+ * @param {string} projectId
+ * @param {{ number: string; value: number; supplierName: string | null; deliveryAddress: string | null } | null} activeOrder
  */
-export function OrgProcurementDetailPanel({ projectId, procurementId }) {
+function procurementDetailFields(row, projectId, activeOrder) {
+  const req = row.requisition;
+  const dept = row.department;
+  const approvedProviders = (req?.shortlist || []).map((s) => s?.name).filter(Boolean).join(", ");
+  const fields = [
+    {
+      label: "Requisition",
+      value: req ? (
+        <Link
+          href={`/projects/${projectId}/requisitions/${req.id}`}
+          className="cursor-pointer font-semibold text-primary underline"
+        >
+          {req.requisitionReference || req.title}
+        </Link>
+      ) : null,
+      wide: true,
+    },
+    { label: "Financial year", value: row.financialYear?.label },
+    { label: "Department", value: dept ? `${dept.name}${dept.code ? ` (${dept.code})` : ""}` : null },
+    { label: "Current stage", value: row.stageLabel || row.statusLabel || row.status, wide: true },
+    { label: "Category", value: req?.category },
+    { label: "Method approved on", value: dateOrNull(row.methodSelectedAt) },
+    {
+      label: row.procurementMethod === "MICRO" ? "Approved provider" : "Shortlisted providers",
+      value: approvedProviders || (row.procurementMethod === "TENDER" ? "Open advertisement" : null),
+      wide: true,
+    },
+    { label: "Plan item", value: row.procurementPlanItem?.title, wide: true },
+    {
+      label: "Budget line",
+      value: row.budgetLine ? [row.budgetLine.code, row.budgetLine.name].filter(Boolean).join(" — ") : null,
+      wide: true,
+    },
+    { label: "Estimated value", value: formatMoneyUGX(req?.estimatedTotalValue) },
+    { label: "Order / contract no.", value: activeOrder?.number },
+    { label: "Order value", value: activeOrder ? formatMoneyUGX(activeOrder.value) : null },
+    { label: "Provider on order", value: activeOrder?.supplierName },
+    {
+      label: "Delivery location",
+      value: activeOrder?.deliveryAddress || req?.deliveryLocation,
+      wide: true,
+    },
+    { label: "Procurement officer", value: row.officer?.displayName, wide: true },
+    { label: "Created on", value: dateOrNull(row.createdAt) },
+    { label: "Closed on", value: dateOrNull(row.closedAt) },
+  ];
+  if (row.closedBy?.displayName) {
+    fields.push({ label: "Closed by", value: row.closedBy.displayName, wide: true });
+  }
+  if (req?.needDescription) fields.push({ label: "Need", value: req.needDescription, full: true });
+  if (row.closureRemarks) fields.push({ label: "Closure remarks", value: row.closureRemarks, full: true });
+  return fields;
+}
+
+/**
+ * `stage` null renders the read-only overview; a stage key renders that stage's actions only.
+ * @param {{
+ *   projectId: string;
+ *   procurementId: string;
+ *   stage?: string | null;
+ *   backHref?: string | null;
+ *   backLabel?: string | null;
+ * }} p
+ */
+export function OrgProcurementDetailPanel({ projectId, procurementId, stage = null, backHref = null, backLabel = null }) {
   const { showToast } = useToast();
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
   const [row, setRow] = useState(/** @type {any} */ (null));
+  const [piDoc, setPiDoc] = useState(/** @type {any} */ (null));
+  const [printedBy, setPrintedBy] = useState(/** @type {any} */ (null));
+  const [organisation, setOrganisation] = useState(/** @type {any} */ (null));
+  const [stageSummaries, setStageSummaries] = useState(/** @type {any} */ (null));
+  const [piProviderFailures, setPiProviderFailures] = useState(
+    /** @type {{ id: string; name: string; reasons: string[] }[]} */ ([]),
+  );
+  const [piWarnOpen, setPiWarnOpen] = useState(false);
   const [pendingTask, setPendingTask] = useState(/** @type {any} */ (null));
   const [blockedTask, setBlockedTask] = useState(/** @type {any} */ (null));
-  const [workflowProgress, setWorkflowProgress] = useState(/** @type {any} */ (null));
   const [sections, setSections] = useState(/** @type {Record<string, any> | null} */ (null));
   const [viewerCommitteeType, setViewerCommitteeType] = useState(/** @type {string | null} */ (null));
+  const [viewerRole, setViewerRole] = useState(/** @type {string | null} */ (null));
+  const [flowStepLabel, setFlowStepLabel] = useState("");
   const [closure, setClosure] = useState(
     /** @type {{ ready?: boolean; blockers?: string[] } | null} */ (null),
   );
@@ -84,10 +208,22 @@ export function OrgProcurementDetailPanel({ projectId, procurementId }) {
   /** @type {[Record<string, { accepted: string; rejected: string }>, Function]} */
   const [inspectionLineEdits, setInspectionLineEdits] = useState({});
   const [inspectionCommitteeId, setInspectionCommitteeId] = useState("");
+  /** @type {[Record<string, string>, Function]} */
+  const [receiveErrors, setReceiveErrors] = useState({});
   const [committees, setCommittees] = useState(/** @type {any[]} */ ([]));
   const [rejectReason, setRejectReason] = useState("");
   const [cancelAwardReason, setCancelAwardReason] = useState("");
   const [bidDialogOpen, setBidDialogOpen] = useState(false);
+  const [recommendation, setRecommendation] = useState(/** @type {any} */ (null));
+  const [recommendations, setRecommendations] = useState(/** @type {any[]} */ ([]));
+  const [recommendOpen, setRecommendOpen] = useState(false);
+  const [piTerms, setPiTerms] = useState({
+    requiredDeliveryDate: "",
+    paymentTerms: DEFAULT_PI_PAYMENT_TERMS,
+    specialInstructions: "",
+  });
+  /** @type {[Record<string, string>, Function]} */
+  const [piErrors, setPiErrors] = useState({});
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -106,11 +242,22 @@ export function OrgProcurementDetailPanel({ projectId, procurementId }) {
         return;
       }
       setRow(data.procurement || null);
+      setPiDoc(data.purchaseInstructionDoc || null);
+      setPrintedBy(data.printedBy || null);
+      setOrganisation(data.organisation || null);
+      setStageSummaries(data.stageSummaries || null);
       setClosure(data.closure || null);
       setBlockedTask(data.blockedTask || null);
-      setWorkflowProgress(data.workflowProgress || null);
       setSections(data.viewer?.sections || null);
+      setRecommendation(data.recommendation || null);
+      setRecommendations(Array.isArray(data.recommendations) ? data.recommendations : []);
       setViewerCommitteeType(data.viewer?.committeeType || null);
+      setViewerRole(data.viewer?.roleName || null);
+      setFlowStepLabel(
+        String(data.workflowProgress?.status || "").toUpperCase() === "COMPLETED"
+          ? ""
+          : String(data.workflowProgress?.currentStep?.label || ""),
+      );
       const task = data.pendingTask || null;
       setPendingTask(task);
       const key = String(task?.actionKey || "").toUpperCase();
@@ -180,10 +327,35 @@ export function OrgProcurementDetailPanel({ projectId, procurementId }) {
     );
   const isApproveEvaluationTask =
     /^approve evaluation report|approve evaluation\/recommendation/i.test(taskTitle);
+  const isReceiveGoodsTask = Boolean(pendingTask) && isReceiveGoodsStep(taskTitle);
+  const isAcceptGoodsTask = Boolean(pendingTask) && isAcceptGoodsStep(taskTitle);
   const isPositiveDecision = isPositiveWorkflowDecision(decision);
   const stepActionLabel = workflowStepActionLabel(taskTitle);
   const usesProviderPicker = (isIssuePi || isRfqIssue) && isPositiveDecision;
   const reqCategory = row?.requisition?.category || null;
+  const approvedShortlistCount = (row?.requisition?.shortlist || []).length;
+  const piApprovedProvider = isIssuePi && isPositiveDecision && approvedShortlistCount > 0;
+  const taskStage = recommendation?.canDecide
+    ? "recommendation"
+    : pendingTask
+      ? procurementTaskStage(taskTitle)
+      : null;
+  const overview = !stage;
+  /** @param {string} key */
+  const on = (key) => stage === key;
+  const isSectionStage = Boolean(stage) && stage !== "task" && stage !== "recommendation";
+  const canViewStage = !isSectionStage || !sections || Boolean(sections[stage]?.view);
+  const printPi = Boolean(piDoc) && on("contract") && row?.procurementMethod === "MICRO" && canViewStage;
+  /** null = whole record (viewable stages only); undefined = nothing to print. */
+  const printStage = !isSectionStage ? null : canViewStage ? stage : undefined;
+  const showTaskCard =
+    !overview &&
+    (stage === "task" || stage === taskStage) &&
+    Boolean(pendingTask) &&
+    !isRecommendationDecisionTask(taskTitle) &&
+    !isReceiveGoodsTask &&
+    !isAcceptGoodsTask &&
+    !recommendation?.pending;
   const providerWord = providerTerm(reqCategory);
   const providerWordPlural = providerTerm(reqCategory, { plural: true });
 
@@ -221,6 +393,103 @@ export function OrgProcurementDetailPanel({ projectId, procurementId }) {
       return true;
     } finally {
       setBusy(false);
+    }
+  }
+
+  /**
+   * Complete the pending delivery step with its payload (receipt lines or inspection decisions).
+   * @param {Record<string, any>} extra
+   * @param {string} successMessage
+   */
+  async function submitDeliveryTask(extra, successMessage) {
+    if (!pendingTask?.id) return false;
+    setBusy(true);
+    try {
+      const res = await fetch(`/api/projects/${projectId}/tasks`, {
+        method: "POST",
+        credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          taskId: pendingTask.id,
+          decision: defaultWorkflowDecision(actionKey),
+          comment: "",
+          ...extra,
+        }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        showToast({
+          message: typeof data.error === "string" ? data.error : "Could not save.",
+          severity: "error",
+        });
+        return false;
+      }
+      showToast({ message: successMessage, severity: "success" });
+      notifyOrgTasksChanged();
+      await load();
+      return true;
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function receiveGoods() {
+    if (!pendingDeliveryNote) return;
+    /** @type {Record<string, string>} */
+    const errs = {};
+    const lines = [];
+    for (const l of pendingDeliveryNote.lines) {
+      const raw = String(deliveryQtys[l.itemName] ?? l.quantity).trim();
+      const n = Number(raw);
+      if (!raw || !Number.isFinite(n) || n < 0) errs[l.itemName] = "Enter a quantity.";
+      else if (n > Number(l.quantity) + 0.009) errs[l.itemName] = `Max ${l.quantity}.`;
+      else if (n > 0) lines.push({ itemName: l.itemName, receivedQuantity: raw });
+    }
+    if (!Object.keys(errs).length && !lines.length) {
+      for (const l of pendingDeliveryNote.lines) errs[l.itemName] = "Enter a quantity.";
+    }
+    setReceiveErrors(errs);
+    if (Object.keys(errs).length) {
+      showToast({ message: "Please fix the highlighted fields.", severity: "error" });
+      return;
+    }
+    const body = {
+      lines,
+      deliveryNoteId: pendingDeliveryNote.id,
+      remarks: `Received against ${pendingDeliveryNote.noteNumber}.`,
+    };
+    const ok = isReceiveGoodsTask
+      ? await submitDeliveryTask(body, "Goods received.")
+      : await runLifecycle("record_delivery", body, "Goods received.");
+    if (ok) setDeliveryQtys({});
+  }
+
+  /**
+   * @param {any} d
+   * @param {boolean} acceptAll
+   */
+  async function inspectDelivery(d, acceptAll) {
+    const lineDecisions = (d.lines || []).map((l) => {
+      const edit = acceptAll ? null : inspectionLineEdits[l.id];
+      return {
+        lineId: l.id,
+        acceptedQuantity: edit?.accepted ?? l.receivedQuantity,
+        rejectedQuantity: edit?.rejected ?? 0,
+      };
+    });
+    const body = {
+      deliveryId: d.id,
+      resultNotes: inspectionNotes.trim() || (acceptAll ? "Accepted in full." : "Inspection recorded."),
+      lineDecisions,
+      committeeId: inspectionCommitteeId || null,
+      committeeRole: inspectionCommitteeId ? "INSPECTION" : null,
+    };
+    const ok = isAcceptGoodsTask
+      ? await submitDeliveryTask(body, "Goods accepted.")
+      : await runLifecycle("record_inspection", body, "Inspection saved.");
+    if (ok) {
+      setInspectionLineEdits({});
+      setInspectionNotes("");
     }
   }
 
@@ -273,8 +542,21 @@ export function OrgProcurementDetailPanel({ projectId, procurementId }) {
     }
   }
 
-  async function submitDecision() {
+  /** @param {{ acknowledged?: boolean }} [opts] */
+  async function submitDecision(opts = {}) {
     if (!pendingTask?.id) return;
+    if (isIssuePi && isPositiveDecision && piProviderFailures.length && !opts.acknowledged) {
+      setPiWarnOpen(true);
+      return;
+    }
+    if (isIssuePi && isPositiveDecision) {
+      const check = validatePurchaseInstructionTerms(piTerms);
+      setPiErrors(check.errors);
+      if (!check.ok) {
+        showToast({ message: "Please fix the highlighted fields.", severity: "error" });
+        return;
+      }
+    }
     if (usesProviderPicker) {
       const missing = isIssuePi ? !piSupplierIds[0] : inviteIds.length === 0;
       if (missing) {
@@ -300,6 +582,7 @@ export function OrgProcurementDetailPanel({ projectId, procurementId }) {
         comment,
       };
       if (isIssuePi && piSupplierIds[0]) payload.supplierId = piSupplierIds[0];
+      if (isIssuePi && isPositiveDecision) Object.assign(payload, piTerms);
       if (isRfqIssue) payload.inviteSupplierIds = inviteIds;
       if ((isRfqIssue || isTenderAdvertise) && closingDate) payload.closingDate = closingDate;
       if (isReceive && isPositiveDecision && offerSupplierId && offerAmount.trim()) {
@@ -337,6 +620,7 @@ export function OrgProcurementDetailPanel({ projectId, procurementId }) {
       if (!res.ok) {
         const fe = data.fieldErrors || {};
         setSelectionError(fe.supplierId || fe.inviteSupplierIds || "");
+        if (isIssuePi) setPiErrors(fe);
         showToast({
           message: typeof data.error === "string" ? data.error : "Could not record decision.",
           severity: "error",
@@ -356,10 +640,11 @@ export function OrgProcurementDetailPanel({ projectId, procurementId }) {
               : "Decision recorded.";
       showToast({
         message: autoCount
-          ? `${baseMessage} ${autoCount} simulated ${autoCount === 1 ? providerWord : providerWordPlural} responded.`
+          ? `${baseMessage} ${autoCount} auto-response ${autoCount === 1 ? providerWord : providerWordPlural} responded.`
           : baseMessage,
         severity: "success",
       });
+      notifyOrgTasksChanged();
       await load();
       await loadSuppliers();
     } finally {
@@ -408,7 +693,7 @@ export function OrgProcurementDetailPanel({ projectId, procurementId }) {
       supplierName: row.lpo.supplier?.name || null,
       deliveryAddress: row.lpo.deliveryAddress || requisitionAddress,
     };
-  } else if (pi && pi.status === "ISSUED") {
+  } else if (pi && ["ISSUED", "ACCEPTED"].includes(pi.status)) {
     activeOrder = {
       number: pi.instructionNumber,
       value: Number(pi.amount) || 0,
@@ -416,6 +701,43 @@ export function OrgProcurementDetailPanel({ projectId, procurementId }) {
       deliveryAddress: pi.deliveryAddress || requisitionAddress,
     };
   }
+  const pendingDeliveryNote = (row.deliveryNotes || []).find((n) => n.status === "SUBMITTED") || null;
+  const deliveries = Array.isArray(row.deliveries) ? row.deliveries : [];
+  const orderProvider = activeOrder?.supplierName || `the ${providerWord}`;
+  const orderNotOpen = row.contract
+    ? ["ACTIVE", "ISSUED"].includes(row.contract.status)
+      ? null
+      : "The contract has not been issued yet."
+    : row.lpo
+      ? row.lpo.status === "ACCEPTED"
+        ? null
+        : `Waiting for ${orderProvider} to accept ${row.lpo.lpoNumber}.`
+      : pi
+        ? pi.status === "ACCEPTED"
+          ? null
+          : `Waiting for ${orderProvider} to accept ${pi.instructionNumber}.`
+        : "No order yet.";
+  /** @type {Record<string, number>} */
+  const receivedByItem = {};
+  for (const d of deliveries) {
+    for (const l of d.lines || []) {
+      receivedByItem[l.itemName] = (receivedByItem[l.itemName] || 0) + (Number(l.receivedQuantity) || 0);
+    }
+  }
+  const reqItems = row.requisition?.items || [];
+  const allReceived =
+    reqItems.length > 0 &&
+    reqItems.every((it) => (receivedByItem[it.itemName] || 0) + 0.009 >= Number(it.quantity || 0));
+  const allInspected = deliveries.length > 0 && deliveries.every((d) => d.inspection);
+  const deliveryStepOpen = isReceiveGoodsStep(flowStepLabel) || isAcceptGoodsStep(flowStepLabel);
+  const deliveryAct = Boolean(sections?.delivery?.act) && !deliveryStepOpen;
+  const canReceiveGoods =
+    isReceiveGoodsTask || (deliveryAct && LIFECYCLE_ACTION_ROLES.record_delivery.includes(viewerRole || ""));
+  const canInspectGoods =
+    isAcceptGoodsTask ||
+    (deliveryAct &&
+      (LIFECYCLE_ACTION_ROLES.record_inspection.includes(viewerRole || "") ||
+        committeeMayPerformLifecycleAction("record_inspection", viewerCommitteeType)));
   const invoices = Array.isArray(row.invoices) ? row.invoices : [];
   const alreadyInvoiced = invoices
     .filter((i) => ["RECEIVED", "CERTIFIED", "VERIFIED", "APPROVED_FOR_PAYMENT"].includes(i.status))
@@ -442,86 +764,207 @@ export function OrgProcurementDetailPanel({ projectId, procurementId }) {
   const saveDeliveryAddress = (kind, deliveryAddress) =>
     runLifecycle("update_delivery_address", { kind, deliveryAddress }, "Delivery address updated.");
 
+  const providerPicker = usesProviderPicker ? (
+    <OrgProviderSelection
+      projectId={projectId}
+      mode={isIssuePi ? "single" : "multi"}
+      method={isIssuePi ? "MICRO" : "QUOTATION"}
+      category={reqCategory}
+      value={isIssuePi ? piSupplierIds : inviteIds}
+      onChange={(ids) => {
+        setSelectionError("");
+        if (isIssuePi) setPiSupplierIds(ids);
+        else setInviteIds(ids);
+      }}
+      locked={piApprovedProvider}
+      optionalValidation={piApprovedProvider}
+      onQualificationChange={isIssuePi ? setPiProviderFailures : undefined}
+      label={
+        isIssuePi
+          ? approvedShortlistCount > 0
+            ? `Approved ${providerWord}`
+            : `Select ${providerWord}`
+          : `${providerTerm(reqCategory, { plural: true, capitalize: true })} to invite`
+      }
+      helperText={
+        approvedShortlistCount > 0
+          ? isIssuePi
+            ? "Approved by Contracts Committee"
+            : "Prefilled from Form 5 Part II."
+          : undefined
+      }
+      actionLabel={isIssuePi ? "Issue purchase instruction" : `Issue RFQs to ${providerWordPlural}`}
+      busy={busy}
+      busyLabel={isIssuePi ? "Issuing purchase instruction…" : "Issuing RFQs…"}
+      extraWarnings={
+        isRfqIssue && inviteIds.length > 0 && inviteIds.length < 3
+          ? [`Only ${inviteIds.length} invited — RFQ normally invites at least three.`]
+          : []
+      }
+      error={selectionError}
+      onConfirm={() => submitDecision({ acknowledged: true })}
+    />
+  ) : null;
+
   return (
     <div className="space-y-4">
       <div className="flex flex-wrap items-center justify-between gap-2">
         <Button
           component={Link}
-          href={`/projects/${projectId}/procurements`}
+          href={
+            backHref ||
+            (overview ? `/projects/${projectId}/procurements` : procurementStageHref(projectId, procurementId))
+          }
           startIcon={<ArrowBackRounded />}
           variant="outlined"
         >
-          Back to procurements
+          {backLabel || (overview ? "Back to procurements" : "Back to procurement")}
         </Button>
-        <Button startIcon={<RefreshRounded />} variant="outlined" onClick={() => void load()}>
-          Refresh
-        </Button>
+        <div className="flex flex-wrap gap-2">
+          {printPi ? (
+            <PrintButton fileName={`Purchase instruction ${piDoc.pi.instructionNumber}`} />
+          ) : printStage !== undefined ? (
+            <PrintButton
+              fileName={`${row.procurementNumber} ${
+                printStage ? procurementStageLabel(printStage, row.procurementMethod) : "procurement record"
+              }`}
+            />
+          ) : null}
+          <Button startIcon={<RefreshRounded />} variant="outlined" onClick={() => void load()}>
+            Refresh
+          </Button>
+        </div>
       </div>
+      {printPi ? (
+        <PurchaseInstructionPrint doc={piDoc} row={row} printedBy={printedBy} />
+      ) : printStage !== undefined ? (
+        <ProcurementPrint
+          row={row}
+          sections={sections}
+          stage={printStage}
+          piDoc={piDoc}
+          organisation={organisation}
+          printedBy={printedBy}
+        />
+      ) : null}
 
       <Paper variant="outlined" sx={{ p: 2, ...adminOutlinedTableContainerSx }}>
         <div className="flex flex-wrap items-start justify-between gap-2">
-          <div>
+          <div className="min-w-0">
+            {!overview ? (
+              <Typography variant="overline" sx={{ color: "primary.main", fontWeight: 700, lineHeight: 1.6 }}>
+                {procurementStageLabel(stage, row.procurementMethod)}
+              </Typography>
+            ) : null}
             <Typography variant="h6" sx={{ fontWeight: 700 }}>
-              {row.procurementNumber}
-            </Typography>
-            <Typography variant="body1" sx={{ fontWeight: 600 }}>
               {row.title}
             </Typography>
-            <Typography variant="body2" sx={{ ...adminMutedTextSx, mb: 0.5 }}>
-              Procurement case — one identity across requisition, method, solicitation, evaluation,
-              award, delivery, invoice, payment and closure.
-            </Typography>
             <Typography variant="body2" sx={adminMutedTextSx}>
-              {row.financialYear?.label || "—"} · {row.department?.name || "—"}
-              {row.officer?.displayName ? ` · Officer ${row.officer.displayName}` : ""}
+              {row.procurementNumber}
             </Typography>
           </div>
           <div className="flex flex-wrap gap-1">
-            <Chip size="small" color="info" label={row.procurementMethod} />
-            <Chip size="small" color="primary" label={row.status} />
+            {row.procurementMethod ? (
+              <Chip
+                size="small"
+                color="info"
+                variant="outlined"
+                label={METHOD_LABELS[row.procurementMethod] || row.procurementMethod}
+              />
+            ) : null}
+            <Chip size="small" color={row.statusColor || "info"} label={row.statusLabel || row.status} />
           </div>
         </div>
 
-        <div className="mt-3 grid gap-2 text-sm sm:grid-cols-2">
-          <p>
-            <span className="font-semibold">Requisition:</span>{" "}
-            {row.requisition ? (
-              <Link
-                href={`/projects/${projectId}/requisitions/${row.requisition.id}`}
-                className="cursor-pointer font-semibold text-primary underline"
-              >
-                {row.requisition.requisitionReference || row.requisition.title}
-              </Link>
-            ) : (
-              "—"
-            )}
-          </p>
-          <p>
-            <span className="font-semibold">Estimated value:</span>{" "}
-            {formatMoneyUGX(row.requisition?.estimatedTotalValue)}
-          </p>
-          <p>
-            <span className="font-semibold">Plan item:</span>{" "}
-            {row.procurementPlanItem?.title || "—"}
-          </p>
-          <p>
-            <span className="font-semibold">Budget line:</span>{" "}
-            {row.budgetLine ? `${row.budgetLine.code} — ${row.budgetLine.name}` : "—"}
-          </p>
-        </div>
+        <RecordDetailsGrid fields={procurementDetailFields(row, projectId, activeOrder)} />
+
+        {blockedTask ? (
+          <Alert severity="warning" variant="outlined" sx={{ mt: 2 }}>
+            {blockedTask.message}
+          </Alert>
+        ) : null}
       </Paper>
 
-      <OrgProcurementStageTracker
-        progress={workflowProgress}
-        blockedTask={blockedTask}
-        hasOwnTask={Boolean(pendingTask)}
-      />
+      {taskStage && taskStage !== stage ? (
+        <Alert
+          severity="info"
+          variant="outlined"
+          icon={<AssignmentTurnedInRounded />}
+          action={
+            <Button
+              component={Link}
+              href={procurementStageHref(projectId, procurementId, taskStage, row.procurementMethod)}
+              variant="contained"
+              size="small"
+            >
+              Open task
+            </Button>
+          }
+        >
+          <span className="font-semibold">Your turn:</span>{" "}
+          {taskStage === "recommendation"
+            ? procurementStageLabel("recommendation", row.procurementMethod)
+            : taskTitle.split(":")[0]}
+        </Alert>
+      ) : null}
 
-      {pendingTask ? (
+      {overview || on("recommendation") || recommendation?.pending ? (
+        <OrgRecommendationsCard
+          projectId={projectId}
+          procurementId={procurementId}
+          recommendations={recommendations}
+          canDecide={on("recommendation") && Boolean(recommendation?.canDecide)}
+          waitingForCommittee={Boolean(recommendation?.pending)}
+          onDecided={async () => {
+            notifyOrgTasksChanged();
+            await load();
+          }}
+        />
+      ) : null}
+
+      {!overview &&
+      !showTaskCard &&
+      stage !== "task" &&
+      stage !== "recommendation" &&
+      sections &&
+      !sections[stage]?.view ? (
+        <Typography variant="body2" sx={adminMutedTextSx}>
+          This stage is not visible to your role.
+        </Typography>
+      ) : null}
+
+      {overview ? (
+        <ProcurementStageCards
+          projectId={projectId}
+          row={row}
+          sections={sections}
+          taskStage={taskStage}
+          summaries={stageSummaries}
+        />
+      ) : null}
+
+      {showTaskCard ? (
         <Paper variant="outlined" sx={{ p: 2, ...adminOutlinedTableContainerSx }}>
-          <Typography variant="subtitle1" sx={{ fontWeight: 600, mb: 2 }}>
-            {pendingTask.title.split(":")[0]}
-          </Typography>
+          <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
+            <Typography variant="subtitle1" sx={{ fontWeight: 600 }}>
+              {pendingTask.title.split(":")[0]}
+            </Typography>
+            {recommendation?.canRecommend ? (
+              <Tooltip title="Recommend cancellation or a provider change to the Contracts Committee">
+                <Button
+                  variant="outlined"
+                  color="warning"
+                  startIcon={<GavelRounded />}
+                  onClick={() => setRecommendOpen(true)}
+                  disabled={busy}
+                  className="w-full sm:w-auto"
+                >
+                  Recommend to Contracts Committee
+                </Button>
+              </Tooltip>
+            ) : null}
+          </div>
+          {piApprovedProvider ? <div className="mb-3">{providerPicker}</div> : null}
           <div className="grid gap-3 sm:grid-cols-2">
             <TextField
               select
@@ -531,7 +974,10 @@ export function OrgProcurementDetailPanel({ projectId, procurementId }) {
               fullWidth
               sx={themedTextFieldSx}
             >
-              {workflowDecisionOptions(actionKey, { isProcurementStep: true }).map((opt) => (
+              {workflowDecisionOptions(actionKey, {
+                isProcurementStep: true,
+                includeReturnReject: !recommendation?.allowed,
+              }).map((opt) => (
                 <MenuItem key={opt.value} value={opt.value}>
                   {workflowDecisionLabelForTask(opt, taskTitle)}
                 </MenuItem>
@@ -545,6 +991,55 @@ export function OrgProcurementDetailPanel({ projectId, procurementId }) {
               </Alert>
             ) : null}
 
+            {isIssuePi && isPositiveDecision ? (
+              <>
+                <TextField
+                  label="Deliver by"
+                  type="date"
+                  value={piTerms.requiredDeliveryDate}
+                  onChange={(e) => {
+                    setPiTerms((t) => ({ ...t, requiredDeliveryDate: e.target.value }));
+                    setPiErrors((p) => ({ ...p, requiredDeliveryDate: "" }));
+                  }}
+                  error={Boolean(piErrors.requiredDeliveryDate)}
+                  helperText={piErrors.requiredDeliveryDate || " "}
+                  fullWidth
+                  slotProps={{ inputLabel: { shrink: true }, htmlInput: { min: toDateInputValue(new Date()) } }}
+                  sx={themedTextFieldSx}
+                />
+                <TextField
+                  label="Payment terms"
+                  value={piTerms.paymentTerms}
+                  onChange={(e) => {
+                    setPiTerms((t) => ({ ...t, paymentTerms: e.target.value }));
+                    setPiErrors((p) => ({ ...p, paymentTerms: "" }));
+                  }}
+                  error={Boolean(piErrors.paymentTerms)}
+                  helperText={piErrors.paymentTerms || " "}
+                  fullWidth
+                  multiline
+                  minRows={2}
+                  className="sm:col-span-2"
+                  sx={themedTextFieldSx}
+                />
+                <TextField
+                  label="Special instructions"
+                  value={piTerms.specialInstructions}
+                  onChange={(e) => {
+                    setPiTerms((t) => ({ ...t, specialInstructions: e.target.value }));
+                    setPiErrors((p) => ({ ...p, specialInstructions: "" }));
+                  }}
+                  error={Boolean(piErrors.specialInstructions)}
+                  helperText={piErrors.specialInstructions || "Optional"}
+                  fullWidth
+                  multiline
+                  minRows={2}
+                  className="sm:col-span-2"
+                  sx={themedTextFieldSx}
+                />
+              </>
+            ) : null}
+
             {isRfqIssue || isTenderAdvertise ? (
               <>
                 <TextField
@@ -553,7 +1048,7 @@ export function OrgProcurementDetailPanel({ projectId, procurementId }) {
                   value={closingDate}
                   onChange={(e) => setClosingDate(e.target.value)}
                   fullWidth
-                  InputLabelProps={{ shrink: true }}
+                  slotProps={{ inputLabel: { shrink: true } }}
                   sx={themedTextFieldSx}
                 />
               </>
@@ -563,7 +1058,7 @@ export function OrgProcurementDetailPanel({ projectId, procurementId }) {
               <>
                 <Alert severity="info" variant="outlined" className="sm:col-span-2">
                   {offers.filter((o) => o.status !== "WITHDRAWN").length} offer(s) received so far
-                  (see the list below). Simulated {providerWordPlural} respond automatically and
+                  (see the list below). Auto-response {providerWordPlural} respond automatically and
                   real ones can submit through their portal login. Record any paper or emailed offer
                   here, then complete the step.
                 </Alert>
@@ -642,7 +1137,7 @@ export function OrgProcurementDetailPanel({ projectId, procurementId }) {
                       {inv.source === "PORTAL"
                         ? " · via portal"
                         : inv.source === "AUTO"
-                          ? " · simulated provider"
+                          ? " · auto-response provider"
                           : ""}
                     </MenuItem>
                   ))}
@@ -667,40 +1162,10 @@ export function OrgProcurementDetailPanel({ projectId, procurementId }) {
               sx={themedTextFieldSx}
             />
           </div>
-          {usesProviderPicker ? (
-            <div className="mt-3">
-              <OrgProviderSelection
-                projectId={projectId}
-                mode={isIssuePi ? "single" : "multi"}
-                method={isIssuePi ? "MICRO" : "QUOTATION"}
-                category={reqCategory}
-                value={isIssuePi ? piSupplierIds : inviteIds}
-                onChange={(ids) => {
-                  setSelectionError("");
-                  if (isIssuePi) setPiSupplierIds(ids);
-                  else setInviteIds(ids);
-                }}
-                label={
-                  isIssuePi
-                    ? `Select ${providerWord}`
-                    : `${providerTerm(reqCategory, { plural: true, capitalize: true })} to invite`
-                }
-                helperText={
-                  (row.requisition?.shortlist || []).length ? "Prefilled from Form 5 Part II." : undefined
-                }
-                actionLabel={isIssuePi ? "Issue purchase instruction" : `Issue RFQs to ${providerWordPlural}`}
-                busy={busy}
-                busyLabel={isIssuePi ? "Issuing purchase instruction…" : "Issuing RFQs…"}
-                extraWarnings={
-                  isRfqIssue && inviteIds.length > 0 && inviteIds.length < 3
-                    ? [`Only ${inviteIds.length} invited — RFQ normally invites at least three.`]
-                    : []
-                }
-                error={selectionError}
-                onConfirm={() => submitDecision()}
-              />
-            </div>
-          ) : (
+          {usesProviderPicker && !piApprovedProvider ? (
+            <div className="mt-3">{providerPicker}</div>
+          ) : null}
+          {!usesProviderPicker || piApprovedProvider ? (
             <div className="mt-3">
               <Button
                 variant="contained"
@@ -718,27 +1183,13 @@ export function OrgProcurementDetailPanel({ projectId, procurementId }) {
                       : workflowDecisionButtonLabel(decision, { busy })}
               </Button>
             </div>
-          )}
+          ) : null}
         </Paper>
       ) : null}
 
-      {pi ? (
-        <Paper variant="outlined" sx={{ p: 2, ...adminOutlinedTableContainerSx }}>
-          <Typography variant="subtitle1" sx={{ fontWeight: 600, mb: 1 }}>
-            Purchase instruction
-          </Typography>
-          <p className="text-sm">
-            <span className="font-semibold">{pi.instructionNumber}</span> · {pi.status} ·{" "}
-            {formatMoneyUGX(pi.amount)}
-          </p>
-          <p className="text-sm">
-            Supplier: {pi.supplier?.name || "—"}
-            {pi.issuedBy?.displayName ? ` · Issued by ${pi.issuedBy.displayName}` : ""}
-          </p>
-          <OrgDeliveryAddressLine address={pi.deliveryAddress} fallback={requisitionAddress} />
-        </Paper>
-      ) : null}
+      {piDoc && (overview || on("contract")) ? <PurchaseInstructionView doc={piDoc} /> : null}
 
+      {on("sourcing") ? (
       <ProcurementSectionGate access={sections?.sourcing}>
       {solicitations.length > 0 ? (
         <Paper variant="outlined" sx={{ p: 2, ...adminOutlinedTableContainerSx }}>
@@ -780,8 +1231,10 @@ export function OrgProcurementDetailPanel({ projectId, procurementId }) {
 
       <OrgOffersCard offers={offers} providerWord={providerWord} />
       </ProcurementSectionGate>
+      ) : null}
 
-      {(row.procurementMethod === "QUOTATION" || row.procurementMethod === "TENDER") &&
+      {on("evaluation") &&
+      (row.procurementMethod === "QUOTATION" || row.procurementMethod === "TENDER") &&
       (!sections || sections.evaluation?.view) ? (
         <OrgEvaluationPanel
           projectId={projectId}
@@ -793,6 +1246,7 @@ export function OrgProcurementDetailPanel({ projectId, procurementId }) {
 
       {row.procurementMethod !== "MICRO" ? (
         <>
+          {on("award") ? (
           <ProcurementSectionGate access={sections?.award}>
           <Paper variant="outlined" sx={{ p: 2, ...adminOutlinedTableContainerSx }}>
             <Typography variant="subtitle1" sx={{ fontWeight: 600, mb: 1 }}>
@@ -891,7 +1345,9 @@ export function OrgProcurementDetailPanel({ projectId, procurementId }) {
             )}
           </Paper>
           </ProcurementSectionGate>
+          ) : null}
 
+          {on("contract") ? (
           <ProcurementSectionGate access={sections?.contract}>
           <Paper variant="outlined" sx={{ p: 2, ...adminOutlinedTableContainerSx }}>
             <Typography variant="subtitle1" sx={{ fontWeight: 600, mb: 1 }}>
@@ -1036,242 +1492,268 @@ export function OrgProcurementDetailPanel({ projectId, procurementId }) {
             )}
           </Paper>
           </ProcurementSectionGate>
+          ) : null}
         </>
       ) : null}
 
+      {on("delivery") ? (
       <ProcurementSectionGate access={sections?.delivery}>
-      <Paper variant="outlined" sx={{ p: 2, ...adminOutlinedTableContainerSx }}>
-        <Typography variant="subtitle1" sx={{ fontWeight: 600, mb: 1 }}>
-          Delivery &amp; inspection
-        </Typography>
-        {(row.deliveries || []).length === 0 ? (
-          <Typography variant="body2" sx={{ ...adminMutedTextSx, mb: 2 }}>
-            No deliveries recorded. An issued Purchase Instruction, accepted LPO, or active contract
-            is required before delivery can be recorded. Partial deliveries are allowed — record
-            received quantities against each requisition line.
-          </Typography>
-        ) : (
-          <ul className="mb-3 space-y-2 text-sm">
-            {row.deliveries.map((d) => (
-              <li key={d.id} className="rounded border border-[color:var(--border-subtle)] p-2">
-                <p>
-                  {d.status}
-                  {d.deliveryDate ? ` · ${String(d.deliveryDate).slice(0, 10)}` : ""}
-                  {d.recordedBy?.displayName ? ` · ${d.recordedBy.displayName}` : ""}
-                </p>
-                {d.deliveryAddress ? (
-                  <p className="text-xs opacity-80 wrap-break-word">
-                    Delivered to: {d.deliveryAddress}
-                  </p>
-                ) : null}
-                <ul className="mt-1 list-disc pl-5">
-                  {(d.lines || []).map((l) => (
-                    <li key={l.id}>
-                      {l.itemName}: received {l.receivedQuantity}
-                      {l.unitOfMeasure ? ` ${l.unitOfMeasure}` : ""} (ordered {l.orderedQuantity};
-                      accepted {l.acceptedQuantity}; rejected {l.rejectedQuantity})
-                    </li>
-                  ))}
-                </ul>
-                {d.inspection ? (
-                  <p className="mt-1 opacity-80">
-                    Inspection: {d.inspection.status}
-                    {d.inspection.inspectedBy?.displayName
-                      ? ` · ${d.inspection.inspectedBy.displayName}`
-                      : ""}
-                    {d.inspection.committeeRole ? ` · ${d.inspection.committeeRole}` : ""}
-                  </p>
-                ) : (
-                  <div className="mt-2 space-y-2">
-                    {row.procurementMethod === "MICRO" ? (
-                      <Typography variant="body2" sx={adminMutedTextSx}>
-                        Micro procurement: the Head of User Department accepts the goods — no
-                        inspection committee is required.
-                      </Typography>
-                    ) : (
-                    <TextField
-                      select
-                      label="Inspection committee (optional)"
-                      value={inspectionCommitteeId}
-                      onChange={(e) => setInspectionCommitteeId(e.target.value)}
-                      fullWidth
-                      size="small"
-                      sx={themedTextFieldSx}
-                      helperText="Prefer an Inspection committee when one exists"
-                    >
-                      <MenuItem value="">None</MenuItem>
-                      {committees
-                        .filter((c) => c.isActive && c.committeeType === "INSPECTION_ACCEPTANCE")
-                        .map((c) => (
-                          <MenuItem key={c.id} value={c.id}>
-                            {c.name}
-                          </MenuItem>
-                        ))}
-                      {committees
-                        .filter((c) => c.isActive && c.committeeType !== "INSPECTION_ACCEPTANCE")
-                        .map((c) => (
-                          <MenuItem key={`other-${c.id}`} value={c.id}>
-                            {c.name} ({c.committeeType})
-                          </MenuItem>
-                        ))}
-                    </TextField>
-                    )}
-                    <TextField
-                      label="Inspection notes"
-                      value={inspectionNotes}
-                      onChange={(e) => setInspectionNotes(e.target.value)}
-                      fullWidth
-                      size="small"
-                      sx={themedTextFieldSx}
-                    />
-                    {(d.lines || []).map((l) => {
-                      const edit = inspectionLineEdits[l.id] || {
-                        accepted: String(l.receivedQuantity ?? ""),
-                        rejected: "0",
-                      };
-                      return (
-                        <div key={l.id} className="grid gap-2 sm:grid-cols-[1fr_120px_120px]">
-                          <Typography variant="body2" className="self-center">
-                            {l.itemName} (received {l.receivedQuantity})
-                          </Typography>
-                          <TextField
-                            label="Accepted"
-                            value={edit.accepted}
-                            onChange={(e) =>
-                              setInspectionLineEdits((prev) => ({
-                                ...prev,
-                                [l.id]: { ...edit, accepted: e.target.value },
-                              }))
-                            }
-                            size="small"
-                            sx={themedTextFieldSx}
-                          />
-                          <TextField
-                            label="Rejected"
-                            value={edit.rejected}
-                            onChange={(e) =>
-                              setInspectionLineEdits((prev) => ({
-                                ...prev,
-                                [l.id]: { ...edit, rejected: e.target.value },
-                              }))
-                            }
-                            size="small"
-                            sx={themedTextFieldSx}
-                          />
-                        </div>
-                      );
-                    })}
-                    <div className="flex flex-wrap gap-2">
-                      <Button
-                        size="small"
-                        variant="outlined"
-                        disabled={busy || !(d.lines || []).length}
-                        onClick={() => {
-                          const lineDecisions = (d.lines || []).map((l) => {
-                            const edit = inspectionLineEdits[l.id];
-                            return {
-                              lineId: l.id,
-                              acceptedQuantity: edit?.accepted ?? l.receivedQuantity,
-                              rejectedQuantity: edit?.rejected ?? 0,
-                            };
-                          });
-                          void runLifecycle("record_inspection", {
-                            deliveryId: d.id,
-                            resultNotes: inspectionNotes || "Inspection recorded.",
-                            lineDecisions,
-                            committeeId: inspectionCommitteeId || null,
-                            committeeRole: inspectionCommitteeId ? "INSPECTION" : null,
-                          });
-                        }}
-                      >
-                        Record inspection
-                      </Button>
-                      <Button
-                        size="small"
-                        variant="text"
-                        disabled={busy || !(d.lines || []).length}
-                        onClick={() => {
-                          const lineDecisions = (d.lines || []).map((l) => ({
-                            lineId: l.id,
-                            acceptedQuantity: l.receivedQuantity,
-                            rejectedQuantity: 0,
-                          }));
-                          void runLifecycle("record_inspection", {
-                            deliveryId: d.id,
-                            resultNotes: inspectionNotes || "Accepted in full.",
-                            lineDecisions,
-                            committeeId: inspectionCommitteeId || null,
-                            committeeRole: inspectionCommitteeId ? "INSPECTION" : null,
-                          });
-                        }}
-                      >
-                        Accept all received
-                      </Button>
-                    </div>
-                  </div>
-                )}
-              </li>
-            ))}
-          </ul>
-        )}
-        <div className="space-y-2">
-          <Typography variant="body2" sx={{ fontWeight: 600 }}>
-            Record (partial) delivery
-          </Typography>
-          {(row.requisition?.items || []).length === 0 ? (
-            <Typography variant="body2" sx={adminMutedTextSx}>
-              No requisition lines available to deliver against.
+      <div className="space-y-3">
+        <Paper variant="outlined" sx={{ p: 2, ...adminOutlinedTableContainerSx }}>
+          <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
+            <Typography variant="subtitle1" sx={{ fontWeight: 600 }}>
+              Receive goods
             </Typography>
-          ) : (
+            {allReceived ? (
+              <Chip size="small" color="success" label="Received" />
+            ) : pendingDeliveryNote ? (
+              <Chip size="small" color="info" label="Dispatched" />
+            ) : orderNotOpen ? (
+              <Chip size="small" color="warning" variant="outlined" label="Awaiting acceptance" />
+            ) : (
+              <Chip size="small" color="warning" variant="outlined" label="Awaiting delivery" />
+            )}
+          </div>
+
+          {pendingDeliveryNote ? (
             <div className="space-y-2">
-              {row.requisition.items.map((it) => (
-                <div key={it.id} className="grid gap-2 sm:grid-cols-[1fr_140px]">
-                  <Typography variant="body2" className="self-center">
-                    {it.itemName} — ordered {it.quantity}
-                    {it.unitOfMeasure ? ` ${it.unitOfMeasure}` : ""}
-                  </Typography>
-                  <TextField
-                    label="Received qty"
-                    value={deliveryQtys[it.itemName] || ""}
-                    onChange={(e) =>
-                      setDeliveryQtys((prev) => ({
-                        ...prev,
-                        [it.itemName]: e.target.value,
-                      }))
-                    }
-                    size="small"
-                    sx={themedTextFieldSx}
-                    inputProps={{ inputMode: "decimal" }}
-                  />
-                </div>
+              <Typography variant="body2">
+                <span className="font-semibold">{pendingDeliveryNote.noteNumber}</span> from{" "}
+                {pendingDeliveryNote.supplier?.name || orderProvider} ·{" "}
+                {formatPrintDate(pendingDeliveryNote.dispatchedAt)}
+                {pendingDeliveryNote.remarks ? ` · ${pendingDeliveryNote.remarks}` : ""}
+              </Typography>
+              {canReceiveGoods ? (
+                <>
+                  {pendingDeliveryNote.lines.map((l) => (
+                    <div key={l.itemName} className="grid gap-2 sm:grid-cols-[1fr_160px]">
+                      <Typography variant="body2" className="self-center">
+                        {l.itemName} — dispatched {l.quantity}
+                        {l.unitOfMeasure ? ` ${l.unitOfMeasure}` : ""}
+                      </Typography>
+                      <TextField
+                        label="Received"
+                        value={deliveryQtys[l.itemName] ?? l.quantity}
+                        onChange={(e) => {
+                          setDeliveryQtys((prev) => ({ ...prev, [l.itemName]: e.target.value }));
+                          setReceiveErrors((prev) => ({ ...prev, [l.itemName]: "" }));
+                        }}
+                        error={Boolean(receiveErrors[l.itemName])}
+                        helperText={receiveErrors[l.itemName] || undefined}
+                        sx={themedTextFieldSx}
+                        slotProps={{ htmlInput: { inputMode: "decimal" } }}
+                      />
+                    </div>
+                  ))}
+                  <Button
+                    variant="contained"
+                    startIcon={busy ? <CircularProgress size={16} color="inherit" /> : <CheckCircleRounded />}
+                    disabled={busy}
+                    onClick={() => void receiveGoods()}
+                    className="w-full sm:w-auto"
+                  >
+                    Confirm receipt
+                  </Button>
+                </>
+              ) : (
+                <Typography variant="body2" sx={adminMutedTextSx}>
+                  Awaiting receipt by the user department.
+                </Typography>
+              )}
+            </div>
+          ) : allReceived ? null : (
+            <Typography variant="body2" sx={adminMutedTextSx}>
+              {orderNotOpen ||
+                (deliveries.length
+                  ? `Waiting for the next delivery from ${orderProvider}.`
+                  : `Waiting for ${orderProvider} to deliver.`)}
+            </Typography>
+          )}
+
+          {deliveries.length ? (
+            <ul className="mt-3 space-y-2 text-sm">
+              {deliveries.map((d) => (
+                <li key={d.id} className="rounded border border-[color:var(--border-subtle)] p-2">
+                  <p className="font-medium">
+                    {d.deliveryDate ? formatPrintDate(d.deliveryDate) : "—"}
+                    {d.deliveryNote?.noteNumber ? ` · ${d.deliveryNote.noteNumber}` : ""}
+                    {d.recordedBy?.displayName ? ` · Received by ${d.recordedBy.displayName}` : ""}
+                  </p>
+                  <ul className="mt-1 list-disc pl-5">
+                    {(d.lines || []).map((l) => (
+                      <li key={l.id}>
+                        {l.itemName}: {l.receivedQuantity}
+                        {l.unitOfMeasure ? ` ${l.unitOfMeasure}` : ""} of {l.orderedQuantity}
+                      </li>
+                    ))}
+                  </ul>
+                </li>
               ))}
+            </ul>
+          ) : null}
+
+          {isReceiveGoodsTask && !pendingDeliveryNote && deliveries.length ? (
+            <Button
+              variant="contained"
+              startIcon={<CheckCircleRounded />}
+              disabled={busy}
+              onClick={() => void submitDeliveryTask({}, "Goods received.")}
+              className="mt-3 w-full sm:w-auto"
+            >
+              Confirm receipt
+            </Button>
+          ) : null}
+        </Paper>
+
+        {deliveries.length ? (
+          <Paper variant="outlined" sx={{ p: 2, ...adminOutlinedTableContainerSx }}>
+            <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
+              <Typography variant="subtitle1" sx={{ fontWeight: 600 }}>
+                Inspect &amp; accept goods
+              </Typography>
+              {allInspected ? (
+                <Chip size="small" color="success" label="Inspected" />
+              ) : (
+                <Chip size="small" color="warning" variant="outlined" label="Awaiting inspection" />
+              )}
+            </div>
+            <ul className="space-y-2 text-sm">
+              {deliveries.map((d) => (
+                <li key={d.id} className="rounded border border-[color:var(--border-subtle)] p-2">
+                  <p className="font-medium">
+                    {d.deliveryNote?.noteNumber || (d.deliveryDate ? formatPrintDate(d.deliveryDate) : "Delivery")}
+                    {d.inspection
+                      ? ` · ${d.inspection.status}${
+                          d.inspection.inspectedBy?.displayName ? ` by ${d.inspection.inspectedBy.displayName}` : ""
+                        }`
+                      : ""}
+                  </p>
+                  {d.inspection ? (
+                    <ul className="mt-1 list-disc pl-5">
+                      {(d.lines || []).map((l) => (
+                        <li key={l.id}>
+                          {l.itemName}: accepted {l.acceptedQuantity}
+                          {Number(l.rejectedQuantity) > 0 ? `, rejected ${l.rejectedQuantity}` : ""}
+                        </li>
+                      ))}
+                    </ul>
+                  ) : canInspectGoods ? (
+                    <div className="mt-2 space-y-2">
+                      {(d.lines || []).map((l) => {
+                        const edit = inspectionLineEdits[l.id] || {
+                          accepted: String(l.receivedQuantity ?? ""),
+                          rejected: "0",
+                        };
+                        return (
+                          <div key={l.id} className="grid gap-2 sm:grid-cols-[1fr_120px_120px]">
+                            <Typography variant="body2" className="self-center">
+                              {l.itemName} — received {l.receivedQuantity}
+                            </Typography>
+                            <TextField
+                              label="Accepted"
+                              value={edit.accepted}
+                              onChange={(e) =>
+                                setInspectionLineEdits((prev) => ({
+                                  ...prev,
+                                  [l.id]: { ...edit, accepted: e.target.value },
+                                }))
+                              }
+                              sx={themedTextFieldSx}
+                              slotProps={{ htmlInput: { inputMode: "decimal" } }}
+                            />
+                            <TextField
+                              label="Rejected"
+                              value={edit.rejected}
+                              onChange={(e) =>
+                                setInspectionLineEdits((prev) => ({
+                                  ...prev,
+                                  [l.id]: { ...edit, rejected: e.target.value },
+                                }))
+                              }
+                              sx={themedTextFieldSx}
+                              slotProps={{ htmlInput: { inputMode: "decimal" } }}
+                            />
+                          </div>
+                        );
+                      })}
+                      {row.procurementMethod !== "MICRO" ? (
+                        <TextField
+                          select
+                          label="Inspection committee"
+                          value={inspectionCommitteeId}
+                          onChange={(e) => setInspectionCommitteeId(e.target.value)}
+                          fullWidth
+                          helperText="Optional"
+                          sx={themedTextFieldSx}
+                        >
+                          <MenuItem value="">None</MenuItem>
+                          {committees
+                            .filter((c) => c.isActive && c.committeeType === "INSPECTION_ACCEPTANCE")
+                            .map((c) => (
+                              <MenuItem key={c.id} value={c.id}>
+                                {c.name}
+                              </MenuItem>
+                            ))}
+                        </TextField>
+                      ) : null}
+                      <TextField
+                        label="Notes"
+                        value={inspectionNotes}
+                        onChange={(e) => setInspectionNotes(e.target.value)}
+                        fullWidth
+                        helperText="Optional"
+                        sx={themedTextFieldSx}
+                      />
+                      <div className="flex flex-wrap gap-2">
+                        <Button
+                          variant="contained"
+                          color="success"
+                          startIcon={busy ? <CircularProgress size={16} color="inherit" /> : <CheckCircleRounded />}
+                          disabled={busy || !(d.lines || []).length}
+                          onClick={() => void inspectDelivery(d, true)}
+                          className="w-full sm:w-auto"
+                        >
+                          Accept all
+                        </Button>
+                        <Button
+                          variant="outlined"
+                          startIcon={<FactCheckRounded />}
+                          disabled={busy || !(d.lines || []).length}
+                          onClick={() => void inspectDelivery(d, false)}
+                          className="w-full sm:w-auto"
+                        >
+                          Save inspection
+                        </Button>
+                      </div>
+                    </div>
+                  ) : (
+                    <Typography variant="body2" sx={adminMutedTextSx}>
+                      Awaiting inspection.
+                    </Typography>
+                  )}
+                </li>
+              ))}
+            </ul>
+
+            {isAcceptGoodsTask && allInspected ? (
               <Button
                 variant="contained"
-                disabled={
-                  busy ||
-                  !Object.values(deliveryQtys).some((v) => String(v || "").trim() && Number(v) > 0)
-                }
-                onClick={() => {
-                  const lines = Object.entries(deliveryQtys)
-                    .filter(([, qty]) => String(qty || "").trim() && Number(qty) > 0)
-                    .map(([itemName, receivedQuantity]) => ({
-                      itemName,
-                      receivedQuantity: String(receivedQuantity).trim(),
-                    }));
-                  void runLifecycle("record_delivery", {
-                    lines,
-                    remarks: "Recorded from procurement case page.",
-                  });
-                }}
+                color="success"
+                startIcon={<CheckCircleRounded />}
+                disabled={busy}
+                onClick={() => void submitDeliveryTask({}, "Delivery accepted.")}
+                className="mt-3 w-full sm:w-auto"
               >
-                Record delivery
+                Accept delivery
               </Button>
-            </div>
-          )}
-        </div>
-      </Paper>
+            ) : null}
+          </Paper>
+        ) : null}
+      </div>
       </ProcurementSectionGate>
+      ) : null}
 
+      {on("invoice") ? (
       <ProcurementSectionGate access={sections?.invoice}>
       <Paper variant="outlined" sx={{ p: 2, ...adminOutlinedTableContainerSx }}>
         <Typography variant="subtitle1" sx={{ fontWeight: 600, mb: 1 }}>
@@ -1377,7 +1859,9 @@ export function OrgProcurementDetailPanel({ projectId, procurementId }) {
         />
       </Paper>
       </ProcurementSectionGate>
+      ) : null}
 
+      {on("payment") ? (
       <ProcurementSectionGate access={sections?.payment}>
       <Paper variant="outlined" sx={{ p: 2, ...adminOutlinedTableContainerSx }}>
         <Typography variant="subtitle1" sx={{ fontWeight: 600, mb: 1 }}>
@@ -1506,7 +1990,9 @@ export function OrgProcurementDetailPanel({ projectId, procurementId }) {
         </div>
       </Paper>
       </ProcurementSectionGate>
+      ) : null}
 
+      {on("closure") ? (
       <ProcurementSectionGate access={sections?.closure}>
       <Paper variant="outlined" sx={{ p: 2, ...adminOutlinedTableContainerSx }}>
         <Typography variant="subtitle1" sx={{ fontWeight: 600, mb: 1 }}>
@@ -1529,7 +2015,7 @@ export function OrgProcurementDetailPanel({ projectId, procurementId }) {
               </ul>
             ) : (
               <Typography variant="body2" sx={adminMutedTextSx}>
-                All known closure gates appear satisfied. Closing is final for this simulation case.
+                All known closure gates appear satisfied. Closing is final.
               </Typography>
             )}
             <TextField
@@ -1556,70 +2042,92 @@ export function OrgProcurementDetailPanel({ projectId, procurementId }) {
         )}
       </Paper>
       </ProcurementSectionGate>
+      ) : null}
 
-      <Paper variant="outlined" sx={{ p: 2, ...adminOutlinedTableContainerSx }}>
-        <details>
-        <summary className="cursor-pointer select-none text-base font-semibold">
-          Lifecycle timeline
-          <span className="ml-2 text-sm font-normal opacity-70">
-            ({(row.timeline || []).length} events)
-          </span>
-        </summary>
-        {(row.timeline || []).length === 0 ? (
-          <Typography sx={{ ...adminMutedTextSx, mt: 1.5 }}>No events yet.</Typography>
-        ) : (
-          <ul className="mt-3 space-y-2 text-sm">
-            {row.timeline.map((a) => {
-              let when = "—";
-              if (a.createdAt) {
-                const d =
-                  typeof a.createdAt === "string" ? parseISO(a.createdAt) : new Date(a.createdAt);
-                if (isValid(d)) when = format(d, "d MMM yyyy, h:mm a");
-              }
-              const who = a.actor?.displayName || "—";
-              const role = a.actorRoleName || "—";
-              const actionLine = a.actionText || a.decision || "Recorded action";
-              const statusLabel =
-                a.statusTransition?.label ||
-                (a.previousStatus && a.newStatus
-                  ? `Status: ${a.previousStatus} → ${a.newStatus}`
-                  : null);
-              return (
-                <li
-                  key={a.id}
-                  className="rounded-lg border border-[color:var(--border-subtle)] p-2"
-                >
-                  <p className="text-xs opacity-70">{when}</p>
-                  <p className="font-semibold">
-                    {who} — {role}
-                  </p>
-                  {a.departmentName ? (
-                    <p className="text-xs opacity-80">Department: {a.departmentName}</p>
-                  ) : null}
-                  {a.committeeRole ? (
-                    <p className="text-xs opacity-80">
-                      Committee role: {String(a.committeeRole).replace(/_/g, " ")}
-                    </p>
-                  ) : null}
-                  <p>{actionLine}</p>
-                  {a.amountLabel ? (
-                    <p className="text-xs opacity-80">Amount: {a.amountLabel}</p>
-                  ) : null}
-                  {statusLabel ? <p className="text-xs opacity-80">{statusLabel}</p> : null}
-                  {a.comment ? <p className="text-xs opacity-80">Comment: {a.comment}</p> : null}
-                  {a.processName ? (
-                    <p className="text-xs opacity-70">Process: {a.processName}</p>
-                  ) : null}
-                  {a.source === "domain" ? (
-                    <p className="text-xs opacity-60">Source: lifecycle audit</p>
-                  ) : null}
-                </li>
-              );
-            })}
+      {canViewStage ? (
+      <WorkflowHistoryPanel
+        showStatusChange
+        history={(row.timeline || []).map((a) => ({
+          id: a.id,
+          createdAt: a.createdAt,
+          decision: a.decision,
+          actionLabel: a.actionText || null,
+          actorName: a.actor?.displayName || null,
+          actorRoleName: a.actorRoleName || null,
+          previousStatus: a.previousStatus,
+          newStatus: a.newStatus,
+          statusLabel: a.statusTransition?.label || null,
+          comment: a.comment,
+          notes: [
+            a.departmentName ? `Department: ${a.departmentName}` : null,
+            a.committeeRole ? `Committee role: ${String(a.committeeRole).replace(/_/g, " ")}` : null,
+            a.amountLabel ? `Amount: ${a.amountLabel}` : null,
+            a.processName ? `Process: ${a.processName}` : null,
+          ],
+        }))}
+      />
+      ) : null}
+      <Dialog
+        open={piWarnOpen}
+        onClose={() => (busy ? null : setPiWarnOpen(false))}
+        maxWidth="sm"
+        fullWidth
+        slotProps={{ paper: { sx: adminDialogPaperSx } }}
+        aria-labelledby="pi-provider-warning-title"
+      >
+        <DialogTitle id="pi-provider-warning-title" className="flex items-center gap-2">
+          <WarningAmberRounded color="warning" aria-hidden />
+          {providerWord.charAt(0).toUpperCase() + providerWord.slice(1)} no longer meets requirements
+        </DialogTitle>
+        <DialogContent dividers>
+          <ul className="space-y-2">
+            {piProviderFailures.map((p) => (
+              <li key={p.id} className="text-sm">
+                <span className="font-semibold">{p.name}</span>
+                {p.reasons.length ? (
+                  <span className="block text-xs text-brand-red wrap-break-word">{p.reasons.join(" · ")}</span>
+                ) : null}
+              </li>
+            ))}
           </ul>
-        )}
-        </details>
-      </Paper>
+          <Typography variant="body2" sx={{ mt: 2, fontWeight: 600 }}>
+            Do you still want to proceed and issue the purchase instruction?
+          </Typography>
+        </DialogContent>
+        <DialogActions className="flex-wrap gap-2">
+          <Button onClick={() => setPiWarnOpen(false)} disabled={busy}>
+            Cancel
+          </Button>
+          <Button
+            variant="contained"
+            color="warning"
+            disabled={busy}
+            startIcon={busy ? <CircularProgress size={16} color="inherit" /> : null}
+            onClick={async () => {
+              await submitDecision({ acknowledged: true });
+              setPiWarnOpen(false);
+            }}
+          >
+            {busy ? "Issuing purchase instruction…" : "Issue anyway"}
+          </Button>
+        </DialogActions>
+      </Dialog>
+      {recommendOpen && recommendation?.canRecommend ? (
+        <OrgRecommendationDialog
+          open
+          onClose={() => setRecommendOpen(false)}
+          projectId={projectId}
+          procurementId={procurementId}
+          kinds={recommendation.kinds || []}
+          currentProviderId={recommendation.currentProviderId}
+          currentProviderName={row.requisition?.shortlist?.[0]?.name || null}
+          providers={suppliers}
+          onSubmitted={async () => {
+            notifyOrgTasksChanged();
+            await load();
+          }}
+        />
+      ) : null}
       {bidDialogOpen && row ? (
         <OrgBidDocumentFillDialog
           open

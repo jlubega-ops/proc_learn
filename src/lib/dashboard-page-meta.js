@@ -1,10 +1,15 @@
+import { NAV_LABELS } from "@/lib/nav-labels";
+
 /**
  * @param {string} pathname
- * @param {string} [_activeRole]
+ * @param {string} [activeRole]
  */
-export function getDashboardPageMeta(pathname, _activeRole) {
+export function getDashboardPageMeta(pathname, activeRole) {
   if (pathname === "/" || pathname === "")
-    return { title: "Home", subtitle: "Dashboard overview" };
+    return {
+      title: NAV_LABELS.dashboard,
+      subtitle: activeRole === "STUDENT" ? "My Organisation" : "Overview",
+    };
   if (pathname.startsWith("/academic/practice/"))
     return { title: "Practice project", subtitle: "My Academic Work" };
   if (pathname.startsWith("/academic/assessments/"))
@@ -41,44 +46,60 @@ export function getDashboardPageMeta(pathname, _activeRole) {
       subtitle: "Projects from your examiner",
     };
   if (pathname.startsWith("/organisation")) {
+    if (pathname === "/organisation" || pathname === "/organisation/")
+      return { title: NAV_LABELS.dashboard, subtitle: "My Organisation" };
     if (pathname === "/organisation/overview" || pathname.startsWith("/organisation/overview/"))
       return { title: "Project overview", subtitle: "Instructions and question" };
     if (pathname.includes("/org-admin/organisation-structure"))
-      return { title: "Organisation structure", subtitle: "My Organisation" };
+      return { title: NAV_LABELS.organisationStructure, subtitle: "My Organisation" };
     if (pathname.includes("/org-admin/financial-years"))
-      return { title: "Financial years", subtitle: "My Organisation" };
+      return { title: NAV_LABELS.financialYears, subtitle: "My Organisation" };
     if (pathname.includes("/org-admin/planning-period"))
-      return { title: "Planning period", subtitle: "My Organisation" };
+      return { title: NAV_LABELS.planningPeriods, subtitle: "My Organisation" };
     if (pathname.includes("/org-admin/process-workflow"))
-      return { title: "Process workflow", subtitle: "My Organisation" };
+      return { title: NAV_LABELS.processWorkflows, subtitle: "My Organisation" };
     if (pathname.includes("/org-admin/users"))
-      return { title: "User accounts", subtitle: "My Organisation" };
+      return { title: NAV_LABELS.users, subtitle: "My Organisation" };
     if (pathname.includes("/org-admin/departments"))
-      return { title: "Departments / units", subtitle: "My Organisation" };
+      return { title: NAV_LABELS.departments, subtitle: "My Organisation" };
     if (pathname.includes("/org-admin/roles"))
-      return { title: "Roles & Permissions", subtitle: "My Organisation" };
+      return { title: NAV_LABELS.roles, subtitle: "My Organisation" };
     if (pathname.includes("/org-admin/budgets"))
-      return { title: "Budgets", subtitle: "My Organisation" };
+      return { title: NAV_LABELS.budgets, subtitle: "My Organisation" };
     if (pathname.includes("/org-admin/committees"))
-      return { title: "Committees", subtitle: "My Organisation" };
+      return { title: NAV_LABELS.committees, subtitle: "My Organisation" };
+    if (pathname.includes("/org-admin/providers"))
+      return { title: NAV_LABELS.providers, subtitle: "My Organisation" };
     if (pathname.includes("/org-admin/audit-logs"))
-      return { title: "Activity logs", subtitle: "My Organisation" };
+      return { title: NAV_LABELS.activityLogs, subtitle: "My Organisation" };
+    if (pathname.includes("/org-admin/settings"))
+      return { title: NAV_LABELS.settings, subtitle: "My Organisation" };
     return { title: "Organisation", subtitle: "My Organisation" };
   }
   if (pathname.includes("/org-admin/organisation-structure"))
-    return { title: "Organisation structure", subtitle: "Project system administration" };
+    return { title: NAV_LABELS.organisationStructure, subtitle: "Project system administration" };
   if (pathname.includes("/org-admin/financial-years"))
-    return { title: "Financial years", subtitle: "Project system administration" };
+    return { title: NAV_LABELS.financialYears, subtitle: "Project system administration" };
   if (pathname.includes("/org-admin/planning-period"))
-    return { title: "Planning period", subtitle: "Project system administration" };
+    return { title: NAV_LABELS.planningPeriods, subtitle: "Project system administration" };
   if (pathname.includes("/org-admin/process-workflow"))
-    return { title: "Process workflow", subtitle: "Project system administration" };
+    return { title: NAV_LABELS.processWorkflows, subtitle: "Project system administration" };
   if (pathname.includes("/org-admin/users"))
-    return { title: "User accounts", subtitle: "Project system administration" };
+    return { title: NAV_LABELS.users, subtitle: "Project system administration" };
   if (pathname.includes("/org-admin/departments"))
-    return { title: "Departments / units", subtitle: "Project system administration" };
+    return { title: NAV_LABELS.departments, subtitle: "Project system administration" };
   if (pathname.includes("/org-admin/roles"))
-    return { title: "Roles & Permissions", subtitle: "Project system administration" };
+    return { title: NAV_LABELS.roles, subtitle: "Project system administration" };
+  if (pathname.includes("/org-admin/budgets"))
+    return { title: NAV_LABELS.budgets, subtitle: "Project system administration" };
+  if (pathname.includes("/org-admin/committees"))
+    return { title: NAV_LABELS.committees, subtitle: "Project system administration" };
+  if (pathname.includes("/org-admin/providers"))
+    return { title: NAV_LABELS.providers, subtitle: "Project system administration" };
+  if (pathname.includes("/org-admin/audit-logs"))
+    return { title: NAV_LABELS.activityLogs, subtitle: "Project system administration" };
+  if (pathname.includes("/org-admin/settings"))
+    return { title: NAV_LABELS.settings, subtitle: "Project system administration" };
   if (pathname.includes("/my-account"))
     return { title: "My account", subtitle: "Organisation user account" };
   if (pathname === "/projects" || pathname === "/projects/") {

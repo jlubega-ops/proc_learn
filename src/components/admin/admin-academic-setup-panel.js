@@ -437,7 +437,7 @@ export function AdminAcademicSetupPanel() {
               error={Boolean(fieldErrors.startDate)}
               helperText={fieldErrors.startDate}
               fullWidth
-              InputLabelProps={{ shrink: true }}
+              slotProps={{ inputLabel: { shrink: true } }}
               sx={themedTextFieldSx}
             />
             <TextField
@@ -448,7 +448,7 @@ export function AdminAcademicSetupPanel() {
               error={Boolean(fieldErrors.endDate)}
               helperText={fieldErrors.endDate}
               fullWidth
-              InputLabelProps={{ shrink: true }}
+              slotProps={{ inputLabel: { shrink: true } }}
               sx={themedTextFieldSx}
             />
             <TextField

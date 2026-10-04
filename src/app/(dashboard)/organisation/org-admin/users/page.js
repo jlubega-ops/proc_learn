@@ -23,7 +23,7 @@ export default async function OrganisationUsersPage() {
 
   return (
     <div className={BRAND_PAGE_SHELL_CLASS}>
-      <DashboardPageIntro title="User accounts" description="People who work in your organisation." />
+      <DashboardPageIntro title="Users" description="People who work in your organisation." />
       <ProjectOrgUsersPanel projectId={project.id} />
     </div>
   );

@@ -18,7 +18,7 @@ export default async function ProjectProcurementDetailPage({ params }) {
     <div className={BRAND_PAGE_SHELL_CLASS}>
       <DashboardPageIntro
         title="Procurement"
-        description="Header, linked requisition and funding, and audit timeline for this procurement."
+        description="Full record and progress of this procurement."
       />
       <OrgProcurementDetailPanel projectId={projectId} procurementId={procurementId} />
     </div>

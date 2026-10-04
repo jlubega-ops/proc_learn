@@ -1,5 +1,6 @@
 "use client";
 
+import { Fragment } from "react";
 import Paper from "@mui/material/Paper";
 import Table from "@mui/material/Table";
 import TableBody from "@mui/material/TableBody";
@@ -26,12 +27,14 @@ import { formatMoneyAmount, formatMoneyUGX } from "@/lib/money";
  *   footerLabel?: string;
  *   footerTotal?: string | number | null;
  *   title?: string;
+ *   getRowNote?: (row: any, index: number) => string | null | undefined;
  * }} p
  */
 export function OrgLineItemsTable({
   columns,
   rows,
   getRowKey,
+  getRowNote,
   emptyMessage = "No line items.",
   footerLabel = "Total",
   footerTotal = null,
@@ -61,23 +64,42 @@ export function OrgLineItemsTable({
               </TableRow>
             </TableHead>
             <TableBody>
-              {list.map((row, index) => (
-                <TableRow key={getRowKey ? getRowKey(row, index) : row.id || index}>
-                  {columns.map((col) => {
-                    const raw = col.render ? col.render(row, index) : row[col.id];
-                    let display = raw;
-                    if (col.money) {
-                      const amount = formatMoneyAmount(raw);
-                      display = amount || "—";
-                    }
-                    return (
-                      <TableCell key={col.id} align={col.align || "left"}>
-                        {display ?? "—"}
-                      </TableCell>
-                    );
-                  })}
-                </TableRow>
-              ))}
+              {list.map((row, index) => {
+                const key = getRowKey ? getRowKey(row, index) : row.id || index;
+                const note = getRowNote ? String(getRowNote(row, index) || "").trim() : "";
+                return (
+                  <Fragment key={key}>
+                    <TableRow sx={note ? { "& > td": { borderBottom: 0 } } : undefined}>
+                      {columns.map((col) => {
+                        const raw = col.render ? col.render(row, index) : row[col.id];
+                        let display = raw;
+                        if (col.money) {
+                          const amount = formatMoneyAmount(raw);
+                          display = amount || "—";
+                        }
+                        return (
+                          <TableCell key={col.id} align={col.align || "left"}>
+                            {display ?? "—"}
+                          </TableCell>
+                        );
+                      })}
+                    </TableRow>
+                    {note ? (
+                      <TableRow>
+                        <TableCell colSpan={columns.length} sx={{ pt: 0 }}>
+                          <Typography
+                            variant="caption"
+                            component="p"
+                            sx={{ ...adminMutedTextSx, whiteSpace: "pre-wrap" }}
+                          >
+                            {note}
+                          </Typography>
+                        </TableCell>
+                      </TableRow>
+                    ) : null}
+                  </Fragment>
+                );
+              })}
               {footerTotal !== null && footerTotal !== undefined ? (
                 <TableRow>
                   <TableCell

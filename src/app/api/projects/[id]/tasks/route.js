@@ -17,6 +17,7 @@ import {
 import { actOnBudgetTask, budgetInclude, serializeBudget } from "@/lib/projects/budgets";
 import { actOnProcurementTask } from "@/lib/projects/procurement-tasks";
 import { healMissingStepTasks } from "@/lib/projects/workflow-engine";
+import { procurementStageHref, procurementTaskStage } from "@/lib/projects/procurement-task-stage";
 import {
   getActiveCommittee,
   checkActingModeForTask,
@@ -116,7 +117,12 @@ export async function GET(_request, context) {
       instanceId: t.instanceId,
       entityType: t.instance?.entityType || null,
       detailHref: procurement
-        ? `/projects/${projectId}/procurements/${procurement.id}`
+        ? procurementStageHref(
+            projectId,
+            procurement.id,
+            procurementTaskStage(t.title),
+            procurement.procurementMethod,
+          )
         : budget
           ? `/projects/${projectId}/budgets/${budget.id}`
           : plan

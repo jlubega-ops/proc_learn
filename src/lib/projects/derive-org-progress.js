@@ -269,7 +269,6 @@ export async function deriveOrganisationProcurementProgress(projectId, opts = {}
 
   const orgUserSelect = {
     firstName: true,
-    middleName: true,
     lastName: true,
     email: true,
   };
@@ -728,7 +727,6 @@ export async function listPersonalOrgProgressSummaries(ownerUserIds, opts = {}) 
   const projectIds = orgs.map((o) => o.id);
   const orgUserSelect = {
     firstName: true,
-    middleName: true,
     lastName: true,
     email: true,
   };

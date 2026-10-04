@@ -12,6 +12,7 @@ import DialogActions from "@mui/material/DialogActions";
 import DialogContent from "@mui/material/DialogContent";
 import DialogTitle from "@mui/material/DialogTitle";
 import LinearProgress from "@mui/material/LinearProgress";
+import Link from "@mui/material/Link";
 import Pagination from "@mui/material/Pagination";
 import Radio from "@mui/material/Radio";
 import TextField from "@mui/material/TextField";
@@ -24,14 +25,17 @@ import EditRounded from "@mui/icons-material/EditRounded";
 import FactCheckRounded from "@mui/icons-material/FactCheckRounded";
 import ReplayRounded from "@mui/icons-material/ReplayRounded";
 import SearchRounded from "@mui/icons-material/SearchRounded";
+import StorefrontRounded from "@mui/icons-material/StorefrontRounded";
 import WarningAmberRounded from "@mui/icons-material/WarningAmberRounded";
 import { useToast } from "@/components/providers/toast-provider";
 import { adminDialogPaperSx, adminMutedTextSx, themedTextFieldSx } from "@/lib/admin-mui-surfaces";
-import { providerTerm } from "@/lib/projects/provider-terms";
+import { providerCategoryLabel, providerTerm } from "@/lib/projects/provider-terms";
 import {
+  ProviderComplianceChecklist,
   ProviderQualificationChip,
   checkIconFor,
 } from "@/components/projects/org-provider-compliance";
+import { RecordDetailsGrid } from "@/components/projects/record-details-grid";
 
 const PICKER_PAGE_SIZE = 6;
 const VERIFY_MS = 3000;
@@ -69,6 +73,8 @@ async function fetchProviders(projectId, params) {
  *   disabled?: boolean;
  *   disabledReason?: string;
  *   autoStart?: boolean;
+ *   hideAction?: boolean;
+ *   dialogOnly?: boolean;
  * }} p
  */
 export function OrgProviderRunValidation({
@@ -83,6 +89,8 @@ export function OrgProviderRunValidation({
   disabled = false,
   disabledReason,
   autoStart = false,
+  hideAction = false,
+  dialogOnly = false,
 }) {
   const [open, setOpen] = useState(() => autoStart && !confirmed);
   const [verifying, setVerifying] = useState(true);
@@ -137,6 +145,172 @@ export function OrgProviderRunValidation({
 
   const working = submitting || busy;
 
+  const dialog = (
+    <Dialog
+      open={open}
+      onClose={(_e, reason) => {
+        if (reason === "backdropClick") return;
+        close();
+      }}
+      maxWidth="sm"
+      fullWidth
+      scroll="paper"
+      slotProps={{ paper: { sx: adminDialogPaperSx } }}
+      aria-labelledby="provider-validation-title"
+    >
+      <DialogTitle id="provider-validation-title" className="flex items-center gap-2">
+        <FactCheckRounded color="primary" aria-hidden />
+        {confirmStep ? `${actionLabel} with warnings?` : "Eligibility validation"}
+      </DialogTitle>
+      {running ? <LinearProgress aria-hidden /> : null}
+      <DialogContent dividers>
+        {confirmStep ? (
+          <>
+            <Typography variant="body2" sx={{ mb: 1 }}>
+              Issues found. You can continue; the warnings are recorded.
+            </Typography>
+            <ul className="list-disc space-y-1 pl-5 text-sm">
+              {warnings.map((w) => (
+                <li key={w} className="wrap-break-word">
+                  {w}
+                </li>
+              ))}
+            </ul>
+          </>
+        ) : (
+          <div className="space-y-3" aria-live="polite" aria-busy={running}>
+            {running ? (
+              <Typography variant="body2" role="status" sx={adminMutedTextSx}>
+                Verifying with the external registers…
+              </Typography>
+            ) : null}
+            {providers.map((p) => {
+              const checks = p.qualification?.checks || [];
+              return (
+                <div key={p.id} className="rounded-md bg-surface-card p-2">
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <Typography variant="body2" fontWeight={700} className="wrap-break-word">
+                      {p.name}
+                    </Typography>
+                    {!running ? <ProviderQualificationChip qualification={p.qualification} /> : null}
+                  </div>
+                  <ul className="mt-1 space-y-1.5">
+                    {checks.map((c) => {
+                      if (running) {
+                        return (
+                          <li key={c.key} className="flex items-center gap-2 text-sm">
+                            <span className="inline-flex size-5 shrink-0 items-center justify-center">
+                              <CircularProgress
+                                size={16}
+                                thickness={5}
+                                disableShrink
+                                sx={{ color: "text.disabled", animationDuration: "800ms" }}
+                                aria-hidden
+                              />
+                            </span>
+                            <span className="opacity-70">
+                              {c.label} <span className="italic">— verifying…</span>
+                            </span>
+                          </li>
+                        );
+                      }
+                      const { Icon, color } = checkIconFor(c);
+                      return (
+                        <li key={c.key} className="flex items-start gap-2 text-sm">
+                          <span className="inline-flex size-5 shrink-0 items-center justify-center">
+                            <Icon fontSize="small" sx={{ color }} aria-hidden />
+                          </span>
+                          <span className="min-w-0">
+                            <span className="font-medium">{c.label}</span>
+                            <span className={c.passed && !c.warning ? "opacity-70" : ""}>
+                              {" — "}
+                              {c.passed ? "" : "Failed: "}
+                              {c.reason}
+                            </span>
+                          </span>
+                        </li>
+                      );
+                    })}
+                  </ul>
+                </div>
+              );
+            })}
+
+            {!running ? (
+              <div className="space-y-2">
+                <Alert
+                  severity={failedProviders.length ? "error" : expiringCount ? "warning" : "success"}
+                  variant="outlined"
+                >
+                  {failedProviders.length
+                    ? `${providers.length - failedProviders.length} of ${providers.length} passed all checks.${hideAction ? "" : ` ${failedProviders.length} did not — you can still continue; the warnings will be recorded.`}`
+                    : expiringCount
+                      ? "All selected providers passed. Some documents expire soon."
+                      : "All selected providers passed every check."}
+                </Alert>
+                {extraWarnings.map((w) => (
+                  <Alert key={w} severity="warning" variant="outlined">
+                    {w}
+                  </Alert>
+                ))}
+              </div>
+            ) : null}
+          </div>
+        )}
+      </DialogContent>
+      <DialogActions className="flex-wrap gap-2">
+        {running ? (
+          <Button onClick={close}>Cancel</Button>
+        ) : confirmStep ? (
+          <>
+            <Button onClick={() => setConfirmStep(false)} disabled={working}>
+              Go back
+            </Button>
+            <Button
+              variant="contained"
+              color="warning"
+              startIcon={working ? <CircularProgress size={16} color="inherit" /> : <WarningAmberRounded />}
+              disabled={working}
+              onClick={() => void doConfirm()}
+            >
+              {working ? busyLabel : `${actionLabel} anyway`}
+            </Button>
+          </>
+        ) : (
+          <>
+            <Button onClick={close} disabled={working}>
+              {hideAction ? "Close" : "Cancel"}
+            </Button>
+            <Button startIcon={<ReplayRounded />} onClick={start} disabled={working}>
+              Run again
+            </Button>
+            {!confirmed && !hideAction ? (
+              <Button
+                variant="contained"
+                color={hasWarnings ? "warning" : "success"}
+                startIcon={
+                  working ? (
+                    <CircularProgress size={16} color="inherit" />
+                  ) : hasWarnings ? (
+                    <WarningAmberRounded />
+                  ) : (
+                    <CheckCircleRounded />
+                  )
+                }
+                disabled={working}
+                onClick={() => (hasWarnings ? setConfirmStep(true) : void doConfirm())}
+              >
+                {working ? busyLabel : hasWarnings ? `${actionLabel} with warnings` : actionLabel}
+              </Button>
+            ) : null}
+          </>
+        )}
+      </DialogActions>
+    </Dialog>
+  );
+
+  if (dialogOnly) return dialog;
+
   return (
     <Box
       className="rounded-lg border border-(--border-subtle) p-3"
@@ -151,7 +325,7 @@ export function OrgProviderRunValidation({
         {confirmed ? (
           <Chip color="success" icon={<CheckCircleRounded />} label={confirmedLabel || "Confirmed"} />
         ) : (
-          <Tooltip title="Run the simulated URSB, URA, NSSF and PPDA register checks">
+          <Tooltip title="Run the URSB, URA, NSSF and PPDA register checks">
             <span>
               <Button
                 variant="contained"
@@ -189,167 +363,7 @@ export function OrgProviderRunValidation({
         </ul>
       )}
 
-      <Dialog
-        open={open}
-        onClose={(_e, reason) => {
-          if (reason === "backdropClick") return;
-          close();
-        }}
-        maxWidth="sm"
-        fullWidth
-        scroll="paper"
-        slotProps={{ paper: { sx: adminDialogPaperSx } }}
-        aria-labelledby="provider-validation-title"
-      >
-        <DialogTitle id="provider-validation-title" className="flex items-center gap-2">
-          <FactCheckRounded color="primary" aria-hidden />
-          {confirmStep ? `${actionLabel} with warnings?` : "Eligibility validation"}
-        </DialogTitle>
-        {running ? <LinearProgress aria-hidden /> : null}
-        <DialogContent dividers>
-          {confirmStep ? (
-            <>
-              <Typography variant="body2" sx={{ mb: 1 }}>
-                Issues found. You can continue; the warnings are recorded.
-              </Typography>
-              <ul className="list-disc space-y-1 pl-5 text-sm">
-                {warnings.map((w) => (
-                  <li key={w} className="wrap-break-word">
-                    {w}
-                  </li>
-                ))}
-              </ul>
-            </>
-          ) : (
-            <div className="space-y-3" aria-live="polite" aria-busy={running}>
-              {running ? (
-                <Typography variant="body2" role="status" sx={adminMutedTextSx}>
-                  Verifying with the external registers…
-                </Typography>
-              ) : null}
-              {providers.map((p) => {
-                const checks = p.qualification?.checks || [];
-                return (
-                  <div key={p.id} className="rounded-md bg-surface-card p-2">
-                    <div className="flex flex-wrap items-center justify-between gap-2">
-                      <Typography variant="body2" fontWeight={700} className="wrap-break-word">
-                        {p.name}
-                      </Typography>
-                      {!running ? <ProviderQualificationChip qualification={p.qualification} /> : null}
-                    </div>
-                    <ul className="mt-1 space-y-1.5">
-                      {checks.map((c) => {
-                        if (running) {
-                          return (
-                            <li key={c.key} className="flex items-center gap-2 text-sm">
-                              <span className="inline-flex size-5 shrink-0 items-center justify-center">
-                                <CircularProgress
-                                  size={16}
-                                  thickness={5}
-                                  disableShrink
-                                  sx={{ color: "text.disabled", animationDuration: "800ms" }}
-                                  aria-hidden
-                                />
-                              </span>
-                              <span className="opacity-70">
-                                {c.label} <span className="italic">— verifying…</span>
-                              </span>
-                            </li>
-                          );
-                        }
-                        const { Icon, color } = checkIconFor(c);
-                        return (
-                          <li key={c.key} className="flex items-start gap-2 text-sm">
-                            <span className="inline-flex size-5 shrink-0 items-center justify-center">
-                              <Icon fontSize="small" sx={{ color }} aria-hidden />
-                            </span>
-                            <span className="min-w-0">
-                              <span className="font-medium">{c.label}</span>
-                              <span className={c.passed && !c.warning ? "opacity-70" : ""}>
-                                {" — "}
-                                {c.passed ? "" : "Failed: "}
-                                {c.reason}
-                              </span>
-                            </span>
-                          </li>
-                        );
-                      })}
-                    </ul>
-                  </div>
-                );
-              })}
-
-              {!running ? (
-                <div className="space-y-2">
-                  <Alert
-                    severity={failedProviders.length ? "error" : expiringCount ? "warning" : "success"}
-                    variant="outlined"
-                  >
-                    {failedProviders.length
-                      ? `${providers.length - failedProviders.length} of ${providers.length} passed all checks. ${failedProviders.length} did not — you can still continue; the warnings will be recorded.`
-                      : expiringCount
-                        ? "All selected providers passed. Some documents expire soon."
-                        : "All selected providers passed every check."}
-                  </Alert>
-                  {extraWarnings.map((w) => (
-                    <Alert key={w} severity="warning" variant="outlined">
-                      {w}
-                    </Alert>
-                  ))}
-                </div>
-              ) : null}
-            </div>
-          )}
-        </DialogContent>
-        <DialogActions className="flex-wrap gap-2">
-          {running ? (
-            <Button onClick={close}>Cancel</Button>
-          ) : confirmStep ? (
-            <>
-              <Button onClick={() => setConfirmStep(false)} disabled={working}>
-                Go back
-              </Button>
-              <Button
-                variant="contained"
-                color="warning"
-                startIcon={working ? <CircularProgress size={16} color="inherit" /> : <WarningAmberRounded />}
-                disabled={working}
-                onClick={() => void doConfirm()}
-              >
-                {working ? busyLabel : `${actionLabel} anyway`}
-              </Button>
-            </>
-          ) : (
-            <>
-              <Button onClick={close} disabled={working}>
-                Cancel
-              </Button>
-              <Button startIcon={<ReplayRounded />} onClick={start} disabled={working}>
-                Run again
-              </Button>
-              {!confirmed ? (
-                <Button
-                  variant="contained"
-                  color={hasWarnings ? "warning" : "success"}
-                  startIcon={
-                    working ? (
-                      <CircularProgress size={16} color="inherit" />
-                    ) : hasWarnings ? (
-                      <WarningAmberRounded />
-                    ) : (
-                      <CheckCircleRounded />
-                    )
-                  }
-                  disabled={working}
-                  onClick={() => (hasWarnings ? setConfirmStep(true) : void doConfirm())}
-                >
-                  {working ? busyLabel : hasWarnings ? `${actionLabel} with warnings` : actionLabel}
-                </Button>
-              ) : null}
-            </>
-          )}
-        </DialogActions>
-      </Dialog>
+      {dialog}
     </Box>
   );
 }
@@ -377,6 +391,9 @@ export function OrgProviderRunValidation({
  *   error?: string;
  *   label?: string;
  *   helperText?: string;
+ *   locked?: boolean;
+ *   optionalValidation?: boolean;
+ *   onQualificationChange?: (failed: { id: string; name: string; reasons: string[] }[]) => void;
  * }} p
  */
 export function OrgProviderSelection({
@@ -397,6 +414,9 @@ export function OrgProviderSelection({
   error,
   label,
   helperText,
+  locked = false,
+  optionalValidation = false,
+  onQualificationChange,
 }) {
   const { showToast } = useToast();
   const term = providerTerm(category);
@@ -413,6 +433,7 @@ export function OrgProviderSelection({
   const [validatedProviders, setValidatedProviders] = useState(/** @type {any[] | null} */ (null));
   const [validationRun, setValidationRun] = useState(0);
   const [refreshing, setRefreshing] = useState(false);
+  const [infoProvider, setInfoProvider] = useState(/** @type {any} */ (null));
 
   const baseParams = useMemo(() => {
     /** @type {Record<string, string>} */
@@ -457,8 +478,8 @@ export function OrgProviderSelection({
   }, [projectId, baseParams, page, qualification, search, showToast]);
 
   useEffect(() => {
-    void load();
-  }, [load]);
+    if (!locked) void load();
+  }, [load, locked]);
 
   const missingKey = value.filter((id) => !known[id]).join(",");
   useEffect(() => {
@@ -486,8 +507,16 @@ export function OrgProviderSelection({
 
   const selected = value.map((id) => known[id]).filter(Boolean);
 
+  const failed = (validatedProviders || selected)
+    .filter((p) => p.qualification && !p.qualification.qualifies)
+    .map((p) => ({ id: p.id, name: p.name, reasons: p.qualification.failedReasons || [] }));
+  const failedKey = JSON.stringify(failed);
+  useEffect(() => {
+    onQualificationChange?.(JSON.parse(failedKey));
+  }, [failedKey, onQualificationChange]);
+
   const toggle = (id) => {
-    if (confirmed) return;
+    if (confirmed || locked) return;
     if (mode === "single") {
       onChange(value[0] === id ? [] : [id]);
       return;
@@ -513,6 +542,83 @@ export function OrgProviderSelection({
 
   const Control = mode === "single" ? Radio : Checkbox;
 
+  if (locked) {
+    const shown = validatedProviders || selected;
+    return (
+      <div className="space-y-2">
+        <div
+          className="flex flex-wrap items-center gap-x-3 gap-y-2 rounded-lg border border-(--border-subtle) px-3 py-2"
+          role="region"
+          aria-label={label || `Approved ${term}`}
+        >
+          <Tooltip title={helperText || ""}>
+            <Typography variant="subtitle2" component="span">
+              {label || `Approved ${term}`}
+            </Typography>
+          </Tooltip>
+          {shown.length ? (
+            shown.map((p) => (
+              <span key={p.id} className="flex flex-wrap items-center gap-2">
+                <Tooltip title={`View ${term} details`}>
+                  <Chip
+                    clickable
+                    color="primary"
+                    variant="outlined"
+                    icon={<StorefrontRounded />}
+                    label={p.name}
+                    onClick={() => setInfoProvider(p)}
+                    aria-label={`View ${p.name} details`}
+                  />
+                </Tooltip>
+                <ProviderQualificationChip qualification={p.qualification} />
+              </span>
+            ))
+          ) : (
+            <CircularProgress size={16} aria-label={`Loading ${term}`} />
+          )}
+          {value.length ? (
+            <Tooltip title="Re-run the URSB, URA, NSSF and PPDA register checks">
+              <Link
+                component="button"
+                type="button"
+                underline="hover"
+                variant="body2"
+                onClick={() => void prepareValidation()}
+                disabled={refreshing || busy}
+                className="ml-auto inline-flex items-center gap-1 font-semibold disabled:cursor-not-allowed disabled:opacity-60"
+              >
+                {refreshing ? <CircularProgress size={12} color="inherit" aria-hidden /> : null}
+                {refreshing ? "Preparing checks…" : "Run validation again"}
+              </Link>
+            </Tooltip>
+          ) : null}
+        </div>
+        {shown
+          .filter((p) => !p.qualification?.qualifies && p.qualification?.failedReasons?.length)
+          .map((p) => (
+            <Typography key={p.id} variant="caption" component="p" className="text-brand-red wrap-break-word">
+              {p.name}: {p.qualification.failedReasons.join(" · ")}
+            </Typography>
+          ))}
+        {validatedProviders ? (
+          <OrgProviderRunValidation
+            key={`${validatedProviders.map((p) => p.id).join(",")}-${validationRun}`}
+            providers={validatedProviders}
+            actionLabel={actionLabel}
+            onConfirm={(s) => onConfirm({ providers: validatedProviders, ...s })}
+            busy={busy}
+            busyLabel={busyLabel}
+            extraWarnings={extraWarnings}
+            hideAction={optionalValidation}
+            dialogOnly
+            autoStart
+          />
+        ) : null}
+        <ProviderInfoDialog provider={infoProvider} term={term} onClose={() => setInfoProvider(null)} />
+      </div>
+    );
+  }
+
   return (
     <div className="space-y-3">
       <div>
@@ -526,7 +632,7 @@ export function OrgProviderSelection({
         ) : null}
       </div>
 
-      {!confirmed ? (
+      {!confirmed && !locked ? (
         <>
           <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
             <TextField
@@ -623,7 +729,7 @@ export function OrgProviderSelection({
               color="primary"
               variant="outlined"
               label={p.name}
-              onDelete={confirmed ? undefined : () => toggle(p.id)}
+              onDelete={confirmed || locked ? undefined : () => toggle(p.id)}
             />
           ))}
           {confirmed && onUnconfirm ? (
@@ -648,6 +754,20 @@ export function OrgProviderSelection({
             extraWarnings={extraWarnings}
             autoStart
           />
+        ) : optionalValidation ? (
+          <Tooltip title="Re-run the URSB, URA, NSSF and PPDA register checks">
+            <span>
+              <Button
+                size="small"
+                variant="text"
+                startIcon={refreshing ? <CircularProgress size={14} color="inherit" /> : <ReplayRounded />}
+                onClick={() => void prepareValidation()}
+                disabled={refreshing || busy}
+              >
+                {refreshing ? "Preparing checks…" : "Check validation again"}
+              </Button>
+            </span>
+          </Tooltip>
         ) : (
           <Box className="rounded-lg border border-(--border-subtle) p-3">
             <div className="flex flex-wrap items-center justify-between gap-2">
@@ -679,6 +799,64 @@ export function OrgProviderSelection({
         </Box>
       )}
     </div>
+  );
+}
+
+/**
+ * Read-only provider profile from the register row already loaded by the picker.
+ * @param {{ provider: any | null; term: string; onClose: () => void }} p
+ */
+function ProviderInfoDialog({ provider, term, onClose }) {
+  const p = provider;
+  const fields = p
+    ? [
+        { label: "Contact person", value: p.contactPerson },
+        { label: "Email", value: p.email },
+        { label: "Phone", value: p.phone },
+        { label: "TIN", value: p.tin },
+        { label: "Registration no.", value: p.registrationRef },
+        {
+          label: "Categories",
+          value: (p.categories || []).map((c) => providerCategoryLabel(c)).join(", "),
+        },
+        { label: "Address", value: p.physicalAddress, wide: true },
+        { label: "Lines of business", value: p.linesOfBusiness, full: true },
+      ].map((f) => ({ ...f, value: f.value || "—" }))
+    : [];
+  return (
+    <Dialog
+      open={Boolean(p)}
+      onClose={onClose}
+      maxWidth="md"
+      fullWidth
+      scroll="paper"
+      slotProps={{ paper: { sx: adminDialogPaperSx } }}
+      aria-labelledby="provider-info-title"
+    >
+      <DialogTitle id="provider-info-title" className="flex flex-wrap items-center gap-2">
+        <StorefrontRounded color="primary" aria-hidden />
+        <span className="min-w-0 wrap-break-word">{p?.name}</span>
+        {p ? <ProviderQualificationChip qualification={p.qualification} /> : null}
+      </DialogTitle>
+      <DialogContent dividers>
+        {p ? (
+          <>
+            <RecordDetailsGrid fields={fields} />
+            {p.qualification?.checks?.length ? (
+              <div className="mt-4">
+                <Typography variant="subtitle2">Eligibility checks</Typography>
+                <ProviderComplianceChecklist checks={p.qualification.checks} />
+              </div>
+            ) : null}
+          </>
+        ) : null}
+      </DialogContent>
+      <DialogActions>
+        <Button onClick={onClose} aria-label={`Close ${term} details`}>
+          Close
+        </Button>
+      </DialogActions>
+    </Dialog>
   );
 }
 

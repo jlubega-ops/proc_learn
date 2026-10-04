@@ -4,6 +4,7 @@
  */
 
 import { BRAND_BLUE, BRAND_RED, BRAND_YELLOW, SEMANTIC } from "@/lib/brand-colors";
+import { APP_BRAND_LABEL, ORG_NAME } from "@/lib/appConfig";
 
 const MARGIN = 48;
 const PAGE_W = 595.28;
@@ -147,7 +148,7 @@ function drawPageHeader(doc, spec, y) {
   doc.setFont("helvetica", "bold");
   doc.setFontSize(16);
   doc.setTextColor(...blue);
-  doc.text("Proc Learn", MARGIN, y);
+  doc.text(APP_BRAND_LABEL, MARGIN, y);
 
   const ref = pdfFieldValue(spec.referenceNumber);
   if (ref !== "—") {
@@ -163,7 +164,7 @@ function drawPageHeader(doc, spec, y) {
   doc.setFont("helvetica", "normal");
   doc.setFontSize(9);
   doc.setTextColor(113, 113, 122);
-  doc.text("Makerere University Business School · Organisation simulator", MARGIN, y);
+  doc.text(ORG_NAME, MARGIN, y);
   y += 18;
 
   return y;
@@ -482,7 +483,7 @@ function drawPageFooter(doc, spec) {
       dateStyle: "medium",
       timeStyle: "short",
     });
-    const left = spec.footerNote || "Proc Learn teaching reference — submit in the simulator.";
+    const left = spec.footerNote || APP_BRAND_LABEL;
     doc.text(left, MARGIN, footerY);
     const pageLabel = `Page ${p} of ${pages} · Generated ${generated}`;
     doc.text(pageLabel, PAGE_W - MARGIN - doc.getTextWidth(pageLabel), footerY);
