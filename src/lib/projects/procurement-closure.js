@@ -53,14 +53,22 @@ export async function evaluateClosureReadiness(prisma, projectId, procurementId)
   const blockers = [];
 
   if (procurement.procurementMethod === OrgProcurementMethod.MICRO) {
-    const issued = procurement.purchaseInstructions.some((pi) => pi.status === OrgPurchaseInstructionStatus.ISSUED);
-    if (!issued) blockers.push("Issue a purchase instruction before closing this Micro Procurement.");
+    const statuses = procurement.purchaseInstructions.map((pi) => pi.status);
+    if (!statuses.includes(OrgPurchaseInstructionStatus.ACCEPTED)) {
+      blockers.push(
+        statuses.includes(OrgPurchaseInstructionStatus.ISSUED)
+          ? "The purchase instruction must be accepted by the supplier."
+          : "Issue a purchase instruction before closing this Micro Procurement.",
+      );
+    }
   } else {
     const acceptedAward = procurement.awards.find((a) => a.status === OrgAwardStatus.ACCEPTED);
     if (!acceptedAward) blockers.push("The award must be accepted by the supplier.");
 
     const hasActiveOrder =
-      procurement.contracts.some((c) => c.status === OrgContractStatus.ACTIVE) ||
+      procurement.contracts.some((c) =>
+        [OrgContractStatus.ACTIVE, OrgContractStatus.ISSUED].includes(c.status),
+      ) ||
       procurement.lpos.some((l) => l.status === OrgLpoStatus.ACCEPTED);
     if (!hasActiveOrder) {
       blockers.push(

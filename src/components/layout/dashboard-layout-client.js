@@ -234,9 +234,10 @@ function NavLinks({
   const renderLink = (section, { href, label, title, Icon, children }) => {
     if (Array.isArray(children) && children.length > 0) {
       const hasActiveChild = childActive(children);
+      const childHasTasks = children.some((child) => (taskCounts[child.href] || 0) > 0);
       return (
         <li key={`${section.id}::${label}`} className="list-none">
-          <details open={hasActiveChild} className="group rounded-lg">
+          <details open={hasActiveChild || childHasTasks} className="group rounded-lg">
             <summary
               title={title}
               className={`flex cursor-pointer list-none items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium transition-colors ${

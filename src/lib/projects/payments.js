@@ -198,7 +198,7 @@ export async function approvePayment(prisma, opts) {
  * Mark an APPROVED payment as PAID. When it fully settles the invoice, the
  * procurement advances to READY_FOR_CLOSURE.
  * @param {import("@prisma/client").PrismaClient} prisma
- * @param {{ projectId: string; paymentId: string; actorOrgUserId: string; actorRoleName: string; paymentDate?: string | Date | null }} opts
+ * @param {{ projectId: string; paymentId: string; actorOrgUserId: string; actorRoleName: string; paymentDate?: string | Date | null; paymentReference?: string | null }} opts
  */
 export async function markPaymentPaid(prisma, opts) {
   const row = await prisma.projectOrgPayment.findFirst({ where: { id: opts.paymentId, projectId: opts.projectId } });
@@ -206,10 +206,25 @@ export async function markPaymentPaid(prisma, opts) {
   if (row.status !== OrgPaymentStatus.APPROVED) {
     return { ok: false, error: "The payment must be approved before it can be marked paid.", status: 400 };
   }
+  let paymentReference =
+    typeof opts.paymentReference === "string" ? opts.paymentReference.trim().slice(0, 128) || null : null;
+  if (!paymentReference && !row.paymentReference) {
+    const [proc, referenced] = await Promise.all([
+      prisma.projectOrgProcurement.findUnique({ where: { id: row.procurementId }, select: { procurementNumber: true } }),
+      prisma.projectOrgPayment.count({
+        where: { procurementId: row.procurementId, paymentReference: { not: null } },
+      }),
+    ]);
+    paymentReference = `PAY-${proc?.procurementNumber || "PROC"}-${String(referenced + 1).padStart(3, "0")}`;
+  }
 
   const updated = await prisma.projectOrgPayment.update({
     where: { id: row.id },
-    data: { status: OrgPaymentStatus.PAID, paymentDate: opts.paymentDate ? new Date(opts.paymentDate) : new Date() },
+    data: {
+      status: OrgPaymentStatus.PAID,
+      paymentDate: opts.paymentDate ? new Date(opts.paymentDate) : new Date(),
+      ...(paymentReference ? { paymentReference } : {}),
+    },
     include: paymentInclude,
   });
 

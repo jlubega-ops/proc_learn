@@ -434,10 +434,12 @@ async function main() {
   let inv = await createInvoice(prisma, {
     projectId,
     procurementId,
-    actorOrgUserId: users.John.id,
-    actorRoleName: users.John.projectOrgRole.name,
+    actorOrgUserId: null,
+    actorRoleName: "Provider (portal)",
+    source: "PORTAL",
+    portalProviderId: lpo.lpo.supplierId,
+    supplierReference: `SUP-${Date.now().toString().slice(-6)}`,
     amount: "75000",
-    invoiceNumber: `INV-${Date.now().toString().slice(-6)}`,
   });
   assert(inv.ok, "Invoice created after delivery", inv.error);
   inv = await certifyInvoice(prisma, {

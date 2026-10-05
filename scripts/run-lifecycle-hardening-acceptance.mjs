@@ -489,11 +489,22 @@ async function main() {
   assert(delivery.ok, "Delivery recorded", delivery.error);
 
   // Invoice before inspection must fail
-  const invEarly = await createInvoice(prisma, {
+  const officerInvoice = await createInvoice(prisma, {
     projectId,
     procurementId: procurementId,
     actorOrgUserId: users.John.id,
     actorRoleName: users.John.projectOrgRole.name,
+    amount: "3500000",
+  });
+  assert(!officerInvoice.ok, "Org users cannot raise the provider's invoice", officerInvoice.error);
+
+  const invEarly = await createInvoice(prisma, {
+    projectId,
+    procurementId: procurementId,
+    actorOrgUserId: null,
+    actorRoleName: "Provider (portal)",
+    source: "PORTAL",
+    portalProviderId: lpo.lpo.supplierId,
     amount: "3500000",
   });
   assert(!invEarly.ok, "Invoice blocked before acceptance", invEarly.error);
@@ -512,8 +523,11 @@ async function main() {
   let inv = await createInvoice(prisma, {
     projectId,
     procurementId: procurementId,
-    actorOrgUserId: users.John.id,
-    actorRoleName: users.John.projectOrgRole.name,
+    actorOrgUserId: null,
+    actorRoleName: "Provider (portal)",
+    source: "PORTAL",
+    portalProviderId: lpo.lpo.supplierId,
+    supplierReference: "SUP-INV-001",
     amount: "3500000",
   });
   assert(inv.ok, "Invoice created", inv.error);

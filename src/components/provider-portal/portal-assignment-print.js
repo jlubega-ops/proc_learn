@@ -179,7 +179,7 @@ export function PortalAssignmentPrint({ data }) {
     },
     {
       type: "table",
-      title: "History",
+      title: "Workflow history",
       columns: [
         { id: "date", label: "Date", width: "18%" },
         { id: "action", label: "Action" },

@@ -45,13 +45,13 @@ import { OrgProviderSelection } from "@/components/projects/org-provider-selecti
 import {
   OrgDeliveryAddressLine,
   OrgOffersCard,
-  OrgReceiveInvoiceForm,
   SubmissionSourceChip,
 } from "@/components/projects/org-procurement-supply-cards";
 import { OrgEvaluationPanel } from "@/components/projects/org-evaluation-panel";
 import Alert from "@mui/material/Alert";
 import { ProcurementSectionGate } from "@/components/projects/org-procurement-stage-tracker";
 import { RecordDetailsGrid } from "@/components/projects/record-details-grid";
+import { OrgLineItemsTable } from "@/components/projects/org-line-items-table";
 import { PrintButton, formatPrintDate } from "@/components/print/print-document";
 import { ProcurementPrint } from "@/components/projects/org-procurement-print";
 import {
@@ -84,6 +84,17 @@ import {
 import AssignmentTurnedInRounded from "@mui/icons-material/AssignmentTurnedInRounded";
 import CheckCircleRounded from "@mui/icons-material/CheckCircleRounded";
 import FactCheckRounded from "@mui/icons-material/FactCheckRounded";
+import BlockRounded from "@mui/icons-material/BlockRounded";
+import ReceiptLongRounded from "@mui/icons-material/ReceiptLongRounded";
+import PaymentsRounded from "@mui/icons-material/PaymentsRounded";
+import UndoRounded from "@mui/icons-material/UndoRounded";
+import TaskAltRounded from "@mui/icons-material/TaskAltRounded";
+
+const APPROVE_PAYMENT_STEP_RE = /^approve payment|^payment approval/i;
+const RECORD_PAYMENT_STEP_RE = /^record payment|^payment recording/i;
+const CLOSE_STEP_RE = /^close procurement|^procurement closure/i;
+const INVOICE_STEP_RE =
+  /^receive\/record invoice|^receive.?record invoice|^process invoice|^invoice$|^verify invoice|^invoice verification|^certify and verify invoice/i;
 
 const METHOD_LABELS = {
   MICRO: "Micro Procurement",
@@ -198,10 +209,17 @@ export function OrgProcurementDetailPanel({ projectId, procurementId, stage = nu
   const [offerAmount, setOfferAmount] = useState("");
   /** @type {[Record<string, string>, Function]} */
   const [offerErrors, setOfferErrors] = useState({});
-  const [taskInvoiceId, setTaskInvoiceId] = useState("");
-  const [paymentAmount, setPaymentAmount] = useState("");
-  const [paymentRef, setPaymentRef] = useState("");
+  /** @type {[any, Function]} */
+  const [invoiceToReject, setInvoiceToReject] = useState(null);
+  const [invoiceRejectReason, setInvoiceRejectReason] = useState("");
+  const [invoiceRejectError, setInvoiceRejectError] = useState("");
+  /** null = untouched, so the generated reference is used. */
+  const [paymentRefInput, setPaymentRef] = useState(/** @type {string | null} */ (null));
+  const [paymentRefError, setPaymentRefError] = useState("");
+  const [paymentReasonOpen, setPaymentReasonOpen] = useState(false);
+  const [paymentReasonError, setPaymentReasonError] = useState("");
   const [closureRemarks, setClosureRemarks] = useState("");
+  const [closeConfirmOpen, setCloseConfirmOpen] = useState(false);
   /** @type {[Record<string, string>, Function]} */
   const [deliveryQtys, setDeliveryQtys] = useState({});
   const [inspectionNotes, setInspectionNotes] = useState("");
@@ -210,6 +228,8 @@ export function OrgProcurementDetailPanel({ projectId, procurementId, stage = nu
   const [inspectionCommitteeId, setInspectionCommitteeId] = useState("");
   /** @type {[Record<string, string>, Function]} */
   const [receiveErrors, setReceiveErrors] = useState({});
+  /** @type {[Record<string, string>, Function]} */
+  const [inspectionErrors, setInspectionErrors] = useState({});
   const [committees, setCommittees] = useState(/** @type {any[]} */ ([]));
   const [rejectReason, setRejectReason] = useState("");
   const [cancelAwardReason, setCancelAwardReason] = useState("");
@@ -273,7 +293,6 @@ export function OrgProcurementDetailPanel({ projectId, procurementId, stage = nu
       setOfferSupplierId("");
       setOfferAmount("");
       setOfferErrors({});
-      setTaskInvoiceId("");
       setDeliveryQtys({});
       setInspectionNotes("");
       setInspectionLineEdits({});
@@ -321,10 +340,11 @@ export function OrgProcurementDetailPanel({ projectId, procurementId, stage = nu
   const isRfqIssue = /issue rfqs to suppliers/i.test(taskTitle);
   const isTenderAdvertise = /advertise tender/i.test(taskTitle);
   const isReceive = /receive quotations/i.test(taskTitle) || /receive bids/i.test(taskTitle);
-  const isReceiveInvoiceTask =
-    /^receive\/record invoice|^receive.?record invoice|^process invoice|^invoice$/i.test(
-      taskTitle.split(":")[0].trim(),
-    );
+  const taskStep = taskTitle.split(":")[0].trim();
+  const isInvoiceTask = Boolean(pendingTask) && INVOICE_STEP_RE.test(taskStep);
+  const isApprovePaymentTask = Boolean(pendingTask) && APPROVE_PAYMENT_STEP_RE.test(taskStep);
+  const isRecordPaymentTask = Boolean(pendingTask) && RECORD_PAYMENT_STEP_RE.test(taskStep);
+  const isCloseTask = Boolean(pendingTask) && CLOSE_STEP_RE.test(taskStep);
   const isApproveEvaluationTask =
     /^approve evaluation report|approve evaluation\/recommendation/i.test(taskTitle);
   const isReceiveGoodsTask = Boolean(pendingTask) && isReceiveGoodsStep(taskTitle);
@@ -355,6 +375,10 @@ export function OrgProcurementDetailPanel({ projectId, procurementId, stage = nu
     !isRecommendationDecisionTask(taskTitle) &&
     !isReceiveGoodsTask &&
     !isAcceptGoodsTask &&
+    !isInvoiceTask &&
+    !isApprovePaymentTask &&
+    !isRecordPaymentTask &&
+    !isCloseTask &&
     !recommendation?.pending;
   const providerWord = providerTerm(reqCategory);
   const providerWordPlural = providerTerm(reqCategory, { plural: true });
@@ -464,30 +488,43 @@ export function OrgProcurementDetailPanel({ projectId, procurementId, stage = nu
     if (ok) setDeliveryQtys({});
   }
 
-  /**
-   * @param {any} d
-   * @param {boolean} acceptAll
-   */
-  async function inspectDelivery(d, acceptAll) {
+  /** @param {any} d */
+  async function inspectDelivery(d) {
+    /** @type {Record<string, string>} */
+    const errs = {};
     const lineDecisions = (d.lines || []).map((l) => {
-      const edit = acceptAll ? null : inspectionLineEdits[l.id];
-      return {
-        lineId: l.id,
-        acceptedQuantity: edit?.accepted ?? l.receivedQuantity,
-        rejectedQuantity: edit?.rejected ?? 0,
-      };
+      const edit = inspectionLineEdits[l.id];
+      const acceptedRaw = String(edit?.accepted ?? l.receivedQuantity).trim();
+      const rejectedRaw = String(edit?.rejected ?? "0").trim() || "0";
+      const accepted = Number(acceptedRaw);
+      const rejected = Number(rejectedRaw);
+      if (!acceptedRaw || !Number.isFinite(accepted) || accepted < 0) errs[`${l.id}:accepted`] = "Enter a quantity.";
+      if (!Number.isFinite(rejected) || rejected < 0) errs[`${l.id}:rejected`] = "Enter a quantity.";
+      else if (accepted + rejected > Number(l.receivedQuantity) + 0.009) {
+        errs[`${l.id}:accepted`] = `Max ${l.receivedQuantity} in total.`;
+      }
+      return { lineId: l.id, acceptedQuantity: acceptedRaw, rejectedQuantity: rejectedRaw };
     });
+    setInspectionErrors(errs);
+    if (Object.keys(errs).length) {
+      showToast({ message: "Please fix the highlighted fields.", severity: "error" });
+      return;
+    }
+    const fullyAccepted = lineDecisions.every(
+      (ld, i) => Number(ld.acceptedQuantity) + 0.009 >= Number(d.lines[i].receivedQuantity),
+    );
     const body = {
       deliveryId: d.id,
-      resultNotes: inspectionNotes.trim() || (acceptAll ? "Accepted in full." : "Inspection recorded."),
+      resultNotes: inspectionNotes.trim() || (fullyAccepted ? "Accepted in full." : "Inspection recorded."),
       lineDecisions,
       committeeId: inspectionCommitteeId || null,
       committeeRole: inspectionCommitteeId ? "INSPECTION" : null,
     };
     const ok = isAcceptGoodsTask
-      ? await submitDeliveryTask(body, "Goods accepted.")
-      : await runLifecycle("record_inspection", body, "Inspection saved.");
+      ? await submitDeliveryTask(body, "Inspection confirmed.")
+      : await runLifecycle("record_inspection", body, "Inspection confirmed.");
     if (ok) {
+      setInspectionErrors({});
       setInspectionLineEdits({});
       setInspectionNotes("");
     }
@@ -591,16 +628,6 @@ export function OrgProcurementDetailPanel({ projectId, procurementId, stage = nu
           amount: offerAmount.trim(),
         };
         payload.finalize = true;
-      }
-      if (isReceiveInvoiceTask && isPositiveDecision) {
-        if (!taskInvoiceId) {
-          showToast({
-            message: "Receive the invoice in the Invoice section below, then choose it here.",
-            severity: "error",
-          });
-          return;
-        }
-        payload.invoiceId = taskInvoiceId;
       }
       const latestReport = Array.isArray(row?.evaluationReports) ? row.evaluationReports[0] : null;
       if (
@@ -729,6 +756,11 @@ export function OrgProcurementDetailPanel({ projectId, procurementId, stage = nu
     reqItems.length > 0 &&
     reqItems.every((it) => (receivedByItem[it.itemName] || 0) + 0.009 >= Number(it.quantity || 0));
   const allInspected = deliveries.length > 0 && deliveries.every((d) => d.inspection);
+  /** @param {string} itemName */
+  const orderedQtyLabel = (itemName) => {
+    const it = reqItems.find((i) => i.itemName === itemName);
+    return it ? `${it.quantity}${it.unitOfMeasure ? ` ${it.unitOfMeasure}` : ""}` : "—";
+  };
   const deliveryStepOpen = isReceiveGoodsStep(flowStepLabel) || isAcceptGoodsStep(flowStepLabel);
   const deliveryAct = Boolean(sections?.delivery?.act) && !deliveryStepOpen;
   const canReceiveGoods =
@@ -739,23 +771,235 @@ export function OrgProcurementDetailPanel({ projectId, procurementId, stage = nu
       (LIFECYCLE_ACTION_ROLES.record_inspection.includes(viewerRole || "") ||
         committeeMayPerformLifecycleAction("record_inspection", viewerCommitteeType)));
   const invoices = Array.isArray(row.invoices) ? row.invoices : [];
-  const alreadyInvoiced = invoices
-    .filter((i) => ["RECEIVED", "CERTIFIED", "VERIFIED", "APPROVED_FOR_PAYMENT"].includes(i.status))
-    .reduce((sum, i) => sum + (Number(i.amount) || 0), 0);
-  const nextInvoiceNumber = `INV-${row.procurementNumber || "PROC"}-${String(
-    invoices.reduce((max, i) => {
-      const m = String(i.invoiceNumber || "").match(/-(\d+)$/);
-      return m ? Math.max(max, Number(m[1]) || 0) : max;
-    }, 0) + 1,
+  const invoicesNewestFirst = [...invoices].sort((a, b) =>
+    String(b.createdAt || "").localeCompare(String(a.createdAt || "")),
+  );
+  const openInvoice =
+    invoicesNewestFirst.find((i) => ["RECEIVED", "CERTIFIED"].includes(i.status)) ||
+    (isInvoiceTask ? invoicesNewestFirst.find((i) => i.status === "VERIFIED") : null) ||
+    null;
+  const latestInvoice = invoicesNewestFirst[0] || null;
+  const invoiceAct = Boolean(sections?.invoice?.act) && !INVOICE_STEP_RE.test(flowStepLabel);
+  const invoiceTaskVerb = /^process invoice/i.test(taskStep)
+    ? ["Process invoice", "Invoice processed."]
+    : /verif/i.test(taskStep)
+      ? ["Verify invoice", "Invoice verified."]
+      : ["Confirm invoice received", "Invoice received."];
+  /** @type {{ label: string; run: () => Promise<boolean> } | null} */
+  const invoiceAction = !openInvoice
+    ? null
+    : isInvoiceTask
+      ? {
+          label: invoiceTaskVerb[0],
+          run: () => submitDeliveryTask({ invoiceId: openInvoice.id }, invoiceTaskVerb[1]),
+        }
+      : invoiceAct &&
+          openInvoice.status === "RECEIVED" &&
+          LIFECYCLE_ACTION_ROLES.certify_invoice.includes(viewerRole || "")
+        ? {
+            label: "Certify invoice",
+            run: () => runLifecycle("certify_invoice", { invoiceId: openInvoice.id }, "Invoice certified."),
+          }
+        : invoiceAct &&
+            openInvoice.status === "CERTIFIED" &&
+            LIFECYCLE_ACTION_ROLES.verify_invoice.includes(viewerRole || "")
+          ? {
+              label: "Verify invoice",
+              run: () => runLifecycle("verify_invoice", { invoiceId: openInvoice.id }, "Invoice verified."),
+            }
+          : null;
+  const canRejectInvoice =
+    Boolean(openInvoice) &&
+    ["RECEIVED", "CERTIFIED"].includes(openInvoice?.status) &&
+    (isInvoiceTask || invoiceAct) &&
+    LIFECYCLE_ACTION_ROLES.reject_invoice.includes(viewerRole || "");
+  const processedInvoices = invoicesNewestFirst.filter((i) => i.id !== openInvoice?.id);
+
+  async function confirmRejectInvoice() {
+    const reason = invoiceRejectReason.trim();
+    if (!reason) {
+      setInvoiceRejectError("Enter a reason.");
+      return;
+    }
+    const ok = await runLifecycle(
+      "reject_invoice",
+      { invoiceId: invoiceToReject?.id, reason },
+      "Invoice rejected.",
+    );
+    if (ok) {
+      setInvoiceToReject(null);
+      setInvoiceRejectReason("");
+    }
+  }
+
+  const paymentsNewestFirst = [...(row.payments || [])].sort((a, b) =>
+    String(b.createdAt || "").localeCompare(String(a.createdAt || "")),
+  );
+  const currentPayment = paymentsNewestFirst.find((p) => p.status !== "REJECTED") || null;
+  const payableInvoice =
+    invoices.find((i) => i.id === currentPayment?.invoiceId) ||
+    invoicesNewestFirst.find((i) => ["VERIFIED", "APPROVED_FOR_PAYMENT"].includes(i.status)) ||
+    null;
+  const generatedPaymentRef = `PAY-${row.procurementNumber || "PROC"}-${String(
+    paymentsNewestFirst.filter((p) => p.paymentReference).length + 1,
   ).padStart(3, "0")}`;
-  const acceptedDeliveries = (row.deliveries || []).filter(
-    (d) => d.inspection && ["ACCEPTED", "PARTIAL"].includes(d.inspection.status),
-  );
-  const receivedInvoices = invoices.filter((i) =>
-    (/^process invoice/i.test(taskTitle) ? ["RECEIVED", "CERTIFIED", "VERIFIED"] : ["RECEIVED"]).includes(
-      i.status,
-    ),
-  );
+  const paymentRef = paymentRefInput ?? generatedPaymentRef;
+  const paymentAct =
+    Boolean(sections?.payment?.act) &&
+    !APPROVE_PAYMENT_STEP_RE.test(flowStepLabel) &&
+    !RECORD_PAYMENT_STEP_RE.test(flowStepLabel);
+  /** @param {keyof typeof LIFECYCLE_ACTION_ROLES} action */
+  const paymentRoleMay = (action) => paymentAct && LIFECYCLE_ACTION_ROLES[action].includes(viewerRole || "");
+  /** @type {{ kind: "raise" | "approve" | "record"; label: string; run: () => Promise<boolean> } | null} */
+  const paymentAction =
+    isApprovePaymentTask && (currentPayment?.status === "PENDING" || (!currentPayment && payableInvoice))
+      ? { kind: "approve", label: "Approve payment", run: () => submitDeliveryTask({}, "Payment approved.") }
+      : isRecordPaymentTask && currentPayment?.status === "APPROVED"
+        ? {
+            kind: "record",
+            label: "Record payment",
+            run: () =>
+              submitDeliveryTask({ paymentReference: paymentRef.trim(), paymentId: currentPayment.id }, "Payment recorded."),
+          }
+        : !currentPayment && payableInvoice && paymentRoleMay("create_payment")
+          ? {
+              kind: "raise",
+              label: "Raise payment",
+              run: () =>
+                runLifecycle(
+                  "create_payment",
+                  { invoiceId: payableInvoice.id, amount: payableInvoice.amount },
+                  "Payment raised.",
+                ),
+            }
+          : currentPayment?.status === "PENDING" && paymentRoleMay("approve_payment")
+            ? {
+                kind: "approve",
+                label: "Approve payment",
+                run: () => runLifecycle("approve_payment", { paymentId: currentPayment.id }, "Payment approved."),
+              }
+            : currentPayment?.status === "APPROVED" && paymentRoleMay("mark_payment_paid")
+              ? {
+                  kind: "record",
+                  label: "Record payment",
+                  run: () =>
+                    runLifecycle(
+                      "mark_payment_paid",
+                      { paymentId: currentPayment.id, paymentReference: paymentRef.trim() },
+                      "Payment recorded.",
+                    ),
+                }
+              : null;
+  /** "return" sends the approval step back; "reject" rejects a pending payment outside the workflow. */
+  const paymentSecondary = isApprovePaymentTask
+    ? "return"
+    : currentPayment?.status === "PENDING" && paymentRoleMay("reject_payment")
+      ? "reject"
+      : null;
+
+  async function runPaymentAction() {
+    if (!paymentAction) return;
+    if (paymentAction.kind === "record" && !paymentRef.trim()) {
+      setPaymentRefError("Enter the payment reference.");
+      showToast({ message: "Please fix the highlighted fields.", severity: "error" });
+      return;
+    }
+    const ok = await paymentAction.run();
+    if (ok) setPaymentRef(null);
+  }
+
+  const closureBlockers = closure && !closure.ready ? closure.blockers || [] : [];
+  const canClose =
+    isCloseTask ||
+    (Boolean(sections?.closure?.act) &&
+      !CLOSE_STEP_RE.test(flowStepLabel) &&
+      LIFECYCLE_ACTION_ROLES.close_procurement.includes(viewerRole || ""));
+
+  const orderStatus = row.contract?.status || row.lpo?.status || pi?.status || null;
+  const orderDone = Boolean(activeOrder) && !orderNotOpen;
+  const verifiedInvoices = invoices.filter((i) => ["VERIFIED", "APPROVED_FOR_PAYMENT"].includes(i.status));
+  const invoicedTotal = verifiedInvoices.reduce((s, i) => s + (Number(i.amount) || 0), 0);
+  const paidPayments = paymentsNewestFirst.filter((p) => p.status === "PAID");
+  const paidTotal = paidPayments.reduce((s, p) => s + (Number(p.amount) || 0), 0);
+  const acceptedInspections = deliveries.filter((d) =>
+    ["ACCEPTED", "PARTIAL"].includes(d.inspection?.status),
+  ).length;
+  /** @param {string} s */
+  const titleCase = (s) => s.charAt(0) + s.slice(1).toLowerCase().replace(/_/g, " ");
+  const closureChecklist = [
+    {
+      id: "order",
+      stage: "Order",
+      details: activeOrder
+        ? `${activeOrder.number} · ${formatMoneyUGX(activeOrder.value)}${orderStatus ? ` · ${titleCase(orderStatus)}` : ""}`
+        : "—",
+      done: orderDone,
+    },
+    {
+      id: "delivery",
+      stage: "Delivery",
+      details: deliveries.length
+        ? `${deliveries.length} received${allReceived ? " · all items" : " · partial"}`
+        : "—",
+      done: allReceived,
+    },
+    {
+      id: "inspection",
+      stage: "Inspection",
+      details: deliveries.length ? `${acceptedInspections} of ${deliveries.length} accepted` : "—",
+      done: allInspected && acceptedInspections > 0,
+    },
+    {
+      id: "invoice",
+      stage: "Invoice",
+      details: verifiedInvoices.length
+        ? verifiedInvoices.map((i) => `${i.invoiceNumber} · ${formatMoneyUGX(i.amount)}`).join(", ")
+        : "—",
+      done: verifiedInvoices.length > 0,
+    },
+    {
+      id: "payment",
+      stage: "Payment",
+      details: paidPayments.length
+        ? paidPayments
+            .map(
+              (p) =>
+                `${formatMoneyUGX(p.amount)}${p.paymentReference ? ` · ${p.paymentReference}` : ""}${
+                  p.paymentDate ? ` · ${formatPrintDate(p.paymentDate)}` : ""
+                }`,
+            )
+            .join(", ")
+        : "—",
+      done: verifiedInvoices.length > 0 && paidTotal + 0.009 >= invoicedTotal,
+    },
+  ];
+
+  async function confirmClose() {
+    const remarks = closureRemarks.trim() || null;
+    const ok = isCloseTask
+      ? await submitDeliveryTask({ remarks, comment: remarks || "" }, "Procurement closed.")
+      : await runLifecycle("close_procurement", { remarks }, "Procurement closed.");
+    if (ok) {
+      setCloseConfirmOpen(false);
+      setClosureRemarks("");
+    }
+  }
+
+  async function confirmPaymentSecondary() {
+    const reason = rejectReason.trim();
+    if (!reason) {
+      setPaymentReasonError("Enter a reason.");
+      return;
+    }
+    const ok =
+      paymentSecondary === "return"
+        ? await submitDeliveryTask({ decision: "RETURN", comment: reason }, "Payment returned.")
+        : await runLifecycle("reject_payment", { paymentId: currentPayment?.id, reason }, "Payment rejected.");
+    if (ok) {
+      setPaymentReasonOpen(false);
+      setRejectReason("");
+    }
+  }
 
   /**
    * @param {"lpo" | "contract"} kind
@@ -1117,40 +1361,6 @@ export function OrgProcurementDetailPanel({ projectId, procurementId, stage = nu
               </>
             ) : null}
 
-            {isReceiveInvoiceTask ? (
-              receivedInvoices.length ? (
-                <TextField
-                  select
-                  label="Invoice received"
-                  value={taskInvoiceId}
-                  onChange={(e) => setTaskInvoiceId(e.target.value)}
-                  helperText="Choose the invoice this step records"
-                  fullWidth
-                  className="sm:col-span-2"
-                  sx={themedTextFieldSx}
-                >
-                  <MenuItem value="">—</MenuItem>
-                  {receivedInvoices.map((inv) => (
-                    <MenuItem key={inv.id} value={inv.id}>
-                      {inv.invoiceNumber} · {formatMoneyUGX(inv.amount)}
-                      {inv.supplierReference ? ` · ref ${inv.supplierReference}` : ""}
-                      {inv.source === "PORTAL"
-                        ? " · via portal"
-                        : inv.source === "AUTO"
-                          ? " · auto-response provider"
-                          : ""}
-                    </MenuItem>
-                  ))}
-                </TextField>
-              ) : (
-                <Alert severity="warning" variant="outlined" className="sm:col-span-2">
-                  No invoice has been received yet. Use &ldquo;Receive invoice from {providerWord}
-                  &rdquo; in the Invoice section below (or wait for the {providerWord} to submit
-                  through the portal), then complete this step.
-                </Alert>
-              )
-            ) : null}
-
             <TextField
               label="Comment"
               value={comment}
@@ -1500,7 +1710,7 @@ export function OrgProcurementDetailPanel({ projectId, procurementId, stage = nu
       <ProcurementSectionGate access={sections?.delivery}>
       <div className="space-y-3">
         <Paper variant="outlined" sx={{ p: 2, ...adminOutlinedTableContainerSx }}>
-          <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
+          <div className="flex flex-wrap items-center justify-between gap-2">
             <Typography variant="subtitle1" sx={{ fontWeight: 600 }}>
               Receive goods
             </Typography>
@@ -1516,35 +1726,68 @@ export function OrgProcurementDetailPanel({ projectId, procurementId, stage = nu
           </div>
 
           {pendingDeliveryNote ? (
-            <div className="space-y-2">
-              <Typography variant="body2">
-                <span className="font-semibold">{pendingDeliveryNote.noteNumber}</span> from{" "}
-                {pendingDeliveryNote.supplier?.name || orderProvider} ·{" "}
-                {formatPrintDate(pendingDeliveryNote.dispatchedAt)}
-                {pendingDeliveryNote.remarks ? ` · ${pendingDeliveryNote.remarks}` : ""}
-              </Typography>
+            <>
+              <RecordDetailsGrid
+                fields={[
+                  { label: "Delivery note", value: pendingDeliveryNote.noteNumber },
+                  {
+                    label: providerWord.charAt(0).toUpperCase() + providerWord.slice(1),
+                    value: pendingDeliveryNote.supplier?.name || activeOrder?.supplierName || null,
+                  },
+                  { label: "Dispatched", value: formatPrintDate(pendingDeliveryNote.dispatchedAt) },
+                  { label: "Order", value: activeOrder?.number || null },
+                  ...(pendingDeliveryNote.remarks
+                    ? [{ label: "Remarks", value: pendingDeliveryNote.remarks, full: true }]
+                    : []),
+                ]}
+              />
+              <div className="mt-3">
+                <OrgLineItemsTable
+                  rows={pendingDeliveryNote.lines}
+                  getRowKey={(l) => l.itemName}
+                  columns={[
+                    { id: "n", label: "#", render: (_l, i) => i + 1 },
+                    { id: "itemName", label: "Item" },
+                    {
+                      id: "ordered",
+                      label: "Ordered",
+                      align: "right",
+                      render: (l) => orderedQtyLabel(l.itemName),
+                    },
+                    {
+                      id: "quantity",
+                      label: "Dispatched",
+                      align: "right",
+                      render: (l) => `${l.quantity}${l.unitOfMeasure ? ` ${l.unitOfMeasure}` : ""}`,
+                    },
+                    ...(canReceiveGoods
+                      ? [
+                          {
+                            id: "received",
+                            label: "Received",
+                            align: /** @type {"right"} */ ("right"),
+                            render: (/** @type {any} */ l) => (
+                              <TextField
+                                aria-label={`Received quantity for ${l.itemName}`}
+                                value={deliveryQtys[l.itemName] ?? l.quantity}
+                                onChange={(e) => {
+                                  setDeliveryQtys((prev) => ({ ...prev, [l.itemName]: e.target.value }));
+                                  setReceiveErrors((prev) => ({ ...prev, [l.itemName]: "" }));
+                                }}
+                                error={Boolean(receiveErrors[l.itemName])}
+                                helperText={receiveErrors[l.itemName] || undefined}
+                                sx={{ ...themedTextFieldSx, width: 120 }}
+                                slotProps={{ htmlInput: { inputMode: "decimal", style: { textAlign: "right" } } }}
+                              />
+                            ),
+                          },
+                        ]
+                      : []),
+                  ]}
+                />
+              </div>
               {canReceiveGoods ? (
-                <>
-                  {pendingDeliveryNote.lines.map((l) => (
-                    <div key={l.itemName} className="grid gap-2 sm:grid-cols-[1fr_160px]">
-                      <Typography variant="body2" className="self-center">
-                        {l.itemName} — dispatched {l.quantity}
-                        {l.unitOfMeasure ? ` ${l.unitOfMeasure}` : ""}
-                      </Typography>
-                      <TextField
-                        label="Received"
-                        value={deliveryQtys[l.itemName] ?? l.quantity}
-                        onChange={(e) => {
-                          setDeliveryQtys((prev) => ({ ...prev, [l.itemName]: e.target.value }));
-                          setReceiveErrors((prev) => ({ ...prev, [l.itemName]: "" }));
-                        }}
-                        error={Boolean(receiveErrors[l.itemName])}
-                        helperText={receiveErrors[l.itemName] || undefined}
-                        sx={themedTextFieldSx}
-                        slotProps={{ htmlInput: { inputMode: "decimal" } }}
-                      />
-                    </div>
-                  ))}
+                <div className="mt-3 flex justify-end">
                   <Button
                     variant="contained"
                     startIcon={busy ? <CircularProgress size={16} color="inherit" /> : <CheckCircleRounded />}
@@ -1554,15 +1797,15 @@ export function OrgProcurementDetailPanel({ projectId, procurementId, stage = nu
                   >
                     Confirm receipt
                   </Button>
-                </>
+                </div>
               ) : (
-                <Typography variant="body2" sx={adminMutedTextSx}>
+                <Typography variant="body2" sx={{ ...adminMutedTextSx, mt: 1 }}>
                   Awaiting receipt by the user department.
                 </Typography>
               )}
-            </div>
+            </>
           ) : allReceived ? null : (
-            <Typography variant="body2" sx={adminMutedTextSx}>
+            <Typography variant="body2" sx={{ ...adminMutedTextSx, mt: 1 }}>
               {orderNotOpen ||
                 (deliveries.length
                   ? `Waiting for the next delivery from ${orderProvider}.`
@@ -1571,43 +1814,50 @@ export function OrgProcurementDetailPanel({ projectId, procurementId, stage = nu
           )}
 
           {deliveries.length ? (
-            <ul className="mt-3 space-y-2 text-sm">
-              {deliveries.map((d) => (
-                <li key={d.id} className="rounded border border-[color:var(--border-subtle)] p-2">
-                  <p className="font-medium">
-                    {d.deliveryDate ? formatPrintDate(d.deliveryDate) : "—"}
-                    {d.deliveryNote?.noteNumber ? ` · ${d.deliveryNote.noteNumber}` : ""}
-                    {d.recordedBy?.displayName ? ` · Received by ${d.recordedBy.displayName}` : ""}
-                  </p>
-                  <ul className="mt-1 list-disc pl-5">
-                    {(d.lines || []).map((l) => (
-                      <li key={l.id}>
-                        {l.itemName}: {l.receivedQuantity}
-                        {l.unitOfMeasure ? ` ${l.unitOfMeasure}` : ""} of {l.orderedQuantity}
-                      </li>
-                    ))}
-                  </ul>
-                </li>
-              ))}
-            </ul>
+            <div className="mt-3">
+              <OrgLineItemsTable
+                title="Received"
+                rows={deliveries.flatMap((d) =>
+                  (d.lines || []).map((l) => ({
+                    id: l.id,
+                    date: d.deliveryDate ? formatPrintDate(d.deliveryDate) : "—",
+                    note: d.deliveryNote?.noteNumber || "—",
+                    item: l.itemName,
+                    received: `${l.receivedQuantity}${l.unitOfMeasure ? ` ${l.unitOfMeasure}` : ""}`,
+                    ordered: l.orderedQuantity,
+                    by: d.recordedBy?.displayName || "—",
+                  })),
+                )}
+                columns={[
+                  { id: "date", label: "Date" },
+                  { id: "note", label: "Delivery note" },
+                  { id: "item", label: "Item" },
+                  { id: "received", label: "Received", align: "right" },
+                  { id: "ordered", label: "Ordered", align: "right" },
+                  { id: "by", label: "Received by" },
+                ]}
+              />
+            </div>
           ) : null}
 
           {isReceiveGoodsTask && !pendingDeliveryNote && deliveries.length ? (
-            <Button
-              variant="contained"
-              startIcon={<CheckCircleRounded />}
-              disabled={busy}
-              onClick={() => void submitDeliveryTask({}, "Goods received.")}
-              className="mt-3 w-full sm:w-auto"
-            >
-              Confirm receipt
-            </Button>
+            <div className="mt-3 flex justify-end">
+              <Button
+                variant="contained"
+                startIcon={<CheckCircleRounded />}
+                disabled={busy}
+                onClick={() => void submitDeliveryTask({}, "Goods received.")}
+                className="w-full sm:w-auto"
+              >
+                Confirm receipt
+              </Button>
+            </div>
           ) : null}
         </Paper>
 
         {deliveries.length ? (
           <Paper variant="outlined" sx={{ p: 2, ...adminOutlinedTableContainerSx }}>
-            <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
+            <div className="flex flex-wrap items-center justify-between gap-2">
               <Typography variant="subtitle1" sx={{ fontWeight: 600 }}>
                 Inspect &amp; accept goods
               </Typography>
@@ -1617,135 +1867,164 @@ export function OrgProcurementDetailPanel({ projectId, procurementId, stage = nu
                 <Chip size="small" color="warning" variant="outlined" label="Awaiting inspection" />
               )}
             </div>
-            <ul className="space-y-2 text-sm">
-              {deliveries.map((d) => (
-                <li key={d.id} className="rounded border border-[color:var(--border-subtle)] p-2">
-                  <p className="font-medium">
-                    {d.deliveryNote?.noteNumber || (d.deliveryDate ? formatPrintDate(d.deliveryDate) : "Delivery")}
-                    {d.inspection
-                      ? ` · ${d.inspection.status}${
-                          d.inspection.inspectedBy?.displayName ? ` by ${d.inspection.inspectedBy.displayName}` : ""
-                        }`
-                      : ""}
-                  </p>
-                  {d.inspection ? (
-                    <ul className="mt-1 list-disc pl-5">
-                      {(d.lines || []).map((l) => (
-                        <li key={l.id}>
-                          {l.itemName}: accepted {l.acceptedQuantity}
-                          {Number(l.rejectedQuantity) > 0 ? `, rejected ${l.rejectedQuantity}` : ""}
-                        </li>
-                      ))}
-                    </ul>
-                  ) : canInspectGoods ? (
-                    <div className="mt-2 space-y-2">
-                      {(d.lines || []).map((l) => {
-                        const edit = inspectionLineEdits[l.id] || {
-                          accepted: String(l.receivedQuantity ?? ""),
-                          rejected: "0",
-                        };
-                        return (
-                          <div key={l.id} className="grid gap-2 sm:grid-cols-[1fr_120px_120px]">
-                            <Typography variant="body2" className="self-center">
-                              {l.itemName} — received {l.receivedQuantity}
-                            </Typography>
-                            <TextField
-                              label="Accepted"
-                              value={edit.accepted}
-                              onChange={(e) =>
-                                setInspectionLineEdits((prev) => ({
-                                  ...prev,
-                                  [l.id]: { ...edit, accepted: e.target.value },
-                                }))
-                              }
-                              sx={themedTextFieldSx}
-                              slotProps={{ htmlInput: { inputMode: "decimal" } }}
-                            />
-                            <TextField
-                              label="Rejected"
-                              value={edit.rejected}
-                              onChange={(e) =>
-                                setInspectionLineEdits((prev) => ({
-                                  ...prev,
-                                  [l.id]: { ...edit, rejected: e.target.value },
-                                }))
-                              }
-                              sx={themedTextFieldSx}
-                              slotProps={{ htmlInput: { inputMode: "decimal" } }}
-                            />
-                          </div>
-                        );
-                      })}
-                      {row.procurementMethod !== "MICRO" ? (
+
+            {deliveries
+              .filter((d) => !d.inspection)
+              .map((d) => (
+                <div key={d.id} className="mt-3 space-y-3">
+                  <Typography variant="subtitle2" sx={{ fontWeight: 600 }}>
+                    {d.deliveryNote?.noteNumber || "Delivery"}
+                    {d.deliveryDate ? ` · received ${formatPrintDate(d.deliveryDate)}` : ""}
+                  </Typography>
+                  {canInspectGoods ? (
+                    <>
+                      <OrgLineItemsTable
+                        rows={d.lines || []}
+                        columns={[
+                          { id: "n", label: "#", render: (_l, i) => i + 1 },
+                          { id: "itemName", label: "Item" },
+                          {
+                            id: "receivedQuantity",
+                            label: "Received",
+                            align: "right",
+                            render: (l) => `${l.receivedQuantity}${l.unitOfMeasure ? ` ${l.unitOfMeasure}` : ""}`,
+                          },
+                          ...["accepted", "rejected"].map((field) => ({
+                            id: field,
+                            label: field === "accepted" ? "Accepted" : "Rejected",
+                            align: /** @type {"right"} */ ("right"),
+                            render: (/** @type {any} */ l) => {
+                              const edit = inspectionLineEdits[l.id] || {
+                                accepted: String(l.receivedQuantity ?? ""),
+                                rejected: "0",
+                              };
+                              return (
+                                <TextField
+                                  aria-label={`${field === "accepted" ? "Accepted" : "Rejected"} quantity for ${l.itemName}`}
+                                  value={edit[field]}
+                                  onChange={(e) => {
+                                    setInspectionLineEdits((prev) => ({
+                                      ...prev,
+                                      [l.id]: { ...edit, [field]: e.target.value },
+                                    }));
+                                    setInspectionErrors((prev) => ({ ...prev, [`${l.id}:${field}`]: "" }));
+                                  }}
+                                  error={Boolean(inspectionErrors[`${l.id}:${field}`])}
+                                  helperText={inspectionErrors[`${l.id}:${field}`] || undefined}
+                                  sx={{ ...themedTextFieldSx, width: 110 }}
+                                  slotProps={{ htmlInput: { inputMode: "decimal", style: { textAlign: "right" } } }}
+                                />
+                              );
+                            },
+                          })),
+                        ]}
+                      />
+                      <div className="grid gap-3 sm:grid-cols-2">
+                        {row.procurementMethod !== "MICRO" ? (
+                          <TextField
+                            select
+                            label="Inspection committee"
+                            value={inspectionCommitteeId}
+                            onChange={(e) => setInspectionCommitteeId(e.target.value)}
+                            fullWidth
+                            helperText="Optional"
+                            sx={themedTextFieldSx}
+                          >
+                            <MenuItem value="">None</MenuItem>
+                            {committees
+                              .filter((c) => c.isActive && c.committeeType === "INSPECTION_ACCEPTANCE")
+                              .map((c) => (
+                                <MenuItem key={c.id} value={c.id}>
+                                  {c.name}
+                                </MenuItem>
+                              ))}
+                          </TextField>
+                        ) : null}
                         <TextField
-                          select
-                          label="Inspection committee"
-                          value={inspectionCommitteeId}
-                          onChange={(e) => setInspectionCommitteeId(e.target.value)}
+                          label="Notes"
+                          value={inspectionNotes}
+                          onChange={(e) => setInspectionNotes(e.target.value)}
                           fullWidth
                           helperText="Optional"
                           sx={themedTextFieldSx}
-                        >
-                          <MenuItem value="">None</MenuItem>
-                          {committees
-                            .filter((c) => c.isActive && c.committeeType === "INSPECTION_ACCEPTANCE")
-                            .map((c) => (
-                              <MenuItem key={c.id} value={c.id}>
-                                {c.name}
-                              </MenuItem>
-                            ))}
-                        </TextField>
-                      ) : null}
-                      <TextField
-                        label="Notes"
-                        value={inspectionNotes}
-                        onChange={(e) => setInspectionNotes(e.target.value)}
-                        fullWidth
-                        helperText="Optional"
-                        sx={themedTextFieldSx}
-                      />
-                      <div className="flex flex-wrap gap-2">
+                          className={row.procurementMethod === "MICRO" ? "sm:col-span-2" : undefined}
+                        />
+                      </div>
+                      <div className="flex justify-end">
                         <Button
                           variant="contained"
-                          color="success"
-                          startIcon={busy ? <CircularProgress size={16} color="inherit" /> : <CheckCircleRounded />}
+                          startIcon={busy ? <CircularProgress size={16} color="inherit" /> : <FactCheckRounded />}
                           disabled={busy || !(d.lines || []).length}
-                          onClick={() => void inspectDelivery(d, true)}
+                          onClick={() => void inspectDelivery(d)}
                           className="w-full sm:w-auto"
                         >
-                          Accept all
-                        </Button>
-                        <Button
-                          variant="outlined"
-                          startIcon={<FactCheckRounded />}
-                          disabled={busy || !(d.lines || []).length}
-                          onClick={() => void inspectDelivery(d, false)}
-                          className="w-full sm:w-auto"
-                        >
-                          Save inspection
+                          Confirm inspection
                         </Button>
                       </div>
-                    </div>
+                    </>
                   ) : (
                     <Typography variant="body2" sx={adminMutedTextSx}>
                       Awaiting inspection.
                     </Typography>
                   )}
-                </li>
+                </div>
               ))}
-            </ul>
+
+            {deliveries.some((d) => d.inspection) ? (
+              <div className="mt-3">
+                <OrgLineItemsTable
+                  title="Inspected"
+                  rows={deliveries
+                    .filter((d) => d.inspection)
+                    .flatMap((d) =>
+                      (d.lines || []).map((l) => ({
+                        id: l.id,
+                        note: d.deliveryNote?.noteNumber || "—",
+                        item: l.itemName,
+                        received: l.receivedQuantity,
+                        accepted: l.acceptedQuantity,
+                        rejected: l.rejectedQuantity,
+                        status: d.inspection.status,
+                        by: d.inspection.inspectedBy?.displayName || "—",
+                      })),
+                    )}
+                  columns={[
+                    { id: "note", label: "Delivery note" },
+                    { id: "item", label: "Item" },
+                    { id: "received", label: "Received", align: "right" },
+                    { id: "accepted", label: "Accepted", align: "right" },
+                    { id: "rejected", label: "Rejected", align: "right" },
+                    {
+                      id: "status",
+                      label: "Result",
+                      render: (r) => (
+                        <Chip
+                          size="small"
+                          variant="outlined"
+                          color={r.status === "ACCEPTED" ? "success" : r.status === "REJECTED" ? "error" : "warning"}
+                          label={r.status.charAt(0) + r.status.slice(1).toLowerCase()}
+                        />
+                      ),
+                    },
+                    { id: "by", label: "Inspected by" },
+                  ]}
+                />
+              </div>
+            ) : null}
 
             {isAcceptGoodsTask && allInspected ? (
-              <Button
-                variant="contained"
-                color="success"
-                startIcon={<CheckCircleRounded />}
-                disabled={busy}
-                onClick={() => void submitDeliveryTask({}, "Delivery accepted.")}
-                className="mt-3 w-full sm:w-auto"
-              >
-                Accept delivery
-              </Button>
+              <div className="mt-3 flex justify-end">
+                <Button
+                  variant="contained"
+                  color="success"
+                  startIcon={<CheckCircleRounded />}
+                  disabled={busy}
+                  onClick={() => void submitDeliveryTask({}, "Delivery accepted.")}
+                  className="w-full sm:w-auto"
+                >
+                  Accept delivery
+                </Button>
+              </div>
             ) : null}
           </Paper>
         ) : null}
@@ -1756,107 +2035,135 @@ export function OrgProcurementDetailPanel({ projectId, procurementId, stage = nu
       {on("invoice") ? (
       <ProcurementSectionGate access={sections?.invoice}>
       <Paper variant="outlined" sx={{ p: 2, ...adminOutlinedTableContainerSx }}>
-        <Typography variant="subtitle1" sx={{ fontWeight: 600, mb: 1 }}>
-          Invoice
-        </Typography>
-        {invoices.length === 0 ? (
-          <Typography variant="body2" sx={{ ...adminMutedTextSx, mb: 2 }}>
-            No invoices yet.
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <Typography variant="subtitle1" sx={{ fontWeight: 600 }}>
+            Invoice
           </Typography>
-        ) : (
-          <ul className="mb-3 space-y-2 text-sm">
-            {invoices.map((inv) => (
-              <li
-                key={inv.id}
-                className="flex flex-wrap items-center gap-2 rounded-lg border border-(--border-subtle) p-2"
-              >
-                <span>
-                  {inv.invoiceNumber} · {formatMoneyUGX(inv.amount)} · {inv.status}
-                  {inv.supplier?.name ? ` · ${inv.supplier.name}` : ""}
-                  {inv.supplierReference ? ` · ref ${inv.supplierReference}` : ""}
-                </span>
-                <SubmissionSourceChip source={inv.source} />
-                {activeOrder && Math.abs((Number(inv.amount) || 0) - activeOrder.value) > 0.009 ? (
-                  <Chip
-                    size="small"
-                    color="warning"
-                    variant="outlined"
-                    label={`Differs from order value (${formatMoneyUGX(activeOrder.value)})`}
-                  />
-                ) : null}
-                {inv.deliveryAddress ? (
-                  <span className="w-full text-xs opacity-80 wrap-break-word">
-                    Delivered to: {inv.deliveryAddress}
-                  </span>
-                ) : null}
-                {inv.notes ? <span className="w-full text-xs opacity-70">{inv.notes}</span> : null}
-                {inv.status === "RECEIVED" ? (
+          {openInvoice && openInvoice.status !== "VERIFIED" ? (
+            <Chip
+              size="small"
+              color="info"
+              label={openInvoice.status === "CERTIFIED" ? "Certified" : "Received"}
+            />
+          ) : latestInvoice && latestInvoice.status !== "REJECTED" ? (
+            <Chip size="small" color="success" label="Verified" />
+          ) : (
+            <Chip size="small" color="warning" variant="outlined" label="Awaiting invoice" />
+          )}
+        </div>
+
+        {openInvoice ? (
+          <>
+            <RecordDetailsGrid
+              fields={[
+                { label: "Invoice no.", value: openInvoice.invoiceNumber },
+                ...(openInvoice.supplierReference
+                  ? [
+                      {
+                        label: `${providerWord.charAt(0).toUpperCase()}${providerWord.slice(1)} ref`,
+                        value: openInvoice.supplierReference,
+                      },
+                    ]
+                  : []),
+                {
+                  label: providerWord.charAt(0).toUpperCase() + providerWord.slice(1),
+                  value: openInvoice.supplier?.name || activeOrder?.supplierName || null,
+                },
+                {
+                  label: "Date",
+                  value: formatPrintDate(openInvoice.invoiceDate || openInvoice.createdAt),
+                },
+                { label: "Amount", value: formatMoneyUGX(openInvoice.amount) },
+                {
+                  label: "Order value",
+                  value: activeOrder ? (
+                    <span className="inline-flex flex-wrap items-center gap-2">
+                      {formatMoneyUGX(activeOrder.value)}
+                      {Math.abs((Number(openInvoice.amount) || 0) - activeOrder.value) > 0.009 ? (
+                        <Chip size="small" color="warning" variant="outlined" label="Differs" />
+                      ) : null}
+                    </span>
+                  ) : null,
+                },
+                { label: "Order", value: activeOrder?.number || null },
+                { label: "Source", value: <SubmissionSourceChip source={openInvoice.source} /> },
+                ...(openInvoice.deliveryAddress
+                  ? [{ label: "Delivered to", value: openInvoice.deliveryAddress, full: true }]
+                  : []),
+                ...(openInvoice.notes ? [{ label: "Notes", value: openInvoice.notes, full: true }] : []),
+              ]}
+            />
+            {invoiceAction || canRejectInvoice ? (
+              <div className="mt-3 flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
+                {canRejectInvoice ? (
                   <Button
-                    size="small"
                     variant="outlined"
-                    disabled={busy}
-                    onClick={() =>
-                      void runLifecycle("certify_invoice", {
-                        invoiceId: inv.id,
-                      })
-                    }
-                  >
-                    Certify
-                  </Button>
-                ) : null}
-                {inv.status === "CERTIFIED" ? (
-                  <Button
-                    size="small"
-                    variant="outlined"
-                    disabled={busy}
-                    onClick={() => void runLifecycle("verify_invoice", { invoiceId: inv.id })}
-                  >
-                    Verify
-                  </Button>
-                ) : null}
-                {["RECEIVED", "CERTIFIED"].includes(inv.status) ? (
-                  <Button
-                    size="small"
                     color="error"
-                    variant="outlined"
-                    disabled={busy || !rejectReason.trim()}
-                    title="Enter a rejection reason below first"
-                    onClick={() =>
-                      void runLifecycle("reject_invoice", {
-                        invoiceId: inv.id,
-                        reason: rejectReason.trim(),
-                      })
-                    }
+                    startIcon={<BlockRounded />}
+                    disabled={busy}
+                    onClick={() => {
+                      setInvoiceRejectError("");
+                      setInvoiceToReject(openInvoice);
+                    }}
+                    className="w-full sm:w-auto"
                   >
                     Reject
                   </Button>
                 ) : null}
-                {inv.rejectionReason ? (
-                  <span className="text-[color:var(--brand-red)]">— {inv.rejectionReason}</span>
+                {invoiceAction ? (
+                  <Button
+                    variant="contained"
+                    startIcon={busy ? <CircularProgress size={16} color="inherit" /> : <ReceiptLongRounded />}
+                    disabled={busy}
+                    onClick={() => void invoiceAction.run()}
+                    className="w-full sm:w-auto"
+                  >
+                    {invoiceAction.label}
+                  </Button>
                 ) : null}
-              </li>
-            ))}
-          </ul>
+              </div>
+            ) : (
+              <Typography variant="body2" sx={{ ...adminMutedTextSx, mt: 1 }}>
+                Awaiting processing.
+              </Typography>
+            )}
+          </>
+        ) : latestInvoice && latestInvoice.status !== "REJECTED" ? null : (
+          <Typography variant="body2" sx={{ ...adminMutedTextSx, mt: 1 }}>
+            {`Waiting for ${orderProvider} to send an invoice.`}
+          </Typography>
         )}
-        <OrgReceiveInvoiceForm
-          key={`${activeOrder?.number || "none"}-${alreadyInvoiced}-${acceptedDeliveries.length}`}
-          order={activeOrder}
-          alreadyInvoiced={alreadyInvoiced}
-          acceptedDeliveries={acceptedDeliveries}
-          providerWord={providerWord}
-          nextInvoiceNumber={nextInvoiceNumber}
-          busy={busy}
-          onSubmit={(body) => runLifecycle("create_invoice", body, "Invoice received.")}
-        />
-        <TextField
-          label="Reject reason (invoice / payment)"
-          value={rejectReason}
-          onChange={(e) => setRejectReason(e.target.value)}
-          size="small"
-          fullWidth
-          sx={{ ...themedTextFieldSx, mt: 2 }}
-          helperText="Required before rejecting an invoice or payment"
-        />
+
+        {processedInvoices.length ? (
+          <div className="mt-3">
+            <OrgLineItemsTable
+              title="Invoices"
+              rows={processedInvoices}
+              columns={[
+                { id: "invoiceNumber", label: "Invoice no." },
+                {
+                  id: "date",
+                  label: "Date",
+                  render: (i) => formatPrintDate(i.invoiceDate || i.createdAt),
+                },
+                { id: "amount", label: "Amount", align: "right", render: (i) => formatMoneyUGX(i.amount) },
+                {
+                  id: "status",
+                  label: "Status",
+                  render: (i) => (
+                    <Chip
+                      size="small"
+                      variant="outlined"
+                      color={i.status === "REJECTED" ? "error" : i.status === "RECEIVED" ? "info" : "success"}
+                      label={i.status.charAt(0) + i.status.slice(1).toLowerCase().replace(/_/g, " ")}
+                    />
+                  ),
+                },
+                { id: "rejectionReason", label: "Reason", render: (i) => i.rejectionReason || "—" },
+              ]}
+            />
+          </div>
+        ) : null}
       </Paper>
       </ProcurementSectionGate>
       ) : null}
@@ -1864,130 +2171,127 @@ export function OrgProcurementDetailPanel({ projectId, procurementId, stage = nu
       {on("payment") ? (
       <ProcurementSectionGate access={sections?.payment}>
       <Paper variant="outlined" sx={{ p: 2, ...adminOutlinedTableContainerSx }}>
-        <Typography variant="subtitle1" sx={{ fontWeight: 600, mb: 1 }}>
-          Payment
-        </Typography>
-        {(row.payments || []).length === 0 ? (
-          <Typography variant="body2" sx={{ ...adminMutedTextSx, mb: 2 }}>
-            No payments yet. The invoice must be verified before a payment can be raised.
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <Typography variant="subtitle1" sx={{ fontWeight: 600 }}>
+            Payment
           </Typography>
-        ) : (
-          <ul className="mb-3 space-y-2 text-sm">
-            {row.payments.map((pay) => (
-              <li key={pay.id} className="flex flex-wrap items-center gap-2">
-                <span>
-                  {formatMoneyUGX(pay.amount)} · {pay.status}
-                  {pay.paymentReference ? ` · ${pay.paymentReference}` : ""}
-                </span>
-                {pay.status === "PENDING" ? (
-                  <>
-                    <Button
-                      size="small"
-                      variant="outlined"
-                      disabled={busy}
-                      onClick={() =>
-                        void runLifecycle("approve_payment", {
-                          paymentId: pay.id,
-                        })
-                      }
-                    >
-                      Approve payment
-                    </Button>
-                    <Button
-                      size="small"
-                      color="error"
-                      variant="outlined"
-                      disabled={busy || !rejectReason.trim()}
-                      onClick={() =>
-                        void runLifecycle("reject_payment", {
-                          paymentId: pay.id,
-                          reason: rejectReason.trim(),
-                        })
-                      }
-                    >
-                      Reject
-                    </Button>
-                  </>
-                ) : null}
-                {pay.status === "APPROVED" ? (
+          {currentPayment?.status === "PAID" ? (
+            <Chip size="small" color="success" label="Paid" />
+          ) : currentPayment?.status === "APPROVED" ? (
+            <Chip size="small" color="info" label="Approved" />
+          ) : payableInvoice ? (
+            <Chip size="small" color="warning" variant="outlined" label="Awaiting approval" />
+          ) : (
+            <Chip size="small" color="warning" variant="outlined" label="Awaiting invoice" />
+          )}
+        </div>
+
+        {payableInvoice ? (
+          <>
+            <RecordDetailsGrid
+              fields={[
+                { label: "Invoice no.", value: payableInvoice.invoiceNumber },
+                {
+                  label: providerWord.charAt(0).toUpperCase() + providerWord.slice(1),
+                  value: payableInvoice.supplier?.name || activeOrder?.supplierName || null,
+                },
+                { label: "Invoice amount", value: formatMoneyUGX(payableInvoice.amount) },
+                {
+                  label: "Payment amount",
+                  value: formatMoneyUGX(currentPayment?.amount ?? payableInvoice.amount),
+                },
+                ...(currentPayment?.approvedBy?.displayName
+                  ? [{ label: "Approved by", value: currentPayment.approvedBy.displayName }]
+                  : []),
+                ...(currentPayment?.paymentReference
+                  ? [{ label: "Payment reference", value: currentPayment.paymentReference }]
+                  : []),
+                ...(currentPayment?.status === "PAID" && currentPayment.paymentDate
+                  ? [{ label: "Paid on", value: formatPrintDate(currentPayment.paymentDate) }]
+                  : []),
+              ]}
+            />
+            {paymentAction?.kind === "record" ? (
+              <TextField
+                label="Payment reference"
+                value={paymentRef}
+                onChange={(e) => {
+                  setPaymentRef(e.target.value);
+                  setPaymentRefError("");
+                }}
+                error={Boolean(paymentRefError)}
+                helperText={paymentRefError || "Auto-generated, editable"}
+                fullWidth
+                sx={{ ...themedTextFieldSx, mt: 2 }}
+              />
+            ) : null}
+            {paymentAction || paymentSecondary ? (
+              <div className="mt-3 flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
+                {paymentSecondary ? (
                   <Button
-                    size="small"
                     variant="outlined"
+                    color={paymentSecondary === "return" ? "warning" : "error"}
+                    startIcon={paymentSecondary === "return" ? <UndoRounded /> : <BlockRounded />}
                     disabled={busy}
-                    onClick={() =>
-                      void runLifecycle("mark_payment_paid", {
-                        paymentId: pay.id,
-                      })
-                    }
+                    onClick={() => {
+                      setPaymentReasonError("");
+                      setPaymentReasonOpen(true);
+                    }}
+                    className="w-full sm:w-auto"
                   >
-                    Mark paid
+                    {paymentSecondary === "return" ? "Return" : "Reject"}
                   </Button>
                 ) : null}
-              </li>
-            ))}
-          </ul>
+                {paymentAction ? (
+                  <Button
+                    variant="contained"
+                    color={paymentAction.kind === "record" ? "success" : "primary"}
+                    startIcon={busy ? <CircularProgress size={16} color="inherit" /> : <PaymentsRounded />}
+                    disabled={busy}
+                    onClick={() => void runPaymentAction()}
+                    className="w-full sm:w-auto"
+                  >
+                    {paymentAction.label}
+                  </Button>
+                ) : null}
+              </div>
+            ) : currentPayment?.status === "PAID" ? null : (
+              <Typography variant="body2" sx={{ ...adminMutedTextSx, mt: 1 }}>
+                {currentPayment?.status === "APPROVED" ? "Awaiting payment." : "Awaiting approval."}
+              </Typography>
+            )}
+          </>
+        ) : (
+          <Typography variant="body2" sx={{ ...adminMutedTextSx, mt: 1 }}>
+            Waiting for a verified invoice.
+          </Typography>
         )}
-        <div className="flex flex-wrap items-end gap-2">
-          <TextField
-            select
-            label="Verified invoice"
-            value={
-              (row.invoices || []).find((i) =>
-                ["VERIFIED", "APPROVED_FOR_PAYMENT"].includes(i.status),
-              )?.id || ""
-            }
-            onChange={() => {}}
-            size="small"
-            sx={{ ...themedTextFieldSx, minWidth: 200 }}
-            disabled
-            helperText="Uses the latest verified invoice automatically when raising payment"
-          >
-            {(row.invoices || [])
-              .filter((i) => ["VERIFIED", "APPROVED_FOR_PAYMENT"].includes(i.status))
-              .map((i) => (
-                <MenuItem key={i.id} value={i.id}>
-                  {i.invoiceNumber} · {formatMoneyUGX(i.amount)}
-                </MenuItem>
-              ))}
-          </TextField>
-          <TextField
-            label="Payment amount"
-            value={paymentAmount}
-            onChange={(e) => setPaymentAmount(e.target.value)}
-            size="small"
-            sx={{ ...themedTextFieldSx, minWidth: 140 }}
-          />
-          <TextField
-            label="Payment reference"
-            value={paymentRef}
-            onChange={(e) => setPaymentRef(e.target.value)}
-            size="small"
-            sx={{ ...themedTextFieldSx, minWidth: 140 }}
-          />
-          <Button
-            variant="contained"
-            disabled={busy || !paymentAmount.trim()}
-            onClick={() => {
-              const inv = (row.invoices || []).find((i) =>
-                ["VERIFIED", "APPROVED_FOR_PAYMENT"].includes(i.status),
-              );
-              if (!inv) {
-                showToast({
-                  message: "Verify an invoice before raising a payment.",
-                  severity: "error",
-                });
-                return;
-              }
-              void runLifecycle("create_payment", {
-                invoiceId: inv.id,
-                amount: paymentAmount.trim(),
-                paymentReference: paymentRef.trim() || null,
-              });
-            }}
-          >
-            Raise payment
-          </Button>
-        </div>
+
+        {paymentsNewestFirst.some((p) => p.id !== currentPayment?.id) ? (
+          <div className="mt-3">
+            <OrgLineItemsTable
+              title="Payments"
+              rows={paymentsNewestFirst.filter((p) => p.id !== currentPayment?.id)}
+              columns={[
+                { id: "date", label: "Date", render: (p) => formatPrintDate(p.createdAt) },
+                { id: "amount", label: "Amount", align: "right", render: (p) => formatMoneyUGX(p.amount) },
+                {
+                  id: "status",
+                  label: "Status",
+                  render: (p) => (
+                    <Chip
+                      size="small"
+                      variant="outlined"
+                      color={p.status === "PAID" ? "success" : p.status === "REJECTED" ? "error" : "info"}
+                      label={p.status.charAt(0) + p.status.slice(1).toLowerCase()}
+                    />
+                  ),
+                },
+                { id: "ref", label: "Reference", render: (p) => p.paymentReference || "—" },
+              ]}
+            />
+          </div>
+        ) : null}
       </Paper>
       </ProcurementSectionGate>
       ) : null}
@@ -1995,50 +2299,89 @@ export function OrgProcurementDetailPanel({ projectId, procurementId, stage = nu
       {on("closure") ? (
       <ProcurementSectionGate access={sections?.closure}>
       <Paper variant="outlined" sx={{ p: 2, ...adminOutlinedTableContainerSx }}>
-        <Typography variant="subtitle1" sx={{ fontWeight: 600, mb: 1 }}>
-          Closure
-        </Typography>
-        {row.status === "CLOSED" ? (
-          <Typography variant="body2">
-            Closed
-            {row.closedAt ? ` on ${String(row.closedAt).slice(0, 10)}` : ""}
-            {row.closedBy?.displayName ? ` by ${row.closedBy.displayName}` : ""}
-            {row.closureRemarks ? ` — ${row.closureRemarks}` : ""}
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <Typography variant="subtitle1" sx={{ fontWeight: 600 }}>
+            Closure
           </Typography>
+          {row.status === "CLOSED" ? (
+            <Chip size="small" color="success" label="Closed" />
+          ) : closureBlockers.length ? (
+            <Chip size="small" color="warning" variant="outlined" label="Not ready" />
+          ) : (
+            <Chip size="small" color="info" label="Ready to close" />
+          )}
+        </div>
+        <RecordDetailsGrid
+          fields={[
+            {
+              label: providerWord.charAt(0).toUpperCase() + providerWord.slice(1),
+              value: activeOrder?.supplierName || null,
+            },
+            { label: "Order value", value: activeOrder ? formatMoneyUGX(activeOrder.value) : null },
+            { label: "Invoiced", value: formatMoneyUGX(invoicedTotal) },
+            { label: "Paid", value: formatMoneyUGX(paidTotal) },
+            ...(activeOrder && Math.abs(activeOrder.value - paidTotal) > 0.009
+              ? [{ label: "Unpaid on order", value: formatMoneyUGX(Math.max(0, activeOrder.value - paidTotal)) }]
+              : []),
+          ]}
+        />
+        <div className="mt-3">
+          <OrgLineItemsTable
+            rows={closureChecklist}
+            columns={[
+              { id: "stage", label: "Stage" },
+              { id: "details", label: "Details" },
+              {
+                id: "done",
+                label: "Status",
+                render: (c) => (
+                  <Chip
+                    size="small"
+                    variant="outlined"
+                    color={c.done ? "success" : "warning"}
+                    label={c.done ? "Complete" : "Pending"}
+                  />
+                ),
+              },
+            ]}
+          />
+        </div>
+        {row.status === "CLOSED" ? (
+          <RecordDetailsGrid
+            fields={[
+              { label: "Closed on", value: row.closedAt ? formatPrintDate(row.closedAt) : null },
+              { label: "Closed by", value: row.closedBy?.displayName || null },
+              ...(row.closureRemarks ? [{ label: "Remarks", value: row.closureRemarks, full: true }] : []),
+            ]}
+          />
         ) : (
-          <div className="space-y-2">
-            {closure && !closure.ready && (closure.blockers || []).length > 0 ? (
-              <ul className="list-disc space-y-1 pl-5 text-sm text-[color:var(--brand-red)]">
-                {closure.blockers.map((b) => (
+          <>
+            {closureBlockers.length ? (
+              <ul className="mt-2 list-disc space-y-1 pl-5 text-sm text-brand-red">
+                {closureBlockers.map((b) => (
                   <li key={b}>{b}</li>
                 ))}
               </ul>
-            ) : (
-              <Typography variant="body2" sx={adminMutedTextSx}>
-                All known closure gates appear satisfied. Closing is final.
+            ) : null}
+            {canClose ? (
+              <div className="mt-3 flex justify-end">
+                <Button
+                  variant="contained"
+                  color="success"
+                  startIcon={<TaskAltRounded />}
+                  disabled={busy || closureBlockers.length > 0}
+                  onClick={() => setCloseConfirmOpen(true)}
+                  className="w-full sm:w-auto"
+                >
+                  Close procurement
+                </Button>
+              </div>
+            ) : !closureBlockers.length ? (
+              <Typography variant="body2" sx={{ ...adminMutedTextSx, mt: 1 }}>
+                Awaiting closure.
               </Typography>
-            )}
-            <TextField
-              label="Closure remarks"
-              value={closureRemarks}
-              onChange={(e) => setClosureRemarks(e.target.value)}
-              fullWidth
-              size="small"
-              sx={themedTextFieldSx}
-            />
-            <Button
-              variant="contained"
-              color="error"
-              disabled={busy}
-              onClick={() =>
-                void runLifecycle("close_procurement", {
-                  remarks: closureRemarks || null,
-                })
-              }
-            >
-              Close procurement
-            </Button>
-          </div>
+            ) : null}
+          </>
         )}
       </Paper>
       </ProcurementSectionGate>
@@ -2109,6 +2452,152 @@ export function OrgProcurementDetailPanel({ projectId, procurementId, stage = nu
             }}
           >
             {busy ? "Issuing purchase instruction…" : "Issue anyway"}
+          </Button>
+        </DialogActions>
+      </Dialog>
+      <Dialog
+        open={Boolean(invoiceToReject)}
+        onClose={() => (busy ? null : setInvoiceToReject(null))}
+        maxWidth="sm"
+        fullWidth
+        slotProps={{ paper: { sx: adminDialogPaperSx } }}
+        aria-labelledby="invoice-reject-title"
+      >
+        <DialogTitle id="invoice-reject-title">
+          Reject invoice {invoiceToReject?.invoiceNumber || ""}
+        </DialogTitle>
+        <DialogContent dividers>
+          <form
+            noValidate
+            id="invoice-reject-form"
+            onSubmit={(e) => {
+              e.preventDefault();
+              void confirmRejectInvoice();
+            }}
+          >
+            <TextField
+              label="Reason"
+              value={invoiceRejectReason}
+              onChange={(e) => {
+                setInvoiceRejectReason(e.target.value);
+                setInvoiceRejectError("");
+              }}
+              error={Boolean(invoiceRejectError)}
+              helperText={invoiceRejectError || undefined}
+              fullWidth
+              multiline
+              minRows={2}
+              autoFocus
+              sx={themedTextFieldSx}
+            />
+          </form>
+        </DialogContent>
+        <DialogActions className="flex-wrap gap-2">
+          <Button onClick={() => setInvoiceToReject(null)} disabled={busy}>
+            Cancel
+          </Button>
+          <Button
+            type="submit"
+            form="invoice-reject-form"
+            variant="contained"
+            color="error"
+            disabled={busy}
+            startIcon={busy ? <CircularProgress size={16} color="inherit" /> : <BlockRounded />}
+          >
+            {busy ? "Rejecting…" : "Reject invoice"}
+          </Button>
+        </DialogActions>
+      </Dialog>
+      <Dialog
+        open={closeConfirmOpen && row.status !== "CLOSED"}
+        onClose={() => (busy ? null : setCloseConfirmOpen(false))}
+        maxWidth="sm"
+        fullWidth
+        slotProps={{ paper: { sx: adminDialogPaperSx } }}
+        aria-labelledby="close-procurement-title"
+      >
+        <DialogTitle id="close-procurement-title">Close {row.procurementNumber}?</DialogTitle>
+        <DialogContent dividers>
+          <Typography variant="body2" sx={{ ...adminMutedTextSx, mb: 2 }}>
+            This is final.
+          </Typography>
+          <TextField
+            label="Closure remarks"
+            value={closureRemarks}
+            onChange={(e) => setClosureRemarks(e.target.value)}
+            helperText="Optional"
+            autoFocus
+            fullWidth
+            multiline
+            minRows={2}
+            sx={themedTextFieldSx}
+          />
+        </DialogContent>
+        <DialogActions className="flex-wrap gap-2">
+          <Button onClick={() => setCloseConfirmOpen(false)} disabled={busy}>
+            Cancel
+          </Button>
+          <Button
+            variant="contained"
+            color="success"
+            disabled={busy}
+            onClick={() => void confirmClose()}
+            startIcon={busy ? <CircularProgress size={16} color="inherit" /> : <TaskAltRounded />}
+          >
+            {busy ? "Closing…" : "Confirm closure"}
+          </Button>
+        </DialogActions>
+      </Dialog>
+      <Dialog
+        open={paymentReasonOpen}
+        onClose={() => (busy ? null : setPaymentReasonOpen(false))}
+        maxWidth="sm"
+        fullWidth
+        slotProps={{ paper: { sx: adminDialogPaperSx } }}
+        aria-labelledby="payment-reason-title"
+      >
+        <DialogTitle id="payment-reason-title">
+          {paymentSecondary === "return" ? "Return payment" : "Reject payment"}
+        </DialogTitle>
+        <DialogContent dividers>
+          <form
+            noValidate
+            id="payment-reason-form"
+            onSubmit={(e) => {
+              e.preventDefault();
+              void confirmPaymentSecondary();
+            }}
+          >
+            <TextField
+              label="Reason"
+              value={rejectReason}
+              onChange={(e) => {
+                setRejectReason(e.target.value);
+                setPaymentReasonError("");
+              }}
+              error={Boolean(paymentReasonError)}
+              helperText={paymentReasonError || undefined}
+              fullWidth
+              multiline
+              minRows={2}
+              autoFocus
+              sx={themedTextFieldSx}
+            />
+          </form>
+        </DialogContent>
+        <DialogActions className="flex-wrap gap-2">
+          <Button onClick={() => setPaymentReasonOpen(false)} disabled={busy}>
+            Cancel
+          </Button>
+          <Button
+            type="submit"
+            form="payment-reason-form"
+            variant="contained"
+            color={paymentSecondary === "return" ? "warning" : "error"}
+            disabled={busy}
+            startIcon={busy ? <CircularProgress size={16} color="inherit" /> : null}
+          >
+            {paymentSecondary === "return" ? "Return" : "Reject payment"}
           </Button>
         </DialogActions>
       </Dialog>

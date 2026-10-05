@@ -356,6 +356,7 @@ export async function actOnProcurementLifecycle(prisma, opts) {
         ...base,
         paymentId: String(body.paymentId),
         paymentDate: body.paymentDate || null,
+        paymentReference: typeof body.paymentReference === "string" ? body.paymentReference : null,
       });
     case "reject_payment":
       if (!body.paymentId) return { ok: false, error: "paymentId is required.", status: 400 };

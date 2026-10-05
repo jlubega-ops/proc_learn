@@ -9,14 +9,12 @@ import DialogActions from "@mui/material/DialogActions";
 import DialogContent from "@mui/material/DialogContent";
 import DialogTitle from "@mui/material/DialogTitle";
 import IconButton from "@mui/material/IconButton";
-import MenuItem from "@mui/material/MenuItem";
 import Paper from "@mui/material/Paper";
 import TextField from "@mui/material/TextField";
 import Tooltip from "@mui/material/Tooltip";
 import Typography from "@mui/material/Typography";
 import EditLocationAltRounded from "@mui/icons-material/EditLocationAltRounded";
 import PlaceRounded from "@mui/icons-material/PlaceRounded";
-import ReceiptLongRounded from "@mui/icons-material/ReceiptLongRounded";
 import { format, isValid, parseISO } from "date-fns";
 import { useToast } from "@/components/providers/toast-provider";
 import {
@@ -25,7 +23,7 @@ import {
   adminOutlinedTableContainerSx,
   themedTextFieldSx,
 } from "@/lib/admin-mui-surfaces";
-import { formatMoneyUGX, parseMoneyInput, validatePositiveMoney } from "@/lib/money";
+import { formatMoneyUGX } from "@/lib/money";
 
 const SOURCE_META = {
   OFFICER: { label: "Recorded by officer", color: "info" },
@@ -199,172 +197,5 @@ export function OrgDeliveryAddressLine({ address, fallback, editableKind, busy, 
         </form>
       </Dialog>
     </div>
-  );
-}
-
-/**
- * Officer records an invoice handed over by the provider (paper / email).
- * @param {{
- *   order: { number: string; value: number; supplierName: string | null; deliveryAddress: string | null } | null;
- *   alreadyInvoiced: number;
- *   acceptedDeliveries: any[];
- *   providerWord: string;
- *   nextInvoiceNumber?: string | null;
- *   busy: boolean;
- *   onSubmit: (body: Record<string, any>) => Promise<boolean>;
- * }} p
- */
-export function OrgReceiveInvoiceForm({
-  order,
-  alreadyInvoiced,
-  acceptedDeliveries,
-  providerWord,
-  nextInvoiceNumber,
-  busy,
-  onSubmit,
-}) {
-  const { showToast } = useToast();
-  const remaining = order ? Math.max(0, order.value - alreadyInvoiced) : 0;
-  const [amount, setAmount] = useState(remaining ? String(remaining) : "");
-  const [reference, setReference] = useState("");
-  const [deliveryId, setDeliveryId] = useState("");
-  const [invoiceDate, setInvoiceDate] = useState(format(new Date(), "yyyy-MM-dd"));
-  const [notes, setNotes] = useState("");
-  /** @type {[Record<string, string>, Function]} */
-  const [errors, setErrors] = useState({});
-
-  if (!order) {
-    return (
-      <Typography variant="body2" sx={adminMutedTextSx}>
-        An issued purchase instruction, accepted LPO or active contract is needed before an invoice can be received.
-      </Typography>
-    );
-  }
-  if (!acceptedDeliveries.length) {
-    return (
-      <Typography variant="body2" sx={adminMutedTextSx}>
-        Record a delivery and pass inspection before receiving the {providerWord}&apos;s invoice.
-      </Typography>
-    );
-  }
-
-  async function submit(e) {
-    e.preventDefault();
-    /** @type {Record<string, string>} */
-    const next = {};
-    const amountErr = validatePositiveMoney(amount, "Invoice amount");
-    if (amountErr) next.amount = amountErr;
-    if (reference.trim().length > 64) next.supplierReference = "Use 64 characters or fewer.";
-    if (!invoiceDate) next.invoiceDate = "Choose the invoice date.";
-    setErrors(next);
-    if (Object.keys(next).length) {
-      showToast({ message: "Please fix the highlighted fields.", severity: "error" });
-      return;
-    }
-    const ok = await onSubmit({
-      amount: parseMoneyInput(amount),
-      supplierReference: reference.trim() || null,
-      deliveryId: deliveryId || null,
-      invoiceDate,
-      notes: notes.trim() || null,
-    });
-    if (ok) {
-      setReference("");
-      setNotes("");
-    }
-  }
-
-  return (
-    <form noValidate onSubmit={(e) => void submit(e)} className="space-y-3">
-      <div className="grid gap-1 text-sm sm:grid-cols-2">
-        <p>
-          <span className="font-semibold">From:</span> {order.supplierName || "—"}
-        </p>
-        <p>
-          <span className="font-semibold">Order:</span> {order.number} · {formatMoneyUGX(order.value)}
-        </p>
-        <p>
-          <span className="font-semibold">Already invoiced:</span> {formatMoneyUGX(alreadyInvoiced)}
-        </p>
-        <p className="wrap-break-word">
-          <span className="font-semibold">Delivered to:</span> {order.deliveryAddress || "—"}
-        </p>
-      </div>
-      <div className="grid gap-3 sm:grid-cols-2">
-        <TextField
-          label="Invoice number"
-          value={nextInvoiceNumber || "Auto-generated"}
-          helperText="Generated automatically"
-          fullWidth
-          InputProps={{ readOnly: true }}
-          sx={themedTextFieldSx}
-        />
-        <TextField
-          label={`${providerWord.charAt(0).toUpperCase()}${providerWord.slice(1)} reference (optional)`}
-          value={reference}
-          onChange={(e) => setReference(e.target.value)}
-          error={Boolean(errors.supplierReference)}
-          helperText={errors.supplierReference || "Number printed on their invoice, if any"}
-          fullWidth
-          sx={themedTextFieldSx}
-        />
-        <TextField
-          label="Invoice amount (UGX)"
-          value={amount}
-          onChange={(e) => setAmount(e.target.value)}
-          error={Boolean(errors.amount)}
-          helperText={errors.amount || `Prefilled with the balance not yet invoiced (${formatMoneyUGX(remaining)})`}
-          fullWidth
-          inputProps={{ inputMode: "decimal" }}
-          sx={themedTextFieldSx}
-        />
-        <TextField
-          label="Invoice date"
-          type="date"
-          value={invoiceDate}
-          onChange={(e) => setInvoiceDate(e.target.value)}
-          error={Boolean(errors.invoiceDate)}
-          helperText={errors.invoiceDate || " "}
-          fullWidth
-          slotProps={{ inputLabel: { shrink: true } }}
-          sx={themedTextFieldSx}
-        />
-        <TextField
-          select
-          label="Delivery (goods received)"
-          value={deliveryId}
-          onChange={(e) => setDeliveryId(e.target.value)}
-          helperText="Defaults to the latest accepted delivery"
-          fullWidth
-          sx={themedTextFieldSx}
-        >
-          <MenuItem value="">Latest accepted delivery</MenuItem>
-          {acceptedDeliveries.map((d) => (
-            <MenuItem key={d.id} value={d.id}>
-              {d.status} · {shortDate(d.deliveryDate)}
-            </MenuItem>
-          ))}
-        </TextField>
-        <TextField
-          label="Notes (optional)"
-          value={notes}
-          onChange={(e) => setNotes(e.target.value)}
-          fullWidth
-          multiline
-          minRows={2}
-          className="sm:col-span-2"
-          sx={themedTextFieldSx}
-        />
-      </div>
-      <Button
-        type="submit"
-        variant="contained"
-        disabled={busy}
-        startIcon={busy ? <CircularProgress size={16} color="inherit" /> : <ReceiptLongRounded />}
-        className="w-full sm:w-auto"
-      >
-        {busy ? "Receiving invoice…" : `Receive invoice from ${providerWord}`}
-      </Button>
-    </form>
   );
 }

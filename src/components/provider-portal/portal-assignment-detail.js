@@ -24,6 +24,7 @@ import { useToast } from "@/components/providers/toast-provider";
 import { PrintButton } from "@/components/print/print-document";
 import { PurchaseInstructionView } from "@/components/procurement/purchase-instruction-document";
 import { PortalAssignmentPrint } from "@/components/provider-portal/portal-assignment-print";
+import { WorkflowHistoryPanel } from "@/components/projects/workflow-history-panel";
 import { PORTAL_NOTIFICATIONS_CHANGED } from "@/components/provider-portal/provider-portal-shell";
 import {
   INVOICE_STATUS,
@@ -343,6 +344,9 @@ export function PortalAssignmentDetail({ procurementId }) {
         Back to assignments
       </Button>
       <div className="flex flex-wrap gap-2">
+        {data ? (
+          <PrintButton fileName={`Order record ${data.order?.number || data.procurement.procurementNumber}`} />
+        ) : null}
         <Button
           variant="outlined"
           startIcon={loading ? <CircularProgress size={16} /> : <RefreshRounded />}
@@ -354,9 +358,6 @@ export function PortalAssignmentDetail({ procurementId }) {
         >
           Refresh
         </Button>
-        {data ? (
-          <PrintButton fileName={`Order record ${data.order?.number || data.procurement.procurementNumber}`} />
-        ) : null}
       </div>
     </div>
   );
@@ -578,24 +579,16 @@ export function PortalAssignmentDetail({ procurementId }) {
         </Card>
       ) : null}
 
-      {data.history?.length ? (
-        <Card title="History">
-          <ol className="space-y-2">
-            {data.history.map((h) => (
-              <li key={h.id} className="rounded-lg border border-zinc-200 p-3">
-                <div className="flex flex-wrap items-baseline justify-between gap-2">
-                  <p className="text-sm font-semibold">{h.action}</p>
-                  <p className="text-xs text-zinc-600">{format(new Date(h.createdAt), "MMM d, yyyy HH:mm")}</p>
-                </div>
-                {h.actor || h.role ? (
-                  <p className="text-xs text-zinc-600">{[h.actor, h.role].filter(Boolean).join(" · ")}</p>
-                ) : null}
-                {h.comment ? <p className="mt-1 text-xs wrap-break-word">{h.comment}</p> : null}
-              </li>
-            ))}
-          </ol>
-        </Card>
-      ) : null}
+      <WorkflowHistoryPanel
+        history={(data.history || []).map((h) => ({
+          id: h.id,
+          createdAt: h.createdAt,
+          actionLabel: h.action,
+          actorName: h.actor,
+          actorRoleName: h.role,
+          comment: h.comment,
+        }))}
+      />
 
       <PortalAssignmentPrint data={data} />
 
@@ -628,7 +621,23 @@ export function PortalAssignmentDetail({ procurementId }) {
             number: order.number,
             value: actions.orderValue,
             remaining: actions.remaining,
+            invoiceNumber: actions.nextInvoiceNumber,
             procurement: { id: procurement.id },
+            procurementNumber: procurement.procurementNumber,
+            title: procurement.title,
+            deliveryLocation: procurement.deliveryLocation,
+            organisation: data.organisation,
+            provider: data.provider,
+            acceptedItems: Object.values(
+              data.deliveries
+                .filter((d) => d.inspection)
+                .flatMap((d) => d.lines)
+                .reduce((acc, l) => {
+                  const prev = acc[l.itemName] || { itemName: l.itemName, quantity: 0, unitOfMeasure: l.unitOfMeasure };
+                  acc[l.itemName] = { ...prev, quantity: prev.quantity + (Number(l.acceptedQuantity) || 0) };
+                  return acc;
+                }, /** @type {Record<string, any>} */ ({})),
+            ).filter((it) => it.quantity > 0),
           }}
           onClose={() => setInvoicing(false)}
           onSaved={() => {

@@ -39,16 +39,6 @@ export async function POST(request) {
       { status: 400 },
     );
   }
-  const supplierReference = typeof body?.supplierReference === "string" ? body.supplierReference.trim() : "";
-  if (!supplierReference) {
-    return NextResponse.json(
-      {
-        error: "Enter your invoice number.",
-        fieldErrors: { supplierReference: "Enter your invoice number." },
-      },
-      { status: 400 },
-    );
-  }
   let invoiceDate = null;
   if (typeof body?.invoiceDate === "string" && body.invoiceDate.trim()) {
     const d = new Date(body.invoiceDate);
@@ -69,7 +59,6 @@ export async function POST(request) {
     amount: body?.amount,
     invoiceDate,
     source: "PORTAL",
-    supplierReference,
     notes: typeof body?.notes === "string" ? body.notes : null,
     portalProviderId: auth.provider.id,
   });

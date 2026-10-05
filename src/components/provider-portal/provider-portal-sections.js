@@ -7,6 +7,7 @@ import Alert from "@mui/material/Alert";
 import MenuItem from "@mui/material/MenuItem";
 import DoneAllRounded from "@mui/icons-material/DoneAllRounded";
 import ChevronRightRounded from "@mui/icons-material/ChevronRightRounded";
+import ArrowBackRounded from "@mui/icons-material/ArrowBackRounded";
 import { PORTAL_NOTIFICATIONS_CHANGED } from "@/components/provider-portal/provider-portal-shell";
 import Button from "@mui/material/Button";
 import Chip from "@mui/material/Chip";
@@ -433,24 +434,106 @@ export function PortalOpportunities() {
 /* Orders + invoice submission                                         */
 /* ------------------------------------------------------------------ */
 
+/** @param {{ label: string; children: import("react").ReactNode }} p */
+function InvoiceField({ label, children }) {
+  return (
+    <div className="min-w-0">
+      <dt className="text-[11px] font-semibold uppercase tracking-wide text-zinc-500">{label}</dt>
+      <dd className="m-0 text-sm font-medium wrap-break-word">{children || "—"}</dd>
+    </div>
+  );
+}
+
+/**
+ * Invoice as the procurement unit will receive it.
+ * @param {{ order: any; invoice: { amount: string; invoiceDate: string; notes: string } }} p
+ */
+function InvoicePreview({ order, invoice }) {
+  const provider = order.provider || {};
+  const org = order.organisation || {};
+  const items = order.acceptedItems || [];
+  return (
+    <div className="rounded-lg border border-zinc-300 bg-white p-4 text-zinc-900">
+      <div className="flex flex-wrap items-start justify-between gap-3 border-b border-zinc-200 pb-3">
+        <div className="min-w-0">
+          <p className="text-base font-bold wrap-break-word">{provider.name || "—"}</p>
+          {provider.physicalAddress ? <p className="text-xs wrap-break-word">{provider.physicalAddress}</p> : null}
+          <p className="text-xs wrap-break-word">
+            {[provider.email, provider.phone].filter(Boolean).join(" · ")}
+          </p>
+          {provider.tin ? <p className="text-xs">TIN {provider.tin}</p> : null}
+        </div>
+        <div className="text-right">
+          <p className="text-lg font-extrabold tracking-wide text-primary">INVOICE</p>
+          <p className="text-sm font-semibold">{order.invoiceNumber}</p>
+          <p className="text-xs">{formatPortalDate(invoice.invoiceDate)}</p>
+        </div>
+      </div>
+      <dl className="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-2">
+        <InvoiceField label="Bill to">
+          {org.name ? `${org.name}${org.code ? ` (${org.code})` : ""}` : null}
+        </InvoiceField>
+        <InvoiceField label={ORDER_KIND[order.kind] || "Order"}>
+          {order.number ? `${order.number} · ${formatMoneyUGX(order.value)}` : null}
+        </InvoiceField>
+        <InvoiceField label="Procurement">
+          {order.procurementNumber ? `${order.procurementNumber} · ${order.title || ""}` : null}
+        </InvoiceField>
+        <InvoiceField label="Delivered to">{order.deliveryLocation}</InvoiceField>
+      </dl>
+      {items.length ? (
+        <div className="mt-3 overflow-x-auto">
+          <table className="w-full min-w-[320px] border-collapse text-sm">
+            <thead>
+              <tr className="border-b border-zinc-300 text-left text-xs uppercase text-zinc-500">
+                <th className="py-1.5 pr-2">#</th>
+                <th className="py-1.5 pr-2">Item</th>
+                <th className="py-1.5 text-right">Accepted qty</th>
+              </tr>
+            </thead>
+            <tbody>
+              {items.map((it, i) => (
+                <tr key={it.itemName} className="border-b border-zinc-100">
+                  <td className="py-1.5 pr-2">{i + 1}</td>
+                  <td className="py-1.5 pr-2 wrap-break-word">{it.itemName}</td>
+                  <td className="py-1.5 text-right">
+                    {it.quantity}
+                    {it.unitOfMeasure ? ` ${it.unitOfMeasure}` : ""}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      ) : null}
+      <div className="mt-3 flex items-center justify-between border-t border-zinc-300 pt-3">
+        <span className="text-sm font-semibold">Total due</span>
+        <span className="text-lg font-bold">{formatMoneyUGX(parseMoneyInput(invoice.amount))}</span>
+      </div>
+      {invoice.notes.trim() ? (
+        <p className="mt-2 text-xs text-zinc-600 wrap-break-word">{invoice.notes.trim()}</p>
+      ) : null}
+    </div>
+  );
+}
+
 /**
  * @param {{ order: any; onClose: () => void; onSaved: () => void }} p
  */
 export function InvoiceDialog({ order, onClose, onSaved }) {
   const { showToast } = useToast();
-  const [supplierReference, setSupplierReference] = useState("");
   const [amount, setAmount] = useState(String(order.remaining || ""));
   const [invoiceDate, setInvoiceDate] = useState(() => format(new Date(), "yyyy-MM-dd"));
   const [notes, setNotes] = useState("");
   /** @type {[Record<string, string>, Function]} */
   const [errors, setErrors] = useState({});
   const [busy, setBusy] = useState(false);
+  const [reviewing, setReviewing] = useState(false);
 
-  async function submit(e) {
+  function review(e) {
     e.preventDefault();
     /** @type {Record<string, string>} */
     const next = {};
-    if (!supplierReference.trim()) next.supplierReference = "Enter your invoice number.";
     const amountErr = validatePositiveMoney(amount, "Amount");
     if (amountErr) next.amount = amountErr;
     else if (Number(parseMoneyInput(amount)) > Number(order.remaining) + 0.009) {
@@ -462,20 +545,26 @@ export function InvoiceDialog({ order, onClose, onSaved }) {
       showToast({ message: "Please fix the highlighted fields.", severity: "error" });
       return;
     }
+    setReviewing(true);
+  }
+
+  async function submit() {
     setBusy(true);
     try {
       const { ok, data } = await portalFetch("/api/provider-portal/invoices", {
         method: "POST",
         body: JSON.stringify({
           procurementId: order.procurement?.id,
-          supplierReference: supplierReference.trim(),
           amount: parseMoneyInput(amount),
           invoiceDate,
           notes: notes.trim() || null,
         }),
       });
       if (!ok) {
-        if (data.fieldErrors) setErrors(data.fieldErrors);
+        if (data.fieldErrors) {
+          setErrors(data.fieldErrors);
+          setReviewing(false);
+        }
         showToast({ message: typeof data.error === "string" ? data.error : "Could not submit the invoice.", severity: "error" });
         return;
       }
@@ -487,8 +576,29 @@ export function InvoiceDialog({ order, onClose, onSaved }) {
   }
 
   return (
-    <Dialog open onClose={busy ? undefined : onClose} maxWidth="sm" fullWidth>
-      <form noValidate onSubmit={submit}>
+    <Dialog open onClose={busy ? undefined : onClose} maxWidth={reviewing ? "md" : "sm"} fullWidth>
+      {reviewing ? (
+        <>
+          <DialogTitle>Review invoice</DialogTitle>
+          <DialogContent dividers>
+            <InvoicePreview order={order} invoice={{ amount, invoiceDate, notes }} />
+          </DialogContent>
+          <DialogActions className="flex-wrap gap-2">
+            <Button startIcon={<ArrowBackRounded />} onClick={() => setReviewing(false)} disabled={busy}>
+              Back
+            </Button>
+            <Button
+              variant="contained"
+              disabled={busy}
+              onClick={() => void submit()}
+              startIcon={busy ? <CircularProgress size={16} color="inherit" /> : <SendRounded />}
+            >
+              {busy ? "Submitting…" : "Submit invoice"}
+            </Button>
+          </DialogActions>
+        </>
+      ) : (
+      <form noValidate onSubmit={review}>
         <DialogTitle>Submit invoice</DialogTitle>
         <DialogContent dividers className="space-y-3">
           <p className="text-sm text-zinc-700">
@@ -496,16 +606,11 @@ export function InvoiceDialog({ order, onClose, onSaved }) {
             {formatMoneyUGX(order.value)} · uninvoiced {formatMoneyUGX(order.remaining)}
           </p>
           <TextField
-            label="Your invoice number"
-            value={supplierReference}
-            onChange={(e) => {
-              setSupplierReference(e.target.value);
-              setErrors((p) => ({ ...p, supplierReference: "" }));
-            }}
-            error={Boolean(errors.supplierReference)}
-            helperText={errors.supplierReference || "As printed on your invoice"}
+            label="Invoice number"
+            value={order.invoiceNumber || "Auto-generated"}
+            helperText="Auto-generated"
             fullWidth
-            autoFocus
+            slotProps={{ input: { readOnly: true } }}
           />
           <TextField
             label="Amount (UGX)"
@@ -545,16 +650,12 @@ export function InvoiceDialog({ order, onClose, onSaved }) {
           <Button onClick={onClose} disabled={busy}>
             Cancel
           </Button>
-          <Button
-            type="submit"
-            variant="contained"
-            disabled={busy}
-            startIcon={busy ? <CircularProgress size={16} color="inherit" /> : <ReceiptLongRounded />}
-          >
-            {busy ? "Submitting…" : "Submit invoice"}
+          <Button type="submit" variant="contained" startIcon={<ReceiptLongRounded />}>
+            Review invoice
           </Button>
         </DialogActions>
       </form>
+      )}
     </Dialog>
   );
 }

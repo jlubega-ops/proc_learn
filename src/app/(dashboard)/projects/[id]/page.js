@@ -5,7 +5,6 @@ import { prisma } from "@/lib/prisma";
 import { formatUserDisplayName } from "@/lib/user-display";
 import { sanitizeRichHtml } from "@/lib/sanitize-rich-html";
 import { loadOrgProfile } from "@/lib/projects/org-profile";
-import { OrgPendingTasksCard } from "@/components/projects/org-pending-tasks-card";
 import { OrgProfileView } from "@/components/projects/org-profile-view";
 import { BRAND_CARD_CLASS } from "@/lib/brand-ui";
 
@@ -66,8 +65,6 @@ export default async function ProjectDetailsPage({ params }) {
             </div>
           ) : null}
         </div>
-
-        <OrgPendingTasksCard projectId={id} />
 
         {profile ? <OrgProfileView profile={profile} /> : null}
       </div>

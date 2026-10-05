@@ -4,7 +4,8 @@ import { procurementTaskStage } from "@/lib/projects/procurement-task-stage";
 
 /**
  * Sidebar paths (relative to `/projects/[id]`) a pending task counts towards. Procurement
- * tasks also count on the section link that holds the step (e.g. Purchase Instructions).
+ * tasks count only on the section link that holds the step (e.g. Purchase Instructions),
+ * never on the Procurements parent, so one task shows one badge besides My Tasks.
  * @param {{ budgetId?: string | null; procurementPlanId?: string | null; requisitionId?: string | null; procurementId?: string | null; procurement?: { procurementMethod?: string | null } | null } | null} instance
  * @param {string | null | undefined} [title]
  * @returns {string[]}
@@ -13,7 +14,7 @@ export function navPathsForTaskInstance(instance, title) {
   if (!instance) return [];
   if (instance.procurementId) {
     const slug = procurementSectionSlug(procurementTaskStage(title), instance.procurement?.procurementMethod);
-    return ["procurements", ...(slug ? [`procurements/${slug}`] : [])];
+    return slug ? [`procurements/${slug}`] : [];
   }
   if (instance.budgetId) return ["budgets"];
   if (instance.procurementPlanId) return ["procurement-plans"];

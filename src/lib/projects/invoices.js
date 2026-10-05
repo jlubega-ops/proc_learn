@@ -55,7 +55,7 @@ const NON_CANCELLED_INVOICE_STATUSES = [
  * @param {string} projectId
  * @param {string} procurementId
  */
-async function nextInvoiceNumber(prisma, projectId, procurementId) {
+export async function nextInvoiceNumber(prisma, projectId, procurementId) {
   const proc = await prisma.projectOrgProcurement.findUnique({
     where: { id: procurementId },
     select: { procurementNumber: true },
@@ -74,7 +74,8 @@ async function nextInvoiceNumber(prisma, projectId, procurementId) {
 }
 
 /**
- * Create an invoice against a procurement's active order. Requires at least one
+ * Create a provider's invoice (portal or auto-response) against a procurement's active
+ * order — the organisation never raises its own supplier invoice. Requires at least one
  * accepted delivery, and the running total of invoices must not exceed the order
  * value (Purchase Instruction amount, LPO value, or contract value).
  *
@@ -95,6 +96,9 @@ async function nextInvoiceNumber(prisma, projectId, procurementId) {
  */
 export async function createInvoice(prisma, opts) {
   const source = Object.values(INVOICE_SOURCE).includes(opts.source) ? opts.source : INVOICE_SOURCE.OFFICER;
+  if (source === INVOICE_SOURCE.OFFICER) {
+    return { ok: false, error: "Invoices are sent by the provider.", status: 400, code: "PROVIDER_INVOICE_ONLY" };
+  }
   const procurement = await prisma.projectOrgProcurement.findFirst({
     where: { id: opts.procurementId, projectId: opts.projectId },
   });

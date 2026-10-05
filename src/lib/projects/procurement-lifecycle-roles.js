@@ -20,12 +20,8 @@ export const LIFECYCLE_ACTION_ROLES = {
   issue_contract: ["Contracts Officer", "Procurement Officer", "Head PDU"],
   record_delivery: ["User Department Officer", "Head User Department"],
   record_inspection: ["Head User Department", "User Department Officer", "Contracts Officer"],
-  create_invoice: [
-    "User Department Officer",
-    "Head User Department",
-    "Contracts Officer",
-    "Finance/Budget Officer",
-  ],
+  // Invoices come from the provider (portal or auto-response), never from org users.
+  create_invoice: [],
   certify_invoice: ["Head User Department", "Contracts Officer", "Finance/Budget Officer"],
   verify_invoice: ["Contracts Officer", "Finance/Budget Officer"],
   reject_invoice: ["Contracts Officer", "Finance/Budget Officer", "Head User Department"],

@@ -944,23 +944,24 @@ export async function actOnProcurementTask(prisma, opts) {
 
   if (STEP.RECEIVE_INVOICE.test(title) && isPositive) {
     const providerInvoiceId = typeof body.invoiceId === "string" ? body.invoiceId.trim() : "";
-    if (providerInvoiceId) {
-      const existingInvoice = await prisma.projectOrgInvoice.findFirst({
-        where: {
-          id: providerInvoiceId,
-          projectId,
-          procurementId,
-          status: { in: ["RECEIVED", "CERTIFIED", "VERIFIED"] },
-        },
-        select: { id: true, status: true },
-      });
-      if (!existingInvoice) {
-        return {
-          ok: false,
-          error: "The selected provider invoice was not found or has already been processed.",
-          status: 400,
-        };
-      }
+    const existingInvoice = await prisma.projectOrgInvoice.findFirst({
+      where: {
+        projectId,
+        procurementId,
+        status: { in: ["RECEIVED", "CERTIFIED", "VERIFIED"] },
+        ...(providerInvoiceId ? { id: providerInvoiceId } : {}),
+      },
+      orderBy: { createdAt: "desc" },
+      select: { id: true, status: true },
+    });
+    if (!existingInvoice && providerInvoiceId) {
+      return {
+        ok: false,
+        error: "The selected provider invoice was not found or has already been processed.",
+        status: 400,
+      };
+    }
+    if (existingInvoice) {
       // Micro has no separate Verify Invoice step: processing certifies and verifies it so
       // Approve Payment can raise the payment.
       if (/^process invoice/i.test(title)) {
@@ -979,25 +980,7 @@ export async function actOnProcurementTask(prisma, opts) {
       }
       return complete({ invoiceId: existingInvoice.id, acknowledgedProviderInvoice: true });
     }
-    if (body.amount == null) {
-      return {
-        ok: false,
-        error: "Provide the invoice amount to raise an invoice against this procurement.",
-        status: 400,
-        fieldErrors: { amount: "Enter the invoice amount." },
-      };
-    }
-    const out = await actOnProcurementLifecycle(prisma, {
-      projectId,
-      procurementId,
-      action: "create_invoice",
-      actorOrgUserId: opts.actorOrgUserId,
-      actorRoleName: opts.actorRoleName,
-      actorDepartmentId: opts.actorDepartmentId,
-      body,
-    });
-    if (!out.ok) return out;
-    return complete({ invoiceId: out.invoice?.id });
+    return { ok: false, error: "The provider has not sent an invoice yet.", status: 400 };
   }
 
   if (STEP.VERIFY_INVOICE.test(title) && isPositive) {
@@ -1106,7 +1089,7 @@ export async function actOnProcurementTask(prisma, opts) {
       action: "mark_payment_paid",
       actorOrgUserId: opts.actorOrgUserId,
       actorRoleName: opts.actorRoleName,
-      body: { paymentId, paymentDate: body.paymentDate || null },
+      body: { paymentId, paymentDate: body.paymentDate || null, paymentReference: body.paymentReference || null },
     });
     if (!out.ok) return out;
     return complete({ paymentId });

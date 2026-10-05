@@ -7,6 +7,7 @@ import {
 } from "@/lib/projects/delivery-notes";
 import { getActiveOrderValue } from "@/lib/projects/contracts-lpo";
 import { loadPrintOrganisation } from "@/lib/projects/print-context";
+import { nextInvoiceNumber } from "@/lib/projects/invoices";
 import { loadProcurementDomainTimeline } from "@/lib/projects/procurement-timeline";
 
 const OPEN_INVOICE_STATUSES = ["RECEIVED", "CERTIFIED", "VERIFIED", "APPROVED_FOR_PAYMENT"];
@@ -247,9 +248,13 @@ export async function loadProviderAssignment(prisma, opts) {
   if (!r) return null;
 
   const pi = r.purchaseInstructions[0] || null;
-  const [piDoc, organisation] = await Promise.all([
+  const [piDoc, organisation, provider] = await Promise.all([
     pi ? loadPurchaseInstructionDoc(prisma, opts) : Promise.resolve(null),
     loadPrintOrganisation(prisma, opts.projectId),
+    prisma.projectOrgProvider.findFirst({
+      where: { id: opts.providerId, projectId: opts.projectId },
+      select: { name: true, email: true, phone: true, physicalAddress: true, tin: true },
+    }),
   ]);
   const activeOrder = await getActiveOrderValue(prisma, opts.projectId, r.id);
   const myOrder = activeOrder?.supplierId === opts.providerId ? activeOrder : null;
@@ -262,6 +267,8 @@ export async function loadProviderAssignment(prisma, opts) {
   const hasAcceptedDelivery = r.deliveries.some((d) => ["ACCEPTED", "PARTIAL"].includes(d.inspection?.status));
   const remaining = myOrder ? Math.max(0, myOrder.value - invoiced) : 0;
   const orderAccepted = Boolean(myOrder) && !orderNotOpenForDelivery(myOrder);
+  const canInvoice = !terminal && hasAcceptedDelivery && remaining > 0.009;
+  const invoiceNumber = canInvoice ? await nextInvoiceNumber(prisma, opts.projectId, r.id) : null;
   const history = await loadProviderHistory(prisma, {
     projectId: opts.projectId,
     procurementId: r.id,
@@ -291,6 +298,7 @@ export async function loadProviderAssignment(prisma, opts) {
     },
     order: orderOf(r),
     organisation,
+    provider,
     purchaseInstructionDoc: piDoc,
     status: progress.status,
     steps: progress.steps,
@@ -335,7 +343,8 @@ export async function loadProviderAssignment(prisma, opts) {
         Boolean(orderAccepted) &&
         !notes.some((n) => n.status === "SUBMITTED") &&
         outstanding.some((l) => l.outstanding > 0),
-      canInvoice: !terminal && hasAcceptedDelivery && remaining > 0.009,
+      canInvoice,
+      nextInvoiceNumber: invoiceNumber,
       remaining: remaining.toFixed(2),
       orderValue: myOrder ? myOrder.value.toFixed(2) : null,
     },
