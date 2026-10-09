@@ -797,7 +797,11 @@ export async function actOnProcurementTask(prisma, opts) {
     (STEP.RFQ_PREPARE_LPO.test(title) || /^prepare contract$/i.test(title)) &&
     isPositive
   ) {
-    const action = /contract/i.test(title) ? "create_contract" : "create_lpo";
+    const proc = await prisma.projectOrgProcurement.findFirst({
+      where: { id: procurementId, projectId },
+      select: { procurementMethod: true },
+    });
+    const action = proc?.procurementMethod === "TENDER" ? "create_contract" : "create_lpo";
     const out = await actOnProcurementLifecycle(prisma, {
       projectId,
       procurementId,
