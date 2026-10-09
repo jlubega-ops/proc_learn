@@ -4,6 +4,7 @@ import { notifyOrgUsers, OrgNotificationType } from "@/lib/projects/org-notifica
 import { getActiveOrderValue } from "@/lib/projects/contracts-lpo";
 import { notifyProvider } from "@/lib/projects/provider-notifications";
 import { orderNotOpenForDelivery } from "@/lib/projects/delivery-notes";
+import { parseDateInputValue, toDateInputValue } from "@/lib/financial-year-dates";
 
 /** @param {any} row */
 export function serializeDelivery(row) {
@@ -16,7 +17,13 @@ export function serializeDelivery(row) {
     deliveryAddress: row.deliveryAddress || null,
     remarks: row.remarks || null,
     deliveryNote: row.deliveryNote
-      ? { id: row.deliveryNote.id, noteNumber: row.deliveryNote.noteNumber, dispatchedAt: row.deliveryNote.dispatchedAt }
+      ? {
+          id: row.deliveryNote.id,
+          noteNumber: row.deliveryNote.noteNumber,
+          dispatchedAt: row.deliveryNote.dispatchedAt,
+          deliveredBy: row.deliveryNote.deliveredBy || null,
+          vehicleNumber: row.deliveryNote.vehicleNumber || null,
+        }
       : null,
     recordedBy: row.recordedBy
       ? { id: row.recordedBy.id, displayName: `${row.recordedBy.firstName || ""} ${row.recordedBy.lastName || ""}`.trim() }
@@ -55,7 +62,9 @@ export function serializeDelivery(row) {
 
 export const deliveryInclude = {
   recordedBy: { select: { id: true, firstName: true, lastName: true } },
-  deliveryNote: { select: { id: true, noteNumber: true, dispatchedAt: true } },
+  deliveryNote: {
+    select: { id: true, noteNumber: true, dispatchedAt: true, deliveredBy: true, vehicleNumber: true },
+  },
   lines: true,
   inspection: { include: { inspectedBy: { select: { id: true, firstName: true, lastName: true } } } },
 };
@@ -108,7 +117,7 @@ export async function recordDelivery(prisma, opts) {
       ...(deliveryNoteId ? { id: deliveryNoteId } : { status: "SUBMITTED" }),
     },
     orderBy: { createdAt: "desc" },
-    select: { id: true, status: true, noteNumber: true, supplierId: true, lines: true },
+    select: { id: true, status: true, noteNumber: true, supplierId: true, lines: true, dispatchedAt: true },
   });
   if (!deliveryNote) {
     return {
@@ -120,6 +129,22 @@ export async function recordDelivery(prisma, opts) {
   }
   if (deliveryNote.status !== "SUBMITTED") {
     return { ok: false, error: "This delivery note has already been received.", status: 409 };
+  }
+  const rawDate = opts.deliveryDate instanceof Date ? toDateInputValue(opts.deliveryDate) : String(opts.deliveryDate ?? "").trim();
+  const deliveryDate = rawDate ? parseDateInputValue(rawDate) : new Date();
+  if (!deliveryDate) {
+    return { ok: false, error: "Please fix the highlighted fields.", status: 400, fieldErrors: { deliveryDate: "Enter a valid date." } };
+  }
+  if (toDateInputValue(deliveryDate) > toDateInputValue(new Date())) {
+    return { ok: false, error: "Please fix the highlighted fields.", status: 400, fieldErrors: { deliveryDate: "Date cannot be in the future." } };
+  }
+  if (toDateInputValue(deliveryDate) < toDateInputValue(deliveryNote.dispatchedAt)) {
+    return {
+      ok: false,
+      error: "Please fix the highlighted fields.",
+      status: 400,
+      fieldErrors: { deliveryDate: "Cannot be before the dispatch date." },
+    };
   }
   const dispatchedByItem = new Map(
     (Array.isArray(deliveryNote.lines) ? deliveryNote.lines : []).map((l) => [String(l?.itemName || ""), Number(l?.quantity || 0)]),
@@ -193,7 +218,7 @@ export async function recordDelivery(prisma, opts) {
         projectId: opts.projectId,
         procurementId: procurement.id,
         status: fullyDelivered ? OrgDeliveryStatus.COMPLETE : OrgDeliveryStatus.PARTIAL,
-        deliveryDate: opts.deliveryDate ? new Date(opts.deliveryDate) : new Date(),
+        deliveryDate,
         recordedByOrgUserId: opts.actorOrgUserId,
         deliveryAddress: order.deliveryAddress || null,
         remarks: typeof opts.remarks === "string" ? opts.remarks.trim() || null : null,
@@ -293,11 +318,18 @@ export async function recordInspection(prisma, opts) {
       fieldErrors.lineDecisions = "Quantities cannot be negative.";
       continue;
     }
-    if (accepted + rejected > Number(line.receivedQuantity) + 0.009) {
-      fieldErrors.lineDecisions = `Accepted + rejected for "${line.itemName}" exceeds received quantity.`;
+    if (Math.abs(accepted + rejected - Number(line.receivedQuantity)) > 0.009) {
+      fieldErrors.lineDecisions = `Accepted + rejected for "${line.itemName}" must equal the received quantity.`;
       continue;
     }
     updates.push({ id: line.id, accepted, rejected });
+  }
+  if (!Object.keys(fieldErrors).length && updates.length !== delivery.lines.length) {
+    fieldErrors.lineDecisions = "Record a decision for every received line.";
+  }
+  const resultNotes = typeof opts.resultNotes === "string" ? opts.resultNotes.trim() : "";
+  if (updates.some((u) => u.rejected > 0) && !resultNotes) {
+    fieldErrors.inspectionNotes = "Enter the reason for rejection.";
   }
   if (Object.keys(fieldErrors).length) {
     return { ok: false, error: "Please fix the highlighted inspection decisions.", fieldErrors, status: 400 };

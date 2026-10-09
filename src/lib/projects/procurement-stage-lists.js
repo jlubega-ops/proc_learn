@@ -39,7 +39,9 @@ function sectionStatus(stageKey, r, inst, head) {
   if (
     stageKey === "delivery" &&
     !r.deliveries?.length &&
-    (r.purchaseInstructions?.[0]?.status === "ISSUED" || r.lpos?.[0]?.status === "ISSUED")
+    (r.purchaseInstructions?.[0]?.status === "ISSUED" ||
+      r.lpos?.[0]?.status === "ISSUED" ||
+      r.contracts?.[0]?.status === "ISSUED")
   ) {
     return { label: "Awaiting provider acceptance", color: "warning" };
   }
@@ -55,7 +57,12 @@ function sectionStatus(stageKey, r, inst, head) {
   const active = inst && ["ACTIVE", "IN_PROGRESS"].includes(inst.status);
   if (active && head && procurementTaskStage(head.title) === stageKey) {
     const step = String(head.title).split(":")[0].trim();
-    const action = step ? step.charAt(0).toLowerCase() + step.slice(1) : "action";
+    const action = step
+      ? step
+          .split(/\s+/)
+          .map((w) => (/[A-Z]{2,}/.test(w) ? w : w.toLowerCase()))
+          .join(" ")
+      : "action";
     return {
       label: `Pending ${action}${head.requiredRoleName ? ` by ${head.requiredRoleName}` : ""}`,
       color: "warning",

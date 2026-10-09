@@ -558,7 +558,7 @@ export const BASELINE_PROCESS_TEMPLATES = [
       {
         stepNumber: 26,
         taskDescription: "Receive/Record Invoice",
-        roleName: "User Department Officer",
+        roleName: "Finance/Budget Officer",
         actionKey: "COMPLETE",
       },
       {
@@ -735,7 +735,7 @@ export const BASELINE_PROCESS_TEMPLATES = [
       {
         stepNumber: 26,
         taskDescription: "Invoice",
-        roleName: "User Department Officer",
+        roleName: "Finance/Budget Officer",
         actionKey: "COMPLETE",
       },
       {

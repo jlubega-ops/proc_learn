@@ -1,6 +1,8 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { createInvoice } from "@/lib/projects/invoices";
+import { parseDateInputValue, toDateInputValue } from "@/lib/financial-year-dates";
+import { listProviderAssignmentsToInvoice } from "@/lib/projects/provider-assignments";
 import {
   listPortalInvoices,
   parsePortalPaging,
@@ -13,12 +15,12 @@ export async function GET(request) {
   const auth = await requireProviderPortalSession(prisma);
   if (!auth.ok) return NextResponse.json({ error: auth.error }, { status: auth.status });
   const paging = parsePortalPaging(new URL(request.url).searchParams);
-  const data = await listPortalInvoices(prisma, {
-    projectId: auth.project.id,
-    providerId: auth.provider.id,
-    ...paging,
-  });
-  return NextResponse.json(data);
+  const opts = { projectId: auth.project.id, providerId: auth.provider.id };
+  const [data, toInvoice] = await Promise.all([
+    listPortalInvoices(prisma, { ...opts, ...paging }),
+    listProviderAssignmentsToInvoice(prisma, opts),
+  ]);
+  return NextResponse.json({ ...data, toInvoice });
 }
 
 export async function POST(request) {
@@ -41,14 +43,27 @@ export async function POST(request) {
   }
   let invoiceDate = null;
   if (typeof body?.invoiceDate === "string" && body.invoiceDate.trim()) {
-    const d = new Date(body.invoiceDate);
-    if (Number.isNaN(d.getTime())) {
+    const d = parseDateInputValue(body.invoiceDate);
+    if (!d) {
       return NextResponse.json(
         { error: "Enter a valid invoice date.", fieldErrors: { invoiceDate: "Enter a valid date." } },
         { status: 400 },
       );
     }
+    if (toDateInputValue(d) > toDateInputValue(new Date())) {
+      return NextResponse.json(
+        { error: "Please fix the highlighted fields.", fieldErrors: { invoiceDate: "Date cannot be in the future." } },
+        { status: 400 },
+      );
+    }
     invoiceDate = d;
+  }
+  const supplierReference = typeof body?.supplierReference === "string" ? body.supplierReference.trim() : "";
+  if (supplierReference.length > 64) {
+    return NextResponse.json(
+      { error: "Please fix the highlighted fields.", fieldErrors: { supplierReference: "Max 64 characters." } },
+      { status: 400 },
+    );
   }
 
   const result = await createInvoice(prisma, {
@@ -58,6 +73,7 @@ export async function POST(request) {
     actorRoleName: "Provider (portal)",
     amount: body?.amount,
     invoiceDate,
+    supplierReference: supplierReference || null,
     source: "PORTAL",
     notes: typeof body?.notes === "string" ? body.notes : null,
     portalProviderId: auth.provider.id,

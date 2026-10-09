@@ -13,17 +13,18 @@ import { workflowDecisionPastLabel } from "@/lib/projects/workflow-status-presen
 const DECISION_COLOR = { APPROVE: "success", RETURN: "warning", REJECT: "error" };
 
 /**
- * Latest decision on each award workflow step, oldest first.
+ * Latest decision on each workflow step of one stage, oldest first.
  * @param {any[]} timeline
+ * @param {string} [stage]
  */
-function awardStepDecisions(timeline) {
+function awardStepDecisions(timeline, stage = "award") {
   /** @type {Map<string, any>} */
   const byStep = new Map();
   const sorted = [...(timeline || [])]
     .filter((a) => a.source === "workflow" && a.decision && a.taskTitle)
     .sort((a, b) => String(a.createdAt || "").localeCompare(String(b.createdAt || "")));
   for (const a of sorted) {
-    if (procurementTaskStage(a.taskTitle) !== "award") continue;
+    if (procurementTaskStage(a.taskTitle) !== stage) continue;
     const step = String(a.taskTitle).split(":")[0].trim();
     byStep.delete(step);
     byStep.set(step, a);
@@ -60,11 +61,11 @@ function fact(label, value) {
 }
 
 /**
- * Decisions on the award steps so far (prepared, reviewed, approved).
- * @param {{ timeline: any[] | null | undefined }} p
+ * Decisions on one stage's steps so far (award by default: prepared, reviewed, approved).
+ * @param {{ timeline: any[] | null | undefined; stage?: string }} p
  */
-export function OrgAwardDecisionTrail({ timeline }) {
-  const decisions = awardStepDecisions(timeline || []);
+export function OrgAwardDecisionTrail({ timeline, stage = "award" }) {
+  const decisions = awardStepDecisions(timeline || [], stage);
   if (!decisions.length) return null;
   return (
     <ul className="divide-y divide-(--border-subtle) rounded-lg border border-(--border-subtle) text-sm">
@@ -195,17 +196,153 @@ export function OrgAwardDetails({ row }) {
 }
 
 /**
+ * The winning bid behind the award (latest live offer from the awarded supplier).
+ * @param {any} row
+ * @returns {{ offer: any | null; lines: any[] }}
+ */
+export function awardedOffer(row) {
+  const supplierId = row?.award?.supplierId;
+  const offer = supplierId
+    ? (row.offers || [])
+        .filter((o) => o.supplierId === supplierId && !["WITHDRAWN", "LATE"].includes(o.status))
+        .sort((a, b) => String(b.submittedAt || "").localeCompare(String(a.submittedAt || "")))[0] || null
+    : null;
+  return { offer, lines: Array.isArray(offer?.lineItems) ? offer.lineItems : [] };
+}
+
+/** @param {{ lines: any[]; total: unknown }} p */
+function PricedLinesTable({ lines, total }) {
+  if (!lines.length) return null;
+  return (
+    <div className="overflow-x-auto rounded-lg border border-(--border-subtle)">
+      <table className="w-full min-w-[520px] border-collapse text-sm">
+        <thead>
+          <tr className="border-b border-(--border-subtle) text-left text-xs uppercase opacity-70">
+            <th className="p-2">Item</th>
+            <th className="p-2 text-right">Qty</th>
+            <th className="p-2 text-right">Unit price</th>
+            <th className="p-2 text-right">Total</th>
+          </tr>
+        </thead>
+        <tbody>
+          {lines.map((l, i) => (
+            <tr key={l.lineNumber || i} className="border-b border-(--border-subtle)">
+              <td className="p-2 wrap-break-word">{l.itemName}</td>
+              <td className="p-2 text-right">
+                {l.quantity}
+                {l.unitOfMeasure ? <span className="text-xs opacity-70"> {l.unitOfMeasure}</span> : null}
+              </td>
+              <td className="p-2 text-right">{formatMoneyUGX(l.unitPrice)}</td>
+              <td className="p-2 text-right">{formatMoneyUGX(l.total)}</td>
+            </tr>
+          ))}
+        </tbody>
+        <tfoot>
+          <tr>
+            <td colSpan={3} className="p-2 text-right font-semibold">
+              Total
+            </td>
+            <td className="p-2 text-right font-semibold">{formatMoneyUGX(total)}</td>
+          </tr>
+        </tfoot>
+      </table>
+    </div>
+  );
+}
+
+export const ORDER_STATUS_PRESENTATION = {
+  DRAFT: { label: "Awaiting approval", color: "warning" },
+  UNDER_REVIEW: { label: "Under review", color: "warning" },
+  APPROVED: { label: "Approved · to issue", color: "info" },
+  SIGNED: { label: "Signed · to issue", color: "info" },
+  ISSUED: { label: "Issued · awaiting supplier", color: "warning" },
+  ACCEPTED: { label: "Accepted by supplier", color: "success" },
+  ACTIVE: { label: "Accepted · active", color: "success" },
+  DECLINED: { label: "Declined by supplier", color: "error" },
+  CANCELLED: { label: "Cancelled", color: "error" },
+};
+
+/**
+ * LPO or contract raised from the award: document facts, priced lines and the decisions on it.
+ * @param {{ row: any; addressSlot?: import("react").ReactNode }} p
+ */
+export function OrgOrderSummary({ row, addressSlot = null }) {
+  const lpo = row.lpo;
+  const contract = row.contract;
+  const doc = contract || lpo;
+  if (!doc) return null;
+  const { offer, lines } = awardedOffer(row);
+  const status = ORDER_STATUS_PRESENTATION[doc.status];
+  const value = contract ? contract.contractValue : lpo.lpoValue;
+  const estimate = Number(row.requisition?.estimatedTotalValue) || 0;
+  const variance = (Number(value) || 0) - estimate;
+
+  return (
+    <div className="space-y-3 text-sm">
+      <div className="grid gap-3 rounded-lg border border-(--border-subtle) p-3 sm:grid-cols-3">
+        {fact(
+          contract ? "Contract no." : "LPO no.",
+          <span className="font-semibold">{contract ? contract.contractNumber : lpo.lpoNumber}</span>,
+        )}
+        {fact(
+          "Status",
+          <Chip size="small" color={/** @type {any} */ (status?.color || "info")} label={status?.label || doc.status} />,
+        )}
+        {fact("Value", <span className="font-semibold">{formatMoneyUGX(value)}</span>)}
+        {fact("Supplier", <span className="wrap-break-word">{doc.supplier?.name || "—"}</span>)}
+        {fact("Estimated value", formatMoneyUGX(estimate))}
+        {fact(
+          "Against estimate",
+          estimate ? (
+            <Chip
+              size="small"
+              color={variance > 0 ? "error" : "success"}
+              label={variance > 0 ? `Over by ${formatMoneyUGX(variance)}` : `Within · saves ${formatMoneyUGX(-variance)}`}
+            />
+          ) : (
+            "—"
+          ),
+        )}
+        {fact("Delivery period", offer?.deliveryDays ? `${offer.deliveryDays} days` : "—")}
+        {fact("Created on", formatPrintDate(doc.createdAt) || "—")}
+        {contract?.startDate ? fact("Start date", formatPrintDate(contract.startDate)) : null}
+        {contract?.endDate ? fact("End date", formatPrintDate(contract.endDate)) : null}
+        {doc.issuedAt ? fact("Issued on", formatPrintDate(doc.issuedAt)) : null}
+        {doc.acceptedAt
+          ? fact(
+              "Accepted by",
+              <span className="wrap-break-word">
+                {doc.acceptedByName || "—"} · {formatPrintDate(doc.acceptedAt)}
+              </span>,
+            )
+          : null}
+        {addressSlot ? <div className="sm:col-span-3">{addressSlot}</div> : null}
+      </div>
+      {doc.status === "ISSUED" ? (
+        <Alert severity="warning" variant="outlined">
+          Waiting for {doc.supplier?.name || "the supplier"} to accept in the provider portal.
+        </Alert>
+      ) : null}
+      {doc.declinedAt ? (
+        <Alert severity="error" variant="outlined">
+          {doc.supplier?.name || "The supplier"} declined on {formatPrintDate(doc.declinedAt)}
+          {doc.declineReason ? `: ${doc.declineReason}` : "."}
+        </Alert>
+      ) : null}
+      <PricedLinesTable lines={lines} total={value} />
+      <OrgAwardDecisionTrail timeline={row.timeline} stage="contract" />
+    </div>
+  );
+}
+
+/**
  * What the LPO / contract will be raised from: the accepted award and the winning bid's priced lines.
  * @param {{ row: any }} p
  */
 export function OrgAwardOrderBasis({ row }) {
   const award = row.award;
   if (!award) return null;
-  const offer =
-    (row.offers || [])
-      .filter((o) => o.supplierId === award.supplierId && !["WITHDRAWN", "LATE"].includes(o.status))
-      .sort((a, b) => String(b.submittedAt || "").localeCompare(String(a.submittedAt || "")))[0] || null;
-  const lines = Array.isArray(offer?.lineItems) ? offer.lineItems : [];
+  const { offer, lines } = awardedOffer(row);
   const status = AWARD_STATUS_PRESENTATION[award.status];
 
   return (
@@ -241,41 +378,7 @@ export function OrgAwardOrderBasis({ row }) {
         </Alert>
       ) : null}
 
-      {lines.length ? (
-        <div className="overflow-x-auto rounded-lg border border-(--border-subtle)">
-          <table className="w-full min-w-[520px] border-collapse text-sm">
-            <thead>
-              <tr className="border-b border-(--border-subtle) text-left text-xs uppercase opacity-70">
-                <th className="p-2">Item</th>
-                <th className="p-2 text-right">Qty</th>
-                <th className="p-2 text-right">Unit price</th>
-                <th className="p-2 text-right">Total</th>
-              </tr>
-            </thead>
-            <tbody>
-              {lines.map((l, i) => (
-                <tr key={l.lineNumber || i} className="border-b border-(--border-subtle)">
-                  <td className="p-2 wrap-break-word">{l.itemName}</td>
-                  <td className="p-2 text-right">
-                    {l.quantity}
-                    {l.unitOfMeasure ? <span className="text-xs opacity-70"> {l.unitOfMeasure}</span> : null}
-                  </td>
-                  <td className="p-2 text-right">{formatMoneyUGX(l.unitPrice)}</td>
-                  <td className="p-2 text-right">{formatMoneyUGX(l.total)}</td>
-                </tr>
-              ))}
-            </tbody>
-            <tfoot>
-              <tr>
-                <td colSpan={3} className="p-2 text-right font-semibold">
-                  Total
-                </td>
-                <td className="p-2 text-right font-semibold">{formatMoneyUGX(award.awardedAmount)}</td>
-              </tr>
-            </tfoot>
-          </table>
-        </div>
-      ) : null}
+      <PricedLinesTable lines={lines} total={award.awardedAmount} />
     </div>
   );
 }

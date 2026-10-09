@@ -7,11 +7,14 @@ import {
 } from "@/lib/projects/delivery-notes";
 import { getActiveOrderValue } from "@/lib/projects/contracts-lpo";
 import { loadPrintOrganisation } from "@/lib/projects/print-context";
-import { nextInvoiceNumber } from "@/lib/projects/invoices";
+import { acceptedShareOfOrder, nextInvoiceNumber } from "@/lib/projects/invoices";
 import { loadProcurementDomainTimeline } from "@/lib/projects/procurement-timeline";
 import { INACTIVE_OFFER_STATUSES } from "@/lib/projects/offer-line-items";
 
 const OPEN_INVOICE_STATUSES = ["RECEIVED", "CERTIFIED", "VERIFIED", "APPROVED_FOR_PAYMENT"];
+/** Orders the provider sees: issued to it onwards (drafts stay internal). */
+const PROVIDER_LPO_STATUSES = [OrgLpoStatus.ISSUED, OrgLpoStatus.ACCEPTED, OrgLpoStatus.DECLINED];
+const PROVIDER_CONTRACT_STATUSES = [OrgContractStatus.ISSUED, OrgContractStatus.ACTIVE, OrgContractStatus.DECLINED];
 
 /** Org events a provider may see on its own assignment. */
 const PROVIDER_VISIBLE_EVENTS = new Set([
@@ -23,7 +26,10 @@ const PROVIDER_VISIBLE_EVENTS = new Set([
   "PROJECT_ORG_PURCHASE_INSTRUCTION_DECLINED",
   "PROJECT_ORG_LPO_ISSUED",
   "PROJECT_ORG_LPO_ACCEPTED",
+  "PROJECT_ORG_LPO_DECLINED",
   "PROJECT_ORG_CONTRACT_ISSUED",
+  "PROJECT_ORG_CONTRACT_ACCEPTED",
+  "PROJECT_ORG_CONTRACT_DECLINED",
   "PROJECT_ORG_SOLICITATION_ISSUED",
   "PROJECT_ORG_SOLICITATION_OPENED",
   "PROJECT_ORG_SOLICITATION_CLOSED",
@@ -100,11 +106,11 @@ async function assignedProcurementIds(prisma, opts) {
       select: { procurementId: true },
     }),
     prisma.projectOrgLpo.findMany({
-      where: { ...where, status: { not: OrgLpoStatus.CANCELLED } },
+      where: { ...where, status: { in: PROVIDER_LPO_STATUSES } },
       select: { procurementId: true },
     }),
     prisma.projectOrgContract.findMany({
-      where: { ...where, status: { not: OrgContractStatus.CANCELLED } },
+      where: { ...where, status: { in: PROVIDER_CONTRACT_STATUSES } },
       select: { procurementId: true },
     }),
     prisma.projectOrgProcurement.findMany({
@@ -145,7 +151,8 @@ function providerProgress(s) {
   const openInvoice = s.invoices.find((i) => OPEN_INVOICE_STATUSES.includes(i.status));
   const paid = s.payments.some((p) => p.status === "PAID");
 
-  const orderAccepted = s.pi ? s.pi.status === "ACCEPTED" : Boolean(s.order);
+  const orderAccepted = s.pi ? s.pi.status === "ACCEPTED" : ["ACCEPTED", "ACTIVE"].includes(s.order?.status);
+  const orderWord = s.order && "contractNumber" in s.order ? "contract" : "LPO";
   const award = s.award || null;
   const steps = [
     { key: "selected", label: award ? "Awarded" : "Selected", done: true },
@@ -159,12 +166,14 @@ function providerProgress(s) {
     { key: "paid", label: "Paid", done: paid },
   ];
 
-  /** @type {{ label: string; color: "success" | "warning" | "error" | "info" | "primary" }} */
+  /** @type {{ label: string; color: "success" | "warning" | "error" | "info" | "primary"; action?: string }} */
   let status;
   if (s.status === "CANCELLED" || s.status === "REJECTED") status = { label: "Cancelled", color: "error" };
   else if (s.status === "CLOSED") status = { label: "Closed", color: "success" };
   else if (award?.status === "DECLINED") status = { label: "You declined the award", color: "error" };
   else if (award?.status === "COMMUNICATED") status = { label: "Respond to award", color: "primary" };
+  else if (s.order?.status === "DECLINED") status = { label: `You declined the ${orderWord}`, color: "error" };
+  else if (s.order?.status === "ISSUED") status = { label: `Respond to ${orderWord}`, color: "primary" };
   else if (s.pi?.status === "DECLINED") status = { label: "You declined", color: "error" };
   else if (s.pi?.status === "ISSUED") status = { label: "Accept purchase instruction", color: "primary" };
   else if (!s.pi && !s.order) {
@@ -172,7 +181,7 @@ function providerProgress(s) {
   }
   else if (paid) status = { label: "Paid", color: "success" };
   else if (openInvoice) status = { label: "Invoice under review", color: "warning" };
-  else if (accepted) status = { label: "Delivery accepted — invoice", color: "primary" };
+  else if (accepted) status = { label: "Delivery accepted — invoice", color: "primary", action: "invoice" };
   else if (rejected && !awaitingInspection) status = { label: "Delivery rejected", color: "error" };
   else if (awaitingInspection && s.deliveries.length) status = { label: "Awaiting inspection", color: "warning" };
   else if (lastNote?.status === "SUBMITTED") status = { label: "Awaiting receipt", color: "warning" };
@@ -211,8 +220,16 @@ function loadAssignmentRows(prisma, ids, providerId) {
         orderBy: { createdAt: "desc" },
         take: 1,
       },
-      lpos: { where: { supplierId: providerId, status: { not: OrgLpoStatus.CANCELLED } }, take: 1 },
-      contracts: { where: { supplierId: providerId, status: { not: OrgContractStatus.CANCELLED } }, take: 1 },
+      lpos: {
+        where: { supplierId: providerId, status: { in: PROVIDER_LPO_STATUSES } },
+        orderBy: { createdAt: "desc" },
+        take: 1,
+      },
+      contracts: {
+        where: { supplierId: providerId, status: { in: PROVIDER_CONTRACT_STATUSES } },
+        orderBy: { createdAt: "desc" },
+        take: 1,
+      },
       deliveryNotes: { where: { supplierId: providerId }, orderBy: { createdAt: "desc" } },
       deliveries: {
         orderBy: { createdAt: "asc" },
@@ -229,10 +246,23 @@ function orderOf(r) {
   const pi = r.purchaseInstructions[0] || null;
   const lpo = r.lpos[0] || null;
   const contract = r.contracts[0] || null;
-  if (contract) {
-    return { kind: "CONTRACT", number: contract.contractNumber, value: contract.contractValue?.toString?.(), status: contract.status };
+  const doc = contract || lpo;
+  if (doc) {
+    return {
+      kind: contract ? "CONTRACT" : "LPO",
+      number: contract ? contract.contractNumber : lpo.lpoNumber,
+      value: (contract ? contract.contractValue : lpo.lpoValue)?.toString?.(),
+      status: doc.status,
+      issuedAt: doc.issuedAt || null,
+      acceptedAt: doc.acceptedAt || null,
+      acceptedByName: doc.acceptedByName || null,
+      declinedAt: doc.declinedAt || null,
+      declineReason: doc.declineReason || null,
+      deliveryAddress: doc.deliveryAddress || null,
+      startDate: contract?.startDate || null,
+      endDate: contract?.endDate || null,
+    };
   }
-  if (lpo) return { kind: "LPO", number: lpo.lpoNumber, value: lpo.lpoValue?.toString?.(), status: lpo.status };
   if (pi) return { kind: "PURCHASE_INSTRUCTION", number: pi.instructionNumber, value: pi.amount?.toString?.(), status: pi.status };
   return null;
 }
@@ -296,6 +326,47 @@ export async function countProviderAssignmentsNeedingAction(prisma, opts) {
 }
 
 /**
+ * Assignments whose accepted goods the provider has not invoiced yet.
+ * @param {import("@prisma/client").PrismaClient} prisma
+ * @param {{ projectId: string; providerId: string }} opts
+ */
+export async function listProviderAssignmentsToInvoice(prisma, opts) {
+  const ids = await assignedProcurementIds(prisma, opts);
+  if (!ids.length) return [];
+  const rows = await loadAssignmentRows(prisma, ids, opts.providerId);
+  return rows
+    .filter(
+      (r) =>
+        providerProgress({
+          status: r.status,
+          pi: r.purchaseInstructions[0] || null,
+          award: r.awards[0] || null,
+          order: r.lpos[0] || r.contracts[0] || null,
+          notes: r.deliveryNotes,
+          deliveries: r.deliveries,
+          invoices: r.invoices,
+          payments: r.payments,
+        }).status.action === "invoice",
+    )
+    .map((r) => {
+      const order = orderOf(r);
+      return {
+        procurementId: r.id,
+        procurementNumber: r.procurementNumber,
+        title: r.title,
+        order,
+        value: order?.value || null,
+        acceptedOn:
+          r.deliveries
+            .map((d) => d.inspection?.inspectedAt)
+            .filter(Boolean)
+            .sort()
+            .slice(-1)[0] || null,
+      };
+    });
+}
+
+/**
  * Full provider view of one assignment, or null when the provider is not on it.
  * @param {import("@prisma/client").PrismaClient} prisma
  * @param {{ projectId: string; providerId: string; procurementId: string }} opts
@@ -326,7 +397,12 @@ export async function loadProviderAssignment(prisma, opts) {
   const hasAcceptedDelivery = r.deliveries.some((d) => ["ACCEPTED", "PARTIAL"].includes(d.inspection?.status));
   const remaining = myOrder ? Math.max(0, myOrder.value - invoiced) : 0;
   const orderAccepted = Boolean(myOrder) && !orderNotOpenForDelivery(myOrder);
-  const canInvoice = !terminal && hasAcceptedDelivery && remaining > 0.009;
+  const acceptedValue =
+    myOrder && hasAcceptedDelivery
+      ? await acceptedShareOfOrder(prisma, { projectId: opts.projectId, procurementId: r.id, orderValue: myOrder.value })
+      : 0;
+  const invoiceable = Math.min(remaining, Math.max(0, acceptedValue - invoiced));
+  const canInvoice = !terminal && hasAcceptedDelivery && invoiceable > 0.5;
   const invoiceNumber = canInvoice ? await nextInvoiceNumber(prisma, opts.projectId, r.id) : null;
   const history = await loadProviderHistory(prisma, {
     projectId: opts.projectId,
@@ -444,6 +520,7 @@ export async function loadProviderAssignment(prisma, opts) {
     actions: {
       canRespond: !terminal && pi?.status === "ISSUED",
       canRespondAward: !terminal && award?.status === "COMMUNICATED",
+      canRespondOrder: !terminal && (r.lpos[0] || r.contracts[0])?.status === "ISSUED",
       canDeliver:
         !terminal &&
         Boolean(orderAccepted) &&
@@ -452,6 +529,9 @@ export async function loadProviderAssignment(prisma, opts) {
       canInvoice,
       nextInvoiceNumber: invoiceNumber,
       remaining: remaining.toFixed(2),
+      invoiceable: invoiceable.toFixed(2),
+      acceptedValue: acceptedValue.toFixed(2),
+      invoiced: invoiced.toFixed(2),
       orderValue: myOrder ? myOrder.value.toFixed(2) : null,
     },
   };

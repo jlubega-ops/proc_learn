@@ -38,6 +38,8 @@ import { attachCommitteeNames, loadPrintOrganisation, printedByFromAuth } from "
 import { isReceiveGoodsStep } from "@/lib/projects/procurement-task-stage";
 import { loadQuotePool } from "@/lib/projects/provider-auto-responses";
 import { LIFECYCLE_ACTION_ROLES } from "@/lib/projects/procurement-lifecycle-roles";
+import { getActiveOrderValue } from "@/lib/projects/contracts-lpo";
+import { INACTIVE_OFFER_STATUSES } from "@/lib/projects/offer-line-items";
 import { askOfferClarification, procurementClarificationsOpen } from "@/lib/projects/offer-clarifications";
 
 export const runtime = "nodejs";
@@ -183,12 +185,23 @@ export async function GET(_request, context) {
         ? "purchase instruction"
         : row.lpos?.[0]?.status === "ISSUED"
           ? "LPO"
-          : null,
+          : row.contracts?.[0]?.status === "ISSUED"
+            ? "contract"
+            : null,
     awaitingDelivery,
   });
   const serialized = serializeProcurement(row, { domainTimeline });
+  const activeOrder = keep.has("contract") ? await getActiveOrderValue(prisma, projectId, procurementId) : null;
+  const orderOffer = activeOrder?.supplierId
+    ? await prisma.projectOrgOffer.findFirst({
+        where: { procurementId, supplierId: activeOrder.supplierId, status: { notIn: INACTIVE_OFFER_STATUSES } },
+        orderBy: { submittedAt: "desc" },
+        select: { lineItems: true },
+      })
+    : null;
   const procurement = {
     ...serialized,
+    orderLines: Array.isArray(orderOffer?.lineItems) ? orderOffer.lineItems : [],
     timeline: await attachCommitteeNames(prisma, serialized.timeline || []),
     statusLabel: presented.label,
     statusColor: presented.color,

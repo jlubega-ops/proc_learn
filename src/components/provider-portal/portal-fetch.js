@@ -35,6 +35,7 @@ export function usePortalList(path, { page, pageSize, reloadKey = 0 }) {
     items: /** @type {any[]} */ ([]),
     total: 0,
     error: "",
+    meta: /** @type {any} */ (null),
   });
 
   useEffect(() => {
@@ -47,6 +48,7 @@ export function usePortalList(path, { page, pageSize, reloadKey = 0 }) {
           items: [],
           total: 0,
           error: typeof data.error === "string" ? data.error : "Could not load.",
+          meta: null,
         });
         return;
       }
@@ -55,6 +57,7 @@ export function usePortalList(path, { page, pageSize, reloadKey = 0 }) {
         items: Array.isArray(data.items) ? data.items : [],
         total: Number(data.total) || 0,
         error: "",
+        meta: data,
       });
     });
     return () => {
@@ -62,7 +65,13 @@ export function usePortalList(path, { page, pageSize, reloadKey = 0 }) {
     };
   }, [path, page, pageSize, requestKey]);
 
-  return { items: state.items, total: state.total, error: state.error, loading: state.key !== requestKey };
+  return {
+    items: state.items,
+    total: state.total,
+    error: state.error,
+    meta: state.meta,
+    loading: state.key !== requestKey,
+  };
 }
 
 /** @param {unknown} value */

@@ -71,6 +71,7 @@ const STEP_ACTION_LABELS = [
   [/^sign\/approve contract/i, "Approve contract and forward"],
   [/^issue lpo/i, "Issue LPO"],
   [/^issue contract/i, "Issue contract"],
+  [/^confirm supplier acceptance|^supplier acceptance/i, "Confirm acceptance and forward"],
   [/^record delivery|^delivery$/i, "Receive delivered items and forward"],
   [/^verify\/accept delivery|^certify delivery|^inspection\/acceptance/i, "Accept delivery and forward"],
   [/^process invoice|^invoice verification|^verify invoice/i, "Process invoice and forward"],

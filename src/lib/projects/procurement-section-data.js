@@ -22,8 +22,8 @@ const SECTION_DEPENDENCIES = {
   contract: ["award"],
   delivery: ["contract"],
   invoice: ["delivery", "contract"],
-  payment: ["invoice", "contract"],
-  closure: [],
+  payment: ["invoice", "contract", "delivery"],
+  closure: ["contract", "delivery", "invoice", "payment"],
 };
 
 const latestStatus = { orderBy: { createdAt: /** @type {const} */ ("desc") }, take: 1, select: { status: true } };

@@ -13,6 +13,8 @@ export function serializeDeliveryNote(row) {
     procurementId: row.procurementId,
     noteNumber: row.noteNumber,
     dispatchedAt: row.dispatchedAt,
+    deliveredBy: row.deliveredBy || null,
+    vehicleNumber: row.vehicleNumber || null,
     remarks: row.remarks || null,
     status: row.status,
     deliveryId: row.deliveryId || null,
@@ -77,8 +79,10 @@ export function orderNotOpenForDelivery(order) {
     return "Waiting for the provider to accept the purchase instruction.";
   }
   if (order.kind === "lpo" && order.status !== "ACCEPTED") return "Waiting for the provider to accept the LPO.";
-  if (order.kind === "contract" && order.status !== "ACTIVE" && order.status !== "ISSUED") {
-    return "The contract has not been issued yet.";
+  if (order.kind === "contract" && order.status !== "ACTIVE") {
+    return order.status === "ISSUED"
+      ? "Waiting for the provider to accept the contract."
+      : "The contract has not been issued yet.";
   }
   return null;
 }
@@ -159,6 +163,11 @@ export async function submitDeliveryNote(prisma, opts) {
 
   const remarks = typeof body.remarks === "string" ? body.remarks.trim() : "";
   if (remarks.length > 2000) fieldErrors.remarks = "Max 2000 characters.";
+  const deliveredBy = typeof body.deliveredBy === "string" ? body.deliveredBy.trim() : "";
+  if (!deliveredBy && !opts.auto) fieldErrors.deliveredBy = "Enter who is delivering.";
+  else if (deliveredBy.length > 160) fieldErrors.deliveredBy = "Max 160 characters.";
+  const vehicleNumber = typeof body.vehicleNumber === "string" ? body.vehicleNumber.trim().toUpperCase() : "";
+  if (vehicleNumber.length > 32) fieldErrors.vehicleNumber = "Max 32 characters.";
 
   const linesIn = Array.isArray(body.lines) ? body.lines : [];
   const lines = [];
@@ -214,6 +223,8 @@ export async function submitDeliveryNote(prisma, opts) {
       supplierId: opts.providerId,
       noteNumber: await nextNoteNumber(prisma, proc.id, proc.procurementNumber),
       dispatchedAt: /** @type {Date} */ (dispatchedAt),
+      deliveredBy: deliveredBy || null,
+      vehicleNumber: vehicleNumber || null,
       remarks: remarks || null,
       lines,
     },

@@ -882,31 +882,21 @@ export async function actOnProcurementTask(prisma, opts) {
   }
 
   if ((STEP.RFQ_ACCEPT_SUPPLIER.test(title) || /^supplier acceptance$/i.test(title)) && isPositive) {
-    if (body.lpoId) {
-      const out = await actOnProcurementLifecycle(prisma, {
-        projectId,
-        procurementId,
-        action: "accept_lpo",
-        actorOrgUserId: opts.actorOrgUserId,
-        actorRoleName: opts.actorRoleName,
-        body: { lpoId: body.lpoId },
-      });
-      if (!out.ok) return out;
-      return complete({ lpoId: body.lpoId });
+    const { lpoId, contractId } = await orderDocumentIds(prisma, projectId, procurementId, {});
+    const doc = contractId
+      ? await prisma.projectOrgContract.findUnique({ where: { id: contractId }, select: { status: true } })
+      : lpoId
+        ? await prisma.projectOrgLpo.findUnique({ where: { id: lpoId }, select: { status: true } })
+        : null;
+    const word = contractId ? "contract" : "LPO";
+    if (!doc) return { ok: false, error: "No LPO or contract has been issued yet.", status: 400 };
+    if (doc.status === "DECLINED") {
+      return { ok: false, error: `The supplier declined the ${word}. Return or recommend instead.`, status: 409 };
     }
-    if (body.awardId) {
-      const out = await actOnProcurementLifecycle(prisma, {
-        projectId,
-        procurementId,
-        action: "accept_award",
-        actorOrgUserId: opts.actorOrgUserId,
-        actorRoleName: opts.actorRoleName,
-        body: { awardId: body.awardId },
-      });
-      if (!out.ok) return out;
-      return complete({ awardId: body.awardId });
+    if (doc.status !== (contractId ? "ACTIVE" : "ACCEPTED")) {
+      return { ok: false, error: `Waiting for the supplier to accept the ${word} in the provider portal.`, status: 409 };
     }
-    return complete({ educationalCheckpoint: true });
+    return complete(contractId ? { contractId } : { lpoId });
   }
 
   if ((STEP.RECORD_DELIVERY.test(title) || /^delivery$/i.test(title)) && isPositive) {

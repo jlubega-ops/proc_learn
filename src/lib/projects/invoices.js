@@ -1,4 +1,4 @@
-import { OrgInvoiceStatus, OrgProcurementStatus, Prisma } from "@prisma/client";
+import { OrgInspectionStatus, OrgInvoiceStatus, OrgProcurementStatus, Prisma } from "@prisma/client";
 import { writeAuditLog, AuditEvent } from "@/lib/audit-log";
 import { getActiveOrderValue } from "@/lib/projects/contracts-lpo";
 import { hasAcceptedDelivery } from "@/lib/projects/deliveries";
@@ -7,6 +7,36 @@ import { startWorkflowFromTrigger } from "@/lib/projects/workflow-engine";
 import { serializeProviderSummary } from "@/lib/projects/providers";
 import { notifyOrgUsers, OrgNotificationType } from "@/lib/projects/org-notifications";
 import { notifyProvider } from "@/lib/projects/provider-notifications";
+
+/**
+ * Value the provider is entitled to invoice after inspection: the order value
+ * scaled by the share of ordered quantities accepted so far.
+ *
+ * @param {import("@prisma/client").PrismaClient} prisma
+ * @param {{ projectId: string; procurementId: string; orderValue: number }} opts
+ */
+export async function acceptedShareOfOrder(prisma, opts) {
+  const deliveries = await prisma.projectOrgDelivery.findMany({
+    where: {
+      projectId: opts.projectId,
+      procurementId: opts.procurementId,
+      inspection: { status: { in: [OrgInspectionStatus.ACCEPTED, OrgInspectionStatus.PARTIAL] } },
+    },
+    include: { lines: true },
+  });
+  const items = await prisma.projectOrgRequisitionItem.findMany({
+    where: { requisition: { procurements: { some: { id: opts.procurementId } } } },
+    select: { itemName: true, quantity: true },
+  });
+  const ordered = items.reduce((sum, i) => sum + Number(i.quantity || 0), 0);
+  if (!ordered) return opts.orderValue;
+  let accepted = 0;
+  for (const d of deliveries) {
+    for (const l of d.lines || []) accepted += Number(l.acceptedQuantity || 0);
+  }
+  const share = Math.min(1, Math.max(0, accepted / ordered));
+  return share > 0 ? opts.orderValue * share : opts.orderValue;
+}
 
 /** @param {any} row */
 export function serializeInvoice(row) {
@@ -147,6 +177,21 @@ export async function createInvoice(prisma, opts) {
       error: `Invoice amount exceeds the order value. Already invoiced ${alreadyInvoiced.toFixed(2)} of ${order.value.toFixed(2)}.`,
       status: 400,
       code: "EXCEEDS_ORDER_VALUE",
+    };
+  }
+  const acceptedValue = await acceptedShareOfOrder(prisma, {
+    projectId: opts.projectId,
+    procurementId: procurement.id,
+    orderValue: order.value,
+  });
+  if (alreadyInvoiced + amount > acceptedValue + 0.5) {
+    const left = Math.max(0, acceptedValue - alreadyInvoiced);
+    return {
+      ok: false,
+      error: `Invoice only for accepted goods. You can invoice up to ${left.toFixed(2)}.`,
+      status: 400,
+      code: "EXCEEDS_ACCEPTED_VALUE",
+      fieldErrors: { amount: `Max ${left.toFixed(2)}.` },
     };
   }
 

@@ -15,7 +15,7 @@ export const LIFECYCLE_ACTION_ROLES = {
   create_lpo: ["Procurement Officer", "Contracts Officer", "Head PDU"],
   approve_lpo: ["Accounting Officer", "Head PDU", "Contracts Officer", "Procurement Officer"],
   issue_lpo: ["Procurement Officer", "Contracts Officer", "Head PDU"],
-  accept_lpo: ["Procurement Officer", "Head PDU"],
+  accept_lpo: [],
   create_contract: ["Contracts Officer", "Procurement Officer", "Head PDU"],
   approve_contract: ["Accounting Officer", "Contracts Officer", "Head PDU"],
   sign_contract: ["Accounting Officer", "Contracts Officer"],

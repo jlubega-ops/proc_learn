@@ -5,6 +5,7 @@ import {
   AWARD_STATUS,
   INVOICE_STATUS,
   ORDER_KIND,
+  ORDER_STATUS,
   PAYMENT_STATUS,
 } from "@/components/provider-portal/provider-portal-sections";
 import { formatMoneyUGX } from "@/lib/money";
@@ -47,6 +48,7 @@ export function PortalAssignmentPrint({ data }) {
 
   const award = data.award;
   const awardOnly = Boolean(award) && !order;
+  const orderDoc = order && order.kind !== "PURCHASE_INSTRUCTION" ? order : null;
 
   /** @type {import("@/components/print/print-document").PrintSection[]} */
   const sections = [];
@@ -74,11 +76,42 @@ export function PortalAssignmentPrint({ data }) {
         { label: "Order value", value: order ? formatMoneyUGX(order.value) : null },
         {
           label: "Order status",
-          value: order ? (pi && order.kind === "PURCHASE_INSTRUCTION" ? presentPurchaseInstructionStatus(pi.status).label : human(order.status)) : null,
+          value: order
+            ? pi && order.kind === "PURCHASE_INSTRUCTION"
+              ? presentPurchaseInstructionStatus(pi.status).label
+              : statusLabel(ORDER_STATUS, order.status)
+            : null,
         },
         { label: "Category", value: procurement.category },
+        ...(orderDoc
+          ? [
+              { label: "Issued on", value: formatPrintDate(orderDoc.issuedAt) },
+              { label: "Delivery period", value: award?.deliveryDays ? `${award.deliveryDays} days` : null },
+              ...(orderDoc.startDate || orderDoc.endDate
+                ? [
+                    {
+                      label: "Contract period",
+                      value: `${formatPrintDate(orderDoc.startDate) || "—"} – ${formatPrintDate(orderDoc.endDate) || "—"}`,
+                    },
+                  ]
+                : []),
+              ...(orderDoc.acceptedAt
+                ? [{ label: "Accepted by", value: `${orderDoc.acceptedByName || "—"} · ${formatPrintDate(orderDoc.acceptedAt)}` }]
+                : []),
+              ...(orderDoc.declinedAt
+                ? [
+                    { label: "Declined on", value: formatPrintDate(orderDoc.declinedAt) },
+                    { label: "Reason", value: orderDoc.declineReason, full: true },
+                  ]
+                : []),
+            ]
+          : []),
         { label: "Deliver by", value: pi?.requiredDeliveryDate ? formatPrintDate(pi.requiredDeliveryDate) : null },
-        { label: "Delivery address", value: pi?.deliveryAddress || procurement.deliveryLocation, full: true },
+        {
+          label: "Delivery address",
+          value: pi?.deliveryAddress || orderDoc?.deliveryAddress || procurement.deliveryLocation,
+          full: true,
+        },
         ...(pi?.paymentTerms ? [{ label: "Payment terms", value: pi.paymentTerms, full: true }] : []),
       ],
     });
@@ -106,10 +139,10 @@ export function PortalAssignmentPrint({ data }) {
           : []),
       ],
     });
-    if (awardOnly && award.lines?.length) {
+    if ((awardOnly || orderDoc) && award.lines?.length) {
       sections.push({
         type: "table",
-        title: "Awarded items",
+        title: awardOnly ? "Awarded items" : "Order lines",
         columns: [
           { id: "n", label: "#", width: "6%" },
           { id: "item", label: "Item" },
@@ -129,7 +162,9 @@ export function PortalAssignmentPrint({ data }) {
             total: formatMoneyUGX(l.total),
           },
         })),
-        footer: { label: "Award amount", value: formatMoneyUGX(award.amount) },
+        footer: awardOnly
+          ? { label: "Award amount", value: formatMoneyUGX(award.amount) }
+          : { label: "Order total", value: formatMoneyUGX(orderDoc.value) },
       });
     }
   }
@@ -168,14 +203,18 @@ export function PortalAssignmentPrint({ data }) {
       title: "Delivery notes",
       columns: [
         { id: "number", label: "Note no.", width: "22%" },
-        { id: "date", label: "Dispatched", width: "18%" },
-        { id: "status", label: "Status" },
+        { id: "date", label: "Dispatched", width: "16%" },
+        { id: "by", label: "Delivered by" },
+        { id: "vehicle", label: "Vehicle", width: "14%" },
+        { id: "status", label: "Status", width: "18%" },
       ],
       rows: data.deliveryNotes.map((n) => ({
         key: n.id,
         cells: {
           number: n.noteNumber,
           date: formatPrintDate(n.dispatchedAt),
+          by: n.deliveredBy || "—",
+          vehicle: n.vehicleNumber || "—",
           status: statusLabel(DELIVERY_NOTE_STATUS_PRESENTATION, n.status),
         },
         note: linesNote(n.lines),
@@ -260,7 +299,16 @@ export function PortalAssignmentPrint({ data }) {
       printedBy={data.printedBy}
       sections={sections}
       signatures={
-        award && !pi && award.status !== "DECLINED"
+        orderDoc && orderDoc.status !== "DECLINED"
+          ? [
+              {
+                label: `${orderDoc.kind === "CONTRACT" ? "Contract" : "LPO"} accepted by provider`,
+                name: orderDoc.acceptedAt ? orderDoc.acceptedByName : null,
+                role: data.provider?.name || "Provider",
+                date: orderDoc.acceptedAt || null,
+              },
+            ]
+          : award && !pi && !orderDoc && award.status !== "DECLINED"
           ? [
               {
                 label: "Award accepted by provider",

@@ -321,6 +321,7 @@ enum OrgContractStatus {
   SIGNED
   ISSUED
   ACTIVE
+  DECLINED
   CANCELLED
 }
 
@@ -330,6 +331,7 @@ enum OrgLpoStatus {
   APPROVED
   ISSUED
   ACCEPTED
+  DECLINED
   CANCELLED
 }
 
@@ -1793,6 +1795,11 @@ model ProjectOrgContract {
   startDate       DateTime?             @map("start_date")
   endDate         DateTime?             @map("end_date")
   issuedAt        DateTime?             @map("issued_at")
+  acceptedAt      DateTime?             @map("accepted_at")
+  /// Name of the provider's signatory who accepted in the portal.
+  acceptedByName  String?               @map("accepted_by_name") @db.VarChar(160)
+  declinedAt      DateTime?             @map("declined_at")
+  declineReason   String?               @map("decline_reason") @db.Text
   deliveryAddress String?               @map("delivery_address") @db.VarChar(255)
   createdAt       DateTime              @default(now()) @map("created_at")
   updatedAt       DateTime              @updatedAt @map("updated_at")
@@ -1816,6 +1823,10 @@ model ProjectOrgLpo {
   status          OrgLpoStatus          @default(DRAFT)
   issuedAt        DateTime?             @map("issued_at")
   acceptedAt      DateTime?             @map("accepted_at")
+  /// Name of the provider's signatory who accepted in the portal.
+  acceptedByName  String?               @map("accepted_by_name") @db.VarChar(160)
+  declinedAt      DateTime?             @map("declined_at")
+  declineReason   String?               @map("decline_reason") @db.Text
   deliveryAddress String?               @map("delivery_address") @db.VarChar(255)
   createdAt       DateTime              @default(now()) @map("created_at")
   updatedAt       DateTime              @updatedAt @map("updated_at")
@@ -1859,6 +1870,9 @@ model ProjectOrgDeliveryNote {
   supplier      ProjectOrgProvider    @relation(fields: [supplierId], references: [id], onDelete: Cascade)
   noteNumber    String                @map("note_number") @db.VarChar(48)
   dispatchedAt  DateTime              @map("dispatched_at")
+  /// Person delivering (driver / supplier representative).
+  deliveredBy   String?               @map("delivered_by") @db.VarChar(160)
+  vehicleNumber String?               @map("vehicle_number") @db.VarChar(32)
   remarks       String?               @db.Text
   /// [{ itemName, quantity, unitOfMeasure }]
   lines         Json

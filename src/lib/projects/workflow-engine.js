@@ -260,7 +260,7 @@ export async function healMissingStepTasks(prisma, projectId, budgetId = null) {
       procurement: { select: { departmentId: true, title: true, procurementNumber: true } },
       tasks: {
         where: { status: OrgWorkflowTaskStatus.PENDING },
-        select: { id: true, stepNumber: true },
+        select: { id: true, stepNumber: true, requiredRoleName: true },
       },
     },
   });
@@ -288,6 +288,18 @@ export async function healMissingStepTasks(prisma, projectId, budgetId = null) {
         }),
       ]);
       instance.tasks = [];
+    }
+    // The catalogue moved this step to another role: re-route its open tasks.
+    const roleName = step.projectOrgRole?.name || "";
+    const misrouted = (instance.tasks || []).filter(
+      (t) => t.stepNumber === step.stepNumber && roleName && t.requiredRoleName && t.requiredRoleName !== roleName,
+    );
+    if (misrouted.length) {
+      await prisma.projectOrgWorkflowTask.updateMany({
+        where: { id: { in: misrouted.map((t) => t.id) }, status: OrgWorkflowTaskStatus.PENDING },
+        data: { status: OrgWorkflowTaskStatus.CANCELLED },
+      });
+      instance.tasks = (instance.tasks || []).filter((t) => !misrouted.includes(t));
     }
     const hasPending = (instance.tasks || []).some((t) => t.stepNumber === step.stepNumber);
     if (hasPending) continue;

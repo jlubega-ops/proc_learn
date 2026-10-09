@@ -4,7 +4,10 @@ import {
   OrgLpoStatus,
   OrgProcurementMethod,
   OrgProcurementStatus,
+  OrgWorkflowInstanceStatus,
+  OrgWorkflowTaskStatus,
 } from "@prisma/client";
+import { validatePurchaseInstructionResponse } from "@/lib/validation/purchase-instruction";
 import { writeAuditLog, AuditEvent } from "@/lib/audit-log";
 import { notifyOrgUsers, OrgNotificationType } from "@/lib/projects/org-notifications";
 import { notifyProvider } from "@/lib/projects/provider-notifications";
@@ -62,6 +65,10 @@ export function serializeContract(row) {
     endDate: row.endDate || null,
     deliveryAddress: row.deliveryAddress || null,
     issuedAt: row.issuedAt || null,
+    acceptedAt: row.acceptedAt || null,
+    acceptedByName: row.acceptedByName || null,
+    declinedAt: row.declinedAt || null,
+    declineReason: row.declineReason || null,
     createdAt: row.createdAt,
     updatedAt: row.updatedAt,
   };
@@ -82,6 +89,9 @@ export function serializeLpo(row) {
     status: row.status,
     issuedAt: row.issuedAt || null,
     acceptedAt: row.acceptedAt || null,
+    acceptedByName: row.acceptedByName || null,
+    declinedAt: row.declinedAt || null,
+    declineReason: row.declineReason || null,
     createdAt: row.createdAt,
     updatedAt: row.updatedAt,
   };
@@ -271,7 +281,7 @@ export async function signContract(prisma, opts) {
 }
 
 /**
- * Issue a SIGNED contract — puts the procurement into CONTRACT_ACTIVE (ready for delivery).
+ * Issue a SIGNED contract to the provider, who accepts it in the portal (that activates it).
  * @param {import("@prisma/client").PrismaClient} prisma
  * @param {{ projectId: string; contractId: string; actorOrgUserId: string; actorRoleName: string }} opts
  */
@@ -282,17 +292,10 @@ export async function issueContract(prisma, opts) {
     return { ok: false, error: "The contract must be signed before it can be issued.", status: 400 };
   }
 
-  const updated = await prisma.$transaction(async (tx) => {
-    const c = await tx.projectOrgContract.update({
-      where: { id: row.id },
-      data: { status: OrgContractStatus.ACTIVE, issuedAt: new Date() },
-      include: { supplier: true },
-    });
-    await tx.projectOrgProcurement.update({
-      where: { id: row.procurementId },
-      data: { status: OrgProcurementStatus.CONTRACT_ACTIVE },
-    });
-    return c;
+  const updated = await prisma.projectOrgContract.update({
+    where: { id: row.id },
+    data: { status: OrgContractStatus.ISSUED, issuedAt: new Date() },
+    include: { supplier: true },
   });
 
   await writeAuditLog({
@@ -313,17 +316,27 @@ export async function issueContract(prisma, opts) {
     providerId: row.supplierId,
     procurementId: row.procurementId,
     title: `Contract issued: ${row.contractNumber}`,
-    body: "Your contract is active. You can now deliver.",
+    body: "Accept or decline the contract in your portal.",
   });
-
-  const { autoDispatchIfAutoResponse } = await import("@/lib/projects/delivery-notes");
-  await autoDispatchIfAutoResponse(prisma, {
-    projectId: opts.projectId,
-    procurementId: row.procurementId,
-    providerId: row.supplierId,
-  });
+  await autoAcceptOrder(prisma, { projectId: opts.projectId, procurementId: row.procurementId, supplier: updated.supplier });
 
   return { ok: true, contract: serializeContract(updated) };
+}
+
+/**
+ * Auto-response providers accept an issued LPO / contract straight away.
+ * @param {import("@prisma/client").PrismaClient} prisma
+ * @param {{ projectId: string; procurementId: string; supplier: any }} opts
+ */
+async function autoAcceptOrder(prisma, opts) {
+  if (!opts.supplier?.isGenerated) return;
+  await respondToOrder(prisma, {
+    projectId: opts.projectId,
+    providerId: opts.supplier.id,
+    procurementId: opts.procurementId,
+    body: { decision: "ACCEPT", acceptedByName: opts.supplier.contactPerson || opts.supplier.name },
+    auto: true,
+  });
 }
 
 /**
@@ -468,75 +481,141 @@ export async function issueLpo(prisma, opts) {
     providerId: row.supplierId,
     procurementId: row.procurementId,
     title: `LPO issued: ${row.lpoNumber}`,
-    body: "A local purchase order has been issued to you.",
+    body: "Accept or decline the local purchase order in your portal.",
   });
+  await autoAcceptOrder(prisma, { projectId: opts.projectId, procurementId: row.procurementId, supplier: updated.supplier });
 
   return { ok: true, lpo: serializeLpo(updated) };
 }
 
 /**
- * Supplier accepts the ISSUED LPO — puts the procurement into CONTRACT_ACTIVE (ready for delivery).
+ * The provider accepts or declines its ISSUED LPO / contract (portal, or auto-response).
+ * Acceptance opens the order for delivery (CONTRACT_ACTIVE); a decline goes back to the PDU.
  * @param {import("@prisma/client").PrismaClient} prisma
- * @param {{ projectId: string; lpoId: string; actorOrgUserId: string; actorRoleName: string }} opts
+ * @param {{ projectId: string; providerId: string; procurementId: string; body: any; auto?: boolean }} opts
  */
-export async function acceptLpo(prisma, opts) {
-  const row = await prisma.projectOrgLpo.findFirst({ where: { id: opts.lpoId, projectId: opts.projectId } });
-  if (!row) return { ok: false, error: "LPO not found.", status: 404 };
-  if (row.status !== OrgLpoStatus.ISSUED) {
-    return { ok: false, error: "The LPO must be issued before it can be accepted.", status: 400 };
+export async function respondToOrder(prisma, opts) {
+  const v = validatePurchaseInstructionResponse(opts.body || {});
+  if (!v.ok) return { ok: false, status: 400, error: "Please fix the highlighted fields.", fieldErrors: v.errors };
+
+  const where = { projectId: opts.projectId, procurementId: opts.procurementId, supplierId: opts.providerId };
+  const [contract, lpo] = await Promise.all([
+    prisma.projectOrgContract.findFirst({
+      where: { ...where, status: { not: OrgContractStatus.CANCELLED } },
+      orderBy: { createdAt: "desc" },
+      include: { supplier: true },
+    }),
+    prisma.projectOrgLpo.findFirst({
+      where: { ...where, status: { not: OrgLpoStatus.CANCELLED } },
+      orderBy: { createdAt: "desc" },
+      include: { supplier: true },
+    }),
+  ]);
+  const isContract = Boolean(contract);
+  const row = contract || lpo;
+  if (!row) return { ok: false, status: 404, error: "Order not found." };
+  const word = isContract ? "contract" : "LPO";
+  const number = isContract ? contract.contractNumber : lpo.lpoNumber;
+  if (row.status !== "ISSUED") {
+    return { ok: false, status: 409, error: `This ${word} is not waiting for your response.` };
   }
 
-  const updated = await prisma.$transaction(async (tx) => {
-    const l = await tx.projectOrgLpo.update({
-      where: { id: row.id },
-      data: { status: OrgLpoStatus.ACCEPTED, acceptedAt: new Date() },
-      include: { supplier: true },
-    });
-    await tx.projectOrgProcurement.update({
-      where: { id: row.procurementId },
-      data: { status: OrgProcurementStatus.CONTRACT_ACTIVE },
-    });
-    return l;
+  const accept = v.values.decision === "ACCEPT";
+  const now = new Date();
+  const data = accept
+    ? { acceptedAt: now, acceptedByName: v.values.acceptedByName }
+    : { declinedAt: now, declineReason: v.values.declineReason };
+  const claimed = await prisma.$transaction(async (tx) => {
+    const res = isContract
+      ? await tx.projectOrgContract.updateMany({
+          where: { id: row.id, status: OrgContractStatus.ISSUED },
+          data: { ...data, status: accept ? OrgContractStatus.ACTIVE : OrgContractStatus.DECLINED },
+        })
+      : await tx.projectOrgLpo.updateMany({
+          where: { id: row.id, status: OrgLpoStatus.ISSUED },
+          data: { ...data, status: accept ? OrgLpoStatus.ACCEPTED : OrgLpoStatus.DECLINED },
+        });
+    if (res.count === 1 && accept) {
+      await tx.projectOrgProcurement.update({
+        where: { id: row.procurementId },
+        data: { status: OrgProcurementStatus.CONTRACT_ACTIVE },
+      });
+    }
+    return res.count;
   });
+  if (claimed !== 1) return { ok: false, status: 409, error: `You have already responded to this ${word}.` };
 
+  const providerLabel = `${row.supplier?.name || "Provider"}${opts.auto ? " (auto-response)" : ""}`;
+  const eventType = isContract
+    ? accept
+      ? AuditEvent.PROJECT_ORG_CONTRACT_ACCEPTED
+      : AuditEvent.PROJECT_ORG_CONTRACT_DECLINED
+    : accept
+      ? AuditEvent.PROJECT_ORG_LPO_ACCEPTED
+      : AuditEvent.PROJECT_ORG_LPO_DECLINED;
   await writeAuditLog({
-    eventType: AuditEvent.PROJECT_ORG_LPO_ACCEPTED,
+    eventType,
     actorUserId: null,
     meta: {
       projectId: opts.projectId,
       procurementId: row.procurementId,
-      lpoId: row.id,
-      supplierId: row.supplierId,
-      actorOrgUserId: opts.actorOrgUserId || null,
-      actorRoleName: opts.actorRoleName || null,
+      ...(isContract ? { contractId: row.id } : { lpoId: row.id }),
+      supplierId: opts.providerId,
+      actorName: accept ? `${v.values.acceptedByName} — ${providerLabel}` : providerLabel,
+      actorRoleName: "Provider",
+      remarks: accept ? null : v.values.declineReason,
     },
   });
 
-  const officer = await prisma.projectOrgProcurement.findUnique({
+  const proc = await prisma.projectOrgProcurement.findUnique({
     where: { id: row.procurementId },
-    select: { officer: { select: { id: true, linkedUserId: true } } },
+    select: {
+      procurementNumber: true,
+      officer: { select: { id: true, linkedUserId: true } },
+      instances: {
+        where: { status: { in: [OrgWorkflowInstanceStatus.ACTIVE, OrgWorkflowInstanceStatus.IN_PROGRESS] } },
+        orderBy: { createdAt: "desc" },
+        take: 1,
+        select: { id: true },
+      },
+    },
   });
-  if (officer?.officer) {
+  /** @type {{ id: string; linkedUserId: string | null }[]} */
+  let recipients = proc?.officer ? [proc.officer] : [];
+  const instanceId = proc?.instances[0]?.id || null;
+  if (instanceId) {
+    const holders = await prisma.projectOrgWorkflowTask.findMany({
+      where: { instanceId, status: OrgWorkflowTaskStatus.PENDING, assigneeOrgUserId: { not: null } },
+      select: { assignee: { select: { id: true, linkedUserId: true } } },
+    });
+    recipients = [...recipients, ...holders.map((t) => t.assignee).filter(Boolean)];
+  }
+  const unique = [...new Map(recipients.map((r) => [r.id, r])).values()];
+  if (unique.length) {
     await notifyOrgUsers(prisma, {
       projectId: opts.projectId,
-      recipients: [officer.officer],
-      type: OrgNotificationType.WORKFLOW_APPROVED,
-      title: "LPO accepted",
-      body: "The supplier accepted the LPO. Delivery follows.",
+      recipients: unique,
+      type: accept ? OrgNotificationType.WORKFLOW_APPROVED : OrgNotificationType.WORKFLOW_REJECTED,
+      title: `${isContract ? "Contract" : "LPO"} ${accept ? "accepted" : "declined"}: ${number}`,
+      body: accept
+        ? `${providerLabel} accepted ${number}. Delivery follows.`
+        : `${providerLabel} declined ${number}: ${v.values.declineReason}`,
       linkUrl: `/projects/${opts.projectId}/procurements/${row.procurementId}`,
-      relatedEntityType: "lpo",
+      relatedEntityType: isContract ? "contract" : "lpo",
       relatedEntityId: row.id,
     });
   }
 
-  const { autoDispatchIfAutoResponse } = await import("@/lib/projects/delivery-notes");
-  await autoDispatchIfAutoResponse(prisma, {
-    projectId: opts.projectId,
-    procurementId: row.procurementId,
-    providerId: row.supplierId,
-  });
+  if (accept) {
+    const { autoDispatchIfAutoResponse } = await import("@/lib/projects/delivery-notes");
+    await autoDispatchIfAutoResponse(prisma, {
+      projectId: opts.projectId,
+      procurementId: row.procurementId,
+      providerId: row.supplierId,
+    });
+  }
 
-  return { ok: true, lpo: serializeLpo(updated) };
+  return { ok: true, decision: v.values.decision };
 }
 
 /**

@@ -1,7 +1,7 @@
 "use client";
 
 import { PrintDocument, formatPrintDate } from "@/components/print/print-document";
-import { formatMoneyUGX } from "@/lib/money";
+import { formatMoneyAmount, formatMoneyUGX } from "@/lib/money";
 import { describeProcurementStage } from "@/lib/projects/procurement-stage-status";
 import {
   procurementStageLabel,
@@ -10,7 +10,19 @@ import {
 } from "@/lib/projects/procurement-task-stage";
 import { workflowDecisionPastLabel } from "@/lib/projects/workflow-status-presentation";
 import { actingRoleLabel, committeeSeatLabel, isCommitteeAction } from "@/lib/projects/committee-labels";
-import { AWARD_STATUS_PRESENTATION } from "@/components/projects/org-award-recommendation-summary";
+import {
+  AWARD_STATUS_PRESENTATION,
+  ORDER_STATUS_PRESENTATION,
+  awardedOffer,
+} from "@/components/projects/org-award-recommendation-summary";
+import {
+  CERTIFY_DELIVERY_STEP_RE,
+  VERIFY_INVOICE_STEP_RE,
+  goodsReceivedEvidence,
+  invoiceThreeWayMatch,
+  latestStepSignOff,
+  procurementMoneySummary,
+} from "@/lib/projects/invoice-match";
 
 /** @typedef {import("@/components/print/print-document").PrintSection} PrintSection */
 
@@ -20,6 +32,26 @@ const METHOD_LABELS = { MICRO: "Micro procurement", QUOTATION: "Request for quot
 function human(v) {
   const s = String(v || "").replace(/_/g, " ").toLowerCase();
   return s ? s[0].toUpperCase() + s.slice(1) : "—";
+}
+
+/**
+ * The order the procurement runs on: contract, LPO or purchase instruction.
+ * @param {any} row
+ */
+function printOrder(row) {
+  const c = row.contract;
+  if (c && ["ACTIVE", "ISSUED", "SIGNED"].includes(c.status)) {
+    return { kind: "Contract", number: c.contractNumber, value: Number(c.contractValue) || 0, status: c.status, supplierName: c.supplier?.name || null };
+  }
+  const l = row.lpo;
+  if (l && ["ACCEPTED", "ISSUED"].includes(l.status)) {
+    return { kind: "LPO", number: l.lpoNumber, value: Number(l.lpoValue) || 0, status: l.status, supplierName: l.supplier?.name || null };
+  }
+  const pi = row.purchaseInstruction || row.purchaseInstructions?.[0] || null;
+  if (pi && ["ISSUED", "ACCEPTED"].includes(pi.status)) {
+    return { kind: "PI", number: pi.instructionNumber, value: Number(pi.amount) || 0, status: pi.status, supplierName: pi.supplier?.name || null };
+  }
+  return null;
 }
 
 /** @param {any} row */
@@ -651,67 +683,211 @@ function stageSections(key, row, piDoc) {
       const c = row.contract;
       const l = row.lpo;
       if (!c && !l) return [{ type: "text", title, text: "Not issued." }];
-      return [
+      const { offer, lines: offerLines } = awardedOffer(row);
+      const lines = row.orderLines?.length ? row.orderLines : offerLines;
+      const orderStatus = (/** @type {string} */ s) => ORDER_STATUS_PRESENTATION[s]?.label || human(s);
+      const value = c ? c.contractValue : l.lpoValue;
+      const estimate = Number(row.requisition?.estimatedTotalValue) || 0;
+      const variance = (Number(value) || 0) - estimate;
+      /** @type {PrintSection[]} */
+      const out = [
         {
           type: "fields",
           title,
-          fields: c
-            ? [
-                { label: "Contract no.", value: c.contractNumber },
-                { label: "Provider", value: c.supplier?.name },
-                { label: "Value", value: formatMoneyUGX(c.contractValue) },
-                { label: "Status", value: human(c.status) },
-                { label: "Start date", value: formatPrintDate(c.startDate) },
-                { label: "End date", value: formatPrintDate(c.endDate) },
-                { label: "Issued on", value: formatPrintDate(c.issuedAt) },
-                { label: "Delivery address", value: c.deliveryAddress, full: true },
-              ]
-            : [
-                { label: "LPO no.", value: l.lpoNumber },
-                { label: "Provider", value: l.supplier?.name },
-                { label: "Value", value: formatMoneyUGX(l.lpoValue) },
-                { label: "Status", value: human(l.status) },
-                { label: "Issued on", value: formatPrintDate(l.issuedAt) },
-                { label: "Accepted on", value: formatPrintDate(l.acceptedAt) },
-                { label: "Delivery address", value: l.deliveryAddress, full: true },
-              ],
+          fields: [
+            ...(c
+              ? [
+                  { label: "Contract no.", value: c.contractNumber },
+                  { label: "Status", value: orderStatus(c.status) },
+                  { label: "Start date", value: formatPrintDate(c.startDate) },
+                  { label: "End date", value: formatPrintDate(c.endDate) },
+                ]
+              : [
+                  { label: "LPO no.", value: l.lpoNumber },
+                  { label: "Status", value: orderStatus(l.status) },
+                ]),
+            ...((c || l).acceptedAt
+              ? [
+                  {
+                    label: "Accepted by",
+                    value: `${(c || l).acceptedByName || "—"} · ${formatPrintDate((c || l).acceptedAt)}`,
+                  },
+                ]
+              : []),
+            ...((c || l).declinedAt
+              ? [
+                  { label: "Declined on", value: formatPrintDate((c || l).declinedAt) },
+                  { label: "Decline reason", value: (c || l).declineReason, full: true },
+                ]
+              : []),
+            { label: "Supplier", value: (c || l).supplier?.name },
+            { label: "Value", value: formatMoneyUGX(value) },
+            ...(estimate
+              ? [
+                  { label: "Estimated value", value: formatMoneyUGX(estimate) },
+                  {
+                    label: "Against estimate",
+                    value:
+                      variance > 0 ? `Over by ${formatMoneyUGX(variance)}` : `Within · saves ${formatMoneyUGX(-variance)}`,
+                  },
+                ]
+              : []),
+            { label: "Delivery period", value: offer?.deliveryDays ? `${offer.deliveryDays} days` : null },
+            { label: "Created on", value: formatPrintDate((c || l).createdAt) },
+            { label: "Issued on", value: formatPrintDate((c || l).issuedAt) },
+            { label: "Delivery address", value: (c || l).deliveryAddress, full: true },
+          ],
         },
       ];
+      if (lines.length) {
+        out.push({
+          type: "table",
+          title: "Order lines",
+          columns: [
+            { id: "n", label: "#", width: "6%" },
+            { id: "item", label: "Item" },
+            { id: "qty", label: "Qty", align: "right", width: "10%" },
+            { id: "unit", label: "Unit", width: "12%" },
+            { id: "price", label: "Unit price", align: "right", width: "16%" },
+            { id: "total", label: "Total", align: "right", width: "18%" },
+          ],
+          rows: lines.map((li, idx) => ({
+            key: li.lineNumber || idx,
+            cells: {
+              n: li.lineNumber || idx + 1,
+              item: li.itemName,
+              qty: li.quantity,
+              unit: li.unitOfMeasure || "—",
+              price: formatMoneyUGX(li.unitPrice),
+              total: formatMoneyUGX(li.total),
+            },
+          })),
+          footer: { label: "Order total", value: formatMoneyUGX(value) },
+        });
+      }
+      return out;
     }
-    case "delivery":
+    case "delivery": {
+      const deliveries = row.deliveries || [];
+      const qty = (/** @type {any} */ v, /** @type {any} */ unit) =>
+        `${formatMoneyAmount(v)}${unit ? ` ${unit}` : ""}`;
+      const userRemarks = (/** @type {string | null} */ r) => (r && !/^Received against /.test(r) ? r : null);
       return [
         {
           type: "table",
-          title,
+          title: `${title} — goods received`,
           columns: [
-            { id: "date", label: "Received", width: "14%" },
-            { id: "note", label: "Delivery note", width: "16%" },
-            { id: "by", label: "Recorded by", width: "18%" },
-            { id: "inspection", label: "Inspection" },
-            { id: "inspector", label: "Inspected by", width: "18%" },
+            { id: "note", label: "Delivery note", width: "18%" },
+            { id: "dispatched", label: "Dispatched", width: "13%" },
+            { id: "deliveredBy", label: "Delivered by" },
+            { id: "received", label: "Received on", width: "13%" },
+            { id: "by", label: "Received by", width: "20%" },
           ],
-          rows: (row.deliveries || []).map((d) => ({
+          rows: deliveries.map((d) => ({
             key: d.id,
             cells: {
-              date: formatPrintDate(d.deliveryDate || d.createdAt),
               note: d.deliveryNote?.noteNumber || "—",
+              dispatched: d.deliveryNote?.dispatchedAt ? formatPrintDate(d.deliveryNote.dispatchedAt) : "—",
+              deliveredBy:
+                [d.deliveryNote?.deliveredBy, d.deliveryNote?.vehicleNumber].filter(Boolean).join(" · ") || "—",
+              received: formatPrintDate(d.deliveryDate || d.createdAt),
               by: d.recordedBy?.displayName || "—",
-              inspection: d.inspection ? human(d.inspection.status) : "Awaiting inspection",
-              inspector: d.inspection?.inspectedBy?.displayName || "—",
             },
             note:
-              (d.lines || [])
-                .map(
-                  (ln) =>
-                    `${ln.itemName}: received ${ln.receivedQuantity}, accepted ${ln.acceptedQuantity}, rejected ${ln.rejectedQuantity}`,
-                )
-                .join("; ") || null,
+              [
+                (d.lines || []).map((ln) => `${ln.itemName}: ${qty(ln.receivedQuantity, ln.unitOfMeasure)}`).join("; "),
+                userRemarks(d.remarks) ? `Remarks: ${userRemarks(d.remarks)}` : "",
+              ]
+                .filter(Boolean)
+                .join(" — ") || null,
           })),
           empty: "No deliveries.",
         },
+        {
+          type: "table",
+          title: "Inspection and acceptance",
+          columns: [
+            { id: "note", label: "Delivery note", width: "18%" },
+            { id: "item", label: "Item" },
+            { id: "received", label: "Received", align: "right", width: "11%" },
+            { id: "accepted", label: "Accepted", align: "right", width: "11%" },
+            { id: "rejected", label: "Rejected", align: "right", width: "11%" },
+            { id: "result", label: "Result", width: "14%" },
+          ],
+          rows: deliveries.flatMap((d) =>
+            (d.lines || []).map((ln, i, all) => ({
+              key: ln.id,
+              cells: {
+                note: d.deliveryNote?.noteNumber || "—",
+                item: ln.itemName,
+                received: qty(ln.receivedQuantity, ln.unitOfMeasure),
+                accepted: d.inspection ? formatMoneyAmount(ln.acceptedQuantity) : "—",
+                rejected: d.inspection ? formatMoneyAmount(ln.rejectedQuantity) : "—",
+                result: d.inspection ? human(d.inspection.status) : "Awaiting inspection",
+              },
+              note:
+                i === all.length - 1 && d.inspection
+                  ? [
+                      `Inspected by ${d.inspection.inspectedBy?.displayName || "—"} on ${formatPrintDate(d.inspection.inspectedAt)}`,
+                      d.inspection.resultNotes,
+                    ]
+                      .filter(Boolean)
+                      .join(" — ")
+                  : null,
+            })),
+          ),
+          empty: "No deliveries.",
+        },
+        {
+          type: "table",
+          title: "Delivery against order",
+          columns: [
+            { id: "item", label: "Item" },
+            { id: "ordered", label: "Ordered", align: "right", width: "14%" },
+            { id: "accepted", label: "Accepted", align: "right", width: "14%" },
+            { id: "outstanding", label: "Outstanding", align: "right", width: "14%" },
+            { id: "status", label: "Status", width: "18%" },
+          ],
+          rows: (row.requisition?.items || []).map((it, idx) => {
+            const accepted = deliveries
+              .filter((d) => d.inspection)
+              .flatMap((d) => d.lines || [])
+              .filter((l) => l.itemName === it.itemName)
+              .reduce((sum, l) => sum + (Number(l.acceptedQuantity) || 0), 0);
+            const outstanding = Math.max(0, Number(it.quantity) - accepted);
+            return {
+              key: it.id || idx,
+              cells: {
+                item: it.itemName,
+                ordered: qty(it.quantity, it.unitOfMeasure),
+                accepted: formatMoneyAmount(accepted),
+                outstanding: formatMoneyAmount(outstanding),
+                status: outstanding > 0.009 ? "Partly delivered" : "Complete",
+              },
+            };
+          }),
+          empty: "No items.",
+        },
       ];
-    case "invoice":
-      return [
+    }
+    case "invoice": {
+      const invoice =
+        [...(row.invoices || [])]
+          .filter((i) => i.status !== "REJECTED")
+          .sort((a, b) => String(b.createdAt || "").localeCompare(String(a.createdAt || "")))[0] || null;
+      const order = row.contract || row.lpo || null;
+      const orderValue = row.contract ? row.contract.contractValue : row.lpo?.lpoValue;
+      const match = invoice
+        ? invoiceThreeWayMatch({
+            row,
+            invoice,
+            orderValue: orderValue == null ? null : Number(orderValue),
+            pricedLines: row.orderLines?.length ? row.orderLines : awardedOffer(row).lines,
+          })
+        : null;
+      const money = (/** @type {number | null} */ v) => (v === null ? "—" : formatMoneyUGX(v));
+      /** @type {PrintSection[]} */
+      const out = [
         {
           type: "table",
           title,
@@ -736,43 +912,209 @@ function stageSections(key, row, piDoc) {
           empty: "No invoices.",
         },
       ];
-    case "payment":
+      if (!match) return out;
+      const evidence = goodsReceivedEvidence(row);
+      out.push(
+        {
+          type: "table",
+          title: `Three-way match — ${invoice.invoiceNumber}`,
+          columns: [
+            { id: "item", label: "Item" },
+            { id: "ordered", label: order ? `Ordered (${row.contract ? "Contract" : "LPO"})` : "Ordered", align: "right", width: "15%" },
+            { id: "accepted", label: "Accepted", align: "right", width: "13%" },
+            { id: "unitPrice", label: "Unit price", align: "right", width: "16%" },
+            { id: "value", label: "Accepted value", align: "right", width: "18%" },
+          ],
+          rows: match.lines.map((ln, idx) => ({
+            key: `${ln.itemName}-${idx}`,
+            cells: {
+              item: ln.itemName,
+              ordered: `${formatMoneyAmount(ln.ordered)}${ln.unitOfMeasure ? ` ${ln.unitOfMeasure}` : ""}`,
+              accepted: `${formatMoneyAmount(ln.accepted)}${ln.unitOfMeasure ? ` ${ln.unitOfMeasure}` : ""}`,
+              unitPrice: money(ln.unitPrice),
+              value: money(ln.acceptedValue),
+            },
+          })),
+          empty: "No items.",
+        },
+        {
+          type: "fields",
+          title: "Invoice check",
+          fields: [
+            { label: "Order value", value: money(orderValue == null ? null : Number(orderValue)) },
+            { label: "Accepted goods value", value: money(match.acceptedValue) },
+            { label: "Previously invoiced", value: money(match.previouslyInvoiced) },
+            { label: "This invoice", value: money(match.amount) },
+            { label: "Result", value: match.result.label },
+            ...(evidence.notes.length ? [{ label: "Delivery notes", value: evidence.notes.join(", ") }] : []),
+            ...(evidence.certifiedAt
+              ? [
+                  {
+                    label: "Delivery certified",
+                    value: `${evidence.certifiedBy || "—"} · ${formatPrintDate(evidence.certifiedAt)}`,
+                  },
+                ]
+              : []),
+          ],
+        },
+      );
+      return out;
+    }
+    case "payment": {
+      const order = printOrder(row);
+      const summary = procurementMoneySummary({
+        row,
+        orderValue: order?.value ?? null,
+        pricedLines: row.orderLines?.length ? row.orderLines : awardedOffer(row).lines,
+      });
+      const verified = latestStepSignOff(row.timeline, VERIFY_INVOICE_STEP_RE);
+      const invoiceNo = (/** @type {string} */ id) =>
+        (row.invoices || []).find((i) => i.id === id)?.invoiceNumber || "—";
       return [
         {
           type: "table",
           title,
           columns: [
-            { id: "date", label: "Date", width: "14%" },
-            { id: "reference", label: "Reference" },
-            { id: "by", label: "Approved by", width: "22%" },
-            { id: "status", label: "Status", width: "14%" },
-            { id: "amount", label: "Amount", align: "right", width: "18%" },
+            { id: "invoice", label: "Invoice no.", width: "20%" },
+            { id: "reference", label: "Payment ref." },
+            { id: "by", label: "Approved by", width: "20%" },
+            { id: "date", label: "Paid on", width: "13%" },
+            { id: "status", label: "Status", width: "11%" },
+            { id: "amount", label: "Amount", align: "right", width: "16%" },
           ],
           rows: (row.payments || []).map((p) => ({
             key: p.id,
             cells: {
-              date: formatPrintDate(p.paymentDate || p.createdAt),
+              invoice: invoiceNo(p.invoiceId),
               reference: p.paymentReference || "—",
               by: p.approvedBy?.displayName || "—",
+              date: p.paymentDate ? formatPrintDate(p.paymentDate) : "—",
               status: human(p.status),
               amount: formatMoneyUGX(p.amount),
             },
           })),
           empty: "No payments.",
         },
+        {
+          type: "fields",
+          title: "Payment position",
+          fields: [
+            { label: "Order", value: order ? `${order.kind} ${order.number}` : null },
+            { label: "Order value", value: order ? formatMoneyUGX(order.value) : null },
+            {
+              label: "Accepted goods value",
+              value: summary.acceptedValue === null ? null : formatMoneyUGX(summary.acceptedValue),
+            },
+            { label: "Verified invoices", value: formatMoneyUGX(summary.invoiced) },
+            { label: "Paid", value: formatMoneyUGX(summary.paid) },
+            {
+              label: "Balance on order",
+              value: summary.unpaidOnOrder === null ? null : formatMoneyUGX(summary.unpaidOnOrder),
+            },
+            ...(verified
+              ? [{ label: "Invoice verified", value: `${verified.by || "—"} · ${formatPrintDate(verified.at)}` }]
+              : []),
+          ],
+        },
       ];
-    case "closure":
+    }
+    case "closure": {
+      const order = printOrder(row);
+      const summary = procurementMoneySummary({
+        row,
+        orderValue: order?.value ?? null,
+        pricedLines: row.orderLines?.length ? row.orderLines : awardedOffer(row).lines,
+      });
+      const deliveries = row.deliveries || [];
+      const accepted = deliveries.filter((d) => ["ACCEPTED", "PARTIAL"].includes(d.inspection?.status)).length;
+      const certified = latestStepSignOff(row.timeline, CERTIFY_DELIVERY_STEP_RE);
+      const verified = latestStepSignOff(row.timeline, VERIFY_INVOICE_STEP_RE);
+      const invoices = (row.invoices || []).filter((i) => ["VERIFIED", "APPROVED_FOR_PAYMENT"].includes(i.status));
+      const paid = (row.payments || []).filter((p) => p.status === "PAID");
+      const signed = (/** @type {{ by: string | null; at: any } | null} */ s, /** @type {string} */ verb) =>
+        s ? ` · ${verb} by ${s.by || "—"} on ${formatPrintDate(s.at)}` : "";
       return [
         {
           type: "fields",
           title,
           fields: [
-            { label: "Closed on", value: formatPrintDate(row.closedAt) },
+            { label: "Closed on", value: row.closedAt ? formatPrintDate(row.closedAt) : null },
             { label: "Closed by", value: row.closedBy?.displayName },
+            { label: "Provider", value: order?.supplierName || null },
+            { label: "Order", value: order ? `${order.kind} ${order.number}` : null },
             ...(row.closureRemarks ? [{ label: "Remarks", value: row.closureRemarks, full: true }] : []),
           ],
         },
+        {
+          type: "table",
+          title: "Closure checklist",
+          columns: [
+            { id: "stage", label: "Stage", width: "16%" },
+            { id: "details", label: "Details" },
+          ],
+          rows: [
+            {
+              key: "order",
+              cells: {
+                stage: "Order",
+                details: order ? `${order.kind} ${order.number} · ${formatMoneyUGX(order.value)} · ${human(order.status)}` : "—",
+              },
+            },
+            {
+              key: "delivery",
+              cells: {
+                stage: "Delivery",
+                details: deliveries.length
+                  ? `${deliveries.length} received · ${accepted} accepted${signed(certified, "certified")}`
+                  : "—",
+              },
+            },
+            {
+              key: "invoice",
+              cells: {
+                stage: "Invoice",
+                details: invoices.length
+                  ? `${invoices.map((i) => `${i.invoiceNumber} · ${formatMoneyUGX(i.amount)}`).join(", ")}${signed(verified, "verified")}`
+                  : "—",
+              },
+            },
+            {
+              key: "payment",
+              cells: {
+                stage: "Payment",
+                details: paid.length
+                  ? paid
+                      .map(
+                        (p) =>
+                          `${formatMoneyUGX(p.amount)}${p.paymentReference ? ` · ${p.paymentReference}` : ""}${
+                            p.paymentDate ? ` · ${formatPrintDate(p.paymentDate)}` : ""
+                          }`,
+                      )
+                      .join(", ")
+                  : "—",
+              },
+            },
+          ],
+          empty: "—",
+        },
+        {
+          type: "fields",
+          title: "Financial position",
+          fields: [
+            { label: "Order value", value: order ? formatMoneyUGX(order.value) : null },
+            {
+              label: "Accepted goods value",
+              value: summary.acceptedValue === null ? null : formatMoneyUGX(summary.acceptedValue),
+            },
+            { label: "Invoiced", value: formatMoneyUGX(summary.invoiced) },
+            { label: "Paid", value: formatMoneyUGX(summary.paid) },
+            ...(summary.unpaidOnOrder !== null && summary.unpaidOnOrder > 0.009
+              ? [{ label: "Unpaid on order", value: formatMoneyUGX(summary.unpaidOnOrder) }]
+              : []),
+          ],
+        },
       ];
+    }
     default:
       return [];
   }
@@ -788,6 +1130,22 @@ function awardAcceptanceSignature(award) {
     name: award.acceptedByName || null,
     role: award.supplier?.name || "Supplier",
     date: award.acceptedAt,
+  };
+}
+
+/**
+ * Supplier's acceptance of the LPO / contract, once accepted in the portal.
+ * @param {any} row
+ * @returns {import("@/components/print/print-document").PrintSignature | null}
+ */
+function orderAcceptanceSignature(row) {
+  const doc = row.contract || row.lpo;
+  if (!doc?.acceptedAt) return null;
+  return {
+    label: `${row.contract ? "Contract" : "LPO"} accepted by supplier`,
+    name: doc.acceptedByName || null,
+    role: doc.supplier?.name || "Supplier",
+    date: doc.acceptedAt,
   };
 }
 
@@ -824,6 +1182,7 @@ function signaturesFor(row, keys, piDoc, stage = null) {
       });
     }
     if (stage === "award" && row.award?.acceptedAt) signed.push(awardAcceptanceSignature(row.award));
+    if (stage === "contract" && orderAcceptanceSignature(row)) signed.push(orderAcceptanceSignature(row));
     return signed.length
       ? signed
       : [{ label: "Prepared by", name: row.officer?.displayName || null, role: "Procurement Officer", date: row.createdAt }];
@@ -880,6 +1239,7 @@ function signaturesFor(row, keys, piDoc, stage = null) {
   if (has("contract") && pi?.issuedBy) {
     out.push({ label: "Issued by", name: pi.issuedBy.displayName, role: pi.issuedBy.roleName || null, date: pi.issuedAt });
   }
+  if (has("contract") && orderAcceptanceSignature(row)) out.push(orderAcceptanceSignature(row));
   if (has("delivery") && inspection) {
     out.push({ label: "Inspected by", name: inspection.inspectedBy.displayName, role: null, date: inspection.inspectedAt });
   }

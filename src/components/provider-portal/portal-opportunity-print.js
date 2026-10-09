@@ -108,7 +108,15 @@ export function PortalOpportunityPrint({ data }) {
     <PrintDocument
       documentTitle={data.type === "RFQ" ? "Request for quotations" : "Bidding document"}
       reference={doc.reference || procurement.number}
-      status={data.accepting ? "Open for offers" : data.decided ? "Under evaluation" : "Closed"}
+      status={
+        data.accepting
+          ? "Open for offers"
+          : data.outcome
+            ? data.outcome.label
+            : data.decided
+              ? "Under evaluation"
+              : "Closed"
+      }
       organisation={data.organisation || { name: doc.pdeName || "" }}
       printedBy={data.printedBy}
       sections={sections}

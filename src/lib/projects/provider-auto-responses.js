@@ -1,5 +1,4 @@
 import {
-  OrgInspectionStatus,
   OrgOfferStatus,
   OrgOfferType,
   OrgProviderStatus,
@@ -17,7 +16,7 @@ import {
 } from "@/lib/projects/solicitations";
 import { notifyProvider } from "@/lib/projects/provider-notifications";
 import { getActiveOrderValue } from "@/lib/projects/contracts-lpo";
-import { createInvoice, INVOICE_SOURCE } from "@/lib/projects/invoices";
+import { acceptedShareOfOrder, createInvoice, INVOICE_SOURCE } from "@/lib/projects/invoices";
 
 export const OFFER_SOURCE = Object.freeze({ OFFICER: "OFFICER", PORTAL: "PORTAL", AUTO: "AUTO" });
 
@@ -368,36 +367,6 @@ export async function generateQuotes(prisma, opts) {
   }
 
   return { ok: true, ...results };
-}
-
-/**
- * Value the provider is entitled to invoice after inspection: the order value
- * scaled by the share of ordered quantities accepted so far.
- *
- * @param {import("@prisma/client").PrismaClient} prisma
- * @param {{ projectId: string; procurementId: string; orderValue: number }} opts
- */
-async function acceptedShareOfOrder(prisma, opts) {
-  const deliveries = await prisma.projectOrgDelivery.findMany({
-    where: {
-      projectId: opts.projectId,
-      procurementId: opts.procurementId,
-      inspection: { status: { in: [OrgInspectionStatus.ACCEPTED, OrgInspectionStatus.PARTIAL] } },
-    },
-    include: { lines: true },
-  });
-  const items = await prisma.projectOrgRequisitionItem.findMany({
-    where: { requisition: { procurements: { some: { id: opts.procurementId } } } },
-    select: { itemName: true, quantity: true },
-  });
-  const ordered = items.reduce((sum, i) => sum + Number(i.quantity || 0), 0);
-  if (!ordered) return opts.orderValue;
-  let accepted = 0;
-  for (const d of deliveries) {
-    for (const l of d.lines || []) accepted += Number(l.acceptedQuantity || 0);
-  }
-  const share = Math.min(1, Math.max(0, accepted / ordered));
-  return share > 0 ? opts.orderValue * share : opts.orderValue;
 }
 
 /**

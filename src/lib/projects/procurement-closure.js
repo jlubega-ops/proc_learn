@@ -66,14 +66,12 @@ export async function evaluateClosureReadiness(prisma, projectId, procurementId)
     if (!acceptedAward) blockers.push("The award must be accepted by the supplier.");
 
     const hasActiveOrder =
-      procurement.contracts.some((c) =>
-        [OrgContractStatus.ACTIVE, OrgContractStatus.ISSUED].includes(c.status),
-      ) ||
+      procurement.contracts.some((c) => c.status === OrgContractStatus.ACTIVE) ||
       procurement.lpos.some((l) => l.status === OrgLpoStatus.ACCEPTED);
     if (!hasActiveOrder) {
       blockers.push(
         procurement.procurementMethod === OrgProcurementMethod.TENDER
-          ? "Issue and activate the contract before closing."
+          ? "Issue the contract and have the supplier accept it before closing."
           : "Issue and accept the LPO before closing.",
       );
     }

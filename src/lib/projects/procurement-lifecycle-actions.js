@@ -11,7 +11,6 @@ import {
   createLpo,
   approveLpo,
   issueLpo,
-  acceptLpo,
   createContract,
   approveContract,
   signContract,
@@ -247,8 +246,7 @@ export async function actOnProcurementLifecycle(prisma, opts) {
       if (!body.lpoId) return { ok: false, error: "lpoId is required.", status: 400 };
       return issueLpo(prisma, { ...base, lpoId: String(body.lpoId) });
     case "accept_lpo":
-      if (!body.lpoId) return { ok: false, error: "lpoId is required.", status: 400 };
-      return acceptLpo(prisma, { ...base, lpoId: String(body.lpoId) });
+      return { ok: false, error: "The provider accepts the LPO from the provider portal.", status: 403 };
 
     case "create_contract":
       return createContract(prisma, {

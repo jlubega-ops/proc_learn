@@ -7,7 +7,6 @@ import Alert from "@mui/material/Alert";
 import MenuItem from "@mui/material/MenuItem";
 import DoneAllRounded from "@mui/icons-material/DoneAllRounded";
 import ChevronRightRounded from "@mui/icons-material/ChevronRightRounded";
-import ArrowBackRounded from "@mui/icons-material/ArrowBackRounded";
 import { PORTAL_NOTIFICATIONS_CHANGED } from "@/components/provider-portal/provider-portal-shell";
 import Button from "@mui/material/Button";
 import Chip from "@mui/material/Chip";
@@ -19,7 +18,6 @@ import DialogTitle from "@mui/material/DialogTitle";
 import TablePagination from "@mui/material/TablePagination";
 import TextField from "@mui/material/TextField";
 import PlaceRounded from "@mui/icons-material/PlaceRounded";
-import ReceiptLongRounded from "@mui/icons-material/ReceiptLongRounded";
 import SendRounded from "@mui/icons-material/SendRounded";
 import { format } from "date-fns";
 import { useToast } from "@/components/providers/toast-provider";
@@ -52,6 +50,15 @@ export const INVOICE_STATUS = {
 export const AWARD_STATUS = {
   COMMUNICATED: { color: "warning", label: "Awaiting your response" },
   ACCEPTED: { color: "success", label: "Accepted" },
+  DECLINED: { color: "error", label: "Declined" },
+  CANCELLED: { color: "error", label: "Cancelled" },
+};
+
+/** LPO / contract status as the provider sees it. */
+export const ORDER_STATUS = {
+  ISSUED: { color: "warning", label: "Awaiting your response" },
+  ACCEPTED: { color: "success", label: "Accepted" },
+  ACTIVE: { color: "success", label: "Accepted · active" },
   DECLINED: { color: "error", label: "Declined" },
   CANCELLED: { color: "error", label: "Cancelled" },
 };
@@ -335,6 +342,7 @@ export function OfferDialog({ opportunity, onClose, onSaved }) {
 /** @param {any} o */
 export function opportunityStateChip(o) {
   if (o.accepting) return { color: "info", label: `Open until ${formatPortalDateTime(o.closingDate)}` };
+  if (o.outcome) return { color: o.outcome.color, label: o.outcome.label };
   if (o.decided) return { color: "warning", label: "Under evaluation" };
   return { color: "error", label: "Closed" };
 }
@@ -426,12 +434,13 @@ function InvoiceField({ label, children }) {
 
 /**
  * Invoice as the procurement unit will receive it.
- * @param {{ order: any; invoice: { amount: string; invoiceDate: string; notes: string } }} p
+ * @param {{ order: any; invoice: { amount: string; invoiceDate: string; notes: string; supplierReference?: string } }} p
  */
 function InvoicePreview({ order, invoice }) {
   const provider = order.provider || {};
   const org = order.organisation || {};
   const items = order.acceptedItems || [];
+  const priced = items.some((it) => it.unitPrice);
   return (
     <div className="rounded-lg border border-zinc-300 bg-white p-4 text-zinc-900">
       <div className="flex flex-wrap items-start justify-between gap-3 border-b border-zinc-200 pb-3">
@@ -446,6 +455,9 @@ function InvoicePreview({ order, invoice }) {
         <div className="text-right">
           <p className="text-lg font-extrabold tracking-wide text-primary">INVOICE</p>
           <p className="text-sm font-semibold">{order.invoiceNumber}</p>
+          {invoice.supplierReference?.trim() ? (
+            <p className="text-xs">Your ref {invoice.supplierReference.trim()}</p>
+          ) : null}
           <p className="text-xs">{formatPortalDate(invoice.invoiceDate)}</p>
         </div>
       </div>
@@ -468,7 +480,13 @@ function InvoicePreview({ order, invoice }) {
               <tr className="border-b border-zinc-300 text-left text-xs uppercase text-zinc-500">
                 <th className="py-1.5 pr-2">#</th>
                 <th className="py-1.5 pr-2">Item</th>
-                <th className="py-1.5 text-right">Accepted qty</th>
+                <th className="py-1.5 pr-2 text-right">Accepted qty</th>
+                {priced ? (
+                  <>
+                    <th className="py-1.5 pr-2 text-right">Unit price</th>
+                    <th className="py-1.5 text-right">Amount</th>
+                  </>
+                ) : null}
               </tr>
             </thead>
             <tbody>
@@ -476,10 +494,18 @@ function InvoicePreview({ order, invoice }) {
                 <tr key={it.itemName} className="border-b border-zinc-100">
                   <td className="py-1.5 pr-2">{i + 1}</td>
                   <td className="py-1.5 pr-2 wrap-break-word">{it.itemName}</td>
-                  <td className="py-1.5 text-right">
+                  <td className="py-1.5 pr-2 text-right">
                     {it.quantity}
                     {it.unitOfMeasure ? ` ${it.unitOfMeasure}` : ""}
                   </td>
+                  {priced ? (
+                    <>
+                      <td className="py-1.5 pr-2 text-right">{it.unitPrice ? formatMoneyUGX(it.unitPrice) : "—"}</td>
+                      <td className="py-1.5 text-right">
+                        {it.unitPrice ? formatMoneyUGX(it.unitPrice * it.quantity) : "—"}
+                      </td>
+                    </>
+                  ) : null}
                 </tr>
               ))}
             </tbody>
@@ -498,37 +524,39 @@ function InvoicePreview({ order, invoice }) {
 }
 
 /**
- * @param {{ order: any; onClose: () => void; onSaved: () => void }} p
+ * @param {{ order: any; onSaved: () => void }} p
  */
-export function InvoiceDialog({ order, onClose, onSaved }) {
+export function SubmitInvoiceCard({ order, onSaved }) {
   const { showToast } = useToast();
-  const [amount, setAmount] = useState(String(order.remaining || ""));
+  const confirm = useConfirm();
+  const [amount, setAmount] = useState(String(order.invoiceable || ""));
   const [invoiceDate, setInvoiceDate] = useState(() => format(new Date(), "yyyy-MM-dd"));
+  const [supplierReference, setSupplierReference] = useState("");
   const [notes, setNotes] = useState("");
   /** @type {[Record<string, string>, Function]} */
   const [errors, setErrors] = useState({});
   const [busy, setBusy] = useState(false);
-  const [reviewing, setReviewing] = useState(false);
+  const today = format(new Date(), "yyyy-MM-dd");
 
-  function review(e) {
+  async function submit(e) {
     e.preventDefault();
     /** @type {Record<string, string>} */
     const next = {};
     const amountErr = validatePositiveMoney(amount, "Amount");
     if (amountErr) next.amount = amountErr;
-    else if (Number(parseMoneyInput(amount)) > Number(order.remaining) + 0.009) {
-      next.amount = `Cannot exceed the uninvoiced balance of ${formatMoneyUGX(order.remaining)}.`;
+    else if (Number(parseMoneyInput(amount)) > Number(order.invoiceable) + 0.5) {
+      next.amount = `Max ${formatMoneyUGX(order.invoiceable)} for accepted goods.`;
     }
     if (!invoiceDate) next.invoiceDate = "Enter the invoice date.";
+    else if (invoiceDate > today) next.invoiceDate = "Date cannot be in the future.";
+    if (supplierReference.trim().length > 64) next.supplierReference = "Max 64 characters.";
+    if (notes.trim().length > 2000) next.notes = "Max 2000 characters.";
     setErrors(next);
     if (Object.keys(next).length) {
       showToast({ message: "Please fix the highlighted fields.", severity: "error" });
       return;
     }
-    setReviewing(true);
-  }
-
-  async function submit() {
+    if (!(await confirm(actionConfirmOptions("Submit invoice")))) return;
     setBusy(true);
     try {
       const { ok, data } = await portalFetch("/api/provider-portal/invoices", {
@@ -537,14 +565,12 @@ export function InvoiceDialog({ order, onClose, onSaved }) {
           procurementId: order.procurement?.id,
           amount: parseMoneyInput(amount),
           invoiceDate,
+          supplierReference: supplierReference.trim() || null,
           notes: notes.trim() || null,
         }),
       });
       if (!ok) {
-        if (data.fieldErrors) {
-          setErrors(data.fieldErrors);
-          setReviewing(false);
-        }
+        if (data.fieldErrors) setErrors(data.fieldErrors);
         showToast({ message: typeof data.error === "string" ? data.error : "Could not submit the invoice.", severity: "error" });
         return;
       }
@@ -556,42 +582,36 @@ export function InvoiceDialog({ order, onClose, onSaved }) {
   }
 
   return (
-    <Dialog open onClose={busy ? undefined : onClose} maxWidth={reviewing ? "md" : "sm"} fullWidth>
-      {reviewing ? (
-        <>
-          <DialogTitle>Review invoice</DialogTitle>
-          <DialogContent dividers>
-            <InvoicePreview order={order} invoice={{ amount, invoiceDate, notes }} />
-          </DialogContent>
-          <DialogActions className="flex-wrap gap-2">
-            <Button startIcon={<ArrowBackRounded />} onClick={() => setReviewing(false)} disabled={busy}>
-              Back
-            </Button>
-            <Button
-              variant="contained"
-              disabled={busy}
-              onClick={() => void submit()}
-              startIcon={busy ? <CircularProgress size={16} color="inherit" /> : <SendRounded />}
-            >
-              {busy ? "Submitting…" : "Submit invoice"}
-            </Button>
-          </DialogActions>
-        </>
-      ) : (
-      <form noValidate onSubmit={review}>
-        <DialogTitle>Submit invoice</DialogTitle>
-        <DialogContent dividers className="space-y-3">
-          <p className="text-sm text-zinc-700">
-            {ORDER_KIND[order.kind]} <span className="font-semibold">{order.number}</span> · value{" "}
-            {formatMoneyUGX(order.value)} · uninvoiced {formatMoneyUGX(order.remaining)}
-          </p>
-          <TextField
-            label="Invoice number"
-            value={order.invoiceNumber || "Auto-generated"}
-            helperText="Auto-generated"
-            fullWidth
-            slotProps={{ input: { readOnly: true } }}
-          />
+    <section className={`${BRAND_CARD_CLASS} p-4`} aria-labelledby="pp-submit-invoice">
+      <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+        <h2 id="pp-submit-invoice" className="text-base font-semibold text-primary">
+          Submit invoice
+        </h2>
+        <Chip size="small" variant="outlined" color="info" label={order.invoiceNumber || "Auto-numbered"} />
+      </div>
+      <form noValidate onSubmit={submit} className="space-y-4" aria-busy={busy}>
+        <dl className="grid gap-3 rounded-lg border border-zinc-200 p-3 text-sm sm:grid-cols-4">
+          <div>
+            <dt className="text-xs text-zinc-500">Against</dt>
+            <dd className="font-semibold">
+              {ORDER_KIND[order.kind]} {order.number}
+            </dd>
+          </div>
+          <div>
+            <dt className="text-xs text-zinc-500">Order value</dt>
+            <dd>{formatMoneyUGX(order.value)}</dd>
+          </div>
+          <div>
+            <dt className="text-xs text-zinc-500">Already invoiced</dt>
+            <dd>{formatMoneyUGX(order.invoiced)}</dd>
+          </div>
+          <div>
+            <dt className="text-xs text-zinc-500">You can invoice</dt>
+            <dd className="font-semibold text-primary">{formatMoneyUGX(order.invoiceable)}</dd>
+          </div>
+        </dl>
+
+        <div className="grid gap-x-3 sm:grid-cols-2">
           <TextField
             label="Amount (UGX)"
             value={amount}
@@ -600,9 +620,9 @@ export function InvoiceDialog({ order, onClose, onSaved }) {
               setErrors((p) => ({ ...p, amount: "" }));
             }}
             error={Boolean(errors.amount)}
-            helperText={errors.amount || " "}
-            inputMode="decimal"
+            helperText={errors.amount || "Accepted goods only"}
             fullWidth
+            slotProps={{ htmlInput: { inputMode: "decimal" } }}
           />
           <TextField
             label="Invoice date"
@@ -615,28 +635,50 @@ export function InvoiceDialog({ order, onClose, onSaved }) {
             error={Boolean(errors.invoiceDate)}
             helperText={errors.invoiceDate || " "}
             fullWidth
-            slotProps={{ inputLabel: { shrink: true } }}
+            slotProps={{ inputLabel: { shrink: true }, htmlInput: { max: today } }}
           />
           <TextField
-            label="Notes (optional)"
-            value={notes}
-            onChange={(e) => setNotes(e.target.value)}
+            label="Your invoice ref"
+            value={supplierReference}
+            onChange={(e) => {
+              setSupplierReference(e.target.value);
+              setErrors((p) => ({ ...p, supplierReference: "" }));
+            }}
+            error={Boolean(errors.supplierReference)}
+            helperText={errors.supplierReference || "Optional"}
             fullWidth
-            multiline
-            minRows={2}
           />
-        </DialogContent>
-        <DialogActions className="flex-wrap gap-2">
-          <Button onClick={onClose} disabled={busy}>
-            Cancel
+          <TextField
+            label="Notes"
+            value={notes}
+            onChange={(e) => {
+              setNotes(e.target.value);
+              setErrors((p) => ({ ...p, notes: "" }));
+            }}
+            error={Boolean(errors.notes)}
+            helperText={errors.notes || "Optional"}
+            fullWidth
+          />
+        </div>
+
+        <div>
+          <p className="mb-1 text-xs font-semibold text-zinc-500">Preview</p>
+          <InvoicePreview order={order} invoice={{ amount, invoiceDate, notes, supplierReference }} />
+        </div>
+
+        <div className="flex justify-end">
+          <Button
+            type="submit"
+            variant="contained"
+            disabled={busy}
+            startIcon={busy ? <CircularProgress size={16} color="inherit" /> : <SendRounded />}
+            className="w-full sm:w-auto"
+          >
+            {busy ? "Submitting…" : "Submit invoice"}
           </Button>
-          <Button type="submit" variant="contained" startIcon={<ReceiptLongRounded />}>
-            Review invoice
-          </Button>
-        </DialogActions>
+        </div>
       </form>
-      )}
-    </Dialog>
+    </section>
   );
 }
 
@@ -784,8 +826,45 @@ export function PortalInvoices({ reloadKey = 0 }) {
   const [page, setPage] = useState(0);
   const [pageSize, setPageSize] = useState(10);
   const list = usePortalList("/api/provider-portal/invoices", { page, pageSize, reloadKey });
+  const toInvoice = Array.isArray(list.meta?.toInvoice) ? list.meta.toInvoice : [];
 
   return (
+    <div className="space-y-6">
+    {toInvoice.length ? (
+      <section aria-labelledby="pp-to-invoice" className="space-y-3">
+        <h2 id="pp-to-invoice" className="flex items-center gap-2 text-base font-semibold text-primary">
+          To invoice
+          <Chip size="small" color="warning" label={toInvoice.length} />
+        </h2>
+        <ul className="space-y-3">
+          {toInvoice.map((a) => (
+            <li key={a.procurementId}>
+              <CardLink href={assignmentHref(a.procurementId)} label={`Invoice ${a.procurementNumber}`}>
+                <div className="flex items-start justify-between gap-2">
+                  <div className="min-w-0">
+                    <p className="font-semibold wrap-break-word">{a.title}</p>
+                    <p className="text-xs text-zinc-600 wrap-break-word">
+                      {a.procurementNumber}
+                      {a.order ? ` · ${ORDER_KIND[a.order.kind]} ${a.order.number}` : ""}
+                    </p>
+                  </div>
+                  <ChevronRightRounded color="primary" className="shrink-0" aria-hidden />
+                </div>
+                <div className="mt-2 flex flex-wrap items-center gap-3 text-sm">
+                  <Chip size="small" color="primary" label="Goods accepted — submit invoice" />
+                  {a.value ? (
+                    <span>
+                      Order value <span className="font-semibold">{formatMoneyUGX(a.value)}</span>
+                    </span>
+                  ) : null}
+                  {a.acceptedOn ? <span className="text-zinc-600">Accepted {formatPortalDate(a.acceptedOn)}</span> : null}
+                </div>
+              </CardLink>
+            </li>
+          ))}
+        </ul>
+      </section>
+    ) : null}
     <section aria-labelledby="pp-invoices" className="space-y-3">
       <h2 id="pp-invoices" className="text-base font-semibold text-primary">
         Invoices
@@ -835,6 +914,7 @@ export function PortalInvoices({ reloadKey = 0 }) {
       </ListState>
       <Pager total={list.total} page={page} pageSize={pageSize} setPage={setPage} setPageSize={setPageSize} />
     </section>
+    </div>
   );
 }
 

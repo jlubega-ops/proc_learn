@@ -1,4 +1,5 @@
 import {
+  OrgAwardStatus,
   OrgLpoStatus,
   OrgContractStatus,
   OrgOfferStatus,
@@ -214,7 +215,42 @@ function opportunityWhere(opts) {
   };
 }
 
-const DECISION_COUNT_SELECT = { _count: { select: { evaluationReports: true, awards: true } } };
+const DECISION_COUNT_SELECT = {
+  status: true,
+  _count: { select: { evaluationReports: true, awards: true } },
+  awards: {
+    where: { status: { in: [OrgAwardStatus.APPROVED, OrgAwardStatus.COMMUNICATED, OrgAwardStatus.ACCEPTED] } },
+    orderBy: { createdAt: /** @type {const} */ ("desc") },
+    take: 1,
+    select: { supplierId: true },
+  },
+};
+
+/**
+ * Where the procurement ended up for this provider once offers are frozen.
+ * @param {any} s solicitation with `procurement.status` and approved `procurement.awards`
+ * @param {string} providerId
+ * @returns {{ key: string; label: string; color: "success" | "warning" | "error"; message: string } | null}
+ */
+function opportunityOutcome(s, providerId) {
+  const status = s.procurement?.status;
+  const award = s.procurement?.awards?.[0] || null;
+  if (status === "CANCELLED") {
+    return { key: "cancelled", label: "Cancelled", color: "error", message: "This procurement was cancelled." };
+  }
+  if (award && award.supplierId === providerId) {
+    return status === "CLOSED"
+      ? { key: "completed", label: "Completed", color: "success", message: "Awarded to you and completed." }
+      : { key: "awarded", label: "Awarded to you", color: "success", message: "Awarded to you. See Assignments." };
+  }
+  if (award) {
+    return { key: "not_awarded", label: "Not awarded", color: "error", message: "Awarded to another provider." };
+  }
+  if (status === "CLOSED") {
+    return { key: "closed", label: "Closed", color: "error", message: "This procurement is closed." };
+  }
+  return null;
+}
 
 /**
  * What the provider may still do on one opportunity. Offers freeze at closing, at opening,
@@ -222,7 +258,8 @@ const DECISION_COUNT_SELECT = { _count: { select: { evaluationReports: true, awa
  * @param {any} s solicitation with `procurement._count`
  * @param {any} myOffer
  */
-function opportunityActions(s, myOffer) {
+function opportunityActions(s, myOffer, providerId) {
+  const outcome = opportunityOutcome(s, providerId);
   const now = Date.now();
   const beforeClosing = !s.closingDate || s.closingDate.getTime() > now;
   const decided = (s.procurement?._count?.evaluationReports || 0) + (s.procurement?._count?.awards || 0) > 0;
@@ -239,6 +276,8 @@ function opportunityActions(s, myOffer) {
   let lockedReason = null;
   if (revising) {
     lockedReason = null;
+  } else if (outcome) {
+    lockedReason = outcome.message;
   } else if (active?.status === OrgOfferStatus.LATE) {
     lockedReason = "Late — not accepted.";
   } else if (!accepting) {
@@ -251,6 +290,7 @@ function opportunityActions(s, myOffer) {
   return {
     accepting,
     decided,
+    outcome,
     lockedReason,
     revising,
     canEdit: Boolean((accepting && active?.status === OrgOfferStatus.SUBMITTED) || revising),
@@ -331,7 +371,7 @@ export async function listPortalOpportunities(prisma, opts) {
     pageSize: opts.pageSize,
     items: rows.map((s) => {
       const myOffer = s.offers[0] || null;
-      const actions = opportunityActions(s, myOffer);
+      const actions = opportunityActions(s, myOffer, opts.providerId);
       return {
         id: s.id,
         type: s.solicitationType,
@@ -403,7 +443,7 @@ export async function loadPortalOpportunity(prisma, opts) {
   if (!s?.procurement) return null;
 
   const myOffer = s.offers[0] || null;
-  const actions = opportunityActions(s, myOffer);
+  const actions = opportunityActions(s, myOffer, opts.providerId);
   const [organisation, history, draftOffer] = await Promise.all([
     loadPrintOrganisation(prisma, opts.projectId),
     loadProviderHistory(prisma, {
@@ -523,14 +563,18 @@ export async function listPortalOrders(prisma, opts) {
       include: { procurement: procSelect },
     }),
     prisma.projectOrgLpo.findMany({
-      where: { projectId: opts.projectId, supplierId: opts.providerId, status: { not: OrgLpoStatus.CANCELLED } },
+      where: {
+        projectId: opts.projectId,
+        supplierId: opts.providerId,
+        status: { in: [OrgLpoStatus.ISSUED, OrgLpoStatus.ACCEPTED, OrgLpoStatus.DECLINED] },
+      },
       include: { procurement: procSelect },
     }),
     prisma.projectOrgContract.findMany({
       where: {
         projectId: opts.projectId,
         supplierId: opts.providerId,
-        status: { not: OrgContractStatus.CANCELLED },
+        status: { in: [OrgContractStatus.ISSUED, OrgContractStatus.ACTIVE, OrgContractStatus.DECLINED] },
       },
       include: { procurement: procSelect },
     }),

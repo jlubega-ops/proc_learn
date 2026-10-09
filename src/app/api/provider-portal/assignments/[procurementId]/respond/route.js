@@ -3,6 +3,7 @@ import { prisma } from "@/lib/prisma";
 import { requireProviderPortalSession } from "@/lib/projects/provider-portal";
 import { respondToPurchaseInstruction } from "@/lib/projects/purchase-instructions";
 import { respondToAward } from "@/lib/projects/awards";
+import { respondToOrder } from "@/lib/projects/contracts-lpo";
 
 export const runtime = "nodejs";
 
@@ -18,7 +19,8 @@ export async function POST(request, context) {
     return NextResponse.json({ error: "Invalid request body." }, { status: 400 });
   }
   const target = String(body?.target || "").trim().toLowerCase();
-  const respond = target === "award" ? respondToAward : respondToPurchaseInstruction;
+  const respond =
+    target === "award" ? respondToAward : target === "order" ? respondToOrder : respondToPurchaseInstruction;
   const result = await respond(prisma, {
     projectId: auth.project.id,
     providerId: auth.provider.id,

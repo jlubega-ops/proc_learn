@@ -8,6 +8,7 @@ import Chip from "@mui/material/Chip";
 import CircularProgress from "@mui/material/CircularProgress";
 import TextField from "@mui/material/TextField";
 import ArrowBackRounded from "@mui/icons-material/ArrowBackRounded";
+import AssignmentRounded from "@mui/icons-material/AssignmentRounded";
 import EditRounded from "@mui/icons-material/EditRounded";
 import RefreshRounded from "@mui/icons-material/RefreshRounded";
 import SendRounded from "@mui/icons-material/SendRounded";
@@ -337,7 +338,27 @@ export function PortalOpportunityDetail({ solicitationId }) {
             Clarification requested. You can revise your {word} until evaluation starts.
           </Alert>
         ) : null}
-        {activeOffer && data.lockedReason ? (
+        {data.outcome ? (
+          <Alert
+            severity={data.outcome.color}
+            variant="outlined"
+            sx={{ mt: 2 }}
+            action={
+              ["awarded", "completed"].includes(data.outcome.key) ? (
+                <Button
+                  component={Link}
+                  href={`/provider-portal/assignments/${procurement.id}`}
+                  size="small"
+                  startIcon={<AssignmentRounded />}
+                >
+                  Open assignment
+                </Button>
+              ) : null
+            }
+          >
+            {data.outcome.message}
+          </Alert>
+        ) : activeOffer && data.lockedReason ? (
           <Alert severity="warning" variant="outlined" sx={{ mt: 2 }}>
             {data.lockedReason} Your {word} can no longer be changed.
           </Alert>

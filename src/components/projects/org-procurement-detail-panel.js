@@ -36,7 +36,7 @@ import {
   adminOutlinedTableContainerSx,
   themedTextFieldSx,
 } from "@/lib/admin-mui-surfaces";
-import { formatMoneyUGX } from "@/lib/money";
+import { formatMoneyAmount, formatMoneyUGX } from "@/lib/money";
 import {
   defaultWorkflowDecision,
   isPositiveWorkflowDecision,
@@ -55,9 +55,12 @@ import {
 } from "@/components/projects/org-procurement-supply-cards";
 import { OrgEvaluationPanel } from "@/components/projects/org-evaluation-panel";
 import {
+  OrgAwardDecisionTrail,
   OrgAwardDetails,
+  awardedOffer,
   OrgAwardOrderBasis,
   OrgAwardRecommendationSummary,
+  OrgOrderSummary,
 } from "@/components/projects/org-award-recommendation-summary";
 import { OrgSubmissionWindow } from "@/components/projects/org-submission-window";
 import { OrgReceiveOffersPanel } from "@/components/projects/org-receive-offers-panel";
@@ -82,6 +85,14 @@ import {
   validatePurchaseInstructionTerms,
 } from "@/lib/validation/purchase-instruction";
 import { toDateInputValue } from "@/lib/financial-year-dates";
+import {
+  CERTIFY_DELIVERY_STEP_RE,
+  VERIFY_INVOICE_STEP_RE,
+  goodsReceivedEvidence,
+  invoiceThreeWayMatch,
+  latestStepSignOff,
+  procurementMoneySummary,
+} from "@/lib/projects/invoice-match";
 import { ProcurementStageCards } from "@/components/projects/org-procurement-stage-cards";
 import {
   isAcceptGoodsStep,
@@ -155,6 +166,23 @@ function procurementDetailFields(row, projectId, activeOrder) {
   const req = row.requisition;
   const dept = row.department;
   const approvedProviders = (req?.shortlist || []).map((s) => s?.name).filter(Boolean).join(", ");
+  const orderDoc = activeOrder
+    ? activeOrder
+    : row.contract && row.contract.status !== "CANCELLED"
+      ? {
+          number: row.contract.contractNumber,
+          value: Number(row.contract.contractValue) || 0,
+          supplierName: row.contract.supplier?.name || null,
+          deliveryAddress: row.contract.deliveryAddress || null,
+        }
+      : row.lpo && row.lpo.status !== "CANCELLED"
+        ? {
+            number: row.lpo.lpoNumber,
+            value: Number(row.lpo.lpoValue) || 0,
+            supplierName: row.lpo.supplier?.name || null,
+            deliveryAddress: row.lpo.deliveryAddress || null,
+          }
+        : null;
   const fields = [
     {
       label: "Requisition",
@@ -185,12 +213,12 @@ function procurementDetailFields(row, projectId, activeOrder) {
       wide: true,
     },
     { label: "Estimated value", value: formatMoneyUGX(req?.estimatedTotalValue) },
-    { label: "Order / contract no.", value: activeOrder?.number },
-    { label: "Order value", value: activeOrder ? formatMoneyUGX(activeOrder.value) : null },
-    { label: "Provider on order", value: activeOrder?.supplierName },
+    { label: "Order / contract no.", value: orderDoc?.number },
+    { label: "Order value", value: orderDoc ? formatMoneyUGX(orderDoc.value) : null },
+    { label: "Provider on order", value: orderDoc?.supplierName },
     {
       label: "Delivery location",
-      value: activeOrder?.deliveryAddress || req?.deliveryLocation,
+      value: orderDoc?.deliveryAddress || req?.deliveryLocation,
       wide: true,
     },
     { label: "Procurement officer", value: row.officer?.displayName, wide: true },
@@ -262,15 +290,16 @@ export function OrgProcurementDetailPanel({ projectId, procurementId, stage = nu
   const [closeConfirmOpen, setCloseConfirmOpen] = useState(false);
   /** @type {[Record<string, string>, Function]} */
   const [deliveryQtys, setDeliveryQtys] = useState({});
+  const [receivedOn, setReceivedOn] = useState(() => toDateInputValue(new Date()));
+  const [receiveRemarks, setReceiveRemarks] = useState("");
+  const [certifyComment, setCertifyComment] = useState("");
   const [inspectionNotes, setInspectionNotes] = useState("");
   /** @type {[Record<string, { accepted: string; rejected: string }>, Function]} */
   const [inspectionLineEdits, setInspectionLineEdits] = useState({});
-  const [inspectionCommitteeId, setInspectionCommitteeId] = useState("");
   /** @type {[Record<string, string>, Function]} */
   const [receiveErrors, setReceiveErrors] = useState({});
   /** @type {[Record<string, string>, Function]} */
   const [inspectionErrors, setInspectionErrors] = useState({});
-  const [committees, setCommittees] = useState(/** @type {any[]} */ ([]));
   const [rejectReason, setRejectReason] = useState("");
   const [cancelAwardReason, setCancelAwardReason] = useState("");
   /** @type {import("react").RefObject<{ validate: () => boolean; save: () => Promise<boolean> } | null>} */
@@ -340,7 +369,6 @@ export function OrgProcurementDetailPanel({ projectId, procurementId, stage = nu
       setDeliveryQtys({});
       setInspectionNotes("");
       setInspectionLineEdits({});
-      setInspectionCommitteeId("");
       setRejectReason("");
       setCancelAwardReason("");
     } finally {
@@ -360,23 +388,10 @@ export function OrgProcurementDetailPanel({ projectId, procurementId, stage = nu
     }
   }, [projectId]);
 
-  const loadCommittees = useCallback(async () => {
-    try {
-      const res = await fetch(`/api/projects/${projectId}/org-committees`, {
-        credentials: "include",
-      });
-      const data = await res.json().catch(() => ({}));
-      if (res.ok) setCommittees(Array.isArray(data.committees) ? data.committees : []);
-    } catch {
-      // optional when VIEW_COMMITTEES is unavailable
-    }
-  }, [projectId]);
-
   useEffect(() => {
     void load();
     void loadSuppliers();
-    void loadCommittees();
-  }, [load, loadSuppliers, loadCommittees]);
+  }, [load, loadSuppliers]);
 
   const actionKey = String(pendingTask?.actionKey || "").toUpperCase();
   const taskTitle = String(pendingTask?.title || "");
@@ -413,6 +428,7 @@ export function OrgProcurementDetailPanel({ projectId, procurementId, stage = nu
             : null;
   const isReceiveGoodsTask = Boolean(pendingTask) && isReceiveGoodsStep(taskTitle);
   const isAcceptGoodsTask = Boolean(pendingTask) && isAcceptGoodsStep(taskTitle);
+  const isCertifyStep = /^certify delivery/i.test(taskStep);
   const isPositiveDecision = isPositiveWorkflowDecision(decision);
   const stepActionLabel = workflowStepActionLabel(taskTitle);
   const usesProviderPicker = (isIssuePi || isRfqIssue) && isPositiveDecision;
@@ -553,6 +569,13 @@ export function OrgProcurementDetailPanel({ projectId, procurementId, stage = nu
     if (!Object.keys(errs).length && !lines.length) {
       for (const l of pendingDeliveryNote.lines) errs[l.itemName] = "Enter a quantity.";
     }
+    const today = toDateInputValue(new Date());
+    if (!receivedOn) errs.receivedOn = "Enter the date.";
+    else if (receivedOn > today) errs.receivedOn = "Date cannot be in the future.";
+    else if (receivedOn < toDateInputValue(pendingDeliveryNote.dispatchedAt)) {
+      errs.receivedOn = "Cannot be before the dispatch date.";
+    }
+    if (receiveRemarks.trim().length > 2000) errs.receiveRemarks = "Max 2000 characters.";
     setReceiveErrors(errs);
     if (Object.keys(errs).length) {
       showToast({ message: "Please fix the highlighted fields.", severity: "error" });
@@ -561,13 +584,17 @@ export function OrgProcurementDetailPanel({ projectId, procurementId, stage = nu
     const body = {
       lines,
       deliveryNoteId: pendingDeliveryNote.id,
-      remarks: `Received against ${pendingDeliveryNote.noteNumber}.`,
+      deliveryDate: receivedOn,
+      remarks: receiveRemarks.trim() || null,
     };
     if (!(await confirm(actionConfirmOptions("Confirm receipt")))) return;
     const ok = isReceiveGoodsTask
       ? await submitDeliveryTask(body, "Goods received.")
       : await runLifecycle("record_delivery", body, "Goods received.");
-    if (ok) setDeliveryQtys({});
+    if (ok) {
+      setDeliveryQtys({});
+      setReceiveRemarks("");
+    }
   }
 
   /** @param {any} d */
@@ -582,11 +609,14 @@ export function OrgProcurementDetailPanel({ projectId, procurementId, stage = nu
       const rejected = Number(rejectedRaw);
       if (!acceptedRaw || !Number.isFinite(accepted) || accepted < 0) errs[`${l.id}:accepted`] = "Enter a quantity.";
       if (!Number.isFinite(rejected) || rejected < 0) errs[`${l.id}:rejected`] = "Enter a quantity.";
-      else if (accepted + rejected > Number(l.receivedQuantity) + 0.009) {
-        errs[`${l.id}:accepted`] = `Max ${l.receivedQuantity} in total.`;
+      else if (Number.isFinite(accepted) && Math.abs(accepted + rejected - Number(l.receivedQuantity)) > 0.009) {
+        errs[`${l.id}:accepted`] = `Must total ${formatMoneyAmount(l.receivedQuantity)}.`;
       }
       return { lineId: l.id, acceptedQuantity: acceptedRaw, rejectedQuantity: rejectedRaw };
     });
+    if (lineDecisions.some((ld) => Number(ld.rejectedQuantity) > 0) && !inspectionNotes.trim()) {
+      errs.inspectionNotes = "Enter the reason for rejection.";
+    }
     setInspectionErrors(errs);
     if (Object.keys(errs).length) {
       showToast({ message: "Please fix the highlighted fields.", severity: "error" });
@@ -599,8 +629,6 @@ export function OrgProcurementDetailPanel({ projectId, procurementId, stage = nu
       deliveryId: d.id,
       resultNotes: inspectionNotes.trim() || (fullyAccepted ? "Accepted in full." : "Inspection recorded."),
       lineDecisions,
-      committeeId: inspectionCommitteeId || null,
-      committeeRole: inspectionCommitteeId ? "INSPECTION" : null,
     };
     if (!(await confirm(actionConfirmOptions("Confirm inspection")))) return;
     const ok = isAcceptGoodsTask
@@ -752,6 +780,18 @@ export function OrgProcurementDetailPanel({ projectId, procurementId, stage = nu
   const isPrepareOrderTask = Boolean(pendingTask) && /^prepare (lpo|contract)/i.test(taskStep);
   const awaitingAwardAcceptance =
     isPrepareOrderTask && Boolean(row.award) && row.award.status !== "ACCEPTED";
+  const isConfirmOrderAcceptanceTask =
+    Boolean(pendingTask) && /^(confirm supplier acceptance|supplier acceptance)/i.test(taskStep);
+  const orderDocForTask = row.contract || row.lpo || null;
+  const orderAcceptanceBlocker = !isConfirmOrderAcceptanceTask
+    ? ""
+    : !orderDocForTask
+      ? "No LPO or contract issued yet."
+      : orderDocForTask.status === "DECLINED"
+        ? `The supplier declined the ${row.contract ? "contract" : "LPO"}.`
+        : ["ACCEPTED", "ACTIVE"].includes(orderDocForTask.status)
+          ? ""
+          : `Waiting for the supplier to accept the ${row.contract ? "contract" : "LPO"}.`;
   const receiveBlocker = !isPositiveDecision
     ? ""
     : isReceive
@@ -770,7 +810,7 @@ export function OrgProcurementDetailPanel({ projectId, procurementId, stage = nu
             : `No ${providerWord.toLowerCase()} response yet`
         : awaitingAwardAcceptance
           ? "Waiting for the supplier to accept the award."
-          : "";
+          : orderAcceptanceBlocker;
   const usesBidDocument = row.procurementMethod === "QUOTATION" || row.procurementMethod === "TENDER";
   const bidDocWord = row.procurementMethod === "TENDER" ? "Tender document" : "RFQ document";
   const docInTaskCard = showTaskCard && (isPrepareDocsTask || isReviewDocsTask);
@@ -806,6 +846,7 @@ export function OrgProcurementDetailPanel({ projectId, procurementId, stage = nu
   let activeOrder = null;
   if (row.contract && ["ACTIVE", "ISSUED", "SIGNED"].includes(row.contract.status)) {
     activeOrder = {
+      kind: "Contract",
       number: row.contract.contractNumber,
       value: Number(row.contract.contractValue) || 0,
       supplierName: row.contract.supplier?.name || null,
@@ -813,6 +854,7 @@ export function OrgProcurementDetailPanel({ projectId, procurementId, stage = nu
     };
   } else if (row.lpo && ["ACCEPTED", "ISSUED"].includes(row.lpo.status)) {
     activeOrder = {
+      kind: "LPO",
       number: row.lpo.lpoNumber,
       value: Number(row.lpo.lpoValue) || 0,
       supplierName: row.lpo.supplier?.name || null,
@@ -820,6 +862,7 @@ export function OrgProcurementDetailPanel({ projectId, procurementId, stage = nu
     };
   } else if (pi && ["ISSUED", "ACCEPTED"].includes(pi.status)) {
     activeOrder = {
+      kind: "PI",
       number: pi.instructionNumber,
       value: Number(pi.amount) || 0,
       supplierName: pi.supplier?.name || null,
@@ -830,9 +873,11 @@ export function OrgProcurementDetailPanel({ projectId, procurementId, stage = nu
   const deliveries = Array.isArray(row.deliveries) ? row.deliveries : [];
   const orderProvider = activeOrder?.supplierName || `the ${providerWord}`;
   const orderNotOpen = row.contract
-    ? ["ACTIVE", "ISSUED"].includes(row.contract.status)
+    ? row.contract.status === "ACTIVE"
       ? null
-      : "The contract has not been issued yet."
+      : row.contract.status === "ISSUED"
+        ? `Waiting for ${orderProvider} to accept ${row.contract.contractNumber}.`
+        : "The contract has not been issued yet."
     : row.lpo
       ? row.lpo.status === "ACCEPTED"
         ? null
@@ -912,6 +957,12 @@ export function OrgProcurementDetailPanel({ projectId, procurementId, stage = nu
     (isInvoiceTask || invoiceAct) &&
     LIFECYCLE_ACTION_ROLES.reject_invoice.includes(viewerRole || "");
   const processedInvoices = invoicesNewestFirst.filter((i) => i.id !== openInvoice?.id);
+  const orderPricedLines = row.orderLines?.length ? row.orderLines : awardedOffer(row).lines;
+  const orderValueNum = activeOrder ? Number(activeOrder.value) : null;
+  const invoiceMatch = openInvoice
+    ? invoiceThreeWayMatch({ row, invoice: openInvoice, orderValue: orderValueNum, pricedLines: orderPricedLines })
+    : null;
+  const goodsEvidence = openInvoice ? goodsReceivedEvidence(row) : null;
 
   async function confirmRejectInvoice() {
     const reason = invoiceRejectReason.trim();
@@ -938,6 +989,14 @@ export function OrgProcurementDetailPanel({ projectId, procurementId, stage = nu
     invoices.find((i) => i.id === currentPayment?.invoiceId) ||
     invoicesNewestFirst.find((i) => ["VERIFIED", "APPROVED_FOR_PAYMENT"].includes(i.status)) ||
     null;
+  const paymentMatch = payableInvoice
+    ? invoiceThreeWayMatch({ row, invoice: payableInvoice, orderValue: orderValueNum, pricedLines: orderPricedLines })
+    : null;
+  const invoiceVerified = payableInvoice ? latestStepSignOff(row.timeline, VERIFY_INVOICE_STEP_RE) : null;
+  const thisPaymentAmount = Number(currentPayment?.amount ?? payableInvoice?.amount) || 0;
+  const previouslyPaid = paymentsNewestFirst
+    .filter((p) => p.status === "PAID" && p.id !== currentPayment?.id)
+    .reduce((s, p) => s + (Number(p.amount) || 0), 0);
   const generatedPaymentRef = `PAY-${row.procurementNumber || "PROC"}-${String(
     paymentsNewestFirst.filter((p) => p.paymentReference).length + 1,
   ).padStart(3, "0")}`;
@@ -953,6 +1012,11 @@ export function OrgProcurementDetailPanel({ projectId, procurementId, stage = nu
       : (LIFECYCLE_ACTION_ROLES[action] || []).includes(viewerRole || "");
   const awardInTaskCard =
     showTaskCard && Boolean(row?.award) && (procurementTaskStage(taskTitle) === "award" || isPrepareOrderTask);
+  const orderInTaskCard =
+    showTaskCard &&
+    !isPrepareOrderTask &&
+    Boolean(row?.lpo || row?.contract) &&
+    procurementTaskStage(taskTitle) === "contract";
   const awardCancellable =
     Boolean(row?.award) &&
     awardMay("cancel_award") &&
@@ -1042,9 +1106,12 @@ export function OrgProcurementDetailPanel({ projectId, procurementId, stage = nu
   const orderStatus = row.contract?.status || row.lpo?.status || pi?.status || null;
   const orderDone = Boolean(activeOrder) && !orderNotOpen;
   const verifiedInvoices = invoices.filter((i) => ["VERIFIED", "APPROVED_FOR_PAYMENT"].includes(i.status));
-  const invoicedTotal = verifiedInvoices.reduce((s, i) => s + (Number(i.amount) || 0), 0);
   const paidPayments = paymentsNewestFirst.filter((p) => p.status === "PAID");
-  const paidTotal = paidPayments.reduce((s, p) => s + (Number(p.amount) || 0), 0);
+  const moneySummary = procurementMoneySummary({ row, orderValue: orderValueNum, pricedLines: orderPricedLines });
+  const invoicedTotal = moneySummary.invoiced;
+  const paidTotal = moneySummary.paid;
+  const deliveryCertified = latestStepSignOff(row.timeline, CERTIFY_DELIVERY_STEP_RE);
+  const invoiceVerifiedAny = latestStepSignOff(row.timeline, VERIFY_INVOICE_STEP_RE);
   const acceptedInspections = deliveries.filter((d) =>
     ["ACCEPTED", "PARTIAL"].includes(d.inspection?.status),
   ).length;
@@ -1070,14 +1137,24 @@ export function OrgProcurementDetailPanel({ projectId, procurementId, stage = nu
     {
       id: "inspection",
       stage: "Inspection",
-      details: deliveries.length ? `${acceptedInspections} of ${deliveries.length} accepted` : "—",
+      details: deliveries.length
+        ? `${acceptedInspections} of ${deliveries.length} accepted${
+            deliveryCertified
+              ? ` · certified by ${deliveryCertified.by || "—"} on ${formatPrintDate(deliveryCertified.at)}`
+              : ""
+          }`
+        : "—",
       done: allInspected && acceptedInspections > 0,
     },
     {
       id: "invoice",
       stage: "Invoice",
       details: verifiedInvoices.length
-        ? verifiedInvoices.map((i) => `${i.invoiceNumber} · ${formatMoneyUGX(i.amount)}`).join(", ")
+        ? `${verifiedInvoices.map((i) => `${i.invoiceNumber} · ${formatMoneyUGX(i.amount)}`).join(", ")}${
+            invoiceVerifiedAny
+              ? ` · verified by ${invoiceVerifiedAny.by || "—"} on ${formatPrintDate(invoiceVerifiedAny.at)}`
+              : ""
+          }`
         : "—",
       done: verifiedInvoices.length > 0,
     },
@@ -1131,6 +1208,17 @@ export function OrgProcurementDetailPanel({ projectId, procurementId, stage = nu
    */
   const saveDeliveryAddress = (kind, deliveryAddress) =>
     runLifecycle("update_delivery_address", { kind, deliveryAddress }, "Delivery address updated.");
+
+  const orderDoc = row?.contract || row?.lpo || null;
+  const orderAddressLine = orderDoc ? (
+    <OrgDeliveryAddressLine
+      address={orderDoc.deliveryAddress}
+      fallback={requisitionAddress}
+      editableKind={["DRAFT", "APPROVED"].includes(orderDoc.status) ? (row.contract ? "contract" : "lpo") : null}
+      busy={busy}
+      onSave={saveDeliveryAddress}
+    />
+  ) : null;
 
   const providerPicker = usesProviderPicker ? (
     <OrgProviderSelection
@@ -1344,6 +1432,11 @@ export function OrgProcurementDetailPanel({ projectId, procurementId, stage = nu
                 setBusy={setBusy}
                 onChanged={load}
               />
+            </div>
+          ) : null}
+          {orderInTaskCard ? (
+            <div className="mb-4">
+              <OrgOrderSummary row={row} addressSlot={orderAddressLine} />
             </div>
           ) : null}
           {awardInTaskCard ? (
@@ -1721,26 +1814,15 @@ export function OrgProcurementDetailPanel({ projectId, procurementId, stage = nu
           </ProcurementSectionGate>
           ) : null}
 
-          {on("contract") && (row.lpo || row.contract || !contractInWorkflow) ? (
+          {on("contract") && !orderInTaskCard && (row.lpo || row.contract || !contractInWorkflow) ? (
           <ProcurementSectionGate access={sections?.contract}>
           <Paper variant="outlined" sx={{ p: 2, ...adminOutlinedTableContainerSx }}>
             <Typography variant="subtitle1" sx={{ fontWeight: 600, mb: 1 }}>
-              Contract / LPO
+              {row.procurementMethod === "TENDER" ? "Contract" : "Local purchase order"}
             </Typography>
             {row.lpo ? (
               <div className="space-y-2 text-sm">
-                <p>
-                  LPO <span className="font-semibold">{row.lpo.lpoNumber}</span> · {row.lpo.status}{" "}
-                  · {formatMoneyUGX(row.lpo.lpoValue)}
-                  {row.lpo.supplier?.name ? ` · ${row.lpo.supplier.name}` : ""}
-                </p>
-                <OrgDeliveryAddressLine
-                  address={row.lpo.deliveryAddress}
-                  fallback={requisitionAddress}
-                  editableKind={["DRAFT", "APPROVED"].includes(row.lpo.status) ? "lpo" : null}
-                  busy={busy}
-                  onSave={saveDeliveryAddress}
-                />
+                <OrgOrderSummary row={row} addressSlot={orderAddressLine} />
                 <div className="flex flex-wrap gap-2">
                   {row.lpo.status === "DRAFT" && !contractInWorkflow ? (
                     <Button
@@ -1766,36 +1848,11 @@ export function OrgProcurementDetailPanel({ projectId, procurementId, stage = nu
                       Issue LPO
                     </Button>
                   ) : null}
-                  {row.lpo.status === "ISSUED" && !contractInWorkflow ? (
-                    <Button
-                      size="small"
-                      variant="outlined"
-                      disabled={busy}
-                      onClick={() =>
-                        void confirmThen("Accept LPO", () => runLifecycle("accept_lpo", { lpoId: row.lpo.id }))
-                      }
-                    >
-                      Accept LPO
-                    </Button>
-                  ) : null}
                 </div>
               </div>
             ) : row.contract ? (
               <div className="space-y-2 text-sm">
-                <p>
-                  Contract <span className="font-semibold">{row.contract.contractNumber}</span> ·{" "}
-                  {row.contract.status} · {formatMoneyUGX(row.contract.contractValue)}
-                  {row.contract.supplier?.name ? ` · ${row.contract.supplier.name}` : ""}
-                </p>
-                <OrgDeliveryAddressLine
-                  address={row.contract.deliveryAddress}
-                  fallback={requisitionAddress}
-                  editableKind={
-                    ["DRAFT", "APPROVED"].includes(row.contract.status) ? "contract" : null
-                  }
-                  busy={busy}
-                  onSave={saveDeliveryAddress}
-                />
+                <OrgOrderSummary row={row} addressSlot={orderAddressLine} />
                 <div className="flex flex-wrap gap-2">
                   {row.contract.status === "DRAFT" && !contractInWorkflow ? (
                     <Button
@@ -1906,6 +1963,8 @@ export function OrgProcurementDetailPanel({ projectId, procurementId, stage = nu
                   },
                   { label: "Dispatched", value: formatPrintDate(pendingDeliveryNote.dispatchedAt) },
                   { label: "Order", value: activeOrder?.number || null },
+                  { label: "Delivered by", value: pendingDeliveryNote.deliveredBy },
+                  { label: "Vehicle no.", value: pendingDeliveryNote.vehicleNumber },
                   ...(pendingDeliveryNote.remarks
                     ? [{ label: "Remarks", value: pendingDeliveryNote.remarks, full: true }]
                     : []),
@@ -1928,7 +1987,7 @@ export function OrgProcurementDetailPanel({ projectId, procurementId, stage = nu
                       id: "quantity",
                       label: "Dispatched",
                       align: "right",
-                      render: (l) => `${l.quantity}${l.unitOfMeasure ? ` ${l.unitOfMeasure}` : ""}`,
+                      render: (l) => `${formatMoneyAmount(l.quantity)}${l.unitOfMeasure ? ` ${l.unitOfMeasure}` : ""}`,
                     },
                     ...(canReceiveGoods
                       ? [
@@ -1939,7 +1998,7 @@ export function OrgProcurementDetailPanel({ projectId, procurementId, stage = nu
                             render: (/** @type {any} */ l) => (
                               <TextField
                                 aria-label={`Received quantity for ${l.itemName}`}
-                                value={deliveryQtys[l.itemName] ?? l.quantity}
+                                value={deliveryQtys[l.itemName] ?? formatMoneyAmount(l.quantity)}
                                 onChange={(e) => {
                                   setDeliveryQtys((prev) => ({ ...prev, [l.itemName]: e.target.value }));
                                   setReceiveErrors((prev) => ({ ...prev, [l.itemName]: "" }));
@@ -1957,7 +2016,43 @@ export function OrgProcurementDetailPanel({ projectId, procurementId, stage = nu
                 />
               </div>
               {canReceiveGoods ? (
-                <div className="mt-3 flex justify-end">
+                <div className="mt-3 grid gap-x-3 sm:grid-cols-[12rem_1fr]">
+                  <TextField
+                    label="Date received"
+                    type="date"
+                    value={receivedOn}
+                    onChange={(e) => {
+                      setReceivedOn(e.target.value);
+                      setReceiveErrors((prev) => ({ ...prev, receivedOn: "" }));
+                    }}
+                    error={Boolean(receiveErrors.receivedOn)}
+                    helperText={receiveErrors.receivedOn || " "}
+                    fullWidth
+                    sx={themedTextFieldSx}
+                    slotProps={{
+                      inputLabel: { shrink: true },
+                      htmlInput: {
+                        min: toDateInputValue(pendingDeliveryNote.dispatchedAt),
+                        max: toDateInputValue(new Date()),
+                      },
+                    }}
+                  />
+                  <TextField
+                    label="Condition / remarks"
+                    value={receiveRemarks}
+                    onChange={(e) => {
+                      setReceiveRemarks(e.target.value);
+                      setReceiveErrors((prev) => ({ ...prev, receiveRemarks: "" }));
+                    }}
+                    error={Boolean(receiveErrors.receiveRemarks)}
+                    helperText={receiveErrors.receiveRemarks || "Optional"}
+                    fullWidth
+                    sx={themedTextFieldSx}
+                  />
+                </div>
+              ) : null}
+              {canReceiveGoods ? (
+                <div className="mt-1 flex justify-end">
                   <Button
                     variant="contained"
                     startIcon={busy ? <CircularProgress size={16} color="inherit" /> : <CheckCircleRounded />}
@@ -1993,18 +2088,20 @@ export function OrgProcurementDetailPanel({ projectId, procurementId, stage = nu
                     date: d.deliveryDate ? formatPrintDate(d.deliveryDate) : "—",
                     note: d.deliveryNote?.noteNumber || "—",
                     item: l.itemName,
-                    received: `${l.receivedQuantity}${l.unitOfMeasure ? ` ${l.unitOfMeasure}` : ""}`,
-                    ordered: l.orderedQuantity,
+                    received: `${formatMoneyAmount(l.receivedQuantity)}${l.unitOfMeasure ? ` ${l.unitOfMeasure}` : ""}`,
+                    ordered: formatMoneyAmount(l.orderedQuantity),
                     by: d.recordedBy?.displayName || "—",
+                    remarks: d.remarks && !/^Received against /.test(d.remarks) ? d.remarks : "—",
                   })),
                 )}
                 columns={[
-                  { id: "date", label: "Date" },
+                  { id: "date", label: "Date received" },
                   { id: "note", label: "Delivery note" },
                   { id: "item", label: "Item" },
                   { id: "received", label: "Received", align: "right" },
                   { id: "ordered", label: "Ordered", align: "right" },
                   { id: "by", label: "Received by" },
+                  { id: "remarks", label: "Remarks" },
                 ]}
               />
             </div>
@@ -2057,7 +2154,8 @@ export function OrgProcurementDetailPanel({ projectId, procurementId, stage = nu
                             id: "receivedQuantity",
                             label: "Received",
                             align: "right",
-                            render: (l) => `${l.receivedQuantity}${l.unitOfMeasure ? ` ${l.unitOfMeasure}` : ""}`,
+                            render: (l) =>
+                              `${formatMoneyAmount(l.receivedQuantity)}${l.unitOfMeasure ? ` ${l.unitOfMeasure}` : ""}`,
                           },
                           ...["accepted", "rejected"].map((field) => ({
                             id: field,
@@ -2065,7 +2163,7 @@ export function OrgProcurementDetailPanel({ projectId, procurementId, stage = nu
                             align: /** @type {"right"} */ ("right"),
                             render: (/** @type {any} */ l) => {
                               const edit = inspectionLineEdits[l.id] || {
-                                accepted: String(l.receivedQuantity ?? ""),
+                                accepted: formatMoneyAmount(l.receivedQuantity),
                                 rejected: "0",
                               };
                               return (
@@ -2073,11 +2171,25 @@ export function OrgProcurementDetailPanel({ projectId, procurementId, stage = nu
                                   aria-label={`${field === "accepted" ? "Accepted" : "Rejected"} quantity for ${l.itemName}`}
                                   value={edit[field]}
                                   onChange={(e) => {
+                                    const value = e.target.value;
+                                    const n = Number(value);
+                                    const other = field === "accepted" ? "rejected" : "accepted";
+                                    const rest = Number(l.receivedQuantity) - n;
                                     setInspectionLineEdits((prev) => ({
                                       ...prev,
-                                      [l.id]: { ...edit, [field]: e.target.value },
+                                      [l.id]: {
+                                        ...edit,
+                                        [field]: value,
+                                        ...(value.trim() && Number.isFinite(n) && rest >= 0
+                                          ? { [other]: formatMoneyAmount(rest) }
+                                          : {}),
+                                      },
                                     }));
-                                    setInspectionErrors((prev) => ({ ...prev, [`${l.id}:${field}`]: "" }));
+                                    setInspectionErrors((prev) => ({
+                                      ...prev,
+                                      [`${l.id}:accepted`]: "",
+                                      [`${l.id}:rejected`]: "",
+                                    }));
                                   }}
                                   error={Boolean(inspectionErrors[`${l.id}:${field}`])}
                                   helperText={inspectionErrors[`${l.id}:${field}`] || undefined}
@@ -2089,37 +2201,25 @@ export function OrgProcurementDetailPanel({ projectId, procurementId, stage = nu
                           })),
                         ]}
                       />
-                      <div className="grid gap-3 sm:grid-cols-2">
-                        {row.procurementMethod !== "MICRO" ? (
-                          <TextField
-                            select
-                            label="Inspection committee"
-                            value={inspectionCommitteeId}
-                            onChange={(e) => setInspectionCommitteeId(e.target.value)}
-                            fullWidth
-                            helperText="Optional"
-                            sx={themedTextFieldSx}
-                          >
-                            <MenuItem value="">None</MenuItem>
-                            {committees
-                              .filter((c) => c.isActive && c.committeeType === "INSPECTION_ACCEPTANCE")
-                              .map((c) => (
-                                <MenuItem key={c.id} value={c.id}>
-                                  {c.name}
-                                </MenuItem>
-                              ))}
-                          </TextField>
-                        ) : null}
-                        <TextField
-                          label="Notes"
-                          value={inspectionNotes}
-                          onChange={(e) => setInspectionNotes(e.target.value)}
-                          fullWidth
-                          helperText="Optional"
-                          sx={themedTextFieldSx}
-                          className={row.procurementMethod === "MICRO" ? "sm:col-span-2" : undefined}
-                        />
-                      </div>
+                      <TextField
+                        label="Inspection notes"
+                        value={inspectionNotes}
+                        onChange={(e) => {
+                          setInspectionNotes(e.target.value);
+                          setInspectionErrors((prev) => ({ ...prev, inspectionNotes: "" }));
+                        }}
+                        error={Boolean(inspectionErrors.inspectionNotes)}
+                        helperText={
+                          inspectionErrors.inspectionNotes ||
+                          ((d.lines || []).some((l) => Number(inspectionLineEdits[l.id]?.rejected) > 0)
+                            ? "Reason for rejection"
+                            : "Optional")
+                        }
+                        fullWidth
+                        multiline
+                        minRows={2}
+                        sx={themedTextFieldSx}
+                      />
                       <div className="flex justify-end">
                         <Button
                           variant="contained"
@@ -2151,14 +2251,16 @@ export function OrgProcurementDetailPanel({ projectId, procurementId, stage = nu
                         id: l.id,
                         note: d.deliveryNote?.noteNumber || "—",
                         item: l.itemName,
-                        received: l.receivedQuantity,
-                        accepted: l.acceptedQuantity,
-                        rejected: l.rejectedQuantity,
+                        received: formatMoneyAmount(l.receivedQuantity),
+                        accepted: formatMoneyAmount(l.acceptedQuantity),
+                        rejected: formatMoneyAmount(l.rejectedQuantity),
                         status: d.inspection.status,
                         by: d.inspection.inspectedBy?.displayName || "—",
+                        on: d.inspection.inspectedAt ? formatPrintDate(d.inspection.inspectedAt) : "—",
                       })),
                     )}
                   columns={[
+                    { id: "on", label: "Inspected on" },
                     { id: "note", label: "Delivery note" },
                     { id: "item", label: "Item" },
                     { id: "received", label: "Received", align: "right" },
@@ -2179,23 +2281,96 @@ export function OrgProcurementDetailPanel({ projectId, procurementId, stage = nu
                     { id: "by", label: "Inspected by" },
                   ]}
                 />
+                {deliveries
+                  .filter((d) => d.inspection?.resultNotes)
+                  .map((d) => (
+                    <Typography key={d.id} variant="body2" sx={{ ...adminMutedTextSx, mt: 1 }}>
+                      {d.deliveryNote?.noteNumber ? `${d.deliveryNote.noteNumber}: ` : ""}
+                      {d.inspection.resultNotes}
+                    </Typography>
+                  ))}
+              </div>
+            ) : null}
+
+            {allInspected ? (
+              <div className="mt-3 space-y-3">
+                <OrgLineItemsTable
+                  title="Delivery against order"
+                  rows={reqItems.map((it) => {
+                    const accepted = deliveries
+                      .filter((d) => d.inspection)
+                      .flatMap((d) => d.lines || [])
+                      .filter((l) => l.itemName === it.itemName)
+                      .reduce((sum, l) => sum + (Number(l.acceptedQuantity) || 0), 0);
+                    const outstanding = Math.max(0, Number(it.quantity) - accepted);
+                    return { id: it.itemName, item: it.itemName, unit: it.unitOfMeasure, ordered: it.quantity, accepted, outstanding };
+                  })}
+                  columns={[
+                    { id: "item", label: "Item" },
+                    {
+                      id: "ordered",
+                      label: "Ordered",
+                      align: "right",
+                      render: (r) => `${formatMoneyAmount(r.ordered)}${r.unit ? ` ${r.unit}` : ""}`,
+                    },
+                    { id: "accepted", label: "Accepted", align: "right", render: (r) => formatMoneyAmount(r.accepted) },
+                    {
+                      id: "outstanding",
+                      label: "Outstanding",
+                      align: "right",
+                      render: (r) => formatMoneyAmount(r.outstanding),
+                    },
+                    {
+                      id: "status",
+                      label: "Status",
+                      render: (r) => (
+                        <Chip
+                          size="small"
+                          variant="outlined"
+                          color={r.outstanding > 0.009 ? "warning" : "success"}
+                          label={r.outstanding > 0.009 ? "Partly delivered" : "Complete"}
+                        />
+                      ),
+                    },
+                  ]}
+                />
+                <OrgAwardDecisionTrail timeline={row.timeline} stage="delivery" />
               </div>
             ) : null}
 
             {isAcceptGoodsTask && allInspected ? (
-              <div className="mt-3 flex justify-end">
-                <Button
-                  variant="contained"
-                  color="success"
-                  startIcon={<CheckCircleRounded />}
-                  disabled={busy}
-                  onClick={() =>
-                    void confirmThen("Accept delivery", () => submitDeliveryTask({}, "Delivery accepted."))
-                  }
-                  className="w-full sm:w-auto"
-                >
-                  Accept delivery
-                </Button>
+              <div className="mt-3 space-y-2">
+                <TextField
+                  label="Comment"
+                  value={certifyComment}
+                  onChange={(e) => setCertifyComment(e.target.value)}
+                  helperText="Optional"
+                  fullWidth
+                  multiline
+                  minRows={2}
+                  sx={themedTextFieldSx}
+                />
+                <div className="flex justify-end">
+                  <Button
+                    variant="contained"
+                    color="success"
+                    startIcon={busy ? <CircularProgress size={16} color="inherit" /> : <CheckCircleRounded />}
+                    disabled={busy}
+                    onClick={() =>
+                      void confirmThen(isCertifyStep ? "Certify delivery" : "Accept delivery", async () => {
+                        const ok = await submitDeliveryTask(
+                          { comment: certifyComment.trim() },
+                          isCertifyStep ? "Delivery certified." : "Delivery accepted.",
+                        );
+                        if (ok) setCertifyComment("");
+                        return ok;
+                      }, "success")
+                    }
+                    className="w-full sm:w-auto"
+                  >
+                    {isCertifyStep ? "Certify delivery" : "Accept delivery"}
+                  </Button>
+                </div>
               </div>
             ) : null}
           </Paper>
@@ -2246,17 +2421,6 @@ export function OrgProcurementDetailPanel({ projectId, procurementId, stage = nu
                   value: formatPrintDate(openInvoice.invoiceDate || openInvoice.createdAt),
                 },
                 { label: "Amount", value: formatMoneyUGX(openInvoice.amount) },
-                {
-                  label: "Order value",
-                  value: activeOrder ? (
-                    <span className="inline-flex flex-wrap items-center gap-2">
-                      {formatMoneyUGX(activeOrder.value)}
-                      {Math.abs((Number(openInvoice.amount) || 0) - activeOrder.value) > 0.009 ? (
-                        <Chip size="small" color="warning" variant="outlined" label="Differs" />
-                      ) : null}
-                    </span>
-                  ) : null,
-                },
                 { label: "Order", value: activeOrder?.number || null },
                 { label: "Source", value: <SubmissionSourceChip source={openInvoice.source} /> },
                 ...(openInvoice.deliveryAddress
@@ -2265,6 +2429,73 @@ export function OrgProcurementDetailPanel({ projectId, procurementId, stage = nu
                 ...(openInvoice.notes ? [{ label: "Notes", value: openInvoice.notes, full: true }] : []),
               ]}
             />
+            {invoiceMatch ? (
+              <div className="mt-3 space-y-2">
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <Typography variant="subtitle2" sx={{ fontWeight: 600 }}>
+                    Three-way match
+                  </Typography>
+                  <Chip size="small" color={invoiceMatch.result.color} label={invoiceMatch.result.label} />
+                </div>
+                <OrgLineItemsTable
+                  rows={invoiceMatch.lines}
+                  getRowKey={(l) => l.itemName}
+                  columns={[
+                    { id: "itemName", label: "Item" },
+                    {
+                      id: "ordered",
+                      label: activeOrder?.kind ? `Ordered (${activeOrder.kind})` : "Ordered",
+                      align: "right",
+                      render: (l) => `${formatMoneyAmount(l.ordered)}${l.unitOfMeasure ? ` ${l.unitOfMeasure}` : ""}`,
+                    },
+                    {
+                      id: "accepted",
+                      label: "Accepted",
+                      align: "right",
+                      render: (l) => `${formatMoneyAmount(l.accepted)}${l.unitOfMeasure ? ` ${l.unitOfMeasure}` : ""}`,
+                    },
+                    {
+                      id: "unitPrice",
+                      label: "Unit price",
+                      align: "right",
+                      render: (l) => (l.unitPrice === null ? "—" : formatMoneyUGX(l.unitPrice)),
+                    },
+                    {
+                      id: "acceptedValue",
+                      label: "Accepted value",
+                      align: "right",
+                      render: (l) => (l.acceptedValue === null ? "—" : formatMoneyUGX(l.acceptedValue)),
+                    },
+                  ]}
+                />
+                <RecordDetailsGrid
+                  fields={[
+                    { label: "Order value", value: activeOrder ? formatMoneyUGX(activeOrder.value) : null },
+                    {
+                      label: "Accepted goods value",
+                      value: invoiceMatch.acceptedValue === null ? null : formatMoneyUGX(invoiceMatch.acceptedValue),
+                    },
+                    { label: "Previously invoiced", value: formatMoneyUGX(invoiceMatch.previouslyInvoiced) },
+                    { label: "This invoice", value: formatMoneyUGX(invoiceMatch.amount) },
+                    ...(goodsEvidence?.notes.length
+                      ? [{ label: "Delivery notes", value: goodsEvidence.notes.join(", "), wide: true }]
+                      : []),
+                    ...(goodsEvidence?.certifiedAt
+                      ? [
+                          {
+                            label: "Delivery certified",
+                            value: `${goodsEvidence.certifiedBy || "—"} · ${formatPrintDate(goodsEvidence.certifiedAt)}`,
+                            wide: true,
+                          },
+                        ]
+                      : []),
+                  ]}
+                />
+              </div>
+            ) : null}
+            <Box sx={{ mt: 1.5, "&:empty": { display: "none" } }}>
+              <OrgAwardDecisionTrail timeline={row.timeline} stage="invoice" />
+            </Box>
             {invoiceAction || canRejectInvoice ? (
               <div className="mt-3 flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
                 {canRejectInvoice ? (
@@ -2367,11 +2598,56 @@ export function OrgProcurementDetailPanel({ projectId, procurementId, stage = nu
                   label: providerWord.charAt(0).toUpperCase() + providerWord.slice(1),
                   value: payableInvoice.supplier?.name || activeOrder?.supplierName || null,
                 },
+                {
+                  label: "Invoice date",
+                  value: formatPrintDate(payableInvoice.invoiceDate || payableInvoice.createdAt),
+                },
                 { label: "Invoice amount", value: formatMoneyUGX(payableInvoice.amount) },
                 {
-                  label: "Payment amount",
-                  value: formatMoneyUGX(currentPayment?.amount ?? payableInvoice.amount),
+                  label: "Order",
+                  value: activeOrder ? `${activeOrder.kind} ${activeOrder.number}` : null,
                 },
+                ...(invoiceVerified
+                  ? [
+                      {
+                        label: "Invoice verified",
+                        value: `${invoiceVerified.by || "—"} · ${formatPrintDate(invoiceVerified.at)}`,
+                        wide: true,
+                      },
+                    ]
+                  : []),
+                ...(paymentMatch
+                  ? [
+                      {
+                        label: "Three-way match",
+                        value: (
+                          <Chip size="small" color={paymentMatch.result.color} label={paymentMatch.result.label} />
+                        ),
+                      },
+                    ]
+                  : []),
+              ]}
+            />
+            <Typography variant="subtitle2" sx={{ fontWeight: 600, mt: 2 }}>
+              Payment
+            </Typography>
+            <RecordDetailsGrid
+              fields={[
+                { label: "Order value", value: activeOrder ? formatMoneyUGX(activeOrder.value) : null },
+                {
+                  label: "Accepted goods value",
+                  value: paymentMatch?.acceptedValue == null ? null : formatMoneyUGX(paymentMatch.acceptedValue),
+                },
+                { label: "Previously paid", value: formatMoneyUGX(previouslyPaid) },
+                { label: "This payment", value: formatMoneyUGX(thisPaymentAmount) },
+                ...(activeOrder
+                  ? [
+                      {
+                        label: "Balance on order",
+                        value: formatMoneyUGX(Math.max(0, activeOrder.value - previouslyPaid - thisPaymentAmount)),
+                      },
+                    ]
+                  : []),
                 ...(currentPayment?.approvedBy?.displayName
                   ? [{ label: "Approved by", value: currentPayment.approvedBy.displayName }]
                   : []),
@@ -2383,6 +2659,9 @@ export function OrgProcurementDetailPanel({ projectId, procurementId, stage = nu
                   : []),
               ]}
             />
+            <Box sx={{ mt: 1.5, "&:empty": { display: "none" } }}>
+              <OrgAwardDecisionTrail timeline={row.timeline} stage="payment" />
+            </Box>
             {paymentAction?.kind === "record" ? (
               <TextField
                 label="Payment reference"
@@ -2489,11 +2768,16 @@ export function OrgProcurementDetailPanel({ projectId, procurementId, stage = nu
               label: providerWord.charAt(0).toUpperCase() + providerWord.slice(1),
               value: activeOrder?.supplierName || null,
             },
+            { label: "Order", value: activeOrder ? `${activeOrder.kind} ${activeOrder.number}` : null },
             { label: "Order value", value: activeOrder ? formatMoneyUGX(activeOrder.value) : null },
+            {
+              label: "Accepted goods value",
+              value: moneySummary.acceptedValue === null ? null : formatMoneyUGX(moneySummary.acceptedValue),
+            },
             { label: "Invoiced", value: formatMoneyUGX(invoicedTotal) },
             { label: "Paid", value: formatMoneyUGX(paidTotal) },
-            ...(activeOrder && Math.abs(activeOrder.value - paidTotal) > 0.009
-              ? [{ label: "Unpaid on order", value: formatMoneyUGX(Math.max(0, activeOrder.value - paidTotal)) }]
+            ...(moneySummary.unpaidOnOrder !== null && moneySummary.unpaidOnOrder > 0.009
+              ? [{ label: "Unpaid on order", value: formatMoneyUGX(moneySummary.unpaidOnOrder) }]
               : []),
           ]}
         />
