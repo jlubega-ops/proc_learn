@@ -21,12 +21,14 @@ import RefreshRounded from "@mui/icons-material/RefreshRounded";
 import TaskAltRounded from "@mui/icons-material/TaskAltRounded";
 import { format } from "date-fns";
 import { useToast } from "@/components/providers/toast-provider";
+import { actionConfirmOptions, useConfirm } from "@/components/providers/confirm-provider";
 import { PrintButton } from "@/components/print/print-document";
 import { PurchaseInstructionView } from "@/components/procurement/purchase-instruction-document";
 import { PortalAssignmentPrint } from "@/components/provider-portal/portal-assignment-print";
 import { WorkflowHistoryPanel } from "@/components/projects/workflow-history-panel";
 import { PORTAL_NOTIFICATIONS_CHANGED } from "@/components/provider-portal/provider-portal-shell";
 import {
+  AWARD_STATUS,
   INVOICE_STATUS,
   InvoiceDialog,
   ORDER_KIND,
@@ -91,11 +93,20 @@ function StepTracker({ steps }) {
 }
 
 /**
- * @param {{ procurementId: string; decision: "ACCEPT" | "DECLINE"; onClose: () => void; onDone: () => void }} p
+ * @param {{
+ *   procurementId: string;
+ *   decision: "ACCEPT" | "DECLINE";
+ *   target: "pi" | "award";
+ *   onClose: () => void;
+ *   onDone: () => void;
+ * }} p
  */
-function RespondDialog({ procurementId, decision, onClose, onDone }) {
+function RespondDialog({ procurementId, decision, target, onClose, onDone }) {
   const { showToast } = useToast();
+  const confirm = useConfirm();
   const accept = decision === "ACCEPT";
+  const subject = target === "award" ? "award" : "purchase instruction";
+  const Subject = target === "award" ? "Award" : "Purchase instruction";
   const [value, setValue] = useState("");
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
@@ -107,11 +118,19 @@ function RespondDialog({ procurementId, decision, onClose, onDone }) {
       setError(accept ? "Enter your name." : "Enter a reason.");
       return;
     }
+    const confirmed = await confirm(
+      accept
+        ? actionConfirmOptions(`Accept ${subject}`, { color: "success" })
+        : actionConfirmOptions(`Decline ${subject}`, { color: "error" }),
+    );
+    if (!confirmed) return;
     setBusy(true);
     try {
       const { ok, data } = await portalFetch(`/api/provider-portal/assignments/${procurementId}/respond`, {
         method: "POST",
-        body: JSON.stringify(accept ? { decision, acceptedByName: v } : { decision, declineReason: v }),
+        body: JSON.stringify(
+          accept ? { target, decision, acceptedByName: v } : { target, decision, declineReason: v },
+        ),
       });
       if (!ok) {
         const fe = data.fieldErrors || {};
@@ -120,7 +139,7 @@ function RespondDialog({ procurementId, decision, onClose, onDone }) {
         return;
       }
       showToast({
-        message: accept ? "Purchase instruction accepted." : "Purchase instruction declined.",
+        message: `${Subject} ${accept ? "accepted" : "declined"}.`,
         severity: "success",
       });
       notifyBell();
@@ -133,7 +152,7 @@ function RespondDialog({ procurementId, decision, onClose, onDone }) {
   return (
     <Dialog open onClose={busy ? undefined : onClose} maxWidth="sm" fullWidth>
       <form noValidate onSubmit={submit}>
-        <DialogTitle>{accept ? "Accept purchase instruction" : "Decline purchase instruction"}</DialogTitle>
+        <DialogTitle>{`${accept ? "Accept" : "Decline"} ${subject}`}</DialogTitle>
         <DialogContent dividers>
           <TextField
             label={accept ? "Accepted by (full name)" : "Reason"}
@@ -176,6 +195,7 @@ function RespondDialog({ procurementId, decision, onClose, onDone }) {
  */
 function DeliveryNoteDialog({ procurementId, outstanding, onClose, onDone }) {
   const { showToast } = useToast();
+  const confirm = useConfirm();
   const open = outstanding.filter((l) => l.outstanding > 0);
   const [qtys, setQtys] = useState(() => Object.fromEntries(open.map((l) => [l.itemName, String(l.outstanding)])));
   const [dispatchedAt, setDispatchedAt] = useState(() => format(new Date(), "yyyy-MM-dd"));
@@ -206,6 +226,7 @@ function DeliveryNoteDialog({ procurementId, outstanding, onClose, onDone }) {
       showToast({ message: "Please fix the highlighted fields.", severity: "error" });
       return;
     }
+    if (!(await confirm(actionConfirmOptions("Send delivery note")))) return;
     setBusy(true);
     try {
       const { ok, data } = await portalFetch(`/api/provider-portal/assignments/${procurementId}/delivery-notes`, {
@@ -317,7 +338,9 @@ export function PortalAssignmentDetail({ procurementId }) {
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(true);
   const [reloadKey, setReloadKey] = useState(0);
-  const [respond, setRespond] = useState(/** @type {"ACCEPT" | "DECLINE" | null} */ (null));
+  const [respond, setRespond] = useState(
+    /** @type {{ decision: "ACCEPT" | "DECLINE"; target: "pi" | "award" } | null} */ (null),
+  );
   const [delivering, setDelivering] = useState(false);
   const [invoicing, setInvoicing] = useState(false);
 
@@ -345,7 +368,13 @@ export function PortalAssignmentDetail({ procurementId }) {
       </Button>
       <div className="flex flex-wrap gap-2">
         {data ? (
-          <PrintButton fileName={`Order record ${data.order?.number || data.procurement.procurementNumber}`} />
+          <PrintButton
+            fileName={
+              data.order
+                ? `Order record ${data.order.number}`
+                : `${data.award ? "Award notice" : "Assignment"} ${data.procurement.procurementNumber}`
+            }
+          />
         ) : null}
         <Button
           variant="outlined"
@@ -394,7 +423,7 @@ export function PortalAssignmentDetail({ procurementId }) {
               {procurement.deliveryLocation ? ` · Deliver to ${procurement.deliveryLocation}` : ""}
             </p>
           </div>
-          <Chip color={data.status.color} label={data.status.label} />
+          <Chip variant="outlined" color={data.status.color} label={data.status.label} />
         </div>
         <div className="mt-3">
           <StepTracker steps={data.steps} />
@@ -407,7 +436,7 @@ export function PortalAssignmentDetail({ procurementId }) {
                   variant="contained"
                   color="success"
                   startIcon={<TaskAltRounded />}
-                  onClick={() => setRespond("ACCEPT")}
+                  onClick={() => setRespond({ decision: "ACCEPT", target: "pi" })}
                   className="w-full sm:w-auto"
                 >
                   Accept
@@ -416,7 +445,7 @@ export function PortalAssignmentDetail({ procurementId }) {
                   variant="outlined"
                   color="error"
                   startIcon={<CancelRounded />}
-                  onClick={() => setRespond("DECLINE")}
+                  onClick={() => setRespond({ decision: "DECLINE", target: "pi" })}
                   className="w-full sm:w-auto"
                 >
                   Decline
@@ -452,9 +481,121 @@ export function PortalAssignmentDetail({ procurementId }) {
         ) : null}
       </section>
 
+      {data.award ? (
+        <Card
+          title="Award"
+          action={<StatusChip map={AWARD_STATUS} status={data.award.status} />}
+        >
+          <dl className="grid gap-3 text-sm sm:grid-cols-3">
+            <div>
+              <dt className="text-xs text-zinc-500">Awarded by</dt>
+              <dd className="wrap-break-word">{data.organisation?.name || "—"}</dd>
+            </div>
+            <div>
+              <dt className="text-xs text-zinc-500">Award amount</dt>
+              <dd className="font-semibold">{formatMoneyUGX(data.award.amount)}</dd>
+            </div>
+            <div>
+              <dt className="text-xs text-zinc-500">Delivery period</dt>
+              <dd>{data.award.deliveryDays ? `${data.award.deliveryDays} days` : "—"}</dd>
+            </div>
+            <div>
+              <dt className="text-xs text-zinc-500">Deliver to</dt>
+              <dd className="wrap-break-word">{procurement.deliveryLocation || "—"}</dd>
+            </div>
+            <div>
+              <dt className="text-xs text-zinc-500">Award date</dt>
+              <dd>{formatPortalDate(data.award.awardDate)}</dd>
+            </div>
+            <div>
+              <dt className="text-xs text-zinc-500">Notified on</dt>
+              <dd>{formatPortalDate(data.award.communicatedAt)}</dd>
+            </div>
+            {data.award.approvalReference ? (
+              <div>
+                <dt className="text-xs text-zinc-500">Approval reference</dt>
+                <dd className="wrap-break-word">{data.award.approvalReference}</dd>
+              </div>
+            ) : null}
+            {data.award.acceptedAt ? (
+              <div className="sm:col-span-2">
+                <dt className="text-xs text-zinc-500">Accepted by</dt>
+                <dd className="wrap-break-word">
+                  {data.award.acceptedByName || "—"} · {formatPortalDate(data.award.acceptedAt)}
+                </dd>
+              </div>
+            ) : null}
+            {data.award.declinedAt ? (
+              <div className="sm:col-span-3">
+                <dt className="text-xs text-zinc-500">Declined on {formatPortalDate(data.award.declinedAt)}</dt>
+                <dd className="wrap-break-word text-brand-red">{data.award.declineReason || "—"}</dd>
+              </div>
+            ) : null}
+          </dl>
+          {data.award.lines.length ? (
+            <div className="mt-3 overflow-x-auto">
+              <table className="w-full min-w-[520px] border-collapse text-sm">
+                <caption className="pb-1 text-left text-xs font-semibold text-zinc-500">Awarded items</caption>
+                <thead>
+                  <tr className="border-b border-zinc-200 text-left text-xs uppercase text-zinc-500">
+                    <th className="py-2 pr-2">Item</th>
+                    <th className="py-2 pr-2 text-right">Qty</th>
+                    <th className="py-2 pr-2 text-right">Unit price</th>
+                    <th className="py-2 text-right">Total</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {data.award.lines.map((l) => (
+                    <tr key={l.lineNumber || l.itemName} className="border-b border-zinc-100">
+                      <td className="py-2 pr-2 wrap-break-word">{l.itemName}</td>
+                      <td className="py-2 pr-2 text-right">
+                        {l.quantity}
+                        {l.unitOfMeasure ? <span className="text-xs text-zinc-500"> {l.unitOfMeasure}</span> : null}
+                      </td>
+                      <td className="py-2 pr-2 text-right">{formatMoneyUGX(l.unitPrice)}</td>
+                      <td className="py-2 text-right">{formatMoneyUGX(l.total)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+                <tfoot>
+                  <tr>
+                    <td colSpan={3} className="py-2 pr-2 text-right font-semibold">
+                      Award amount
+                    </td>
+                    <td className="py-2 text-right font-semibold">{formatMoneyUGX(data.award.amount)}</td>
+                  </tr>
+                </tfoot>
+              </table>
+            </div>
+          ) : null}
+          {actions.canRespondAward ? (
+            <div className="mt-3 flex flex-wrap gap-2">
+              <Button
+                variant="contained"
+                color="success"
+                startIcon={<TaskAltRounded />}
+                onClick={() => setRespond({ decision: "ACCEPT", target: "award" })}
+                className="w-full sm:w-auto"
+              >
+                Accept award
+              </Button>
+              <Button
+                variant="outlined"
+                color="error"
+                startIcon={<CancelRounded />}
+                onClick={() => setRespond({ decision: "DECLINE", target: "award" })}
+                className="w-full sm:w-auto"
+              >
+                Decline award
+              </Button>
+            </div>
+          ) : null}
+        </Card>
+      ) : null}
+
       {data.purchaseInstructionDoc ? <PurchaseInstructionView doc={data.purchaseInstructionDoc} /> : null}
 
-      {data.outstanding.length ? (
+      {order && data.outstanding.length ? (
         <Card title="Items">
           <div className="overflow-x-auto">
             <table className="w-full min-w-[480px] border-collapse text-sm">
@@ -595,7 +736,8 @@ export function PortalAssignmentDetail({ procurementId }) {
       {respond ? (
         <RespondDialog
           procurementId={procurementId}
-          decision={respond}
+          decision={respond.decision}
+          target={respond.target}
           onClose={() => setRespond(null)}
           onDone={() => {
             setRespond(null);

@@ -112,6 +112,7 @@ export const procurementInclude = {
           actor: {
             select: { id: true, firstName: true, lastName: true },
           },
+          task: { select: { requiredRoleName: true } },
         },
       },
     },
@@ -132,7 +133,7 @@ export const procurementInclude = {
   },
   offers: {
     orderBy: { submittedAt: "asc" },
-    include: { supplier: true },
+    include: { supplier: true, clarifications: { orderBy: { askedAt: "asc" } } },
   },
   awards: {
     orderBy: { createdAt: "desc" },
@@ -170,10 +171,27 @@ export const procurementInclude = {
       status: true,
       evaluatedAmount: true,
       recommendation: true,
+      comments: true,
+      eligibilityJson: true,
       approvedAt: true,
       createdAt: true,
       recommendedSupplier: { select: { id: true, name: true } },
+      committee: {
+        select: {
+          name: true,
+          members: {
+            where: { status: "ACTIVE" },
+            orderBy: { committeeRole: "asc" },
+            select: { committeeRole: true, orgUser: { select: { firstName: true, lastName: true } } },
+          },
+        },
+      },
     },
+  },
+  postQualificationReports: {
+    orderBy: { createdAt: "desc" },
+    take: 1,
+    select: { id: true, status: true, comments: true, validationJson: true, approvedAt: true, createdAt: true },
   },
   closedBy: { select: { id: true, firstName: true, lastName: true } },
 };
@@ -316,11 +334,32 @@ export function serializeProcurement(row, opts = {}) {
           status: er.status,
           evaluatedAmount: er.evaluatedAmount?.toString?.() ?? String(er.evaluatedAmount ?? ""),
           recommendation: er.recommendation || null,
+          comments: er.comments || null,
+          eligibility: er.eligibilityJson || null,
           approvedAt: er.approvedAt || null,
           createdAt: er.createdAt || null,
           recommendedSupplier: er.recommendedSupplier
             ? { id: er.recommendedSupplier.id, name: er.recommendedSupplier.name }
             : null,
+          committee: er.committee
+            ? {
+                name: er.committee.name,
+                members: (er.committee.members || []).map((m) => ({
+                  name: `${m.orgUser?.firstName || ""} ${m.orgUser?.lastName || ""}`.trim(),
+                  committeeRole: m.committeeRole,
+                })),
+              }
+            : null,
+        }))
+      : [],
+    postQualificationReports: Array.isArray(row.postQualificationReports)
+      ? row.postQualificationReports.map((pq) => ({
+          id: pq.id,
+          status: pq.status,
+          comments: pq.comments || null,
+          validation: pq.validationJson || null,
+          approvedAt: pq.approvedAt || null,
+          createdAt: pq.createdAt || null,
         }))
       : [],
     createdAt: row.createdAt,

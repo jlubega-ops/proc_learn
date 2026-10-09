@@ -1,7 +1,12 @@
 "use client";
 
-import { PrintDocument, formatPrintDate, formatPrintDateTime } from "@/components/print/print-document";
-import { INVOICE_STATUS, ORDER_KIND, PAYMENT_STATUS } from "@/components/provider-portal/provider-portal-sections";
+import { PrintDocument, formatPrintDate } from "@/components/print/print-document";
+import {
+  AWARD_STATUS,
+  INVOICE_STATUS,
+  ORDER_KIND,
+  PAYMENT_STATUS,
+} from "@/components/provider-portal/provider-portal-sections";
 import { formatMoneyUGX } from "@/lib/money";
 import {
   DELIVERY_NOTE_STATUS_PRESENTATION,
@@ -40,9 +45,26 @@ export function PortalAssignmentPrint({ data }) {
   const doc = data.purchaseInstructionDoc;
   const pi = doc?.pi || null;
 
+  const award = data.award;
+  const awardOnly = Boolean(award) && !order;
+
   /** @type {import("@/components/print/print-document").PrintSection[]} */
-  const sections = [
-    {
+  const sections = [];
+  if (awardOnly) {
+    sections.push({
+      type: "fields",
+      title: "Procurement",
+      fields: [
+        { label: "Procurement no.", value: procurement.procurementNumber },
+        { label: "Category", value: procurement.category },
+        { label: "Subject", value: procurement.title, full: true },
+        { label: "Awarded by", value: data.organisation?.name },
+        { label: "Awarded to", value: data.provider?.name },
+        { label: "Delivery address", value: procurement.deliveryLocation, full: true },
+      ],
+    });
+  } else {
+    sections.push({
       type: "fields",
       title: "Order details",
       fields: [
@@ -59,8 +81,58 @@ export function PortalAssignmentPrint({ data }) {
         { label: "Delivery address", value: pi?.deliveryAddress || procurement.deliveryLocation, full: true },
         ...(pi?.paymentTerms ? [{ label: "Payment terms", value: pi.paymentTerms, full: true }] : []),
       ],
-    },
-  ];
+    });
+  }
+
+  if (award) {
+    sections.push({
+      type: "fields",
+      title: "Award",
+      fields: [
+        { label: "Status", value: statusLabel(AWARD_STATUS, award.status) },
+        { label: "Award amount", value: formatMoneyUGX(award.amount) },
+        { label: "Delivery period", value: award.deliveryDays ? `${award.deliveryDays} days` : null },
+        { label: "Award date", value: formatPrintDate(award.awardDate) },
+        { label: "Notified on", value: formatPrintDate(award.communicatedAt) },
+        ...(award.approvalReference ? [{ label: "Approval reference", value: award.approvalReference }] : []),
+        ...(award.acceptedAt
+          ? [{ label: "Accepted by", value: `${award.acceptedByName || "—"} · ${formatPrintDate(award.acceptedAt)}` }]
+          : []),
+        ...(award.declinedAt
+          ? [
+              { label: "Declined on", value: formatPrintDate(award.declinedAt) },
+              { label: "Reason", value: award.declineReason, full: true },
+            ]
+          : []),
+      ],
+    });
+    if (awardOnly && award.lines?.length) {
+      sections.push({
+        type: "table",
+        title: "Awarded items",
+        columns: [
+          { id: "n", label: "#", width: "6%" },
+          { id: "item", label: "Item" },
+          { id: "qty", label: "Qty", align: "right", width: "10%" },
+          { id: "unit", label: "Unit", width: "12%" },
+          { id: "price", label: "Unit price", align: "right", width: "16%" },
+          { id: "total", label: "Total", align: "right", width: "18%" },
+        ],
+        rows: award.lines.map((l, idx) => ({
+          key: l.lineNumber || idx,
+          cells: {
+            n: l.lineNumber || idx + 1,
+            item: l.itemName,
+            qty: l.quantity,
+            unit: l.unitOfMeasure || "—",
+            price: formatMoneyUGX(l.unitPrice),
+            total: formatMoneyUGX(l.total),
+          },
+        })),
+        footer: { label: "Award amount", value: formatMoneyUGX(award.amount) },
+      });
+    }
+  }
 
   if (doc?.items?.length) {
     sections.push({
@@ -90,7 +162,7 @@ export function PortalAssignmentPrint({ data }) {
     });
   }
 
-  sections.push(
+  if (!awardOnly) sections.push(
     {
       type: "table",
       title: "Delivery notes",
@@ -177,39 +249,27 @@ export function PortalAssignmentPrint({ data }) {
       })),
       empty: "No payments.",
     },
-    {
-      type: "table",
-      title: "Workflow history",
-      columns: [
-        { id: "date", label: "Date", width: "18%" },
-        { id: "action", label: "Action" },
-        { id: "actor", label: "By", width: "22%" },
-        { id: "role", label: "Role", width: "18%" },
-      ],
-      rows: (data.history || []).map((h) => ({
-        key: h.id,
-        cells: {
-          date: formatPrintDateTime(h.createdAt),
-          action: h.action,
-          actor: h.actor || "—",
-          role: h.role || "—",
-        },
-        note: h.comment || null,
-      })),
-      empty: "No actions yet.",
-    },
   );
 
   return (
     <PrintDocument
-      documentTitle="Order record"
+      documentTitle={awardOnly ? "Award notice" : "Order record"}
       reference={order?.number || procurement.procurementNumber}
       status={data.status?.label || human(procurement.status)}
       organisation={data.organisation || doc?.organisation || { name: "" }}
       printedBy={data.printedBy}
       sections={sections}
       signatures={
-        pi
+        award && !pi && award.status !== "DECLINED"
+          ? [
+              {
+                label: "Award accepted by provider",
+                name: award.status === "ACCEPTED" ? award.acceptedByName : null,
+                role: data.provider?.name || "Provider",
+                date: award.status === "ACCEPTED" ? award.acceptedAt : null,
+              },
+            ]
+          : pi
           ? [
               {
                 label: "Issued by",

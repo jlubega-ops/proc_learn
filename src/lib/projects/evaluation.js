@@ -68,7 +68,7 @@ async function loadProcurementForEvaluation(prisma, projectId, procurementId) {
   return prisma.projectOrgProcurement.findFirst({
     where: { id: procurementId, projectId },
     include: {
-      offers: { where: { status: { not: "WITHDRAWN" } } },
+      offers: { where: { status: { notIn: ["WITHDRAWN", "LATE"] } } },
       requisition: { select: { estimatedTotalValue: true } },
     },
   });

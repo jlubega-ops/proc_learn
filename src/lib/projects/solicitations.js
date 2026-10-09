@@ -11,6 +11,8 @@ import { writeAuditLog, AuditEvent } from "@/lib/audit-log";
 import { notifyProvider } from "@/lib/projects/provider-notifications";
 import { serializeProviderSummary } from "@/lib/projects/providers";
 import { buildBidDocument } from "@/lib/projects/ppda-forms";
+import { validateStartEndDateRange } from "@/lib/validation/date-range";
+import { INACTIVE_OFFER_STATUSES, priceOfferLines } from "@/lib/projects/offer-line-items";
 
 /** Ordinal position used to guard against moving a solicitation status backwards. */
 const STATUS_ORDER = [
@@ -38,12 +40,15 @@ export function serializeSolicitation(row) {
     bidDocumentAt: row.bidDocumentAt || null,
     issueDate: row.issueDate || null,
     closingDate: row.closingDate || null,
+    originalClosingDate: row.originalClosingDate || null,
     openedAt: row.openedAt || null,
     closedAt: row.closedAt || null,
     invites: Array.isArray(row.invites)
       ? row.invites.map((i) => ({
           id: i.id,
           invitedAt: i.invitedAt,
+          noResponseAt: i.noResponseAt || null,
+          supplierId: i.supplierId,
           supplier: i.supplier ? serializeProviderSummary(i.supplier) : null,
         }))
       : undefined,
@@ -70,6 +75,19 @@ export function serializeOffer(row) {
     source: row.source || "OFFICER",
     deliveryDays: row.deliveryDays ?? null,
     remarks: row.remarks || null,
+    lineItems: Array.isArray(row.lineItems) ? row.lineItems : [],
+    clarifications: Array.isArray(row.clarifications)
+      ? row.clarifications.map((c) => ({
+          id: c.id,
+          question: c.question,
+          askedByName: c.askedByName || null,
+          askedByRole: c.askedByRole || null,
+          askedAt: c.askedAt,
+          response: c.response || null,
+          responseSource: c.responseSource || null,
+          respondedAt: c.respondedAt || null,
+        }))
+      : [],
     withdrawnAt: row.withdrawnAt || null,
     supplierId: row.supplierId,
     supplier: row.supplier ? serializeProviderSummary(row.supplier) : null,
@@ -234,12 +252,25 @@ export async function saveBidDocumentForProcurement(prisma, opts) {
       status: 400,
     };
   }
+  if (
+    !validateStartEndDateRange(snapshot.issueDate, snapshot.closingDate, { requireBoth: false }).ok
+  ) {
+    return {
+      ok: false,
+      error: "Validation failed.",
+      fieldErrors: { closingDate: "Closing date cannot be before the issue date." },
+      status: 400,
+    };
+  }
 
   const updated = await prisma.projectOrgSolicitation.update({
     where: { id: solicitation.id },
     data: {
       bidDocument: snapshot,
       bidDocumentAt: new Date(),
+      ...(snapshot.issueDate
+        ? { issueDate: new Date(`${snapshot.issueDate}T12:00:00.000Z`) }
+        : {}),
       ...(snapshot.closingDate
         ? { closingDate: new Date(`${snapshot.closingDate}T12:00:00.000Z`) }
         : {}),
@@ -355,7 +386,8 @@ export async function issueSolicitation(prisma, opts) {
     };
   }
 
-  const closingDate = parseClosingDate(opts.closingDate);
+  const approvedClosingDate = solicitation.closingDate || null;
+  const closingDate = approvedClosingDate || parseClosingDate(opts.closingDate);
   if (!closingDate) {
     return {
       ok: false,
@@ -367,7 +399,9 @@ export async function issueSolicitation(prisma, opts) {
   if (closingDate.getTime() < Date.now() - 24 * 60 * 60 * 1000) {
     return {
       ok: false,
-      error: "The closing date cannot be in the past.",
+      error: approvedClosingDate
+        ? "The approved closing date has passed. Recommend a change to the Contracts Committee."
+        : "The closing date cannot be in the past.",
       status: 400,
       fieldErrors: { closingDate: "Choose a closing date today or later." },
     };
@@ -468,6 +502,7 @@ export async function issueSolicitation(prisma, opts) {
  *   actorOrgUserId: string | null;
  *   actorRoleName: string;
  *   source?: "OFFICER" | "PORTAL" | "AUTO";
+ *   lineItems?: unknown;
  *   deliveryDays?: unknown;
  *   remarks?: unknown;
  * }} opts
@@ -534,15 +569,9 @@ export async function receiveOffer(prisma, opts) {
     }
   }
 
-  const amountNum = Number(String(opts.amount ?? "").replace(/,/g, "").trim());
-  if (!Number.isFinite(amountNum) || amountNum <= 0) {
-    return {
-      ok: false,
-      error: "Enter a valid offer amount greater than zero.",
-      status: 400,
-      fieldErrors: { amount: "Enter a valid amount." },
-    };
-  }
+  const priced = await priceOfferInput(prisma, solicitation.procurementId, opts);
+  if (!priced.ok) return priced;
+  const amountNum = priced.amount;
 
   const extras = parseOfferExtras(opts);
   if (!extras.ok) return extras;
@@ -572,8 +601,13 @@ export async function receiveOffer(prisma, opts) {
       source: extras.source,
       deliveryDays: extras.deliveryDays,
       remarks: extras.remarks,
+      ...(priced.lines ? { lineItems: priced.lines } : {}),
     },
     include: { supplier: true },
+  });
+  await prisma.projectOrgSolicitationInvite.updateMany({
+    where: { solicitationId: solicitation.id, supplierId, noResponseAt: { not: null } },
+    data: { noResponseAt: null },
   });
 
   await writeAuditLog({
@@ -599,6 +633,57 @@ export async function receiveOffer(prisma, opts) {
 const OFFER_SOURCES = ["OFFICER", "PORTAL", "AUTO"];
 
 /**
+ * Requisition items a quotation / bid is priced against.
+ * @param {import("@prisma/client").PrismaClient} prisma
+ * @param {string} procurementId
+ */
+export async function loadOfferItems(prisma, procurementId) {
+  const items = await prisma.projectOrgRequisitionItem.findMany({
+    where: { requisition: { procurements: { some: { id: procurementId } } } },
+    orderBy: { lineNumber: "asc" },
+    select: { lineNumber: true, itemName: true, quantity: true, unitOfMeasure: true, estimatedUnitPrice: true },
+  });
+  return items.map((i) => ({
+    lineNumber: i.lineNumber,
+    itemName: i.itemName,
+    quantity: Number(i.quantity),
+    unitOfMeasure: i.unitOfMeasure || null,
+    estimatedUnitPrice: Number(i.estimatedUnitPrice),
+  }));
+}
+
+/**
+ * Total from priced lines when given (the total is then derived), else the typed amount.
+ * @param {import("@prisma/client").PrismaClient} prisma
+ * @param {string} procurementId
+ * @param {{ amount?: unknown; lineItems?: unknown }} opts
+ * @returns {Promise<{ ok: true; amount: number; lines: any[] | null } | { ok: false; error: string; status: number; fieldErrors?: Record<string, string> }>}
+ */
+async function priceOfferInput(prisma, procurementId, opts) {
+  if (Array.isArray(opts.lineItems) && opts.lineItems.length) {
+    const items = await loadOfferItems(prisma, procurementId);
+    if (items.length) {
+      const priced = priceOfferLines(items, opts.lineItems);
+      if (!priced.ok) return { ok: false, error: priced.error, status: 400, fieldErrors: priced.fieldErrors };
+      if (priced.total <= 0) {
+        return { ok: false, error: "The total must be greater than zero.", status: 400, fieldErrors: { amount: "Enter prices." } };
+      }
+      return { ok: true, amount: priced.total, lines: priced.lines };
+    }
+  }
+  const amountNum = Number(String(opts.amount ?? "").replace(/,/g, "").trim());
+  if (!Number.isFinite(amountNum) || amountNum <= 0) {
+    return {
+      ok: false,
+      error: "Enter a valid offer amount greater than zero.",
+      status: 400,
+      fieldErrors: { amount: "Enter a valid amount." },
+    };
+  }
+  return { ok: true, amount: amountNum, lines: null };
+}
+
+/**
  * @param {{ source?: unknown; deliveryDays?: unknown; remarks?: unknown }} opts
  */
 function parseOfferExtras(opts) {
@@ -621,16 +706,39 @@ function parseOfferExtras(opts) {
 }
 
 /**
+ * Once evaluation starts or any award exists, every provider's offer on the case is frozen.
+ * @param {import("@prisma/client").PrismaClient} prisma
+ * @param {string} procurementId
+ */
+export async function offersLockedByDecision(prisma, procurementId) {
+  const [reports, awards] = await Promise.all([
+    prisma.projectOrgEvaluationReport.count({ where: { procurementId } }),
+    prisma.projectOrgAward.count({ where: { procurementId } }),
+  ]);
+  return reports + awards > 0;
+}
+
+/**
  * Load an offer the provider owns, still editable (solicitation accepting and closing date ahead).
  * @param {import("@prisma/client").PrismaClient} prisma
  * @param {{ projectId: string; offerId: string; providerId: string }} opts
  */
-async function loadEditableProviderOffer(prisma, opts) {
+async function loadEditableProviderOffer(prisma, opts, purpose = "withdraw") {
   const offer = await prisma.projectOrgOffer.findFirst({
     where: { id: opts.offerId, projectId: opts.projectId, supplierId: opts.providerId },
-    include: { solicitation: true },
+    include: { solicitation: true, _count: { select: { clarifications: true } } },
   });
   if (!offer) return { ok: false, error: "Offer not found.", status: 404 };
+  if (
+    purpose === "edit" &&
+    offer._count.clarifications > 0 &&
+    offer.solicitation?.closingDate &&
+    offer.solicitation.closingDate.getTime() < Date.now()
+  ) {
+    const { clarificationWindowOpen } = await import("@/lib/projects/offer-clarifications");
+    if (await clarificationWindowOpen(prisma, offer)) return { ok: true, offer, revision: true };
+    return { ok: false, error: "Evaluation has started. Offers can no longer be changed.", status: 400, code: "OFFERS_LOCKED" };
+  }
   if (offer.status !== OrgOfferStatus.SUBMITTED) {
     return { ok: false, error: "This offer can no longer be changed.", status: 400 };
   }
@@ -649,26 +757,29 @@ async function loadEditableProviderOffer(prisma, opts) {
       code: "SOLICITATION_CLOSED",
     };
   }
+  if (await offersLockedByDecision(prisma, offer.procurementId)) {
+    return {
+      ok: false,
+      error: "Evaluation has started. Offers can no longer be edited or withdrawn.",
+      status: 400,
+      code: "OFFERS_LOCKED",
+    };
+  }
   return { ok: true, offer };
 }
 
 /**
- * Provider edits its own submitted quotation/bid before the closing date.
+ * Provider edits its own quotation/bid before the closing date, or afterwards in answer
+ * to a clarification until evaluation starts (the original submission time is kept).
  * @param {import("@prisma/client").PrismaClient} prisma
  * @param {{ projectId: string; offerId: string; providerId: string; amount: unknown; deliveryDays?: unknown; remarks?: unknown }} opts
  */
 export async function updateProviderOffer(prisma, opts) {
-  const loaded = await loadEditableProviderOffer(prisma, opts);
+  const loaded = await loadEditableProviderOffer(prisma, opts, "edit");
   if (!loaded.ok) return loaded;
-  const amountNum = Number(String(opts.amount ?? "").replace(/,/g, "").trim());
-  if (!Number.isFinite(amountNum) || amountNum <= 0) {
-    return {
-      ok: false,
-      error: "Enter a valid offer amount greater than zero.",
-      status: 400,
-      fieldErrors: { amount: "Enter a valid amount." },
-    };
-  }
+  const priced = await priceOfferInput(prisma, loaded.offer.procurementId, opts);
+  if (!priced.ok) return priced;
+  const amountNum = priced.amount;
   const extras = parseOfferExtras({ source: "PORTAL", deliveryDays: opts.deliveryDays, remarks: opts.remarks });
   if (!extras.ok) return extras;
 
@@ -678,7 +789,9 @@ export async function updateProviderOffer(prisma, opts) {
       amount: new Prisma.Decimal(amountNum.toFixed(2)),
       deliveryDays: extras.deliveryDays,
       remarks: extras.remarks,
-      submittedAt: new Date(),
+      lineItems: priced.lines ?? Prisma.JsonNull,
+      source: extras.source,
+      ...(loaded.revision ? {} : { submittedAt: new Date() }),
     },
     include: { supplier: true },
   });
@@ -694,6 +807,7 @@ export async function updateProviderOffer(prisma, opts) {
       previousAmount: loaded.offer.amount?.toString?.(),
       amount: updated.amount?.toString?.(),
       via: "PROVIDER_PORTAL",
+      ...(loaded.revision ? { revision: "CLARIFICATION", actorRoleName: "Provider (portal)" } : {}),
     },
   });
 
@@ -760,7 +874,7 @@ export async function openSolicitation(prisma, opts) {
   }
 
   const offerCount = await prisma.projectOrgOffer.count({
-    where: { solicitationId: solicitation.id, status: { not: OrgOfferStatus.WITHDRAWN } },
+    where: { solicitationId: solicitation.id, status: { notIn: INACTIVE_OFFER_STATUSES } },
   });
   if (offerCount === 0) {
     return {
@@ -805,35 +919,132 @@ export async function openSolicitation(prisma, opts) {
 }
 
 /**
- * Enforce that a solicitation's closing date has passed — used by the Tender
- * "Close Tender Submission" gate before bids may be opened.
+ * Close/Lock submissions. Before the closing date this closes early: the closing date
+ * moves to now so every "closed" check (portal, receive, generate) applies at once;
+ * the original deadline is kept in the audit trail.
  *
  * @param {import("@prisma/client").PrismaClient} prisma
- * @param {{ projectId: string; procurementId: string; solicitationType: string }} opts
+ * @param {{ projectId: string; procurementId: string; solicitationType: string; actorOrgUserId: string | null; actorRoleName: string }} opts
  */
-export async function enforceClosingDatePassed(prisma, opts) {
+export async function lockSolicitationSubmissions(prisma, opts) {
   const solicitation = await findSolicitationForProcurement(prisma, opts);
   if (!solicitation) {
-    return { ok: false, error: "No advertised solicitation was found for this procurement.", status: 400 };
-  }
-  if (!solicitation.closingDate) {
-    return { ok: false, error: "This solicitation has no closing date set.", status: 400 };
-  }
-  if (solicitation.closingDate.getTime() > Date.now()) {
-    return {
-      ok: false,
-      error: "The submission closing date has not yet passed.",
-      status: 400,
-      code: "CLOSING_DATE_NOT_REACHED",
-    };
+    return { ok: false, error: "No issued solicitation was found for this procurement.", status: 400 };
   }
   const offerCount = await prisma.projectOrgOffer.count({
-    where: { solicitationId: solicitation.id, status: { not: OrgOfferStatus.WITHDRAWN } },
+    where: { solicitationId: solicitation.id, status: { notIn: INACTIVE_OFFER_STATUSES } },
   });
   if (offerCount === 0) {
-    return { ok: false, error: "Record at least one bid before closing submissions.", status: 400 };
+    const word = opts.solicitationType === OrgSolicitationType.RFQ ? "quotation" : "bid";
+    return { ok: false, error: `Record at least one ${word} before closing submissions.`, status: 400 };
   }
-  return { ok: true, solicitation: serializeSolicitation(solicitation) };
+  const now = new Date();
+  const early = !solicitation.closingDate || solicitation.closingDate.getTime() > now.getTime();
+  if (!early) return { ok: true, solicitation: serializeSolicitation(solicitation), early: false };
+
+  const updated = await prisma.projectOrgSolicitation.update({
+    where: { id: solicitation.id },
+    data: {
+      closingDate: now,
+      ...(solicitation.originalClosingDate ? {} : { originalClosingDate: solicitation.closingDate }),
+    },
+    include: SOLICITATION_INCLUDE,
+  });
+  await writeAuditLog({
+    eventType: AuditEvent.PROJECT_ORG_SOLICITATION_CLOSED,
+    actorUserId: null,
+    meta: {
+      projectId: opts.projectId,
+      procurementId: opts.procurementId,
+      solicitationId: solicitation.id,
+      earlyClose: true,
+      originalClosingDate: solicitation.closingDate ? solicitation.closingDate.toISOString() : null,
+      offerCount,
+      actorOrgUserId: opts.actorOrgUserId,
+      actorRoleName: opts.actorRoleName,
+      comment: "Submissions closed before the closing date.",
+    },
+  });
+  return { ok: true, solicitation: serializeSolicitation(updated), early: true };
+}
+
+/**
+ * Reopen submissions on the Close step with a new future closing date. Only before the
+ * offers are opened or any evaluation decision exists. Providers marked as no response
+ * may answer again.
+ *
+ * @param {import("@prisma/client").PrismaClient} prisma
+ * @param {{ projectId: string; procurementId: string; solicitationType: string; closingDate: unknown; actorOrgUserId: string | null; actorRoleName: string }} opts
+ */
+export async function reopenSolicitationSubmissions(prisma, opts) {
+  const solicitation = await findSolicitationForProcurement(prisma, opts);
+  if (!solicitation) {
+    return { ok: false, error: "No issued solicitation was found for this procurement.", status: 400 };
+  }
+  const reopenable = [OrgSolicitationStatus.ISSUED, OrgSolicitationStatus.ADVERTISED];
+  if (!reopenable.includes(solicitation.status) || solicitation.openedAt) {
+    return { ok: false, error: "Submissions can no longer be reopened.", status: 400 };
+  }
+  if (await offersLockedByDecision(prisma, opts.procurementId)) {
+    return { ok: false, error: "Evaluation has started.", status: 400, code: "OFFERS_LOCKED" };
+  }
+  const raw = typeof opts.closingDate === "string" ? opts.closingDate.trim() : "";
+  const closingDate = raw ? new Date(raw) : null;
+  if (!closingDate || Number.isNaN(closingDate.getTime()) || closingDate.getTime() <= Date.now()) {
+    return {
+      ok: false,
+      error: "Choose a closing date in the future.",
+      status: 400,
+      fieldErrors: { closingDate: "Choose a future date and time." },
+    };
+  }
+
+  const [updated] = await prisma.$transaction([
+    prisma.projectOrgSolicitation.update({
+      where: { id: solicitation.id },
+      data: {
+        closingDate,
+        ...(solicitation.originalClosingDate ? {} : { originalClosingDate: solicitation.closingDate }),
+      },
+      include: SOLICITATION_INCLUDE,
+    }),
+    prisma.projectOrgSolicitationInvite.updateMany({
+      where: { solicitationId: solicitation.id, noResponseAt: { not: null } },
+      data: { noResponseAt: null },
+    }),
+  ]);
+
+  await writeAuditLog({
+    eventType: AuditEvent.PROJECT_ORG_SOLICITATION_REOPENED,
+    actorUserId: null,
+    meta: {
+      projectId: opts.projectId,
+      procurementId: opts.procurementId,
+      solicitationId: solicitation.id,
+      previousClosingDate: solicitation.closingDate ? solicitation.closingDate.toISOString() : null,
+      closingDate: closingDate.toISOString(),
+      actorOrgUserId: opts.actorOrgUserId,
+      actorRoleName: opts.actorRoleName,
+      comment: `Submissions reopened until ${format(closingDate, "MMM d, yyyy HH:mm")}.`,
+    },
+  });
+
+  if (solicitation.solicitationType === OrgSolicitationType.RFQ) {
+    const word = "quotation";
+    for (const invite of solicitation.invites || []) {
+      await notifyProvider(prisma, {
+        projectId: opts.projectId,
+        providerId: invite.supplierId,
+        title: "Submissions reopened",
+        body: `"${solicitation.title}" is open again until ${format(closingDate, "MMM d, yyyy HH:mm")}. You can submit or revise your ${word}.`,
+        linkUrl: `/provider-portal/opportunities/${solicitation.id}`,
+        relatedEntityType: "solicitation",
+        relatedEntityId: solicitation.id,
+      });
+    }
+  }
+
+  return { ok: true, solicitation: serializeSolicitation(updated) };
 }
 
 /**

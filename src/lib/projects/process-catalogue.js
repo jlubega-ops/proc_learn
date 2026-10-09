@@ -460,18 +460,6 @@ export const BASELINE_PROCESS_TEMPLATES = [
         actionKey: "COMPLETE",
       },
       {
-        stepNumber: 8,
-        taskDescription: "Nominate Evaluation Committee",
-        roleName: "Procurement Officer",
-        actionKey: "COMPLETE",
-      },
-      {
-        stepNumber: 9,
-        taskDescription: "Approve Evaluation Committee",
-        roleName: "Contracts Committee",
-        actionKey: "APPROVE",
-      },
-      {
         stepNumber: 10,
         taskDescription: "Technical Evaluation",
         roleName: "Evaluation Committee",
@@ -653,18 +641,6 @@ export const BASELINE_PROCESS_TEMPLATES = [
         taskDescription: "Forward Bids for Evaluation",
         roleName: "Head PDU",
         actionKey: "COMPLETE",
-      },
-      {
-        stepNumber: 9,
-        taskDescription: "Nominate Evaluation Committee",
-        roleName: "Procurement Officer",
-        actionKey: "COMPLETE",
-      },
-      {
-        stepNumber: 10,
-        taskDescription: "Approve Evaluation Committee",
-        roleName: "Contracts Committee",
-        actionKey: "APPROVE",
       },
       {
         stepNumber: 11,
@@ -930,11 +906,11 @@ export async function ensureBaselineProcessTemplates(prisma) {
       });
     }
 
-    const maxStep = Math.max(...tpl.steps.map((s) => s.stepNumber));
+    // Removed steps keep their numbers retired so in-flight instances never shift.
     await prisma.projectOrgProcessFlowItem.deleteMany({
       where: {
         processFlowId: flow.id,
-        stepNumber: { gt: maxStep },
+        stepNumber: { notIn: tpl.steps.map((s) => s.stepNumber) },
       },
     });
   }

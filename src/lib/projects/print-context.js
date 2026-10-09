@@ -6,17 +6,39 @@ export const WORKFLOW_HISTORY_ACTION_SELECT = {
   previousStatus: true,
   newStatus: true,
   createdAt: true,
+  committeeId: true,
+  committeeRole: true,
   actor: { select: { firstName: true, lastName: true } },
+  task: { select: { requiredRoleName: true } },
 };
 
 /**
  * @param {any[] | null | undefined} actions
  */
 export function mapWorkflowHistoryActions(actions) {
-  return (actions || []).map(({ actor, ...a }) => ({
+  return (actions || []).map(({ actor, task, ...a }) => ({
     ...a,
     actorName: actor ? `${actor.firstName || ""} ${actor.lastName || ""}`.trim() || null : null,
+    stepRoleName: task?.requiredRoleName || null,
   }));
+}
+
+/**
+ * Adds `committeeName` to history / timeline entries decided from a committee seat.
+ * @template {{ committeeId?: string | null }} T
+ * @param {import("@prisma/client").PrismaClient} prisma
+ * @param {T[]} entries
+ * @returns {Promise<(T & { committeeName?: string | null })[]>}
+ */
+export async function attachCommitteeNames(prisma, entries) {
+  const ids = [...new Set((entries || []).map((e) => e.committeeId).filter(Boolean))];
+  if (!ids.length) return entries || [];
+  const rows = await prisma.projectOrgCommittee.findMany({
+    where: { id: { in: /** @type {string[]} */ (ids) } },
+    select: { id: true, name: true },
+  });
+  const names = new Map(rows.map((r) => [r.id, r.name]));
+  return entries.map((e) => (e.committeeId ? { ...e, committeeName: names.get(e.committeeId) || null } : e));
 }
 
 /**

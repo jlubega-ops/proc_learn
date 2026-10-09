@@ -9,21 +9,33 @@ import { getActiveOrderValue } from "@/lib/projects/contracts-lpo";
 import { loadPrintOrganisation } from "@/lib/projects/print-context";
 import { nextInvoiceNumber } from "@/lib/projects/invoices";
 import { loadProcurementDomainTimeline } from "@/lib/projects/procurement-timeline";
+import { INACTIVE_OFFER_STATUSES } from "@/lib/projects/offer-line-items";
 
 const OPEN_INVOICE_STATUSES = ["RECEIVED", "CERTIFIED", "VERIFIED", "APPROVED_FOR_PAYMENT"];
 
 /** Org events a provider may see on its own assignment. */
 const PROVIDER_VISIBLE_EVENTS = new Set([
   "PROJECT_ORG_AWARD_COMMUNICATED",
+  "PROJECT_ORG_AWARD_ACCEPTED",
+  "PROJECT_ORG_AWARD_DECLINED",
   "PROJECT_ORG_PURCHASE_INSTRUCTION_ISSUED",
   "PROJECT_ORG_PURCHASE_INSTRUCTION_ACCEPTED",
   "PROJECT_ORG_PURCHASE_INSTRUCTION_DECLINED",
   "PROJECT_ORG_LPO_ISSUED",
   "PROJECT_ORG_LPO_ACCEPTED",
   "PROJECT_ORG_CONTRACT_ISSUED",
+  "PROJECT_ORG_SOLICITATION_ISSUED",
+  "PROJECT_ORG_SOLICITATION_OPENED",
+  "PROJECT_ORG_SOLICITATION_CLOSED",
+  "PROJECT_ORG_SOLICITATION_REOPENED",
   "PROJECT_ORG_OFFER_RECORDED",
   "PROJECT_ORG_OFFER_UPDATED",
   "PROJECT_ORG_OFFER_WITHDRAWN",
+  "PROJECT_ORG_OFFER_GENERATED",
+  "PROJECT_ORG_OFFER_LATE",
+  "PROJECT_ORG_OFFER_NO_RESPONSE",
+  "PROJECT_ORG_OFFER_CLARIFICATION_REQUESTED",
+  "PROJECT_ORG_OFFER_CLARIFICATION_ANSWERED",
   "PROJECT_ORG_DELIVERY_NOTE_SUBMITTED",
   "PROJECT_ORG_DELIVERY_RECORDED",
   "PROJECT_ORG_DELIVERY_INSPECTED",
@@ -36,14 +48,18 @@ const PROVIDER_VISIBLE_EVENTS = new Set([
   "PROJECT_ORG_PROCUREMENT_CLOSED",
   "PROJECT_ORG_PROCUREMENT_CANCELLED",
 ]);
-const PROVIDER_VISIBLE_COMMENTS = new Set(["PROJECT_ORG_INVOICE_REJECTED", "PROJECT_ORG_DELIVERY_INSPECTED"]);
+const PROVIDER_VISIBLE_COMMENTS = new Set([
+  "PROJECT_ORG_INVOICE_REJECTED",
+  "PROJECT_ORG_DELIVERY_INSPECTED",
+  "PROJECT_ORG_OFFER_CLARIFICATION_REQUESTED",
+]);
 
 /**
  * History of one assignment as the provider sees it — never other providers' actions.
  * @param {import("@prisma/client").PrismaClient} prisma
  * @param {{ projectId: string; procurementId: string; procurementNumber: string; providerId: string }} opts
  */
-async function loadProviderHistory(prisma, opts) {
+export async function loadProviderHistory(prisma, opts) {
   const entries = await loadProcurementDomainTimeline(prisma, opts);
   return entries
     .filter(
@@ -77,7 +93,10 @@ async function assignedProcurementIds(prisma, opts) {
   const [pis, awards, lpos, contracts, micro] = await Promise.all([
     prisma.projectOrgPurchaseInstruction.findMany({ where, select: { procurementId: true } }),
     prisma.projectOrgAward.findMany({
-      where: { ...where, status: { in: [OrgAwardStatus.COMMUNICATED, OrgAwardStatus.ACCEPTED] } },
+      where: {
+        ...where,
+        status: { in: [OrgAwardStatus.COMMUNICATED, OrgAwardStatus.ACCEPTED, OrgAwardStatus.DECLINED] },
+      },
       select: { procurementId: true },
     }),
     prisma.projectOrgLpo.findMany({
@@ -110,6 +129,7 @@ async function assignedProcurementIds(prisma, opts) {
  * @param {{
  *   status: string;
  *   pi: any | null;
+ *   award?: any | null;
  *   order: any | null;
  *   notes: any[];
  *   deliveries: any[];
@@ -126,10 +146,12 @@ function providerProgress(s) {
   const paid = s.payments.some((p) => p.status === "PAID");
 
   const orderAccepted = s.pi ? s.pi.status === "ACCEPTED" : Boolean(s.order);
+  const award = s.award || null;
   const steps = [
-    { key: "selected", label: "Selected", done: true },
+    { key: "selected", label: award ? "Awarded" : "Selected", done: true },
+    ...(award ? [{ key: "award", label: "Award accepted", done: award.status === "ACCEPTED" }] : []),
     { key: "order", label: s.pi ? "Purchase instruction" : "Order issued", done: Boolean(s.pi || s.order) },
-    { key: "accepted", label: "Accepted", done: orderAccepted },
+    { key: "accepted", label: "Order accepted", done: orderAccepted },
     { key: "dispatched", label: "Dispatched", done: s.notes.length > 0 || s.deliveries.length > 0 },
     { key: "received", label: "Received", done: s.deliveries.length > 0 },
     { key: "inspected", label: "Inspected", done: accepted || rejected },
@@ -141,9 +163,13 @@ function providerProgress(s) {
   let status;
   if (s.status === "CANCELLED" || s.status === "REJECTED") status = { label: "Cancelled", color: "error" };
   else if (s.status === "CLOSED") status = { label: "Closed", color: "success" };
+  else if (award?.status === "DECLINED") status = { label: "You declined the award", color: "error" };
+  else if (award?.status === "COMMUNICATED") status = { label: "Respond to award", color: "primary" };
   else if (s.pi?.status === "DECLINED") status = { label: "You declined", color: "error" };
   else if (s.pi?.status === "ISSUED") status = { label: "Accept purchase instruction", color: "primary" };
-  else if (!s.pi && !s.order) status = { label: "Selected — awaiting order", color: "warning" };
+  else if (!s.pi && !s.order) {
+    status = { label: award ? "Award accepted — awaiting order" : "Selected — awaiting order", color: "warning" };
+  }
   else if (paid) status = { label: "Paid", color: "success" };
   else if (openInvoice) status = { label: "Invoice under review", color: "warning" };
   else if (accepted) status = { label: "Delivery accepted — invoice", color: "primary" };
@@ -177,6 +203,14 @@ function loadAssignmentRows(prisma, ids, providerId) {
       updatedAt: true,
       requisition: { select: { category: true, deliveryLocation: true, estimatedTotalValue: true } },
       purchaseInstructions: { where: { supplierId: providerId } },
+      awards: {
+        where: {
+          supplierId: providerId,
+          status: { in: [OrgAwardStatus.COMMUNICATED, OrgAwardStatus.ACCEPTED, OrgAwardStatus.DECLINED] },
+        },
+        orderBy: { createdAt: "desc" },
+        take: 1,
+      },
       lpos: { where: { supplierId: providerId, status: { not: OrgLpoStatus.CANCELLED } }, take: 1 },
       contracts: { where: { supplierId: providerId, status: { not: OrgContractStatus.CANCELLED } }, take: 1 },
       deliveryNotes: { where: { supplierId: providerId }, orderBy: { createdAt: "desc" } },
@@ -216,6 +250,7 @@ export async function listProviderAssignments(prisma, opts) {
     const progress = providerProgress({
       status: r.status,
       pi: r.purchaseInstructions[0] || null,
+      award: r.awards[0] || null,
       order: r.lpos[0] || r.contracts[0] || null,
       notes: r.deliveryNotes,
       deliveries: r.deliveries,
@@ -234,6 +269,30 @@ export async function listProviderAssignments(prisma, opts) {
     };
   });
   return { total: rows.length, page: opts.page, pageSize: opts.pageSize, items };
+}
+
+/**
+ * Assignments waiting on the provider (accept the order, deliver, or invoice).
+ * @param {import("@prisma/client").PrismaClient} prisma
+ * @param {{ projectId: string; providerId: string }} opts
+ */
+export async function countProviderAssignmentsNeedingAction(prisma, opts) {
+  const ids = await assignedProcurementIds(prisma, opts);
+  if (!ids.length) return 0;
+  const rows = await loadAssignmentRows(prisma, ids, opts.providerId);
+  return rows.filter(
+    (r) =>
+      providerProgress({
+        status: r.status,
+        pi: r.purchaseInstructions[0] || null,
+        award: r.awards[0] || null,
+        order: r.lpos[0] || r.contracts[0] || null,
+        notes: r.deliveryNotes,
+        deliveries: r.deliveries,
+        invoices: r.invoices,
+        payments: r.payments,
+      }).status.color === "primary",
+  ).length;
 }
 
 /**
@@ -276,9 +335,28 @@ export async function loadProviderAssignment(prisma, opts) {
     providerId: opts.providerId,
   });
 
+  const award = r.awards[0] || null;
+  const awardedOffer = award
+    ? await prisma.projectOrgOffer.findFirst({
+        where: {
+          procurementId: r.id,
+          supplierId: opts.providerId,
+          status: { notIn: INACTIVE_OFFER_STATUSES },
+        },
+        orderBy: { submittedAt: "desc" },
+        select: {
+          amount: true,
+          deliveryDays: true,
+          submittedAt: true,
+          lineItems: true,
+          offerType: true,
+        },
+      })
+    : null;
   const progress = providerProgress({
     status: r.status,
     pi,
+    award,
     order: r.lpos[0] || r.contracts[0] || null,
     notes: r.deliveryNotes,
     deliveries: r.deliveries,
@@ -297,6 +375,33 @@ export async function loadProviderAssignment(prisma, opts) {
       deliveryLocation: r.requisition?.deliveryLocation || null,
     },
     order: orderOf(r),
+    award: award
+      ? {
+          id: award.id,
+          status: award.status,
+          amount: award.awardedAmount?.toString?.() ?? "",
+          awardDate: award.awardDate || null,
+          communicatedAt: award.communicatedAt || null,
+          acceptedAt: award.acceptedAt || null,
+          acceptedByName: award.acceptedByName || null,
+          declinedAt: award.declinedAt || null,
+          declineReason: award.declineReason || null,
+          approvalReference: award.approvalReference || null,
+          offerType: awardedOffer?.offerType || null,
+          offerSubmittedAt: awardedOffer?.submittedAt || null,
+          deliveryDays: awardedOffer?.deliveryDays ?? null,
+          lines: Array.isArray(awardedOffer?.lineItems)
+            ? awardedOffer.lineItems.map((l) => ({
+                lineNumber: Number(l?.lineNumber) || 0,
+                itemName: String(l?.itemName || ""),
+                quantity: Number(l?.quantity) || 0,
+                unitOfMeasure: l?.unitOfMeasure || null,
+                unitPrice: Number(l?.unitPrice) || 0,
+                total: Number(l?.total) || 0,
+              }))
+            : [],
+        }
+      : null,
     organisation,
     provider,
     purchaseInstructionDoc: piDoc,
@@ -338,6 +443,7 @@ export async function loadProviderAssignment(prisma, opts) {
     history,
     actions: {
       canRespond: !terminal && pi?.status === "ISSUED",
+      canRespondAward: !terminal && award?.status === "COMMUNICATED",
       canDeliver:
         !terminal &&
         Boolean(orderAccepted) &&

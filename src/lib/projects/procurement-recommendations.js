@@ -18,9 +18,11 @@ import {
   RECOMMENDATION_KIND_LABELS,
   RECOMMENDATION_TASK_PREFIX,
   isRecommendationDecisionTask,
+  mayRecommendToContractsCommittee,
   recommendationReasonLabel,
   recommendationReasons,
 } from "@/lib/projects/procurement-recommendation-options";
+import { MIN_RFQ_PROVIDERS } from "@/lib/projects/procurement-thresholds";
 
 const CONTRACTS_COMMITTEE_ROLE = "Contracts Committee";
 const TERMINAL_STATUSES = new Set([
@@ -28,6 +30,8 @@ const TERMINAL_STATUSES = new Set([
   OrgProcurementStatus.CANCELLED,
   OrgProcurementStatus.REJECTED,
 ]);
+/** RFQs can only be re-addressed before they go out to providers. */
+const PRE_ISSUE_SOLICITATION = new Set(["DRAFT", "REVIEW", "APPROVED"]);
 const LIVE_AWARD_STATUSES = [
   OrgAwardStatus.APPROVED,
   OrgAwardStatus.COMMUNICATED,
@@ -53,6 +57,8 @@ export function serializeRecommendation(row) {
     currentProvider: row.currentProvider
       ? { id: row.currentProvider.id, name: row.currentProvider.name }
       : null,
+    currentShortlist: Array.isArray(row.currentShortlist) ? row.currentShortlist : [],
+    proposedShortlist: Array.isArray(row.proposedShortlist) ? row.proposedShortlist : [],
     proposedProvider: row.proposedProvider
       ? { id: row.proposedProvider.id, name: row.proposedProvider.name }
       : null,
@@ -60,7 +66,14 @@ export function serializeRecommendation(row) {
       ? { displayName: personName(row.recommendedBy), roleName: row.recommendedByRoleName || null }
       : null,
     decidedBy: row.decidedBy
-      ? { displayName: personName(row.decidedBy), roleName: row.decidedByRoleName || null }
+      ? {
+          displayName: personName(row.decidedBy),
+          roleName: row.decidedByRoleName || null,
+          committeeId: row.committeeId || null,
+          committeeRole: row.committeeId ? row.decidedByRoleName || null : null,
+          committeeName: null,
+          stepRoleName: row.committeeId ? "Contracts Committee" : null,
+        }
       : null,
     decisionComment: row.decisionComment || null,
     decidedAt: row.decidedAt || null,
@@ -86,7 +99,19 @@ export async function loadRecommendations(prisma, opts) {
     take: 20,
     include: RECOMMENDATION_INCLUDE,
   });
-  return rows.map(serializeRecommendation);
+  const ids = [...new Set(rows.map((r) => r.committeeId).filter(Boolean))];
+  const committees = ids.length
+    ? await prisma.projectOrgCommittee.findMany({
+        where: { id: { in: /** @type {string[]} */ (ids) } },
+        select: { id: true, name: true },
+      })
+    : [];
+  const names = new Map(committees.map((c) => [c.id, c.name]));
+  return rows.map((r) => {
+    const out = serializeRecommendation(r);
+    if (out.decidedBy?.committeeId) out.decidedBy.committeeName = names.get(out.decidedBy.committeeId) || null;
+    return out;
+  });
 }
 
 /**
@@ -103,6 +128,7 @@ export async function recommendationStage(prisma, opts) {
       status: true,
       procurementMethod: true,
       requisition: { select: { form5PartII: true } },
+      solicitations: { select: { status: true } },
       _count: {
         select: {
           purchaseInstructions: { where: { status: { not: "DECLINED" } } },
@@ -113,10 +139,39 @@ export async function recommendationStage(prisma, opts) {
       },
     },
   });
-  if (!proc) return { allowed: false, kinds: [], currentProviderId: null, procurement: null };
+  if (!proc) {
+    return {
+      allowed: false,
+      awardDeclined: false,
+      kinds: [],
+      currentProviderId: null,
+      currentShortlist: [],
+      procurement: null,
+    };
+  }
+  const prepareAwardTasks = await prisma.projectOrgWorkflowTask.findMany({
+    where: {
+      projectId: opts.projectId,
+      instance: { procurementId: opts.procurementId },
+      title: { startsWith: "Prepare award recommendation" },
+    },
+    select: { status: true },
+  });
+  const awardRecommended =
+    prepareAwardTasks.some((t) => t.status === OrgWorkflowTaskStatus.COMPLETED) &&
+    !prepareAwardTasks.some(
+      (t) => t.status === OrgWorkflowTaskStatus.PENDING || t.status === OrgWorkflowTaskStatus.IN_PROGRESS,
+    );
+  const latestAward = await prisma.projectOrgAward.findFirst({
+    where: { projectId: opts.projectId, procurementId: opts.procurementId },
+    orderBy: { createdAt: "desc" },
+    select: { status: true },
+  });
+  const awardDeclined = latestAward?.status === OrgAwardStatus.DECLINED;
   const c = proc._count;
   const allowed =
     !TERMINAL_STATUSES.has(proc.status) &&
+    (!awardRecommended || awardDeclined) &&
     c.purchaseInstructions === 0 &&
     c.lpos === 0 &&
     c.contracts === 0 &&
@@ -126,10 +181,19 @@ export async function recommendationStage(prisma, opts) {
     : [];
   const currentProviderId =
     proc.procurementMethod === "MICRO" && shortlist[0]?.id ? String(shortlist[0].id) : null;
+  const rfqIssued = (proc.solicitations || []).some((s) => !PRE_ISSUE_SOLICITATION.has(s.status));
+  /** @type {{ id: string; name: string }[]} */
+  const currentShortlist =
+    proc.procurementMethod === "QUOTATION"
+      ? shortlist.filter((s) => s?.id).map((s) => ({ id: String(s.id), name: String(s.name || "") }))
+      : [];
   /** @type {string[]} */
   const kinds = allowed ? [OrgProcurementRecommendationKind.CANCEL] : [];
   if (allowed && currentProviderId) kinds.push(OrgProcurementRecommendationKind.CHANGE_PROVIDER);
-  return { allowed, kinds, currentProviderId, procurement: proc };
+  if (allowed && currentShortlist.length && !rfqIssued) {
+    kinds.push(OrgProcurementRecommendationKind.CHANGE_SHORTLIST);
+  }
+  return { allowed, awardDeclined, kinds, currentProviderId, currentShortlist, procurement: proc };
 }
 
 /**
@@ -182,21 +246,39 @@ export async function findHeldProcurementTask(prisma, opts) {
  */
 export async function submitRecommendation(prisma, opts) {
   const body = opts.body || {};
+  if (!mayRecommendToContractsCommittee(opts.actorRoleName)) {
+    return { ok: false, status: 403, error: "Only the Head PDU or Procurement Officer can recommend." };
+  }
   const held = await findHeldProcurementTask(prisma, {
     projectId: opts.projectId,
     procurementId: opts.procurementId,
     orgUserId: opts.actorOrgUserId,
   });
-  if (!held) {
-    return { ok: false, status: 403, error: "Only the officer holding this step can recommend." };
-  }
   const stage = await recommendationStage(prisma, opts);
   if (!stage.allowed || !stage.procurement) {
     return {
       ok: false,
       status: 400,
-      error: "This procurement is past award or order. Changes now need a contract amendment.",
+      error: "Recommendations are closed at this stage.",
     };
+  }
+  const instanceId =
+    held?.instanceId ||
+    (stage.awardDeclined
+      ? (
+          await prisma.projectOrgWorkflowInstance.findFirst({
+            where: {
+              projectId: opts.projectId,
+              procurementId: opts.procurementId,
+              status: { in: [OrgWorkflowInstanceStatus.ACTIVE, OrgWorkflowInstanceStatus.IN_PROGRESS] },
+            },
+            orderBy: { createdAt: "desc" },
+            select: { id: true },
+          })
+        )?.id
+      : null);
+  if (!instanceId) {
+    return { ok: false, status: 403, error: "Only the officer holding this step can recommend." };
   }
   if (await findPendingRecommendation(prisma, opts)) {
     return {
@@ -238,6 +320,32 @@ export async function submitRecommendation(prisma, opts) {
       if (!proposed) fieldErrors.proposedProviderId = "Choose an active registered provider.";
     }
   }
+  /** @type {{ id: string; name: string }[] | null} */
+  let proposedShortlist = null;
+  if (kind === OrgProcurementRecommendationKind.CHANGE_SHORTLIST) {
+    const ids = Array.isArray(body.proposedProviderIds)
+      ? [...new Set(body.proposedProviderIds.filter((id) => typeof id === "string" && id.trim()))]
+      : [];
+    const currentIds = stage.currentShortlist.map((s) => s.id);
+    if (!ids.length) {
+      fieldErrors.proposedProviderIds = "Choose at least one provider.";
+    } else if (ids.length === currentIds.length && ids.every((id) => currentIds.includes(id))) {
+      fieldErrors.proposedProviderIds = "Change at least one provider.";
+    } else {
+      const found = await prisma.projectOrgProvider.findMany({
+        where: { id: { in: ids }, projectId: opts.projectId, status: OrgProviderStatus.ACTIVE },
+        select: { id: true, name: true },
+      });
+      if (found.length !== ids.length) {
+        fieldErrors.proposedProviderIds = "Choose only active registered providers.";
+      } else {
+        proposedShortlist = ids.map((id) => {
+          const p = found.find((f) => f.id === id);
+          return { id, name: p?.name || "" };
+        });
+      }
+    }
+  }
   if (Object.keys(fieldErrors).length) {
     return { ok: false, status: 400, error: "Please fix the highlighted fields.", fieldErrors };
   }
@@ -271,6 +379,9 @@ export async function submitRecommendation(prisma, opts) {
         alternative: alternative || null,
         currentProviderId: stage.currentProviderId,
         proposedProviderId: proposed?.id || null,
+        ...(proposedShortlist
+          ? { currentShortlist: stage.currentShortlist, proposedShortlist }
+          : {}),
         recommendedByOrgUserId: opts.actorOrgUserId,
         recommendedByRoleName: opts.actorRoleName || null,
       },
@@ -280,7 +391,7 @@ export async function submitRecommendation(prisma, opts) {
       await tx.projectOrgWorkflowTask.create({
         data: {
           projectId: opts.projectId,
-          instanceId: held.instanceId,
+          instanceId,
           processFlowItemId: null,
           stepNumber: 0,
           title: taskTitle,
@@ -304,6 +415,7 @@ export async function submitRecommendation(prisma, opts) {
       kind,
       reason,
       proposedProviderId: proposed?.id || null,
+      proposedShortlist: proposedShortlist ? proposedShortlist.map((p) => p.id) : undefined,
       remarks: `${kindLabel} — ${recommendationReasonLabel(kind, reason)}. ${details}`,
       actorOrgUserId: opts.actorOrgUserId,
       actorRoleName: opts.actorRoleName,
@@ -403,10 +515,36 @@ export async function decideRecommendation(prisma, opts) {
 
   const approve = decision === "APPROVE";
   const isCancel = rec.kind === OrgProcurementRecommendationKind.CANCEL;
+  const isShortlistChange = rec.kind === OrgProcurementRecommendationKind.CHANGE_SHORTLIST;
 
   /** @type {any} */
   let newShortlistEntry = null;
-  if (approve && !isCancel) {
+  /** @type {any[] | null} */
+  let newShortlist = null;
+  if (approve && isShortlistChange) {
+    const stage = await recommendationStage(prisma, opts);
+    if (!stage.kinds.includes(OrgProcurementRecommendationKind.CHANGE_SHORTLIST)) {
+      return { ok: false, status: 400, error: "The RFQs have already been issued." };
+    }
+    const ids = Array.isArray(rec.proposedShortlist)
+      ? rec.proposedShortlist.map((p) => /** @type {any} */ (p)?.id).filter(Boolean)
+      : [];
+    const assessed = await assessProviderSelection(prisma, {
+      projectId: opts.projectId,
+      providerIds: ids,
+      method: "QUOTATION",
+      category: proc.requisition?.category || null,
+    });
+    if (!ids.length || !assessed.ok || assessed.providers.length !== ids.length) {
+      return { ok: false, status: 400, error: "A proposed provider is no longer in the register." };
+    }
+    newShortlist = assessed.providers.map((p) => ({
+      id: p.id,
+      name: p.name,
+      qualifies: p.qualifies,
+      failedReasons: p.failedReasons,
+    }));
+  } else if (approve && !isCancel) {
     const stage = await recommendationStage(prisma, opts);
     if (!stage.allowed) {
       return { ok: false, status: 400, error: "This procurement is past award or order." };
@@ -514,6 +652,27 @@ export async function decideRecommendation(prisma, opts) {
         }
       }
 
+      if (approve && proc.requisition && newShortlist) {
+        const partII =
+          proc.requisition.form5PartII && typeof proc.requisition.form5PartII === "object"
+            ? /** @type {Record<string, any>} */ (proc.requisition.form5PartII)
+            : {};
+        await tx.projectOrgRequisition.update({
+          where: { id: proc.requisition.id },
+          data: {
+            form5PartII: {
+              ...partII,
+              shortlist: newShortlist,
+              shortlistedProviders: newShortlist.map((p) => p.name).join(", "),
+              shortlistValidatedAt: now.toISOString(),
+              ...(newShortlist.length < MIN_RFQ_PROVIDERS && !String(partII.shortlistJustification || "").trim()
+                ? { shortlistJustification: String(rec.details || "").trim() }
+                : {}),
+            },
+          },
+        });
+      }
+
       if (approve && !isCancel && proc.requisition && newShortlistEntry) {
         const partII =
           proc.requisition.form5PartII && typeof proc.requisition.form5PartII === "object"
@@ -578,6 +737,21 @@ export async function decideRecommendation(prisma, opts) {
         previousProviderId: rec.currentProviderId,
         supplierId: newShortlistEntry.id,
         remarks: `Approved provider is now ${newShortlistEntry.name}.`,
+      },
+    });
+  }
+
+  if (approve && newShortlist) {
+    await writeAuditLog({
+      eventType: AuditEvent.PROJECT_ORG_PROCUREMENT_PROVIDER_CHANGED,
+      actorUserId: null,
+      meta: {
+        ...baseMeta,
+        previousShortlist: Array.isArray(rec.currentShortlist)
+          ? rec.currentShortlist.map((p) => /** @type {any} */ (p)?.id)
+          : [],
+        shortlist: newShortlist.map((p) => p.id),
+        remarks: `Approved shortlist is now ${newShortlist.map((p) => p.name).join(", ")}.`,
       },
     });
   }

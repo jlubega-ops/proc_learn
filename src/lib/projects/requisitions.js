@@ -528,7 +528,7 @@ export async function createOrUpdateRequisitionDraft(prisma, opts) {
     opts.requesterOrgUserId
       ? await prisma.projectOrgUser.findFirst({
           where: { id: opts.requesterOrgUserId, projectId: opts.projectId },
-          select: { firstName: true, lastName: true },
+          select: { firstName: true, lastName: true, projectOrgRole: { select: { name: true } } },
         })
       : null;
   const requesterName = requester
@@ -536,9 +536,8 @@ export async function createOrUpdateRequisitionDraft(prisma, opts) {
     : "";
   const form5Body =
     b.form5 && typeof b.form5 === "object" ? { ...b.form5 } : {};
-  if (!String(form5Body.memberName || "").trim() && requesterName) {
-    form5Body.memberName = requesterName;
-  }
+  if (requesterName) form5Body.memberName = requesterName;
+  if (requester?.projectOrgRole?.name) form5Body.memberTitle = requester.projectOrgRole.name;
   if (!String(form5Body.memberTitle || "").trim()) {
     form5Body.memberTitle = "User Department Officer";
   }
@@ -961,7 +960,7 @@ export async function actOnRequisitionTask(prisma, opts) {
       where: { id: taskPreview.instance.requisitionId },
       select: { category: true, estimatedTotalValue: true },
     });
-    const { checkMethodValueCeiling } = await import("@/lib/projects/procurement-thresholds");
+    const { checkMethodValueCeiling, MIN_RFQ_PROVIDERS } = await import("@/lib/projects/procurement-thresholds");
     const ceiling = checkMethodValueCeiling(method, reqRow?.estimatedTotalValue);
     if (!ceiling.ok) {
       return {
@@ -1000,7 +999,7 @@ export async function actOnRequisitionTask(prisma, opts) {
     }
     if (
       method === "QUOTATION" &&
-      picked.length < 3 &&
+      picked.length < MIN_RFQ_PROVIDERS &&
       !String(form5Body.shortlistJustification || "").trim()
     ) {
       return {

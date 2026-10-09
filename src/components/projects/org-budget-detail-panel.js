@@ -23,8 +23,10 @@ import LockRounded from "@mui/icons-material/LockRounded";
 import RefreshRounded from "@mui/icons-material/RefreshRounded";
 import SendRounded from "@mui/icons-material/SendRounded";
 import { OrgLineItemsTable } from "@/components/projects/org-line-items-table";
+import { OrgBudgetUtilisation } from "@/components/projects/org-budget-utilisation";
 import { WorkflowHistoryPanel } from "@/components/projects/workflow-history-panel";
 import { useToast } from "@/components/providers/toast-provider";
+import { decisionConfirmOptions, useConfirm } from "@/components/providers/confirm-provider";
 import { notifyOrgTasksChanged } from "@/hooks/use-pending-task-counts";
 import {
   adminCenteredLoadingBoxSx,
@@ -42,10 +44,8 @@ import {
 } from "@/components/print/print-document";
 import { RecordDetailsGrid, recordPersonLine } from "@/components/projects/record-details-grid";
 import { DEFAULT_CURRENCY, formatMoneyAmount, formatMoneyUGX } from "@/lib/money";
-import {
-  workflowDecisionButtonLabel,
-  workflowDecisionPastLabel,
-} from "@/lib/projects/workflow-status-presentation";
+import { workflowDecisionButtonLabel } from "@/lib/projects/workflow-status-presentation";
+import { finalApproverRoleLabel } from "@/lib/projects/committee-labels";
 import {
   workflowDecisionHelp,
   workflowDecisionOptions,
@@ -103,9 +103,8 @@ function budgetDetailFields(budget) {
 
 /**
  * @param {any} budget
- * @param {any[]} history
  */
-function budgetPrintSections(budget, history) {
+function budgetPrintSections(budget) {
   const currency = budget.currency || DEFAULT_CURRENCY;
   const dept = budget.department;
   return [
@@ -171,30 +170,6 @@ function budgetPrintSections(budget, history) {
       empty: "No budget lines.",
       footer: { label: "Grand total", value: formatMoneyUGX(budget.totals?.approvedAmount) },
     },
-    {
-      type: "table",
-      title: "Section C: Approval trail",
-      columns: [
-        { id: "no", label: "No.", width: "5%" },
-        { id: "date", label: "Date", width: "18%" },
-        { id: "action", label: "Action" },
-        { id: "by", label: "By" },
-        { id: "role", label: "Role" },
-        { id: "comment", label: "Comment" },
-      ],
-      rows: history.map((h, idx) => ({
-        key: h.id,
-        cells: {
-          no: `${idx + 1}.`,
-          date: formatPrintDateTime(h.createdAt),
-          action: workflowDecisionPastLabel(h.decision),
-          by: h.actorName || "—",
-          role: h.actorRoleName || "—",
-          comment: h.comment || "—",
-        },
-      })),
-      empty: "Not yet submitted for review.",
-    },
   ];
 }
 
@@ -208,6 +183,7 @@ function budgetPrintSections(budget, history) {
  */
 export function OrgBudgetDetailPanel({ projectId, budgetId, listHref, readOnly = false, allowClose = false }) {
   const { showToast } = useToast();
+  const confirm = useConfirm();
   const router = useRouter();
   const backHref = listHref || `/projects/${projectId}/budgets`;
   const [closeOpen, setCloseOpen] = useState(false);
@@ -285,6 +261,7 @@ export function OrgBudgetDetailPanel({ projectId, budgetId, listHref, readOnly =
   }
 
   async function submitBudget() {
+    if (!(await confirm(decisionConfirmOptions("SUBMIT", "this budget for review")))) return;
     setBusy(true);
     try {
       const res = await fetch(`/api/projects/${projectId}/budgets/${budgetId}`, {
@@ -333,6 +310,7 @@ export function OrgBudgetDetailPanel({ projectId, budgetId, listHref, readOnly =
 
   async function submitDecision() {
     if (!pendingTask?.id) return;
+    if (!(await confirm(decisionConfirmOptions(decision, "this budget")))) return;
     setBusy(true);
     try {
       const res = await fetch(`/api/projects/${projectId}/tasks`, {
@@ -411,7 +389,7 @@ export function OrgBudgetDetailPanel({ projectId, budgetId, listHref, readOnly =
         reference={budget.budgetReference}
         status={budget.stageLabel || budget.status}
         organisation={organisation}
-        sections={budgetPrintSections(budget, history)}
+        sections={budgetPrintSections(budget)}
         signatures={[
           {
             label: "Prepared by",
@@ -422,7 +400,7 @@ export function OrgBudgetDetailPanel({ projectId, budgetId, listHref, readOnly =
           {
             label: "Approved by",
             name: budget.approvedBy?.displayName,
-            role: budget.approvedBy?.roleName,
+            role: finalApproverRoleLabel(history, budget.approvedBy?.roleName),
             date: budget.approvedAt,
           },
         ]}
@@ -514,6 +492,10 @@ export function OrgBudgetDetailPanel({ projectId, budgetId, listHref, readOnly =
           ) : null}
         </div>
       </Paper>
+
+      {budget.status === "APPROVED" || budget.status === "CLOSED" ? (
+        <OrgBudgetUtilisation projectId={projectId} budgetId={budgetId} />
+      ) : null}
 
       {pendingTask ? (
         <Paper variant="outlined" sx={{ p: 2, ...adminOutlinedTableContainerSx }}>

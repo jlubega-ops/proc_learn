@@ -40,7 +40,7 @@ async function loadProcurement(prisma, projectId, procurementId) {
       officer: { select: { id: true, linkedUserId: true } },
       requisition: { select: { category: true } },
       offers: {
-        where: { status: { not: "WITHDRAWN" } },
+        where: { status: { notIn: ["WITHDRAWN", "LATE"] } },
         orderBy: { amount: "asc" },
         include: { supplier: true },
       },

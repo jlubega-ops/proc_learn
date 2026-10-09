@@ -37,7 +37,7 @@ export function describeProcurementStage(key, row) {
   switch (key) {
     case "sourcing": {
       if (!sol) return { status: NOT_STARTED, summary: [] };
-      const offers = (row.offers || []).filter((o) => o.status !== "WITHDRAWN").length;
+      const offers = (row.offers || []).filter((o) => !["WITHDRAWN", "LATE"].includes(o.status)).length;
       const summary = [`${offers} offer${offers === 1 ? "" : "s"} received`];
       if (sol.closingDate) summary.push(`Closes ${day(sol.closingDate)}`);
       if (report || award || sol.status === "CLOSED") return { status: { label: "Completed", color: "success" }, summary };
@@ -74,6 +74,7 @@ export function describeProcurementStage(key, row) {
         APPROVED: { label: "Approved", color: "info" },
         COMMUNICATED: { label: "Awaiting provider acceptance", color: "warning" },
         ACCEPTED: { label: "Accepted", color: "success" },
+        DECLINED: { label: "Declined by provider", color: "error" },
         CANCELLED: { label: "Cancelled", color: "error" },
       };
       return {

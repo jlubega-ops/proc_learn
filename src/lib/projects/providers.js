@@ -10,8 +10,11 @@ import {
   behavioursForBatch,
   GENERATE_MIX,
   MAX_GENERATE_COUNT,
+  normalizeConductIssues,
   normalizeProviderBehaviour,
-  providerBehaviourLabel,
+  PROVIDER_BEHAVIOUR,
+  providerConductIssues,
+  providerConductLabel,
 } from "@/lib/projects/provider-behaviours";
 import {
   normalizeProviderCategories,
@@ -72,7 +75,8 @@ export function serializeProvider(row, opts = {}) {
     compliance,
     ppdaSuspended: Boolean(row.ppdaSuspended),
     behaviour: row.behaviour || null,
-    behaviourLabel: providerBehaviourLabel(row.behaviour),
+    conductIssues: [...providerConductIssues(row)],
+    behaviourLabel: providerConductLabel(row),
     isGenerated: Boolean(row.isGenerated),
     statusReason: row.statusReason || null,
     portalLastLoginAt: row.portalLastLoginAt || null,
@@ -165,7 +169,10 @@ export function validateProviderInput(body) {
   const tin = str(b.tin, 32).replace(/\s+/g, "");
   const linesOfBusiness = str(b.linesOfBusiness, 500);
   const categories = normalizeProviderCategories(b.categories);
-  const behaviour = normalizeProviderBehaviour(b.behaviour);
+  const conductIssues = normalizeConductIssues(b.conductIssues);
+  const behaviour = conductIssues
+    ? conductIssues[0] || PROVIDER_BEHAVIOUR.COMPLIANT_COMPETITIVE
+    : normalizeProviderBehaviour(b.behaviour);
 
   if (!name) fieldErrors.name = "Enter the provider's registered name.";
   if (email && !EMAIL_RE.test(email)) fieldErrors.email = "Enter a valid email address.";
@@ -200,6 +207,7 @@ export function validateProviderInput(body) {
       compliance,
       ppdaSuspended: Boolean(b.ppdaSuspended),
       behaviour,
+      ...(conductIssues ? { conductIssues } : {}),
     },
   };
 }

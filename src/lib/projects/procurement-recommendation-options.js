@@ -2,11 +2,13 @@
 export const RECOMMENDATION_KIND = {
   CANCEL: "CANCEL",
   CHANGE_PROVIDER: "CHANGE_PROVIDER",
+  CHANGE_SHORTLIST: "CHANGE_SHORTLIST",
 };
 
 export const RECOMMENDATION_KIND_LABELS = {
   CANCEL: "Cancel procurement",
   CHANGE_PROVIDER: "Change provider",
+  CHANGE_SHORTLIST: "Change shortlist",
 };
 
 /** The only grounds for cancelling a procurement (PPDA PDE Regulations 2023, reg. 14(3)). */
@@ -23,9 +25,18 @@ export const CHANGE_PROVIDER_REASONS = [
   { value: "OTHER", label: "Other" },
 ];
 
+export const CHANGE_SHORTLIST_REASONS = [
+  { value: "PROVIDER_DECLINED", label: "Shortlisted provider declined or cannot supply" },
+  { value: "PROVIDER_INELIGIBLE", label: "Shortlisted provider no longer eligible" },
+  { value: "INSUFFICIENT_COMPETITION", label: "Too few providers for competition" },
+  { value: "OTHER", label: "Other" },
+];
+
 /** @param {string | null | undefined} kind */
 export function recommendationReasons(kind) {
-  return kind === RECOMMENDATION_KIND.CHANGE_PROVIDER ? CHANGE_PROVIDER_REASONS : CANCEL_REASONS;
+  if (kind === RECOMMENDATION_KIND.CHANGE_PROVIDER) return CHANGE_PROVIDER_REASONS;
+  if (kind === RECOMMENDATION_KIND.CHANGE_SHORTLIST) return CHANGE_SHORTLIST_REASONS;
+  return CANCEL_REASONS;
 }
 
 /**
@@ -41,6 +52,14 @@ export const RECOMMENDATION_STATUS_PRESENTATION = {
   APPROVED: { label: "Approved", color: "success" },
   DECLINED: { label: "Declined", color: "error" },
 };
+
+/** PDU roles that hold the case and may recommend to the Contracts Committee. */
+export const RECOMMEND_ROLES = ["Head PDU", "Procurement Officer"];
+
+/** @param {string | null | undefined} roleName */
+export function mayRecommendToContractsCommittee(roleName) {
+  return RECOMMEND_ROLES.includes(String(roleName || "").trim());
+}
 
 /** Title prefix of the Contracts Committee decision task. */
 export const RECOMMENDATION_TASK_PREFIX = "Decide PDU recommendation";

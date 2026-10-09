@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { format, isValid } from "date-fns";
 import Alert from "@mui/material/Alert";
+import Autocomplete from "@mui/material/Autocomplete";
 import Button from "@mui/material/Button";
 import Chip from "@mui/material/Chip";
 import CircularProgress from "@mui/material/CircularProgress";
@@ -24,6 +25,7 @@ import CheckCircleRounded from "@mui/icons-material/CheckCircleRounded";
 import DoNotDisturbOnRounded from "@mui/icons-material/DoNotDisturbOnRounded";
 import GavelRounded from "@mui/icons-material/GavelRounded";
 import { useToast } from "@/components/providers/toast-provider";
+import { actionConfirmOptions, useConfirm } from "@/components/providers/confirm-provider";
 import { RecordDetailsGrid } from "@/components/projects/record-details-grid";
 import {
   adminDialogPaperSx,
@@ -32,6 +34,7 @@ import {
   adminTableSx,
   themedTextFieldSx,
 } from "@/lib/admin-mui-surfaces";
+import { actingRoleLabel } from "@/lib/projects/committee-labels";
 import {
   RECOMMENDATION_KIND,
   RECOMMENDATION_KIND_LABELS,
@@ -62,7 +65,8 @@ async function postAction(projectId, procurementId, body) {
 }
 
 /**
- * PDU officer's recommendation to the Contracts Committee (cancel, or change the approved provider).
+ * PDU officer's recommendation to the Contracts Committee (cancel, change the approved provider,
+ * or change the RFQ shortlist).
  * @param {{
  *   open: boolean;
  *   onClose: () => void;
@@ -71,6 +75,7 @@ async function postAction(projectId, procurementId, body) {
  *   kinds: string[];
  *   currentProviderId?: string | null;
  *   currentProviderName?: string | null;
+ *   currentShortlist?: { id: string; name: string }[];
  *   providers: { id: string; name: string }[];
  *   onSubmitted: () => void | Promise<void>;
  * }} p
@@ -83,13 +88,16 @@ export function OrgRecommendationDialog({
   kinds,
   currentProviderId,
   currentProviderName,
+  currentShortlist = [],
   providers,
   onSubmitted,
 }) {
   const { showToast } = useToast();
+  const confirm = useConfirm();
   const [kind, setKind] = useState(kinds[0] || RECOMMENDATION_KIND.CANCEL);
   const [reason, setReason] = useState("");
   const [proposedProviderId, setProposedProviderId] = useState("");
+  const [proposedIds, setProposedIds] = useState(() => currentShortlist.map((s) => s.id));
   const [details, setDetails] = useState("");
   const [alternative, setAlternative] = useState("");
   /** @type {[Record<string, string>, Function]} */
@@ -97,7 +105,16 @@ export function OrgRecommendationDialog({
   const [busy, setBusy] = useState(false);
 
   const isChange = kind === RECOMMENDATION_KIND.CHANGE_PROVIDER;
+  const isShortlist = kind === RECOMMENDATION_KIND.CHANGE_SHORTLIST;
   const reasons = recommendationReasons(kind);
+  const currentIds = currentShortlist.map((s) => s.id);
+  const shortlistUnchanged =
+    proposedIds.length === currentIds.length && proposedIds.every((id) => currentIds.includes(id));
+  /** @type {{ id: string; name: string }[]} */
+  const shortlistOptions = [
+    ...currentShortlist.filter((s) => !providers.some((p) => p.id === s.id)),
+    ...providers,
+  ];
 
   /** @param {string} key */
   const clear = (key) => setErrors((prev) => ({ ...prev, [key]: "" }));
@@ -110,11 +127,14 @@ export function OrgRecommendationDialog({
     if (!reasons.some((r) => r.value === reason)) next.reason = "Choose a reason.";
     if (!details.trim()) next.details = "Enter the details.";
     if (isChange && !proposedProviderId) next.proposedProviderId = "Choose the proposed provider.";
+    if (isShortlist && !proposedIds.length) next.proposedProviderIds = "Choose at least one provider.";
+    else if (isShortlist && shortlistUnchanged) next.proposedProviderIds = "Change at least one provider.";
     setErrors(next);
     if (Object.keys(next).length) {
       showToast({ message: "Please fix the highlighted fields.", severity: "error" });
       return;
     }
+    if (!(await confirm(actionConfirmOptions("Send to committee")))) return;
     setBusy(true);
     try {
       const { ok, data } = await postAction(projectId, procurementId, {
@@ -122,8 +142,9 @@ export function OrgRecommendationDialog({
         kind,
         reason,
         details: details.trim(),
-        alternative: isChange ? "" : alternative.trim(),
+        alternative: isChange || isShortlist ? "" : alternative.trim(),
         proposedProviderId: isChange ? proposedProviderId : "",
+        proposedProviderIds: isShortlist ? proposedIds : [],
       });
       if (!ok) {
         setErrors(data.fieldErrors || {});
@@ -190,7 +211,7 @@ export function OrgRecommendationDialog({
                 clear("reason");
               }}
               error={Boolean(errors.reason)}
-              helperText={errors.reason || (isChange ? " " : "PPDA grounds")}
+              helperText={errors.reason || (isChange || isShortlist ? " " : "PPDA grounds")}
               fullWidth
               sx={themedTextFieldSx}
             >
@@ -232,6 +253,41 @@ export function OrgRecommendationDialog({
                 </TextField>
               </>
             ) : null}
+            {isShortlist ? (
+              <>
+                <TextField
+                  label="Current shortlist"
+                  value={currentShortlist.map((s) => s.name).join(", ") || "—"}
+                  fullWidth
+                  multiline
+                  slotProps={{ input: { readOnly: true } }}
+                  sx={themedTextFieldSx}
+                />
+                <Autocomplete
+                  multiple
+                  options={shortlistOptions}
+                  getOptionLabel={(o) => o.name}
+                  isOptionEqualToValue={(o, v) => o.id === v.id}
+                  value={shortlistOptions.filter((o) => proposedIds.includes(o.id))}
+                  onChange={(_e, v) => {
+                    setProposedIds(v.map((o) => o.id));
+                    clear("proposedProviderIds");
+                  }}
+                  renderInput={(params) => (
+                    <TextField
+                      {...params}
+                      label="Proposed shortlist"
+                      error={Boolean(errors.proposedProviderIds)}
+                      helperText={
+                        errors.proposedProviderIds ||
+                        (proposedIds.length > 0 && proposedIds.length < 3 ? "RFQ normally invites at least three" : " ")
+                      }
+                      sx={themedTextFieldSx}
+                    />
+                  )}
+                />
+              </>
+            ) : null}
             <TextField
               label="Details"
               value={details}
@@ -246,7 +302,7 @@ export function OrgRecommendationDialog({
               minRows={3}
               sx={themedTextFieldSx}
             />
-            {!isChange ? (
+            {!isChange && !isShortlist ? (
               <TextField
                 label="Alternative process"
                 value={alternative}
@@ -283,6 +339,11 @@ export function OrgRecommendationDialog({
   );
 }
 
+/** @param {unknown} list */
+function shortlistNames(list) {
+  return Array.isArray(list) ? list.map((p) => p?.name).filter(Boolean).join(", ") || null : null;
+}
+
 /**
  * @param {any} rec
  */
@@ -303,6 +364,12 @@ function pendingFields(rec) {
     fields.push(
       { label: "Current provider", value: rec.currentProvider?.name, wide: true },
       { label: "Proposed provider", value: rec.proposedProvider?.name, wide: true },
+    );
+  }
+  if (rec.kind === RECOMMENDATION_KIND.CHANGE_SHORTLIST) {
+    fields.push(
+      { label: "Current shortlist", value: shortlistNames(rec.currentShortlist), full: true },
+      { label: "Proposed shortlist", value: shortlistNames(rec.proposedShortlist), full: true },
     );
   }
   fields.push({ label: "Details", value: rec.details, full: true });
@@ -381,6 +448,7 @@ export function OrgRecommendationsCard({
   }
 
   const approveIsDestructive = pending?.kind === RECOMMENDATION_KIND.CANCEL;
+  const pendingIsShortlist = pending?.kind === RECOMMENDATION_KIND.CHANGE_SHORTLIST;
 
   return (
     <Paper variant="outlined" sx={{ p: 2, ...adminOutlinedTableContainerSx }}>
@@ -426,7 +494,11 @@ export function OrgRecommendationsCard({
               disabled={busy}
               onClick={() => ask("APPROVE")}
             >
-              {approveIsDestructive ? "Approve cancellation" : "Approve provider change"}
+              {approveIsDestructive
+                ? "Approve cancellation"
+                : pendingIsShortlist
+                  ? "Approve shortlist change"
+                  : "Approve provider change"}
             </Button>
             <Button
               variant="outlined"
@@ -464,9 +536,9 @@ export function OrgRecommendationsCard({
                   <TableCell sx={{ whiteSpace: "nowrap" }}>{fmt(r.createdAt)}</TableCell>
                   <TableCell>
                     {r.kindLabel}
-                    {r.proposedProvider?.name ? (
+                    {r.proposedProvider?.name || shortlistNames(r.proposedShortlist) ? (
                       <Typography variant="caption" component="p" sx={adminMutedTextSx}>
-                        To {r.proposedProvider.name}
+                        To {r.proposedProvider?.name || shortlistNames(r.proposedShortlist)}
                       </Typography>
                     ) : null}
                   </TableCell>
@@ -485,9 +557,24 @@ export function OrgRecommendationsCard({
                     <Chip size="small" color={/** @type {any} */ (pres.color)} label={pres.label} />
                   </TableCell>
                   <TableCell sx={{ whiteSpace: "pre-wrap", maxWidth: 280 }}>
-                    {r.decidedBy?.displayName
-                      ? `${r.decidedBy.displayName} · ${fmt(r.decidedAt)}${r.decisionComment ? `\n${r.decisionComment}` : ""}`
-                      : "—"}
+                    {r.decidedBy?.displayName ? (
+                      <>
+                        <Typography variant="body2" sx={{ fontWeight: 600 }}>
+                          {r.decidedBy.displayName}
+                        </Typography>
+                        {actingRoleLabel(r.decidedBy) ? (
+                          <Typography variant="caption" component="p" sx={adminMutedTextSx}>
+                            {actingRoleLabel(r.decidedBy)}
+                          </Typography>
+                        ) : null}
+                        <Typography variant="caption" component="p" sx={adminMutedTextSx}>
+                          {fmt(r.decidedAt)}
+                        </Typography>
+                        {r.decisionComment ? <span className="text-sm">{r.decisionComment}</span> : null}
+                      </>
+                    ) : (
+                      "—"
+                    )}
                   </TableCell>
                 </TableRow>
               );
@@ -509,7 +596,9 @@ export function OrgRecommendationsCard({
             ? "Decline recommendation?"
             : approveIsDestructive
               ? "Cancel this procurement?"
-              : "Change the approved provider?"}
+              : pendingIsShortlist
+                ? "Change the approved shortlist?"
+                : "Change the approved provider?"}
         </DialogTitle>
         <DialogContent>
           <Typography variant="body2">
@@ -517,7 +606,9 @@ export function OrgRecommendationsCard({
               ? "The officer continues with the current step."
               : approveIsDestructive
                 ? "The procurement is cancelled and its budget commitment released. This cannot be undone."
-                : `The purchase instruction will go to ${pending?.proposedProvider?.name || "the proposed provider"}.`}
+                : pendingIsShortlist
+                  ? `RFQs will go to ${shortlistNames(pending?.proposedShortlist) || "the proposed providers"}.`
+                  : `The purchase instruction will go to ${pending?.proposedProvider?.name || "the proposed provider"}.`}
           </Typography>
         </DialogContent>
         <DialogActions>

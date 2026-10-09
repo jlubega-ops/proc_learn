@@ -16,18 +16,16 @@ import Dialog from "@mui/material/Dialog";
 import DialogActions from "@mui/material/DialogActions";
 import DialogContent from "@mui/material/DialogContent";
 import DialogTitle from "@mui/material/DialogTitle";
-import IconButton from "@mui/material/IconButton";
 import TablePagination from "@mui/material/TablePagination";
 import TextField from "@mui/material/TextField";
-import Tooltip from "@mui/material/Tooltip";
-import EditRounded from "@mui/icons-material/EditRounded";
 import PlaceRounded from "@mui/icons-material/PlaceRounded";
 import ReceiptLongRounded from "@mui/icons-material/ReceiptLongRounded";
 import SendRounded from "@mui/icons-material/SendRounded";
-import UndoRounded from "@mui/icons-material/UndoRounded";
 import { format } from "date-fns";
 import { useToast } from "@/components/providers/toast-provider";
+import { actionConfirmOptions, useConfirm } from "@/components/providers/confirm-provider";
 import { formatMoneyUGX, parseMoneyInput, validatePositiveMoney } from "@/lib/money";
+import { draftLinesTotal } from "@/lib/projects/offer-line-items";
 import { BRAND_CARD_CLASS } from "@/lib/brand-ui";
 import {
   formatPortalDate,
@@ -36,11 +34,12 @@ import {
   usePortalList,
 } from "@/components/provider-portal/portal-fetch";
 
-const OFFER_STATUS = {
+export const OFFER_STATUS = {
   SUBMITTED: { color: "info", label: "Submitted" },
   OPENED: { color: "info", label: "Opened" },
   WITHDRAWN: { color: "warning", label: "Withdrawn" },
   REJECTED: { color: "error", label: "Rejected" },
+  LATE: { color: "error", label: "Late — not accepted" },
 };
 export const INVOICE_STATUS = {
   RECEIVED: { color: "warning", label: "Received — pending review" },
@@ -50,6 +49,13 @@ export const INVOICE_STATUS = {
   REJECTED: { color: "error", label: "Rejected" },
   DRAFT: { color: "warning", label: "Draft" },
 };
+export const AWARD_STATUS = {
+  COMMUNICATED: { color: "warning", label: "Awaiting your response" },
+  ACCEPTED: { color: "success", label: "Accepted" },
+  DECLINED: { color: "error", label: "Declined" },
+  CANCELLED: { color: "error", label: "Cancelled" },
+};
+
 export const PAYMENT_STATUS = {
   PENDING: { color: "warning", label: "Pending" },
   APPROVED: { color: "info", label: "Approved" },
@@ -135,23 +141,42 @@ function Pager({ total, page, pageSize, setPage, setPageSize }) {
 /**
  * @param {{ opportunity: any; onClose: () => void; onSaved: () => void }} p
  */
-function OfferDialog({ opportunity, onClose, onSaved }) {
+export function OfferDialog({ opportunity, onClose, onSaved }) {
   const { showToast } = useToast();
+  const confirm = useConfirm();
   const existing = opportunity.myOffer && opportunity.canEdit ? opportunity.myOffer : null;
+  const prefill = existing || opportunity.draftOffer || null;
   const word = opportunity.type === "RFQ" ? "quotation" : "bid";
-  const [amount, setAmount] = useState(existing ? String(existing.amount) : "");
-  const [deliveryDays, setDeliveryDays] = useState(existing?.deliveryDays ? String(existing.deliveryDays) : "");
-  const [remarks, setRemarks] = useState(existing?.remarks || "");
+  const items = Array.isArray(opportunity.items) ? opportunity.items : [];
+  const byLine = items.length > 0 && items.every((i) => Number(i.quantity) > 0);
+  const [unitPrices, setUnitPrices] = useState(() => {
+    /** @type {Record<string, string>} */
+    const map = {};
+    for (const l of prefill?.lineItems || []) map[String(l.lineNumber)] = String(l.unitPrice ?? "");
+    return map;
+  });
+  const [amount, setAmount] = useState(prefill?.amount ? String(prefill.amount) : "");
+  const [deliveryDays, setDeliveryDays] = useState(prefill?.deliveryDays ? String(prefill.deliveryDays) : "");
+  const [remarks, setRemarks] = useState(prefill?.remarks || "");
   /** @type {[Record<string, string>, Function]} */
   const [errors, setErrors] = useState({});
   const [busy, setBusy] = useState(false);
+  const lineTotal = byLine ? draftLinesTotal(items, unitPrices) : 0;
+  const total = byLine ? lineTotal : parseMoneyInput(amount);
 
   async function submit(e) {
     e.preventDefault();
     /** @type {Record<string, string>} */
     const next = {};
-    const amountErr = validatePositiveMoney(amount, "Amount");
-    if (amountErr) next.amount = amountErr;
+    if (byLine) {
+      for (const i of items) {
+        const err = validatePositiveMoney(unitPrices[String(i.lineNumber)] || "", "Unit price");
+        if (err) next[`line_${i.lineNumber}`] = err;
+      }
+    } else {
+      const amountErr = validatePositiveMoney(amount, "Amount");
+      if (amountErr) next.amount = amountErr;
+    }
     if (deliveryDays.trim()) {
       const n = Number(deliveryDays);
       if (!Number.isInteger(n) || n < 1 || n > 730) next.deliveryDays = "Enter whole days between 1 and 730.";
@@ -161,10 +186,21 @@ function OfferDialog({ opportunity, onClose, onSaved }) {
       showToast({ message: "Please fix the highlighted fields.", severity: "error" });
       return;
     }
+    const verb = existing ? `Update ${word}` : `Submit ${word}`;
+    const confirmed = await confirm(
+      actionConfirmOptions(verb, { message: `Total price ${formatMoneyUGX(total)}.` }),
+    );
+    if (!confirmed) return;
     setBusy(true);
     try {
       const payload = {
-        amount: parseMoneyInput(amount),
+        amount: total,
+        lineItems: byLine
+          ? items.map((i) => ({
+              lineNumber: i.lineNumber,
+              unitPrice: parseMoneyInput(unitPrices[String(i.lineNumber)] || ""),
+            }))
+          : null,
         deliveryDays: deliveryDays.trim() || null,
         remarks: remarks.trim() || null,
       };
@@ -198,19 +234,62 @@ function OfferDialog({ opportunity, onClose, onSaved }) {
             <span className="font-semibold">{opportunity.title}</span> · {opportunity.procurement?.number}
             {opportunity.closingDate ? ` · closes ${formatPortalDateTime(opportunity.closingDate)}` : ""}
           </p>
-          <TextField
-            label="Total price (UGX)"
-            value={amount}
-            onChange={(e) => {
-              setAmount(e.target.value);
-              setErrors((p) => ({ ...p, amount: "" }));
-            }}
-            error={Boolean(errors.amount)}
-            helperText={errors.amount || "Your total offer price, inclusive of taxes"}
-            inputMode="decimal"
-            fullWidth
-            autoFocus
-          />
+          {byLine ? (
+            <div className="space-y-2">
+              {items.map((i) => {
+                const key = String(i.lineNumber);
+                const err = errors[`line_${i.lineNumber}`];
+                const unit = Number(parseMoneyInput(unitPrices[key] || ""));
+                const qty = Number(i.quantity);
+                return (
+                  <div
+                    key={key}
+                    className="grid grid-cols-1 items-start gap-2 rounded-lg border border-zinc-200 p-2 sm:grid-cols-[1fr_10rem]"
+                  >
+                    <div className="min-w-0 text-sm">
+                      <p className="font-semibold wrap-break-word">
+                        {i.lineNumber}. {i.itemName}
+                      </p>
+                      <p className="text-xs text-zinc-600">
+                        {qty} {i.unitOfMeasure || "units"}
+                        {Number.isFinite(unit) && unit > 0 ? ` · ${formatMoneyUGX(unit * qty)}` : ""}
+                      </p>
+                    </div>
+                    <TextField
+                      label="Unit price (UGX)"
+                      value={unitPrices[key] || ""}
+                      onChange={(e) => {
+                        const v = e.target.value;
+                        setUnitPrices((p) => ({ ...p, [key]: v }));
+                        setErrors((p) => ({ ...p, [`line_${i.lineNumber}`]: "" }));
+                      }}
+                      error={Boolean(err)}
+                      helperText={err || " "}
+                      inputMode="decimal"
+                      fullWidth
+                    />
+                  </div>
+                );
+              })}
+              <p className="text-right text-sm">
+                Total <span className="font-bold">{formatMoneyUGX(lineTotal)}</span>
+              </p>
+            </div>
+          ) : (
+            <TextField
+              label="Total price (UGX)"
+              value={amount}
+              onChange={(e) => {
+                setAmount(e.target.value);
+                setErrors((p) => ({ ...p, amount: "" }));
+              }}
+              error={Boolean(errors.amount)}
+              helperText={errors.amount || "Inclusive of taxes"}
+              inputMode="decimal"
+              fullWidth
+              autoFocus
+            />
+          )}
           <TextField
             label="Delivery period in days (optional)"
             value={deliveryDays}
@@ -232,7 +311,7 @@ function OfferDialog({ opportunity, onClose, onSaved }) {
             minRows={2}
           />
           <p className="text-xs text-zinc-600">
-            You can edit or withdraw this {word} until the closing date.
+            {opportunity.revising ? "Editable until evaluation starts." : "Editable until the closing date."}
           </p>
         </DialogContent>
         <DialogActions className="flex-wrap gap-2">
@@ -253,34 +332,17 @@ function OfferDialog({ opportunity, onClose, onSaved }) {
   );
 }
 
+/** @param {any} o */
+export function opportunityStateChip(o) {
+  if (o.accepting) return { color: "info", label: `Open until ${formatPortalDateTime(o.closingDate)}` };
+  if (o.decided) return { color: "warning", label: "Under evaluation" };
+  return { color: "error", label: "Closed" };
+}
+
 export function PortalOpportunities() {
-  const { showToast } = useToast();
   const [page, setPage] = useState(0);
   const [pageSize, setPageSize] = useState(10);
-  const [reloadKey, setReloadKey] = useState(0);
-  const list = usePortalList("/api/provider-portal/opportunities", { page, pageSize, reloadKey });
-  const [editing, setEditing] = useState(/** @type {any} */ (null));
-  const [withdrawing, setWithdrawing] = useState(/** @type {any} */ (null));
-  const [busy, setBusy] = useState(false);
-
-  async function confirmWithdraw() {
-    if (!withdrawing?.myOffer) return;
-    setBusy(true);
-    try {
-      const { ok, data } = await portalFetch(`/api/provider-portal/offers/${withdrawing.myOffer.id}`, {
-        method: "DELETE",
-      });
-      if (!ok) {
-        showToast({ message: typeof data.error === "string" ? data.error : "Could not withdraw.", severity: "error" });
-        return;
-      }
-      showToast({ message: "Your offer was withdrawn.", severity: "success" });
-      setWithdrawing(null);
-      setReloadKey((k) => k + 1);
-    } finally {
-      setBusy(false);
-    }
-  }
+  const list = usePortalList("/api/provider-portal/opportunities", { page, pageSize });
 
   return (
     <section aria-labelledby="pp-opps" className="space-y-3">
@@ -298,134 +360,52 @@ export function PortalOpportunities() {
       >
         <ul className="space-y-3">
           {list.items.map((o) => {
-            const actionable = o.canSubmit || o.canEdit;
-            const openLabel = o.canEdit ? "Edit offer" : o.type === "RFQ" ? "Submit quotation" : "Submit bid";
+            const state = opportunityStateChip(o);
             return (
-            <li
-              key={o.id}
-              className={`${BRAND_CARD_CLASS} p-4 ${actionable ? CARD_CLICKABLE_CLASS : ""}`}
-              {...(actionable
-                ? {
-                    role: "button",
-                    tabIndex: 0,
-                    title: openLabel,
-                    "aria-label": `${openLabel}: ${o.title}`,
-                    onClick: () => setEditing(o),
-                    onKeyDown: (/** @type {import("react").KeyboardEvent} */ e) => {
-                      if (e.target !== e.currentTarget) return;
-                      if (e.key === "Enter" || e.key === " ") {
-                        e.preventDefault();
-                        setEditing(o);
-                      }
-                    },
-                  }
-                : {})}
-            >
-              <div className="flex flex-wrap items-start justify-between gap-2">
-                <div className="min-w-0">
-                  <p className="font-semibold wrap-break-word">{o.title}</p>
-                  <p className="text-xs text-zinc-600">
-                    {o.type === "RFQ" ? "Request for quotation" : "Open tender"} · {o.procurement?.number}
-                  </p>
-                </div>
-                <div
-                  className="flex shrink-0 items-center gap-1"
-                  onClick={(e) => e.stopPropagation()}
-                  onKeyDown={(e) => e.stopPropagation()}
-                  role="presentation"
-                >
-                  {o.canSubmit ? (
-                    <Tooltip title={o.type === "RFQ" ? "Submit quotation" : "Submit bid"}>
-                      <IconButton
-                        color="primary"
-                        aria-label={o.type === "RFQ" ? "Submit quotation" : "Submit bid"}
-                        onClick={() => setEditing(o)}
-                      >
-                        <SendRounded />
-                      </IconButton>
-                    </Tooltip>
+              <li key={o.id}>
+                <CardLink href={`/provider-portal/opportunities/${o.id}`} label={`Open ${o.title}`}>
+                  <div className="flex flex-wrap items-start justify-between gap-2">
+                    <div className="min-w-0">
+                      <p className="font-semibold wrap-break-word">{o.title}</p>
+                      <p className="text-xs text-zinc-600">
+                        {o.type === "RFQ" ? "Request for quotation" : "Open tender"} · {o.procurement?.number}
+                      </p>
+                    </div>
+                    <div className="flex shrink-0 items-center gap-1">
+                      {o.canSubmit ? (
+                        <Chip size="small" color="warning" label="Action needed" />
+                      ) : o.openClarifications ? (
+                        <Chip size="small" color="warning" label="Clarification requested" />
+                      ) : null}
+                      <ChevronRightRounded aria-hidden className="text-zinc-400" />
+                    </div>
+                  </div>
+                  <div className="mt-2 flex flex-wrap items-center gap-2 text-sm">
+                    <Chip size="small" color={/** @type {any} */ (state.color)} label={state.label} />
+                    {o.myOffer ? (
+                      <>
+                        <StatusChip map={OFFER_STATUS} status={o.myOffer.status} />
+                        <span>
+                          Your offer: <span className="font-semibold">{formatMoneyUGX(o.myOffer.amount)}</span>
+                          {o.myOffer.deliveryDays ? ` · ${o.myOffer.deliveryDays} days` : ""}
+                        </span>
+                      </>
+                    ) : (
+                      <span className="text-zinc-600">No offer submitted</span>
+                    )}
+                  </div>
+                  {o.procurement?.deliveryLocation ? (
+                    <p className="mt-1 flex items-center gap-1 text-xs text-zinc-600">
+                      <PlaceRounded fontSize="inherit" aria-hidden /> Deliver to: {o.procurement.deliveryLocation}
+                    </p>
                   ) : null}
-                  {o.canEdit ? (
-                    <>
-                      <Tooltip title="Edit offer">
-                        <IconButton color="primary" aria-label="Edit offer" onClick={() => setEditing(o)}>
-                          <EditRounded />
-                        </IconButton>
-                      </Tooltip>
-                      <Tooltip title="Withdraw offer">
-                        <IconButton color="error" aria-label="Withdraw offer" onClick={() => setWithdrawing(o)}>
-                          <UndoRounded />
-                        </IconButton>
-                      </Tooltip>
-                    </>
-                  ) : null}
-                </div>
-              </div>
-              <div className="mt-2 flex flex-wrap items-center gap-2 text-sm">
-                {o.accepting ? (
-                  <Chip size="small" color="info" label={`Open until ${formatPortalDateTime(o.closingDate)}`} />
-                ) : (
-                  <Chip size="small" color="error" label="Closed" />
-                )}
-                {o.myOffer ? (
-                  <>
-                    <StatusChip map={OFFER_STATUS} status={o.myOffer.status} />
-                    <span>
-                      Your offer: <span className="font-semibold">{formatMoneyUGX(o.myOffer.amount)}</span>
-                      {o.myOffer.deliveryDays ? ` · ${o.myOffer.deliveryDays} days` : ""}
-                    </span>
-                  </>
-                ) : (
-                  <span className="text-zinc-600">No offer submitted</span>
-                )}
-              </div>
-              {o.procurement?.deliveryLocation ? (
-                <p className="mt-1 flex items-center gap-1 text-xs text-zinc-600">
-                  <PlaceRounded fontSize="inherit" aria-hidden /> Deliver to: {o.procurement.deliveryLocation}
-                </p>
-              ) : null}
-            </li>
+                </CardLink>
+              </li>
             );
           })}
         </ul>
       </ListState>
       <Pager total={list.total} page={page} pageSize={pageSize} setPage={setPage} setPageSize={setPageSize} />
-
-      {editing ? (
-        <OfferDialog
-          key={editing.id}
-          opportunity={editing}
-          onClose={() => setEditing(null)}
-          onSaved={() => {
-            setEditing(null);
-            setReloadKey((k) => k + 1);
-          }}
-        />
-      ) : null}
-
-      <Dialog open={Boolean(withdrawing)} onClose={busy ? undefined : () => setWithdrawing(null)} maxWidth="xs" fullWidth>
-        <DialogTitle>Withdraw your offer?</DialogTitle>
-        <DialogContent dividers>
-          <p className="text-sm">
-            Your offer for <span className="font-semibold">{withdrawing?.title}</span> will no longer be
-            considered. You can submit a new one before the closing date.
-          </p>
-        </DialogContent>
-        <DialogActions className="flex-wrap gap-2">
-          <Button onClick={() => setWithdrawing(null)} disabled={busy}>
-            Keep offer
-          </Button>
-          <Button
-            color="error"
-            variant="contained"
-            disabled={busy}
-            onClick={confirmWithdraw}
-            startIcon={busy ? <CircularProgress size={16} color="inherit" /> : <UndoRounded />}
-          >
-            {busy ? "Withdrawing…" : "Withdraw"}
-          </Button>
-        </DialogActions>
-      </Dialog>
     </section>
   );
 }

@@ -18,6 +18,7 @@ import { useRouter } from "next/navigation";
 import { format } from "date-fns";
 import { useAuthSession } from "@/components/providers/auth-session-provider";
 import { useToast } from "@/components/providers/toast-provider";
+import { decisionConfirmOptions, useConfirm } from "@/components/providers/confirm-provider";
 import { OrgLineItemsTable } from "@/components/projects/org-line-items-table";
 import {
   adminCenteredLoadingBoxSx,
@@ -61,6 +62,7 @@ function futureDateOrEmpty(value) {
  */
 export function OrgRequisitionCreateForm({ projectId, requisitionId = "" }) {
   const { showToast } = useToast();
+  const confirm = useConfirm();
   const { session } = useAuthSession();
   const router = useRouter();
   const isEdit = Boolean(requisitionId);
@@ -631,6 +633,7 @@ export function OrgRequisitionCreateForm({ projectId, requisitionId = "" }) {
       focusFirstFieldError(errors);
       return;
     }
+    if (!saveOnly && !(await confirm(decisionConfirmOptions("SUBMIT", "this requisition")))) return;
     setBusy(true);
     try {
       const payload = {
@@ -1312,25 +1315,18 @@ export function OrgRequisitionCreateForm({ projectId, requisitionId = "" }) {
           name="form5.memberName"
           label="Member (User Department)"
           value={form.form5.memberName}
-          onChange={(e) => {
-            setForm((f) => ({ ...f, form5: { ...f.form5, memberName: e.target.value } }));
-            clearFieldError("form5.memberName");
-          }}
           fullWidth
           error={Boolean(fieldErrors["form5.memberName"])}
-          helperText={
-            fieldErrors["form5.memberName"] ||
-            "Auto-filled from your signed-in name — edit if needed."
-          }
+          helperText={fieldErrors["form5.memberName"] || "Auto-filled"}
+          slotProps={{ input: { readOnly: true } }}
           sx={themedTextFieldSx}
         />
         <TextField
           label="Member title"
           value={form.form5.memberTitle}
-          onChange={(e) =>
-            setForm((f) => ({ ...f, form5: { ...f.form5, memberTitle: e.target.value } }))
-          }
           fullWidth
+          helperText="Auto-filled"
+          slotProps={{ input: { readOnly: true } }}
           sx={themedTextFieldSx}
         />
 

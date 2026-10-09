@@ -328,8 +328,8 @@ export function bidDocumentToPdfSpec(bid, ctx, opts = {}) {
         fields: [
           { label: "Procurement reference", value: bid.procurementReference },
           { label: "Subject", value: bid.subject },
-          { label: "Closing date", value: bid.closingDate },
           { label: "Issue date", value: bid.issueDate },
+          { label: "Closing date", value: bid.closingDate },
           { label: "Issued by", value: bid.issuedByName },
           { label: "Position", value: bid.issuedByPosition },
         ],
@@ -456,11 +456,11 @@ export function bidDocumentToHtml(bid) {
   return `
 <h2>${escapeHtml(bid.documentTitle || "Bid / RFQ document")}</h2>
 <table>
-<tr><th>PDE / Organisation</th><td>${escapeHtml(bid.pdeName)}</td></tr>
+<tr><th>Procuring and Disposing Entity (PDE)</th><td>${escapeHtml(bid.pdeName)}</td></tr>
 <tr><th>Procurement reference</th><td>${escapeHtml(bid.procurementReference)}</td></tr>
 <tr><th>Subject</th><td>${escapeHtml(bid.subject)}</td></tr>
-<tr><th>Closing date</th><td>${escapeHtml(bid.closingDate)}</td></tr>
 <tr><th>Issue date</th><td>${escapeHtml(bid.issueDate)}</td></tr>
+<tr><th>Closing date</th><td>${escapeHtml(bid.closingDate)}</td></tr>
 <tr><th>Issued by</th><td>${escapeHtml(bid.issuedByName)} (${escapeHtml(bid.issuedByPosition)})</td></tr>
 </table>
 <h2>Specifications / scope</h2>

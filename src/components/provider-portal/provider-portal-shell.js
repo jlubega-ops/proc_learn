@@ -265,6 +265,49 @@ function PortalBell() {
   );
 }
 
+/** @param {{ count?: number }} p */
+function NavCountBadge({ count }) {
+  if (!count) return null;
+  const label = `${count} ${count === 1 ? "item needs" : "items need"} your action`;
+  return (
+    <span
+      title={label}
+      aria-label={label}
+      className="ml-auto inline-flex h-5 min-w-5 shrink-0 items-center justify-center rounded-full bg-brand-yellow px-1.5 text-[11px] font-bold leading-none text-zinc-900"
+    >
+      {count > 99 ? "99+" : count}
+    </span>
+  );
+}
+
+/** Sidebar badge counts keyed by nav href; refreshed on navigation and after portal actions. */
+function usePortalActionCounts(pathname) {
+  const [counts, setCounts] = useState(/** @type {Record<string, number>} */ ({}));
+
+  const load = useCallback(async () => {
+    const { ok, data } = await portalFetch("/api/provider-portal/action-counts");
+    if (ok && data && typeof data === "object") setCounts(data);
+  }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+    void portalFetch("/api/provider-portal/action-counts").then(({ ok, data }) => {
+      if (!cancelled && ok && data && typeof data === "object") setCounts(data);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [pathname]);
+
+  useEffect(() => {
+    const onChange = () => void load();
+    window.addEventListener(PORTAL_NOTIFICATIONS_CHANGED, onChange);
+    return () => window.removeEventListener(PORTAL_NOTIFICATIONS_CHANGED, onChange);
+  }, [load]);
+
+  return counts;
+}
+
 /** @param {{ children: import("react").ReactNode }} p */
 export function ProviderPortalShell({ children }) {
   const { showToast } = useToast();
@@ -272,6 +315,7 @@ export function ProviderPortalShell({ children }) {
   const [me, setMe] = useState(/** @type {any} */ (null));
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [signingOut, setSigningOut] = useState(false);
+  const actionCounts = usePortalActionCounts(pathname);
 
   useEffect(() => {
     let cancelled = false;
@@ -352,7 +396,8 @@ export function ProviderPortalShell({ children }) {
                     }`}
                   >
                     <Icon aria-hidden sx={navIconSx} />
-                    {label}
+                    <span className="min-w-0 truncate">{label}</span>
+                    <NavCountBadge count={actionCounts[href]} />
                   </Link>
                 </li>
               );

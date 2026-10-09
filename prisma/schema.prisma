@@ -286,6 +286,8 @@ enum OrgOfferStatus {
   OPENED
   WITHDRAWN
   REJECTED
+  /// Received after the closing date — recorded but never opened or evaluated.
+  LATE
 }
 
 enum OrgEvaluationReportStatus {
@@ -308,6 +310,7 @@ enum OrgAwardStatus {
   APPROVED
   COMMUNICATED
   ACCEPTED
+  DECLINED
   CANCELLED
 }
 
@@ -1475,6 +1478,8 @@ model ProjectOrgProvider {
   ppdaSuspended      Boolean           @default(false) @map("ppda_suspended")
   /// Simulated provider behaviour key used by auto-responses (see provider-behaviours.js).
   behaviour          String?           @db.VarChar(40)
+  /// Conduct problems the provider shows (subset of NON_RESPONSIVE, LATE_SUBMITTER, COMPLIANT_EXPENSIVE, POOR_DELIVERY, INVOICE_MISMATCH). Empty = good conduct; null = derive from `behaviour`.
+  conductIssues      Json?             @map("conduct_issues")
   isGenerated        Boolean           @default(false) @map("is_generated")
   status             OrgProviderStatus @default(ACTIVE)
   statusReason       String?           @map("status_reason") @db.VarChar(500)
@@ -1540,6 +1545,7 @@ model ProjectOrgPurchaseInstruction {
 enum OrgProcurementRecommendationKind {
   CANCEL
   CHANGE_PROVIDER
+  CHANGE_SHORTLIST
 }
 
 enum OrgProcurementRecommendationStatus {
@@ -1563,6 +1569,9 @@ model ProjectOrgProcurementRecommendation {
   currentProvider        ProjectOrgProvider?                @relation("RecommendationCurrentProvider", fields: [currentProviderId], references: [id], onDelete: SetNull)
   proposedProviderId     String?                            @map("proposed_provider_id")
   proposedProvider       ProjectOrgProvider?                @relation("RecommendationProposedProvider", fields: [proposedProviderId], references: [id], onDelete: SetNull)
+  /// RFQ shortlist change: [{ id, name }] before and after.
+  currentShortlist       Json?                              @map("current_shortlist")
+  proposedShortlist      Json?                              @map("proposed_shortlist")
   status                 OrgProcurementRecommendationStatus @default(PENDING)
   recommendedByOrgUserId String?                            @map("recommended_by_org_user_id")
   recommendedBy          ProjectOrgUser?                    @relation("RecommendationRecommender", fields: [recommendedByOrgUserId], references: [id], onDelete: SetNull)
@@ -1593,6 +1602,8 @@ model ProjectOrgSolicitation {
   bidDocumentAt    DateTime?             @map("bid_document_at")
   issueDate        DateTime?             @map("issue_date")
   closingDate      DateTime?             @map("closing_date")
+  /// Advertised deadline before submissions were closed early; default for a reopen.
+  originalClosingDate DateTime?          @map("original_closing_date")
   openedAt         DateTime?             @map("opened_at")
   closedAt         DateTime?             @map("closed_at")
   createdAt        DateTime              @default(now()) @map("created_at")
@@ -1613,6 +1624,8 @@ model ProjectOrgSolicitationInvite {
   supplierId     String                 @map("supplier_id")
   supplier       ProjectOrgProvider     @relation(fields: [supplierId], references: [id], onDelete: Restrict)
   invitedAt      DateTime               @default(now()) @map("invited_at")
+  /// Set when the provider is recorded as not responding; cleared if it later submits.
+  noResponseAt   DateTime?              @map("no_response_at")
 
   @@unique([solicitationId, supplierId])
   @@index([supplierId])
@@ -1637,14 +1650,40 @@ model ProjectOrgOffer {
   source         String                  @default("OFFICER") @db.VarChar(16)
   deliveryDays   Int?                    @map("delivery_days")
   remarks        String?                 @db.Text
+  /// Priced lines: [{ lineNumber, itemName, quantity, unitOfMeasure, unitPrice, total }].
+  lineItems      Json?                   @map("line_items")
   withdrawnAt    DateTime?               @map("withdrawn_at")
   createdAt      DateTime                @default(now()) @map("created_at")
   updatedAt      DateTime                @updatedAt @map("updated_at")
+
+  clarifications ProjectOrgOfferClarification[]
 
   @@index([projectId, procurementId, offerType])
   @@index([supplierId, status])
   @@index([solicitationId])
   @@map("project_org_offer")
+}
+
+/// Officer question on a received quotation/bid and the provider's reply (before closing).
+model ProjectOrgOfferClarification {
+  id             String          @id @default(uuid())
+  projectId      String          @map("project_id")
+  procurementId  String          @map("procurement_id")
+  offerId        String          @map("offer_id")
+  offer          ProjectOrgOffer @relation(fields: [offerId], references: [id], onDelete: Cascade)
+  supplierId     String          @map("supplier_id")
+  question       String          @db.Text
+  askedByName    String?         @map("asked_by_name") @db.VarChar(160)
+  askedByRole    String?         @map("asked_by_role") @db.VarChar(120)
+  askedAt        DateTime        @default(now()) @map("asked_at")
+  response       String?         @db.Text
+  /// PORTAL (provider login) or AUTO (auto-response provider).
+  responseSource String?         @map("response_source") @db.VarChar(16)
+  respondedAt    DateTime?       @map("responded_at")
+
+  @@index([offerId])
+  @@index([projectId, supplierId, respondedAt])
+  @@map("project_org_offer_clarification")
 }
 
 model ProjectOrgEvaluationReport {
@@ -1721,6 +1760,10 @@ model ProjectOrgAward {
   awardDate           DateTime?             @map("award_date")
   communicatedAt      DateTime?             @map("communicated_at")
   acceptedAt          DateTime?             @map("accepted_at")
+  /// Name of the provider's representative who accepted the award.
+  acceptedByName      String?               @map("accepted_by_name") @db.VarChar(160)
+  declinedAt          DateTime?             @map("declined_at")
+  declineReason       String?               @map("decline_reason") @db.Text
   approvalReference   String?               @map("approval_reference") @db.VarChar(128)
   approvedByOrgUserId String?               @map("approved_by_org_user_id")
   approvedBy          ProjectOrgUser?       @relation("AwardApprover", fields: [approvedByOrgUserId], references: [id], onDelete: SetNull)

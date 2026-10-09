@@ -6,6 +6,7 @@ import { ThemeProvider } from "@/components/providers/theme-provider";
 import { MuiAppThemeProvider } from "@/components/providers/mui-app-theme-provider";
 import { ConnectionBanner } from "@/components/connection/connection-banner";
 import { ToastProvider } from "@/components/providers/toast-provider";
+import { ConfirmProvider } from "@/components/providers/confirm-provider";
 import { APP_NAME, ORG_SHORT } from "@/lib/appConfig";
 import { resolveHtmlThemeClass } from "@/lib/resolve-html-theme-class";
 
@@ -43,8 +44,10 @@ export default async function RootLayout({ children }) {
           <ThemeProvider>
             <MuiAppThemeProvider>
               <ToastProvider>
-                <ConnectionBanner />
-                {children}
+                <ConfirmProvider>
+                  <ConnectionBanner />
+                  {children}
+                </ConfirmProvider>
               </ToastProvider>
             </MuiAppThemeProvider>
           </ThemeProvider>

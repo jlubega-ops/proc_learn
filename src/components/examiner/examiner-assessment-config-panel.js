@@ -24,6 +24,7 @@ import {
   themedTextFieldSx,
 } from "@/lib/admin-mui-surfaces";
 import { useToast } from "@/components/providers/toast-provider";
+import { actionConfirmOptions, useConfirm } from "@/components/providers/confirm-provider";
 import {
   ASSESSMENT_PROCESS_CATALOGUE,
   processDisableBlockers,
@@ -43,6 +44,7 @@ const GROUP_LABEL = {
  */
 export function ExaminerAssessmentConfigPanel({ projectId }) {
   const { showToast } = useToast();
+  const confirm = useConfirm();
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [project, setProject] = useState(/** @type {any} */ (null));
@@ -195,6 +197,12 @@ export function ExaminerAssessmentConfigPanel({ projectId }) {
   }
 
   async function toggleRelease(release) {
+    const confirmed = await confirm(
+      release
+        ? actionConfirmOptions("Release results", { message: "Students will see their scores." })
+        : actionConfirmOptions("Hide results", { message: "Students will no longer see their scores.", color: "warning" }),
+    );
+    if (!confirmed) return;
     setSaving(true);
     try {
       const res = await fetch(`/api/projects/${encodeURIComponent(projectId)}/assessment`, {

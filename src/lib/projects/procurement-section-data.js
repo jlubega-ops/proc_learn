@@ -5,7 +5,7 @@ import { procurementStagesForMethod } from "@/lib/projects/procurement-task-stag
 /** Procurement relations that belong to each section. */
 const SECTION_RELATIONS = {
   sourcing: ["solicitations", "offers"],
-  evaluation: ["evaluationReports"],
+  evaluation: ["evaluationReports", "postQualificationReports"],
   award: ["awards"],
   contract: ["purchaseInstructions", "contracts", "lpos"],
   delivery: ["deliveries", "deliveryNotes"],
@@ -33,6 +33,7 @@ const STATUS_ONLY = {
   solicitations: latestStatus,
   offers: { select: { status: true } },
   evaluationReports: latestStatus,
+  postQualificationReports: latestStatus,
   awards: latestStatus,
   purchaseInstructions: latestStatus,
   contracts: latestStatus,

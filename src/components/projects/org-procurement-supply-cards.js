@@ -24,11 +24,12 @@ import {
   themedTextFieldSx,
 } from "@/lib/admin-mui-surfaces";
 import { formatMoneyUGX } from "@/lib/money";
+import { OfferClarificationThread, OfferClarifyButton } from "@/components/projects/org-offer-clarification";
 
 const SOURCE_META = {
   OFFICER: { label: "Recorded by officer", color: "info" },
   PORTAL: { label: "Provider portal", color: "primary" },
-  AUTO: { label: "Auto-response provider", color: "warning" },
+  AUTO: { label: "Generated", color: "warning" },
 };
 
 /** @param {{ source?: string | null }} p */
@@ -37,7 +38,14 @@ export function SubmissionSourceChip({ source }) {
   return <Chip size="small" variant="outlined" color={/** @type {any} */ (meta.color)} label={meta.label} />;
 }
 
-const OFFER_STATUS_COLOR = { SUBMITTED: "info", OPENED: "primary", WITHDRAWN: "error", REJECTED: "error" };
+const OFFER_STATUS = {
+  SUBMITTED: { label: "Received", color: "info" },
+  OPENED: { label: "Opened", color: "primary" },
+  WITHDRAWN: { label: "Withdrawn", color: "error" },
+  REJECTED: { label: "Rejected", color: "error" },
+  LATE: { label: "Late — not accepted", color: "error" },
+};
+const INACTIVE = new Set(["WITHDRAWN", "LATE", "REJECTED"]);
 
 /** @param {unknown} value */
 function shortDate(value) {
@@ -48,11 +56,18 @@ function shortDate(value) {
 
 /**
  * Received quotations / bids with where each came from.
- * @param {{ offers: any[]; providerWord: string }} p
+ * @param {{
+ *   offers: any[];
+ *   providerWord: string;
+ *   projectId?: string;
+ *   procurementId?: string;
+ *   clarifyAllowed?: boolean;
+ *   onChanged?: () => Promise<void> | void;
+ * }} p
  */
-export function OrgOffersCard({ offers, providerWord }) {
+export function OrgOffersCard({ offers, providerWord, projectId, procurementId, clarifyAllowed = false, onChanged }) {
   if (!offers.length) return null;
-  const active = offers.filter((o) => o.status !== "WITHDRAWN");
+  const active = offers.filter((o) => !INACTIVE.has(o.status));
   const lowest = active.reduce(
     (min, o) => (min === null || Number(o.amount) < Number(min.amount) ? o : min),
     /** @type {any} */ (null),
@@ -63,8 +78,7 @@ export function OrgOffersCard({ offers, providerWord }) {
         Quotations / bids
       </Typography>
       <Typography variant="body2" sx={{ ...adminMutedTextSx, mb: 1.5 }}>
-        {active.length} active of {offers.length} received. Offers come from the officer, the {providerWord}
-        &apos;s own portal login, or auto-response {providerWord}s.
+        {active.length} valid of {offers.length} from {providerWord}s
       </Typography>
       <ul className="space-y-2 text-sm">
         {offers.map((o) => (
@@ -78,18 +92,85 @@ export function OrgOffersCard({ offers, providerWord }) {
             <span className="opacity-70">· {shortDate(o.submittedAt)}</span>
             <Chip
               size="small"
-              color={/** @type {any} */ (OFFER_STATUS_COLOR[o.status] || "info")}
-              label={o.status}
+              color={/** @type {any} */ (OFFER_STATUS[o.status]?.color || "info")}
+              label={OFFER_STATUS[o.status]?.label || o.status}
             />
             <SubmissionSourceChip source={o.source} />
             {lowest && lowest.id === o.id && active.length > 1 ? (
               <Chip size="small" color="success" variant="outlined" label="Lowest price" />
             ) : null}
+            {projectId && procurementId && onChanged && (clarifyAllowed || o.clarifications?.length) ? (
+              <OfferClarifyButton
+                projectId={projectId}
+                procurementId={procurementId}
+                offer={o}
+                allowed={clarifyAllowed}
+                onChanged={onChanged}
+              />
+            ) : null}
+            {o.lineItems?.length ? (
+              <details className="w-full text-xs">
+                <summary className="cursor-pointer text-primary">Price breakdown</summary>
+                <div className="mt-1 overflow-x-auto">
+                  <table className="w-full min-w-[360px] border-collapse">
+                    <tbody>
+                      {o.lineItems.map((l) => (
+                        <tr key={l.lineNumber} className="border-b border-(--border-subtle)">
+                          <td className="py-1 pr-2">{l.itemName}</td>
+                          <td className="py-1 pr-2 text-right">
+                            {l.quantity} {l.unitOfMeasure || ""} × {formatMoneyUGX(l.unitPrice)}
+                          </td>
+                          <td className="py-1 text-right font-medium">{formatMoneyUGX(l.total)}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </details>
+            ) : null}
             {o.remarks ? <span className="w-full text-xs opacity-70">{o.remarks}</span> : null}
+            <OfferClarificationThread clarifications={o.clarifications} />
           </li>
         ))}
       </ul>
     </Paper>
+  );
+}
+
+/**
+ * Providers an RFQ was issued to, with where each stands.
+ * @param {{ invites: any[]; offers: any[]; providerWordPlural: string }} p
+ */
+export function OrgInvitedProvidersList({ invites, offers, providerWordPlural }) {
+  const offerBySupplier = new Map(
+    offers.filter((o) => o.status !== "WITHDRAWN").map((o) => [o.supplierId, o]),
+  );
+  return (
+    <div className="mb-3">
+      <Typography variant="caption" sx={{ ...adminMutedTextSx, display: "block", mb: 0.5 }}>
+        Invited {providerWordPlural} ({invites.length})
+      </Typography>
+      <ul className="divide-y divide-(--border-subtle) rounded-lg border border-(--border-subtle) text-sm">
+        {invites.map((i) => {
+          const offer = offerBySupplier.get(i.supplierId);
+          /** @type {{ label: string; color: any }} */
+          const state = offer
+            ? OFFER_STATUS[offer.status] || { label: offer.status, color: "info" }
+            : i.noResponseAt
+              ? { label: "No response", color: "error" }
+              : { label: "Awaiting", color: "warning" };
+          return (
+            <li key={i.id} className="flex flex-wrap items-center justify-between gap-2 px-3 py-2">
+              <span className="min-w-0">
+                <span className="font-semibold wrap-break-word">{i.supplier?.name || "—"}</span>
+                <span className="text-xs opacity-70"> · invited {shortDate(i.invitedAt)}</span>
+              </span>
+              <Chip size="small" color={state.color} label={state.label} />
+            </li>
+          );
+        })}
+      </ul>
+    </div>
   );
 }
 

@@ -23,6 +23,7 @@ import { OrgLineItemsTable } from "@/components/projects/org-line-items-table";
 import { RecordDetailsGrid, recordPersonLine } from "@/components/projects/record-details-grid";
 import { WorkflowHistoryPanel } from "@/components/projects/workflow-history-panel";
 import { useToast } from "@/components/providers/toast-provider";
+import { decisionConfirmOptions, useConfirm } from "@/components/providers/confirm-provider";
 import { notifyOrgTasksChanged } from "@/hooks/use-pending-task-counts";
 import {
   adminCenteredLoadingBoxSx,
@@ -37,10 +38,8 @@ import {
   workflowDecisionHelp,
   workflowDecisionOptions,
 } from "@/lib/projects/workflow-decision-options";
-import {
-  workflowDecisionButtonLabel,
-  workflowDecisionPastLabel,
-} from "@/lib/projects/workflow-status-presentation";
+import { workflowDecisionButtonLabel } from "@/lib/projects/workflow-status-presentation";
+import { finalApproverRoleLabel } from "@/lib/projects/committee-labels";
 
 const SHEET_LABELS = {
   CONSULTANCY: "Consultancy services",
@@ -91,9 +90,8 @@ const PLAN_ITEM_COLUMNS = [
 
 /**
  * @param {any} plan
- * @param {any[]} history
  */
-function planPrintSections(plan, history) {
+function planPrintSections(plan) {
   const currency = plan.items?.[0]?.circularFields?.currency || DEFAULT_CURRENCY;
   const dept = plan.department;
   const period = plan.planningPeriod;
@@ -174,30 +172,6 @@ function planPrintSections(plan, history) {
       empty: "No plan items.",
       footer: { label: "Grand total", value: formatMoneyUGX(plan.totals?.estimatedTotal) },
     },
-    {
-      type: "table",
-      title: "Section C: Approval trail",
-      columns: [
-        { id: "no", label: "No.", width: "5%" },
-        { id: "date", label: "Date", width: "18%" },
-        { id: "action", label: "Action" },
-        { id: "by", label: "By" },
-        { id: "role", label: "Role" },
-        { id: "comment", label: "Comment" },
-      ],
-      rows: history.map((h, idx) => ({
-        key: h.id,
-        cells: {
-          no: `${idx + 1}.`,
-          date: formatPrintDateTime(h.createdAt),
-          action: workflowDecisionPastLabel(h.decision),
-          by: h.actorName || "—",
-          role: h.actorRoleName || "—",
-          comment: h.comment || "—",
-        },
-      })),
-      empty: "Not yet submitted for review.",
-    },
   ];
 }
 
@@ -239,6 +213,7 @@ function PlanDetailsGrid({ plan }) {
  */
 export function OrgProcurementPlanDetailPanel({ projectId, planId }) {
   const { showToast } = useToast();
+  const confirm = useConfirm();
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
   const [plan, setPlan] = useState(/** @type {any} */ (null));
@@ -284,6 +259,7 @@ export function OrgProcurementPlanDetailPanel({ projectId, planId }) {
   }, [load]);
 
   async function submitPlan() {
+    if (!(await confirm(decisionConfirmOptions("SUBMIT", "this plan for review")))) return;
     setBusy(true);
     try {
       const res = await fetch(`/api/projects/${projectId}/procurement-plans/${planId}`, {
@@ -309,6 +285,7 @@ export function OrgProcurementPlanDetailPanel({ projectId, planId }) {
 
   async function submitDecision() {
     if (!pendingTask?.id) return;
+    if (!(await confirm(decisionConfirmOptions(decision, "this plan")))) return;
     setBusy(true);
     try {
       const res = await fetch(`/api/projects/${projectId}/tasks`, {
@@ -373,7 +350,7 @@ export function OrgProcurementPlanDetailPanel({ projectId, planId }) {
         reference={plan.planReference}
         status={plan.stageLabel || plan.status}
         organisation={organisation}
-        sections={planPrintSections(plan, history)}
+        sections={planPrintSections(plan)}
         signatures={[
           {
             label: "Prepared by",
@@ -384,7 +361,7 @@ export function OrgProcurementPlanDetailPanel({ projectId, planId }) {
           {
             label: "Approved by",
             name: plan.approvedBy?.displayName,
-            role: plan.approvedBy?.roleName,
+            role: finalApproverRoleLabel(history, plan.approvedBy?.roleName),
             date: plan.approvedAt,
           },
         ]}

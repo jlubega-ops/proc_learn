@@ -21,7 +21,8 @@ export const DOMAIN_TIMELINE_EVENT_LABELS = {
   PROJECT_ORG_AWARD_CREATED: "Created award recommendation",
   PROJECT_ORG_AWARD_APPROVED: "Approved award",
   PROJECT_ORG_AWARD_COMMUNICATED: "Communicated award decision",
-  PROJECT_ORG_AWARD_ACCEPTED: "Recorded supplier award acceptance",
+  PROJECT_ORG_AWARD_ACCEPTED: "Provider accepted award",
+  PROJECT_ORG_AWARD_DECLINED: "Provider declined award",
   PROJECT_ORG_AWARD_CANCELLED: "Cancelled award",
   PROJECT_ORG_CONTRACT_CREATED: "Prepared contract",
   PROJECT_ORG_CONTRACT_APPROVED: "Approved contract",
@@ -43,10 +44,16 @@ export const DOMAIN_TIMELINE_EVENT_LABELS = {
   PROJECT_ORG_SOLICITATION_ISSUED: "Issued solicitation",
   PROJECT_ORG_SOLICITATION_OPENED: "Opened offers",
   PROJECT_ORG_SOLICITATION_CLOSED: "Closed solicitation",
+  PROJECT_ORG_SOLICITATION_REOPENED: "Reopened solicitation",
   PROJECT_ORG_OFFER_RECORDED: "Quotation / bid submitted",
   PROJECT_ORG_OFFER_UPDATED: "Provider revised offer",
   PROJECT_ORG_OFFER_WITHDRAWN: "Provider withdrew offer",
   PROJECT_ORG_OFFER_AUTO_RESPONDED: "Auto-response providers submitted offers",
+  PROJECT_ORG_OFFER_GENERATED: "Quotation / bid recorded for provider",
+  PROJECT_ORG_OFFER_LATE: "Late submission received — not accepted",
+  PROJECT_ORG_OFFER_NO_RESPONSE: "Recorded as no response",
+  PROJECT_ORG_OFFER_CLARIFICATION_REQUESTED: "Clarification requested",
+  PROJECT_ORG_OFFER_CLARIFICATION_ANSWERED: "Clarification answered",
   PROJECT_ORG_INVOICE_CERTIFIED: "Certified invoice",
   PROJECT_ORG_INVOICE_VERIFIED: "Verified invoice",
   PROJECT_ORG_INVOICE_REJECTED: "Rejected invoice",
@@ -145,6 +152,7 @@ export function serializeTimelineAction(action, ctx = {}) {
     actorRoleName: action.actorRoleName || null,
     committeeId: action.committeeId || null,
     committeeRole: action.committeeRole || null,
+    stepRoleName: action.task?.requiredRoleName || null,
     previousStatus,
     newStatus,
     createdAt: action.createdAt,
@@ -186,6 +194,8 @@ export function serializeTimelineAction(action, ctx = {}) {
 }
 
 const PROVIDER_EVENTS = new Set([
+  "PROJECT_ORG_AWARD_ACCEPTED",
+  "PROJECT_ORG_AWARD_DECLINED",
   "PROJECT_ORG_PURCHASE_INSTRUCTION_ACCEPTED",
   "PROJECT_ORG_PURCHASE_INSTRUCTION_DECLINED",
   "PROJECT_ORG_DELIVERY_NOTE_SUBMITTED",
@@ -193,6 +203,8 @@ const PROVIDER_EVENTS = new Set([
   "PROJECT_ORG_OFFER_UPDATED",
   "PROJECT_ORG_OFFER_WITHDRAWN",
   "PROJECT_ORG_OFFER_AUTO_RESPONDED",
+  "PROJECT_ORG_OFFER_LATE",
+  "PROJECT_ORG_OFFER_CLARIFICATION_ANSWERED",
 ]);
 
 /**
@@ -238,7 +250,9 @@ export function serializeDomainAuditTimelineEntry(auditRow, ctx = {}) {
     eventType === "PROJECT_ORG_OFFER_AUTO_RESPONDED"
       ? "Auto-response providers"
       : supplierId && ctx.providerNameById?.[supplierId]
-        ? `${ctx.providerNameById[supplierId]}${meta.source === "AUTO" ? " (auto-response)" : ""}`
+        ? `${ctx.providerNameById[supplierId]}${
+            meta.source === "AUTO" && eventType === "PROJECT_ORG_OFFER_RECORDED" ? " (auto-response)" : ""
+          }`
         : null;
   const amountRaw =
     meta.amount != null

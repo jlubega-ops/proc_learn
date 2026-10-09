@@ -30,6 +30,7 @@ export async function PATCH(request, { params }) {
     offerId: String(offerId),
     providerId: auth.provider.id,
     amount: body?.amount,
+    lineItems: body?.lineItems,
     deliveryDays: body?.deliveryDays,
     remarks: body?.remarks,
   });

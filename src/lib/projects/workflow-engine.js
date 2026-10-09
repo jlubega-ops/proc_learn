@@ -267,10 +267,28 @@ export async function healMissingStepTasks(prisma, projectId, budgetId = null) {
 
   let created = 0;
   for (const instance of instances) {
-    const step = (instance.processFlow?.items || []).find(
-      (i) => i.stepNumber === instance.currentStepNumber,
-    );
-    if (!step) continue;
+    const items = instance.processFlow?.items || [];
+    let step = items.find((i) => i.stepNumber === instance.currentStepNumber);
+    if (!step) {
+      // The current step was retired from the catalogue: move on to the next remaining step.
+      step = items.find((i) => i.stepNumber > instance.currentStepNumber);
+      if (!step) continue;
+      await prisma.$transaction([
+        prisma.projectOrgWorkflowTask.updateMany({
+          where: {
+            instanceId: instance.id,
+            stepNumber: instance.currentStepNumber,
+            status: { in: [OrgWorkflowTaskStatus.PENDING, OrgWorkflowTaskStatus.IN_PROGRESS] },
+          },
+          data: { status: OrgWorkflowTaskStatus.CANCELLED },
+        }),
+        prisma.projectOrgWorkflowInstance.update({
+          where: { id: instance.id },
+          data: { currentStepNumber: step.stepNumber },
+        }),
+      ]);
+      instance.tasks = [];
+    }
     const hasPending = (instance.tasks || []).some((t) => t.stepNumber === step.stepNumber);
     if (hasPending) continue;
 
@@ -1127,7 +1145,7 @@ export async function completeWorkflowTask(prisma, opts) {
 
       const items = instance.processFlow.items;
       const idx = items.findIndex((i) => i.stepNumber === task.stepNumber);
-      const nextStep = idx >= 0 ? items[idx + 1] : null;
+      const nextStep = idx >= 0 ? items[idx + 1] : items.find((i) => i.stepNumber > task.stepNumber) || null;
 
       if (!nextStep) {
         await tx.projectOrgWorkflowInstance.update({

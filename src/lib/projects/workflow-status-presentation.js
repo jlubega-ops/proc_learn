@@ -27,6 +27,24 @@ export function shortOrgRoleName(roleName) {
   return ROLE_SHORT[raw] || raw;
 }
 
+/** @type {[RegExp, string][]} */
+const POST_APPROVAL_STEP_LABELS = [
+  [/^recommend procurement method/i, "method selection"],
+  [/^approve procurement method/i, "method approval"],
+];
+
+/**
+ * "Approved · pending method selection by Procurement Officer" for steps that follow approval.
+ * @param {{ requiredRoleName?: string | null; title?: string | null }} stage
+ */
+function postApprovalStageLabel(stage) {
+  const role = shortOrgRoleName(stage.requiredRoleName);
+  const step = String(stage.title || "").split(":")[0].trim();
+  const what = POST_APPROVAL_STEP_LABELS.find(([re]) => re.test(step))?.[1];
+  if (what) return `Approved · pending ${what}${role ? ` by ${role}` : ""}`;
+  return role ? `Approved · pending ${role}` : "Approved";
+}
+
 /**
  * @param {{
  *   status?: string | null;
@@ -45,6 +63,11 @@ export function presentOrgWorkflowStatus(opts) {
   const lastRole = shortOrgRoleName(last?.actorRoleName);
 
   if (status === "APPROVED") {
+    // A requisition is approved by the AO mid-workflow; method recommendation and approval still follow.
+    if (stage) {
+      if (pendingForViewer) return { label: "Approved · pending your action", color: "warning" };
+      return { label: postApprovalStageLabel(stage), color: "warning" };
+    }
     return { label: "Approved", color: "success" };
   }
   if (status === "CLOSED") {
@@ -101,8 +124,12 @@ export function presentProcurementStatus(opts) {
   const step = progress?.currentStep || null;
   const role = shortOrgRoleName(progress?.waitingOnRole || step?.roleName);
   const stepLabel = String(step?.label || "").trim();
+  const stepPhrase = stepLabel
+    .split(/\s+/)
+    .map((w) => (/[A-Z]{2,}/.test(w) ? w : w.toLowerCase()))
+    .join(" ");
   const stageLabel =
-    stepLabel && role ? `Pending ${stepLabel.toLowerCase()} by ${role}` : role ? `Pending ${role}` : "";
+    stepPhrase && role ? `Pending ${stepPhrase} by ${role}` : role ? `Pending ${role}` : "";
 
   if (status === "CLOSED") return { label: "Closed", color: "success", stageLabel: "Closed" };
   if (status === "CANCELLED") return { label: "Cancelled", color: "error", stageLabel: "Cancelled" };

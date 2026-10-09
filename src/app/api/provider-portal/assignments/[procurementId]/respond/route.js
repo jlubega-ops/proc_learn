@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { requireProviderPortalSession } from "@/lib/projects/provider-portal";
 import { respondToPurchaseInstruction } from "@/lib/projects/purchase-instructions";
+import { respondToAward } from "@/lib/projects/awards";
 
 export const runtime = "nodejs";
 
@@ -16,7 +17,9 @@ export async function POST(request, context) {
   } catch {
     return NextResponse.json({ error: "Invalid request body." }, { status: 400 });
   }
-  const result = await respondToPurchaseInstruction(prisma, {
+  const target = String(body?.target || "").trim().toLowerCase();
+  const respond = target === "award" ? respondToAward : respondToPurchaseInstruction;
+  const result = await respond(prisma, {
     projectId: auth.project.id,
     providerId: auth.provider.id,
     procurementId,

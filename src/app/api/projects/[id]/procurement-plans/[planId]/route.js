@@ -11,6 +11,7 @@ import {
 import { healMissingStepTasks } from "@/lib/projects/workflow-engine";
 import {
   WORKFLOW_HISTORY_ACTION_SELECT,
+  attachCommitteeNames,
   loadPrintOrganisation,
   mapWorkflowHistoryActions,
   printedByFromAuth,
@@ -109,7 +110,7 @@ export async function GET(_request, context) {
     }),
   ]);
 
-  workflowHistory = mapWorkflowHistoryActions(instance?.actions);
+  workflowHistory = await attachCommitteeNames(prisma, mapWorkflowHistoryActions(instance?.actions));
   const latestAction = workflowHistory.length ? workflowHistory[workflowHistory.length - 1] : null;
   if (latestAction) {
     lastDecision = {

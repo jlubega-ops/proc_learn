@@ -1,4 +1,11 @@
-import { OrgAwardStatus, OrgEvaluationReportStatus, OrgProcurementStatus } from "@prisma/client";
+import {
+  OrgAwardStatus,
+  OrgEvaluationReportStatus,
+  OrgProcurementStatus,
+  OrgWorkflowInstanceStatus,
+  OrgWorkflowTaskStatus,
+} from "@prisma/client";
+import { validatePurchaseInstructionResponse } from "@/lib/validation/purchase-instruction";
 import { writeAuditLog, AuditEvent } from "@/lib/audit-log";
 import { notifyOrgUsers, OrgNotificationType } from "@/lib/projects/org-notifications";
 import { notifyProvider } from "@/lib/projects/provider-notifications";
@@ -21,6 +28,9 @@ export function serializeAward(row) {
     awardDate: row.awardDate || null,
     communicatedAt: row.communicatedAt || null,
     acceptedAt: row.acceptedAt || null,
+    acceptedByName: row.acceptedByName || null,
+    declinedAt: row.declinedAt || null,
+    declineReason: row.declineReason || null,
     approvalReference: row.approvalReference || null,
     approvedBy: row.approvedBy
       ? {
@@ -113,7 +123,8 @@ export async function createAwardFromApprovedEvaluation(prisma, opts) {
         awardedAmount: evaluation.evaluatedAmount,
         status: OrgAwardStatus.APPROVED,
         awardDate: new Date(),
-        approvalReference: typeof opts.approvalReference === "string" ? opts.approvalReference.trim() || null : null,
+        approvalReference:
+          typeof opts.approvalReference === "string" ? opts.approvalReference.trim().slice(0, 128) || null : null,
         approvedByOrgUserId: opts.actorOrgUserId,
       },
       include: awardInclude,
@@ -190,64 +201,132 @@ export async function communicateAward(prisma, opts) {
     projectId: opts.projectId,
     providerId: row.supplierId,
     procurementId: row.procurementId,
-    title: "Contract awarded to you",
-    body: `You have been awarded this procurement at ${formatMoneyUGX(row.awardedAmount?.toString?.())}.`,
+    title: "Award notice: accept or decline",
+    body: `You have been awarded this procurement at ${formatMoneyUGX(row.awardedAmount?.toString?.())}. Accept or decline the award.`,
+    relatedEntityType: "award",
+    relatedEntityId: row.id,
   });
 
-  return { ok: true, award: serializeAward(updated) };
+  const others = await prisma.projectOrgOffer.findMany({
+    where: { procurementId: row.procurementId, supplierId: { not: row.supplierId } },
+    select: { supplierId: true },
+    distinct: ["supplierId"],
+  });
+  for (const o of others) {
+    await notifyProvider(prisma, {
+      projectId: opts.projectId,
+      providerId: o.supplierId,
+      procurementId: row.procurementId,
+      title: "Award decision",
+      body: `Your bid was not successful. The award went to ${row.supplier?.name || "another bidder"} at ${formatMoneyUGX(row.awardedAmount?.toString?.())}.`,
+    });
+  }
+
+  if (row.supplier?.isGenerated) {
+    await respondToAward(prisma, {
+      projectId: opts.projectId,
+      providerId: row.supplierId,
+      procurementId: row.procurementId,
+      body: { decision: "ACCEPT", acceptedByName: row.supplier.contactPerson || row.supplier.name },
+      auto: true,
+    });
+  }
+
+  return { ok: true, award: serializeAward(updated), notifiedUnsuccessful: others.length };
 }
 
 /**
- * Record the supplier's acceptance of a COMMUNICATED award (simulated).
+ * The winning provider accepts or declines its COMMUNICATED award (portal, or auto-response).
+ * Acceptance lets the PDU prepare the LPO / contract; a decline goes back to the PDU.
  * @param {import("@prisma/client").PrismaClient} prisma
- * @param {{ projectId: string; awardId: string; actorOrgUserId: string; actorRoleName: string }} opts
+ * @param {{ projectId: string; providerId: string; procurementId: string; body: any; auto?: boolean }} opts
  */
-export async function acceptAward(prisma, opts) {
+export async function respondToAward(prisma, opts) {
+  const v = validatePurchaseInstructionResponse(opts.body || {});
+  if (!v.ok) return { ok: false, status: 400, error: "Please fix the highlighted fields.", fieldErrors: v.errors };
+
   const row = await prisma.projectOrgAward.findFirst({
-    where: { id: opts.awardId, projectId: opts.projectId },
-    include: awardInclude,
+    where: { projectId: opts.projectId, procurementId: opts.procurementId, supplierId: opts.providerId },
+    orderBy: { createdAt: "desc" },
+    include: {
+      ...awardInclude,
+      procurement: {
+        select: {
+          id: true,
+          procurementNumber: true,
+          title: true,
+          officer: { select: { id: true, linkedUserId: true } },
+          instances: {
+            where: { status: { in: [OrgWorkflowInstanceStatus.ACTIVE, OrgWorkflowInstanceStatus.IN_PROGRESS] } },
+            orderBy: { createdAt: "desc" },
+            take: 1,
+            select: { id: true },
+          },
+        },
+      },
+    },
   });
-  if (!row) return { ok: false, error: "Award not found.", status: 404 };
+  if (!row) return { ok: false, status: 404, error: "Award not found." };
   if (row.status !== OrgAwardStatus.COMMUNICATED) {
-    return { ok: false, error: "The award must be communicated to the supplier before it can be accepted.", status: 400 };
+    return { ok: false, status: 409, error: "You have already responded to this award." };
   }
 
-  const updated = await prisma.projectOrgAward.update({
-    where: { id: row.id },
-    data: { status: OrgAwardStatus.ACCEPTED, acceptedAt: new Date() },
-    include: awardInclude,
+  const accept = v.values.decision === "ACCEPT";
+  const now = new Date();
+  const claimed = await prisma.projectOrgAward.updateMany({
+    where: { id: row.id, status: OrgAwardStatus.COMMUNICATED },
+    data: accept
+      ? { status: OrgAwardStatus.ACCEPTED, acceptedAt: now, acceptedByName: v.values.acceptedByName }
+      : { status: OrgAwardStatus.DECLINED, declinedAt: now, declineReason: v.values.declineReason },
   });
+  if (claimed.count !== 1) {
+    return { ok: false, status: 409, error: "You have already responded to this award." };
+  }
 
+  const proc = row.procurement;
+  const providerLabel = `${row.supplier?.name || "Provider"}${opts.auto ? " (auto-response)" : ""}`;
   await writeAuditLog({
-    eventType: AuditEvent.PROJECT_ORG_AWARD_ACCEPTED,
+    eventType: accept ? AuditEvent.PROJECT_ORG_AWARD_ACCEPTED : AuditEvent.PROJECT_ORG_AWARD_DECLINED,
     actorUserId: null,
     meta: {
       projectId: opts.projectId,
-      procurementId: row.procurementId,
+      procurementId: proc.id,
       awardId: row.id,
-      actorOrgUserId: opts.actorOrgUserId,
-      actorRoleName: opts.actorRoleName,
+      supplierId: opts.providerId,
+      actorName: accept ? `${v.values.acceptedByName} — ${providerLabel}` : providerLabel,
+      actorRoleName: "Provider",
+      newStatus: accept ? OrgAwardStatus.ACCEPTED : OrgAwardStatus.DECLINED,
+      remarks: accept ? null : v.values.declineReason,
     },
   });
 
-  const officer = await prisma.projectOrgProcurement.findUnique({
-    where: { id: row.procurementId },
-    select: { officer: { select: { id: true, linkedUserId: true } } },
-  });
-  if (officer?.officer) {
+  /** @type {{ id: string; linkedUserId: string | null }[]} */
+  let recipients = proc.officer ? [proc.officer] : [];
+  const instanceId = proc.instances[0]?.id || null;
+  if (instanceId) {
+    const holders = await prisma.projectOrgWorkflowTask.findMany({
+      where: { instanceId, status: OrgWorkflowTaskStatus.PENDING, assigneeOrgUserId: { not: null } },
+      select: { assignee: { select: { id: true, linkedUserId: true } } },
+    });
+    recipients = [...recipients, ...holders.map((t) => t.assignee).filter(Boolean)];
+  }
+  const unique = [...new Map(recipients.map((r) => [r.id, r])).values()];
+  if (unique.length) {
     await notifyOrgUsers(prisma, {
       projectId: opts.projectId,
-      recipients: [officer.officer],
-      type: OrgNotificationType.WORKFLOW_APPROVED,
-      title: "Award accepted",
-      body: "The supplier accepted the award. You may now proceed to issue a contract or LPO.",
-      linkUrl: `/projects/${opts.projectId}/procurements/${row.procurementId}`,
+      recipients: unique,
+      type: accept ? OrgNotificationType.WORKFLOW_APPROVED : OrgNotificationType.WORKFLOW_REJECTED,
+      title: accept ? `Award accepted: ${proc.procurementNumber}` : `Award declined: ${proc.procurementNumber}`,
+      body: accept
+        ? `${providerLabel} accepted the award. The LPO / contract can now be prepared.`
+        : `${providerLabel} declined the award: ${v.values.declineReason}`,
+      linkUrl: `/projects/${opts.projectId}/procurements/${proc.id}`,
       relatedEntityType: "award",
       relatedEntityId: row.id,
     });
   }
 
-  return { ok: true, award: serializeAward(updated) };
+  return { ok: true, decision: v.values.decision };
 }
 
 /**

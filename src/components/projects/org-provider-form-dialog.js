@@ -21,7 +21,7 @@ import SaveRounded from "@mui/icons-material/SaveRounded";
 import { useToast } from "@/components/providers/toast-provider";
 import { adminDialogPaperSx, adminMutedTextSx, themedTextFieldSx } from "@/lib/admin-mui-surfaces";
 import { PROVIDER_DOCUMENTS } from "@/lib/projects/provider-compliance";
-import { PROVIDER_BEHAVIOUR_OPTIONS } from "@/lib/projects/provider-behaviours";
+import { PROVIDER_CONDUCT_TRAITS } from "@/lib/projects/provider-behaviours";
 import { PROVIDER_CATEGORY_OPTIONS } from "@/lib/projects/provider-terms";
 
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
@@ -61,7 +61,7 @@ function formFromProvider(provider) {
     linesOfBusiness: provider?.linesOfBusiness || "",
     compliance,
     ppdaSuspended: Boolean(provider?.ppdaSuspended),
-    behaviour: provider?.behaviour || "",
+    conductIssues: Array.isArray(provider?.conductIssues) ? provider.conductIssues : [],
   };
 }
 
@@ -392,22 +392,28 @@ export function OrgProviderFormDialog({ open, projectId, provider = null, onClos
             <Typography variant="subtitle2" sx={{ fontWeight: 700 }}>
               Provider behaviour
             </Typography>
-            <TextField
-              select
-              label="Behaviour"
-              value={form.behaviour}
-              onChange={(e) => setField("behaviour", e.target.value)}
-              fullWidth
-              sx={themedTextFieldSx}
-              helperText="How it responds, delivers and invoices"
-            >
-              <MenuItem value="">Not set</MenuItem>
-              {PROVIDER_BEHAVIOUR_OPTIONS.map((o) => (
-                <MenuItem key={o.value} value={o.value}>
-                  {o.label}
-                </MenuItem>
+            <div className="grid gap-x-4 sm:grid-cols-2">
+              {PROVIDER_CONDUCT_TRAITS.map((t) => (
+                <FormControlLabel
+                  key={t.issue}
+                  title={`Untick if the provider: ${t.problem.toLowerCase()}`}
+                  control={
+                    <Checkbox
+                      checked={!form.conductIssues.includes(t.issue)}
+                      onChange={(e) =>
+                        setField(
+                          "conductIssues",
+                          e.target.checked
+                            ? form.conductIssues.filter((i) => i !== t.issue)
+                            : [...form.conductIssues, t.issue],
+                        )
+                      }
+                    />
+                  }
+                  label={<span className="text-sm">{t.label}</span>}
+                />
               ))}
-            </TextField>
+            </div>
           </section>
         </DialogContent>
         <DialogActions className="flex-wrap gap-2">

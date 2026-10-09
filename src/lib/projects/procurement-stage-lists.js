@@ -82,7 +82,7 @@ const STAGE_QUERIES = {
     record: (r) => {
       const s = r.solicitations?.[0];
       if (!s) return null;
-      const offers = (r.offers || []).filter((o) => o.status !== "WITHDRAWN").length;
+      const offers = (r.offers || []).filter((o) => !["WITHDRAWN", "LATE"].includes(o.status)).length;
       return {
         reference: `${s.title} · ${offers} offer${offers === 1 ? "" : "s"}`,
         status: s.status,

@@ -18,7 +18,9 @@ import {
   issueSolicitation,
   receiveOffer,
   openSolicitation,
-  enforceClosingDatePassed,
+  lockSolicitationSubmissions,
+  reopenSolicitationSubmissions,
+  findSolicitationForProcurement,
   closeSolicitation,
 } from "@/lib/projects/solicitations";
 import { actOnProcurementLifecycle } from "@/lib/projects/procurement-lifecycle-actions";
@@ -26,7 +28,9 @@ import { getLatestAward } from "@/lib/projects/awards";
 import { listDeliveries } from "@/lib/projects/deliveries";
 import { listInvoices } from "@/lib/projects/invoices";
 import { listPayments } from "@/lib/projects/payments";
-import { autoRespondToSolicitation } from "@/lib/projects/provider-auto-responses";
+import { generateQuotes, loadQuotePool } from "@/lib/projects/provider-auto-responses";
+import { askOfferClarification } from "@/lib/projects/offer-clarifications";
+import { MIN_RFQ_PROVIDERS } from "@/lib/projects/procurement-thresholds";
 import {
   committeeTypeForWorkflowRole,
   isCommitteeWorkflowRole,
@@ -36,7 +40,10 @@ import {
   findPendingRecommendation,
   recommendationStage,
 } from "@/lib/projects/procurement-recommendations";
-import { isRecommendationDecisionTask } from "@/lib/projects/procurement-recommendation-options";
+import {
+  isRecommendationDecisionTask,
+  mayRecommendToContractsCommittee,
+} from "@/lib/projects/procurement-recommendation-options";
 
 /**
  * Step-title matchers keyed to the exact wording used in the Micro/Quotation/
@@ -54,8 +61,6 @@ const STEP = {
   RFQ_RECEIVE: /^receive quotations/i,
   RFQ_CLOSE: /^close\/lock quotation submission|^close.?lock quotation/i,
   RFQ_OPEN: /^open quotations/i,
-  RFQ_NOMINATE_EVAL: /^nominate evaluation committee/i,
-  RFQ_APPROVE_EVAL_COMMITTEE: /^approve evaluation committee/i,
   RFQ_TECH_EVAL: /^technical evaluation/i,
   RFQ_FIN_EVAL: /^financial evaluation/i,
   RFQ_PREPARE_EVAL: /^prepare evaluation report/i,
@@ -89,6 +94,23 @@ const STEP = {
   TENDER_OPEN: /^open bids/i,
   TENDER_FORWARD: /^forward bids for evaluation/i,
 };
+
+/**
+ * The procurement's live LPO / contract ids, so contract-stage tasks act on them without the client passing ids.
+ * @param {import("@prisma/client").PrismaClient} prisma
+ * @param {string} projectId
+ * @param {string} procurementId
+ * @param {Record<string, any>} body
+ */
+async function orderDocumentIds(prisma, projectId, procurementId, body) {
+  if (body.lpoId || body.contractId) return { lpoId: body.lpoId || null, contractId: body.contractId || null };
+  const where = { projectId, procurementId, status: { not: "CANCELLED" } };
+  const [lpo, contract] = await Promise.all([
+    prisma.projectOrgLpo.findFirst({ where, orderBy: { createdAt: "desc" }, select: { id: true } }),
+    prisma.projectOrgContract.findFirst({ where, orderBy: { createdAt: "desc" }, select: { id: true } }),
+  ]);
+  return { lpoId: lpo?.id || null, contractId: contract?.id || null };
+}
 
 /**
  * Act on a workflow task whose instance is linked to a Procurement (post-requisition
@@ -165,11 +187,20 @@ export async function actOnProcurementTask(prisma, opts) {
     !isCommitteeWorkflowRole(taskPreview.requiredRoleName) &&
     (await recommendationStage(prisma, { projectId, procurementId })).allowed
   ) {
-    return {
-      ok: false,
-      error: "Recommend cancellation to the Contracts Committee instead.",
-      status: 400,
-    };
+    if (mayRecommendToContractsCommittee(opts.actorRoleName)) {
+      return {
+        ok: false,
+        error: "Recommend cancellation to the Contracts Committee instead.",
+        status: 400,
+      };
+    }
+    if (decision === OrgWorkflowDecision.REJECT) {
+      return {
+        ok: false,
+        error: "Only the Contracts Committee can cancel before award. Return it instead.",
+        status: 400,
+      };
+    }
   }
 
   const committeeType = committeeTypeForWorkflowRole(taskPreview.requiredRoleName);
@@ -361,8 +392,17 @@ export async function actOnProcurementTask(prisma, opts) {
       actorRoleName: opts.actorRoleName,
     });
     if (!created.ok) return created;
+    const submitted = await advanceSolicitationStatus(prisma, {
+      projectId,
+      procurementId,
+      solicitationType: OrgSolicitationType.RFQ,
+      toStatus: OrgSolicitationStatus.REVIEW,
+      actorOrgUserId: opts.actorOrgUserId,
+      actorRoleName: opts.actorRoleName,
+    });
+    if (!submitted.ok) return submitted;
     const result = await complete({ solicitationId: created.solicitation.id });
-    return { ...result, solicitation: created.solicitation };
+    return { ...result, solicitation: submitted.solicitation };
   }
 
   if (STEP.RFQ_REVIEW.test(title) && isPositive) {
@@ -394,6 +434,37 @@ export async function actOnProcurementTask(prisma, opts) {
   }
 
   if (STEP.RFQ_ISSUE.test(title) && isPositive) {
+    const approvedProc = await prisma.projectOrgProcurement.findFirst({
+      where: { id: procurementId, projectId },
+      select: { requisition: { select: { form5PartII: true } } },
+    });
+    const approvedShortlist = Array.isArray(approvedProc?.requisition?.form5PartII?.shortlist)
+      ? approvedProc.requisition.form5PartII.shortlist.map((s) => s?.id).filter(Boolean)
+      : [];
+    if (approvedShortlist.length) {
+      const requested = Array.isArray(body.inviteSupplierIds)
+        ? body.inviteSupplierIds.filter((id) => typeof id === "string" && id.trim())
+        : [];
+      if (requested.some((id) => !approvedShortlist.includes(id))) {
+        return {
+          ok: false,
+          error: "Only suppliers approved by the Contracts Committee can be invited.",
+          status: 400,
+          fieldErrors: { inviteSupplierIds: "Use the approved shortlist." },
+        };
+      }
+      body.inviteSupplierIds = approvedShortlist;
+    }
+    const inviteCount = new Set(Array.isArray(body.inviteSupplierIds) ? body.inviteSupplierIds : []).size;
+    const justified = Boolean(String(approvedProc?.requisition?.form5PartII?.shortlistJustification || "").trim());
+    if (inviteCount > 0 && inviteCount < MIN_RFQ_PROVIDERS && !justified) {
+      return {
+        ok: false,
+        error: `An RFQ goes to at least ${MIN_RFQ_PROVIDERS} providers unless fewer were justified on the shortlist.`,
+        status: 400,
+        fieldErrors: { inviteSupplierIds: `Invite at least ${MIN_RFQ_PROVIDERS} providers.` },
+      };
+    }
     const eligibility = await eligibilityFor(body.inviteSupplierIds, "QUOTATION");
     if (!eligibility.ok) return eligibility;
 
@@ -413,19 +484,11 @@ export async function actOnProcurementTask(prisma, opts) {
       data: { status: OrgProcurementStatus.SOLICITATION },
     });
 
-    const autoResponses = await bestEffortAutoRespond(prisma, {
-      projectId,
-      procurementId,
-      solicitationType: OrgSolicitationType.RFQ,
-      actorOrgUserId: opts.actorOrgUserId,
-    });
-
     const result = await complete({
       solicitationId: issuedSol.solicitation.id,
       ...(eligibility.warnings.length ? { eligibilityWarnings: eligibility.warnings } : {}),
-      autoResponseCount: autoResponses.responded.length,
     });
-    return { ...result, solicitation: issuedSol.solicitation, autoResponses };
+    return { ...result, solicitation: issuedSol.solicitation };
   }
 
   if (STEP.RFQ_RECEIVE.test(title)) {
@@ -441,14 +504,17 @@ export async function actOnProcurementTask(prisma, opts) {
     });
   }
 
-  if (STEP.RFQ_CLOSE.test(title) && isPositive) {
-    const gate = await enforceClosingDatePassed(prisma, {
+  if (STEP.RFQ_CLOSE.test(title)) {
+    return handleCloseStep(prisma, {
+      opts,
+      body,
       projectId,
       procurementId,
       solicitationType: OrgSolicitationType.RFQ,
+      isPositive,
+      complete,
+      resolveSupplierId,
     });
-    if (!gate.ok) return gate;
-    return complete({ solicitationId: gate.solicitation.id });
   }
 
   if (STEP.RFQ_OPEN.test(title) && isPositive) {
@@ -485,8 +551,17 @@ export async function actOnProcurementTask(prisma, opts) {
       actorRoleName: opts.actorRoleName,
     });
     if (!created.ok) return created;
+    const submitted = await advanceSolicitationStatus(prisma, {
+      projectId,
+      procurementId,
+      solicitationType: OrgSolicitationType.TENDER,
+      toStatus: OrgSolicitationStatus.REVIEW,
+      actorOrgUserId: opts.actorOrgUserId,
+      actorRoleName: opts.actorRoleName,
+    });
+    if (!submitted.ok) return submitted;
     const result = await complete({ solicitationId: created.solicitation.id });
-    return { ...result, solicitation: created.solicitation };
+    return { ...result, solicitation: submitted.solicitation };
   }
 
   if (STEP.TENDER_REVIEW.test(title) && isPositive) {
@@ -534,18 +609,8 @@ export async function actOnProcurementTask(prisma, opts) {
       data: { status: OrgProcurementStatus.SOLICITATION },
     });
 
-    const autoResponses = await bestEffortAutoRespond(prisma, {
-      projectId,
-      procurementId,
-      solicitationType: OrgSolicitationType.TENDER,
-      actorOrgUserId: opts.actorOrgUserId,
-    });
-
-    const result = await complete({
-      solicitationId: issuedSol.solicitation.id,
-      autoResponseCount: autoResponses.responded.length,
-    });
-    return { ...result, solicitation: issuedSol.solicitation, autoResponses };
+    const result = await complete({ solicitationId: issuedSol.solicitation.id });
+    return { ...result, solicitation: issuedSol.solicitation };
   }
 
   if (STEP.TENDER_RECEIVE.test(title)) {
@@ -561,14 +626,17 @@ export async function actOnProcurementTask(prisma, opts) {
     });
   }
 
-  if (STEP.TENDER_CLOSE.test(title) && isPositive) {
-    const gate = await enforceClosingDatePassed(prisma, {
+  if (STEP.TENDER_CLOSE.test(title)) {
+    return handleCloseStep(prisma, {
+      opts,
+      body,
       projectId,
       procurementId,
       solicitationType: OrgSolicitationType.TENDER,
+      isPositive,
+      complete,
+      resolveSupplierId,
     });
-    if (!gate.ok) return gate;
-    return complete({ solicitationId: gate.solicitation.id });
   }
 
   if (STEP.TENDER_OPEN.test(title) && isPositive) {
@@ -607,41 +675,6 @@ export async function actOnProcurementTask(prisma, opts) {
   // ---------------------------------------------------------------------
   // Shared post-solicitation lifecycle bridges (Micro / Quotation / Tender)
   // ------------------------------------------------------------------
-
-  if (
-    (STEP.RFQ_NOMINATE_EVAL.test(title) || STEP.RFQ_APPROVE_EVAL_COMMITTEE.test(title)) &&
-    isPositive
-  ) {
-    const committeeId =
-      typeof body.committeeId === "string" ? body.committeeId.trim() : "";
-    if (!committeeId) {
-      return {
-        ok: false,
-        error:
-          "Choose an Evaluation committee (committeeId) for this procurement before continuing.",
-        status: 400,
-        fieldErrors: { committeeId: "Choose an evaluation committee." },
-      };
-    }
-    const committee = await prisma.projectOrgCommittee.findFirst({
-      where: {
-        id: committeeId,
-        projectId,
-        isActive: true,
-        committeeType: "EVALUATION",
-      },
-      include: { _count: { select: { members: true } } },
-    });
-    if (!committee || (committee._count?.members || 0) < 1) {
-      return {
-        ok: false,
-        error:
-          "Nominate an active Evaluation committee that has at least one active member.",
-        status: 400,
-      };
-    }
-    return complete({ committeeId: committee.id, committeeName: committee.name });
-  }
 
   if (STEP.RFQ_PREPARE_EVAL.test(title) && isPositive) {
     const report = await latestEvaluationReport(prisma, projectId, procurementId);
@@ -778,74 +811,70 @@ export async function actOnProcurementTask(prisma, opts) {
   }
 
   if ((STEP.RFQ_APPROVE_LPO.test(title) || /^sign\/approve contract/i.test(title)) && isPositive) {
-    if (body.lpoId) {
+    const { lpoId, contractId } = await orderDocumentIds(prisma, projectId, procurementId, body);
+    if (lpoId) {
       const out = await actOnProcurementLifecycle(prisma, {
         projectId,
         procurementId,
         action: "approve_lpo",
         actorOrgUserId: opts.actorOrgUserId,
         actorRoleName: opts.actorRoleName,
-        body: { lpoId: body.lpoId },
+        body: { lpoId },
       });
       if (!out.ok) return out;
-      return complete({ lpoId: body.lpoId });
+      return complete({ lpoId });
     }
-    if (body.contractId) {
+    if (contractId) {
       const out = await actOnProcurementLifecycle(prisma, {
         projectId,
         procurementId,
         action: "approve_contract",
         actorOrgUserId: opts.actorOrgUserId,
         actorRoleName: opts.actorRoleName,
-        body: { contractId: body.contractId },
+        body: { contractId },
       });
       if (!out.ok) return out;
-      return complete({ contractId: body.contractId });
+      return complete({ contractId });
     }
-    return {
-      ok: false,
-      error: "Provide lpoId or contractId to approve this document.",
-      status: 400,
-    };
+    return { ok: false, error: "No LPO or contract to approve yet.", status: 400 };
   }
 
   if ((STEP.RFQ_ISSUE_LPO.test(title) || /^issue contract$/i.test(title)) && isPositive) {
-    if (body.lpoId) {
+    const { lpoId, contractId } = await orderDocumentIds(prisma, projectId, procurementId, body);
+    if (lpoId) {
       const out = await actOnProcurementLifecycle(prisma, {
         projectId,
         procurementId,
         action: "issue_lpo",
         actorOrgUserId: opts.actorOrgUserId,
         actorRoleName: opts.actorRoleName,
-        body: { lpoId: body.lpoId },
+        body: { lpoId },
       });
       if (!out.ok) return out;
-      return complete({ lpoId: body.lpoId });
+      return complete({ lpoId });
     }
-    if (body.contractId) {
-      let out = await actOnProcurementLifecycle(prisma, {
+    if (contractId) {
+      const signed = await actOnProcurementLifecycle(prisma, {
         projectId,
         procurementId,
         action: "sign_contract",
         actorOrgUserId: opts.actorOrgUserId,
         actorRoleName: opts.actorRoleName,
-        body: { contractId: body.contractId },
+        body: { contractId },
       });
-      if (!out.ok && !/signed|already/i.test(String(out.error || ""))) {
-        // try issue directly if already signed
-      }
-      out = await actOnProcurementLifecycle(prisma, {
+      if (!signed.ok && !/signed|already/i.test(String(signed.error || ""))) return signed;
+      const out = await actOnProcurementLifecycle(prisma, {
         projectId,
         procurementId,
         action: "issue_contract",
         actorOrgUserId: opts.actorOrgUserId,
         actorRoleName: opts.actorRoleName,
-        body: { contractId: body.contractId },
+        body: { contractId },
       });
       if (!out.ok) return out;
-      return complete({ contractId: body.contractId });
+      return complete({ contractId });
     }
-    return { ok: false, error: "Provide lpoId or contractId to issue.", status: 400 };
+    return { ok: false, error: "No LPO or contract to issue yet.", status: 400 };
   }
 
   if ((STEP.RFQ_ACCEPT_SUPPLIER.test(title) || /^supplier acceptance$/i.test(title)) && isPositive) {
@@ -1147,21 +1176,6 @@ function latestPostQualification(prisma, projectId, procurementId) {
 }
 
 /**
- * Simulated providers answer the solicitation; a failure here must never undo
- * the issue/advertise step itself.
- *
- * @param {import("@prisma/client").PrismaClient} prisma
- * @param {{ projectId: string; procurementId: string; solicitationType: string; actorOrgUserId: string }} opts
- */
-async function bestEffortAutoRespond(prisma, opts) {
-  try {
-    return await autoRespondToSolicitation(prisma, opts);
-  } catch {
-    return { ok: false, responded: [], skipped: [] };
-  }
-}
-
-/**
  * Shared logic for "Receive Quotations" / "Receive Bids": lets the officer
  * record offers one at a time without finalizing the step, then finalize
  * (complete the task, advancing the workflow) once ready.
@@ -1178,8 +1192,82 @@ async function bestEffortAutoRespond(prisma, opts) {
  *   resolveSupplierId: (rawSupplierId: unknown, inlineSupplier: unknown) => Promise<any>;
  * }} p
  */
+/**
+ * Close/Lock Quotation Submission / Close Tender Submission: close now, reopen with a new
+ * closing date, take offers while reopened, and forward only once submissions are closed.
+ * @param {import("@prisma/client").PrismaClient} prisma
+ * @param {any} p same shape as {@link handleReceiveStep}
+ */
+async function handleCloseStep(prisma, p) {
+  const { opts, body, projectId, procurementId, solicitationType, isPositive, complete } = p;
+  const base = {
+    projectId,
+    procurementId,
+    solicitationType,
+    actorOrgUserId: opts.actorOrgUserId,
+    actorRoleName: opts.actorRoleName,
+  };
+
+  if (body.generate || body.offer) {
+    return handleReceiveStep(prisma, { ...p, body: { ...body, finalize: false }, isPositive: false });
+  }
+  if (body.lock === true) {
+    const locked = await lockSolicitationSubmissions(prisma, base);
+    if (!locked.ok) return locked;
+    return { ok: true, solicitation: locked.solicitation, taskStatus: "PENDING" };
+  }
+  if (body.reopen && typeof body.reopen === "object") {
+    const reopened = await reopenSolicitationSubmissions(prisma, { ...base, closingDate: body.reopen.closingDate });
+    if (!reopened.ok) return reopened;
+    return { ok: true, solicitation: reopened.solicitation, taskStatus: "PENDING" };
+  }
+  if (!isPositive) return complete();
+
+  const solicitation = await findSolicitationForProcurement(prisma, base);
+  if (!solicitation) {
+    return { ok: false, error: "No issued solicitation was found for this procurement.", status: 400 };
+  }
+  if (!solicitation.closingDate || solicitation.closingDate.getTime() > Date.now()) {
+    return { ok: false, error: "Close submissions first.", status: 400, code: "SUBMISSIONS_OPEN" };
+  }
+  const valid = await prisma.projectOrgOffer.count({
+    where: { solicitationId: solicitation.id, status: { notIn: ["WITHDRAWN", "LATE"] } },
+  });
+  if (!valid) {
+    const word = solicitationType === OrgSolicitationType.RFQ ? "quotation" : "bid";
+    return { ok: false, error: `Record at least one valid ${word} first.`, status: 400 };
+  }
+  return complete({ solicitationId: solicitation.id });
+}
+
 async function handleReceiveStep(prisma, p) {
   const { opts, body, projectId, procurementId, solicitationType, isPositive, complete, resolveSupplierId } = p;
+
+  if (body.generate && typeof body.generate === "object") {
+    const generated = await generateQuotes(prisma, {
+      projectId,
+      procurementId,
+      solicitationType,
+      supplierId: typeof body.generate.supplierId === "string" ? body.generate.supplierId : "",
+      actorOrgUserId: opts.actorOrgUserId,
+      actorRoleName: opts.actorRoleName,
+    });
+    if (!generated.ok) return generated;
+    return { ...generated, taskStatus: "PENDING" };
+  }
+
+  if (body.clarification && typeof body.clarification === "object") {
+    const asked = await askOfferClarification(prisma, {
+      projectId,
+      procurementId,
+      offerId: body.clarification.offerId,
+      question: body.clarification.question,
+      actorOrgUserId: opts.actorOrgUserId,
+      actorRoleName: opts.actorRoleName,
+    });
+    if (!asked.ok) return asked;
+    return { ...asked, taskStatus: "PENDING" };
+  }
 
   if (body.offer && typeof body.offer === "object") {
     const resolved = await resolveSupplierId(body.offer.supplierId, body.offer.supplier);
@@ -1200,6 +1288,9 @@ async function handleReceiveStep(prisma, p) {
       solicitationType,
       supplierId: resolved.supplierId,
       amount,
+      lineItems: body.offer.lineItems,
+      deliveryDays: body.offer.deliveryDays,
+      remarks: body.offer.remarks,
       actorOrgUserId: opts.actorOrgUserId,
       actorRoleName: opts.actorRoleName,
     });
@@ -1216,19 +1307,12 @@ async function handleReceiveStep(prisma, p) {
     return complete();
   }
 
-  const count = await prisma.projectOrgOffer.count({
-    where: {
-      procurementId,
-      offerType: solicitationType === OrgSolicitationType.RFQ ? "QUOTATION" : "BID",
-      status: { not: "WITHDRAWN" },
-    },
-  });
-  if (count === 0) {
-    return {
-      ok: false,
-      error: `Record at least one ${solicitationType === OrgSolicitationType.RFQ ? "quotation" : "bid"} before completing this step.`,
-      status: 400,
-    };
+  const pool = await loadQuotePool(prisma, { projectId, procurementId });
+  if (!pool) {
+    return { ok: false, error: "This procurement has no solicitation to receive offers against.", status: 400 };
+  }
+  if (!pool.ready) {
+    return { ok: false, error: pool.blockers[0], status: 400, code: "RECEIVE_NOT_READY" };
   }
 
   return complete();

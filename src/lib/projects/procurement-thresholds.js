@@ -6,6 +6,9 @@ export const METHOD_VALUE_CEILINGS_UGX = {
   MICRO: 10_000_000,
 };
 
+/** Providers an RFQ must go to; fewer only with a recorded justification. */
+export const MIN_RFQ_PROVIDERS = 3;
+
 /**
  * @param {string | null | undefined} method
  * @param {unknown} estimatedValue

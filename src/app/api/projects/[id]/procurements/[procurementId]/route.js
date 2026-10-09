@@ -16,6 +16,7 @@ import { healMissingStepTasks } from "@/lib/projects/workflow-engine";
 import {
   checkActingModeForTask,
   getActiveCommittee,
+  isCommitteeWorkflowRole,
   requireCommitteeMembership,
 } from "@/lib/projects/committee-context";
 import { loadProcurementWorkflowProgress } from "@/lib/projects/procurement-workflow-progress";
@@ -28,10 +29,16 @@ import {
   recommendationStage,
   submitRecommendation,
 } from "@/lib/projects/procurement-recommendations";
-import { isRecommendationDecisionTask } from "@/lib/projects/procurement-recommendation-options";
+import {
+  isRecommendationDecisionTask,
+  mayRecommendToContractsCommittee,
+} from "@/lib/projects/procurement-recommendation-options";
 import { loadPurchaseInstructionDoc } from "@/lib/projects/purchase-instructions";
-import { loadPrintOrganisation, printedByFromAuth } from "@/lib/projects/print-context";
+import { attachCommitteeNames, loadPrintOrganisation, printedByFromAuth } from "@/lib/projects/print-context";
 import { isReceiveGoodsStep } from "@/lib/projects/procurement-task-stage";
+import { loadQuotePool } from "@/lib/projects/provider-auto-responses";
+import { LIFECYCLE_ACTION_ROLES } from "@/lib/projects/procurement-lifecycle-roles";
+import { askOfferClarification, procurementClarificationsOpen } from "@/lib/projects/offer-clarifications";
 
 export const runtime = "nodejs";
 
@@ -137,6 +144,7 @@ export async function GET(_request, context) {
     recommendationStage(prisma, { projectId, procurementId }),
   ]);
   const pendingRecommendation = recommendations.find((r) => r.status === "PENDING") || null;
+  const viewerRoleName = auth.type === "org" ? auth.orgUser.projectOrgRole?.name || null : null;
   const heldTask =
     auth.type === "org"
       ? await findHeldProcurementTask(prisma, {
@@ -178,11 +186,17 @@ export async function GET(_request, context) {
           : null,
     awaitingDelivery,
   });
+  const serialized = serializeProcurement(row, { domainTimeline });
   const procurement = {
-    ...serializeProcurement(row, { domainTimeline }),
+    ...serialized,
+    timeline: await attachCommitteeNames(prisma, serialized.timeline || []),
     statusLabel: presented.label,
     statusColor: presented.color,
     stageLabel: presented.stageLabel,
+    currentStepLabel:
+      String(workflowProgress?.status || "").toUpperCase() !== "COMPLETED"
+        ? workflowProgress?.currentStep?.label || null
+        : null,
   };
 
   let closure = null;
@@ -196,11 +210,19 @@ export async function GET(_request, context) {
     closure = { ready: false, blockers: ["Could not evaluate closure readiness."] };
   }
 
-  const [purchaseInstructionDoc, organisation] = await Promise.all([
+  const mayClarify =
+    auth.type === "org" &&
+    LIFECYCLE_ACTION_ROLES.ask_offer_clarification.includes(auth.orgUser.projectOrgRole?.name || "");
+  const [purchaseInstructionDoc, organisation, quotePool, clarifyOpen] = await Promise.all([
     keep.has("contract") && row.purchaseInstructions?.length
       ? loadPurchaseInstructionDoc(prisma, { projectId, procurementId })
       : Promise.resolve(null),
     loadPrintOrganisation(prisma, projectId),
+    pendingTask &&
+    /^receive (quotations|bids)|^close\/lock quotation|^close.?lock quotation|^close tender submission/i.test(pendingTask.title)
+      ? loadQuotePool(prisma, { projectId, procurementId })
+      : Promise.resolve(null),
+    mayClarify ? procurementClarificationsOpen(prisma, procurementId) : Promise.resolve(false),
   ]);
 
   return NextResponse.json({
@@ -219,10 +241,21 @@ export async function GET(_request, context) {
     recommendations,
     recommendation: {
       allowed: stage.allowed,
+      returnRejectAllowed: !stage.allowed || isCommitteeWorkflowRole(pendingTask?.requiredRoleName),
+      returnAllowed:
+        !stage.allowed ||
+        isCommitteeWorkflowRole(pendingTask?.requiredRoleName) ||
+        !mayRecommendToContractsCommittee(viewerRoleName),
       kinds: stage.kinds,
       currentProviderId: stage.currentProviderId,
+      currentShortlist: stage.currentShortlist,
       pending: pendingRecommendation,
-      canRecommend: Boolean(heldTask) && stage.allowed && !pendingRecommendation,
+      awardDeclined: stage.awardDeclined,
+      canRecommend:
+        (Boolean(heldTask) || stage.awardDeclined) &&
+        mayRecommendToContractsCommittee(viewerRoleName) &&
+        stage.allowed &&
+        !pendingRecommendation,
       canDecide,
     },
     viewer:
@@ -236,6 +269,8 @@ export async function GET(_request, context) {
         : null,
     stageSummaries,
     closure,
+    quotePool,
+    offerClarification: { allowed: Boolean(clarifyOpen) },
   });
 }
 
@@ -316,18 +351,45 @@ export async function POST(request, context) {
     return NextResponse.json(result);
   }
 
+  if (body?.action === "ask_clarification") {
+    if (!LIFECYCLE_ACTION_ROLES.ask_offer_clarification.includes(actorRoleName)) {
+      return NextResponse.json({ error: "Forbidden." }, { status: 403 });
+    }
+    const result = await askOfferClarification(prisma, {
+      projectId,
+      procurementId,
+      offerId: body.offerId,
+      question: body.question,
+      actorOrgUserId: auth.orgUser.id,
+      actorRoleName,
+    });
+    if (!result.ok) {
+      return NextResponse.json(
+        { error: result.error, fieldErrors: result.fieldErrors },
+        { status: result.status || 400 },
+      );
+    }
+    return NextResponse.json(result);
+  }
+
   if (body?.action !== "save_bid_document") {
     return NextResponse.json({ error: "Unsupported action." }, { status: 400 });
   }
 
   const { saveBidDocumentForProcurement } = await import("@/lib/projects/solicitations");
+  const organisation = await loadPrintOrganisation(prisma, projectId);
+  const issuer = printedByFromAuth(auth);
   const saved = await saveBidDocumentForProcurement(prisma, {
     projectId,
     procurementId,
     actorOrgUserId: auth.orgUser.id,
     actorRoleName: auth.orgUser.projectOrgRole?.name || null,
-    body: body.bidDocument || body,
-    pdeName: body.pdeName || null,
+    body: {
+      ...(body.bidDocument || body),
+      issuedByName: issuer.name,
+      issuedByPosition: issuer.role || "",
+    },
+    pdeName: organisation.name || null,
   });
   if (!saved.ok) {
     return NextResponse.json(

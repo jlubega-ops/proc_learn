@@ -30,6 +30,7 @@ import {
   formatPrintDateTime,
 } from "@/components/print/print-document";
 import { useToast } from "@/components/providers/toast-provider";
+import { decisionConfirmOptions, useConfirm } from "@/components/providers/confirm-provider";
 import { notifyOrgTasksChanged } from "@/hooks/use-pending-task-counts";
 import {
   adminCenteredLoadingBoxSx,
@@ -50,6 +51,13 @@ import {
   workflowDecisionButtonLabel,
   workflowDecisionPastLabel,
 } from "@/lib/projects/workflow-status-presentation";
+import {
+  actingRoleLabel,
+  committeeSeatLabel,
+  finalApprovalEntry,
+  finalApproverRoleLabel,
+  isCommitteeAction,
+} from "@/lib/projects/committee-labels";
 import { providerTerm } from "@/lib/projects/provider-terms";
 import {
   OrgMethodEligibility,
@@ -234,31 +242,95 @@ function requisitionPrintSections(row, history) {
       empty: "None.",
     });
   }
-  sections.push({
-    type: "table",
-    title: `Section ${shortlist.length ? "E" : "D"}: Approval trail`,
-    columns: [
-      { id: "no", label: "No.", width: "5%" },
-      { id: "date", label: "Date", width: "18%" },
-      { id: "action", label: "Action" },
-      { id: "by", label: "By" },
-      { id: "role", label: "Role" },
-      { id: "comment", label: "Comment" },
-    ],
-    rows: history.map((h, idx) => ({
-      key: h.id,
-      cells: {
-        no: `${idx + 1}.`,
-        date: formatPrintDateTime(h.createdAt),
-        action: workflowDecisionPastLabel(h.decision),
-        by: h.actorName || "—",
-        role: h.actorRoleName || "—",
-        comment: h.comment || "—",
-      },
-    })),
-    empty: "Not yet submitted for review.",
-  });
+  const partII = row.form5PartII && typeof row.form5PartII === "object" ? row.form5PartII : {};
+  const committeeActions = latestCommitteeDecisions(history);
+  if (partII.methodJustification || partII.ccChairName || partII.ccSecretaryName || committeeActions.length) {
+    sections.push({
+      type: "fields",
+      title: "Section E: Procurement method approval",
+      fields: [
+        {
+          label: "Procurement method",
+          value: METHOD_LABELS[row.procurementMethod] || row.procurementMethod,
+        },
+        { label: "PDU officer", value: [partII.pduOfficerName, partII.pduOfficerPosition].filter(Boolean).join(", ") || null },
+        { label: "Method justification", value: partII.methodJustification, full: true },
+        { label: "Contracts Committee chairperson", value: partII.ccChairName },
+        { label: "Contracts Committee secretary", value: partII.ccSecretaryName },
+      ],
+    });
+  }
+  if (committeeActions.length) {
+    sections.push({
+      type: "table",
+      title: "Committee decisions",
+      columns: [
+        { id: "date", label: "Date", width: "16%" },
+        { id: "committee", label: "Committee" },
+        { id: "decision", label: "Decision", width: "14%" },
+        { id: "by", label: "Decided by", width: "20%" },
+        { id: "seat", label: "Seat", width: "14%" },
+      ],
+      rows: committeeActions.map((h) => ({
+        key: h.id,
+        cells: {
+          date: formatPrintDate(h.createdAt),
+          committee: h.committeeName || h.stepRoleName || "Committee",
+          decision: workflowDecisionPastLabel(h.decision),
+          by: h.actorName || "—",
+          seat: committeeSeatLabel(h.committeeRole) || "—",
+        },
+        note: h.comment || null,
+      })),
+    });
+  }
   return sections;
+}
+
+/**
+ * Latest decision per committee, oldest first.
+ * @param {any[]} history
+ */
+function latestCommitteeDecisions(history) {
+  /** @type {Map<string, any>} */
+  const byCommittee = new Map();
+  const sorted = [...(history || [])]
+    .filter((h) => h.decision && isCommitteeAction(h))
+    .sort((a, b) => String(a.createdAt || "").localeCompare(String(b.createdAt || "")));
+  for (const h of sorted) byCommittee.set(h.committeeId || h.stepRoleName || "committee", h);
+  return [...byCommittee.values()];
+}
+
+/**
+ * @param {any} row
+ * @param {any[]} history
+ */
+function requisitionSignatures(row, history) {
+  const finalApproval = finalApprovalEntry(history);
+  const out = [
+    {
+      label: "Requested by",
+      name: row.requester?.displayName,
+      role: row.requester?.roleName,
+      date: row.submittedAt || row.createdAt,
+    },
+  ];
+  for (const h of latestCommitteeDecisions(history)) {
+    if (finalApproval && h.id === finalApproval.id) continue;
+    out.push({
+      label: `${h.committeeName || h.stepRoleName || "Committee"} — ${workflowDecisionPastLabel(h.decision)}`,
+      name: h.actorName,
+      role: actingRoleLabel(h),
+      date: h.createdAt,
+    });
+  }
+  out.push({
+    label: "Approved by",
+    name: row.approvedBy?.displayName,
+    role: finalApproverRoleLabel(history, row.approvedBy?.roleName),
+    date: row.approvedAt,
+  });
+  return out;
 }
 
 /**
@@ -266,6 +338,7 @@ function requisitionPrintSections(row, history) {
  */
 export function OrgRequisitionDetailPanel({ projectId, requisitionId }) {
   const { showToast } = useToast();
+  const confirm = useConfirm();
   const router = useRouter();
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
@@ -419,6 +492,12 @@ export function OrgRequisitionDetailPanel({ projectId, requisitionId }) {
         return;
       }
     }
+    const confirmed = await confirm(
+      decisionConfirmOptions(decision, "this requisition", {
+        actionLabel: isPositiveWorkflowDecision(decision) ? workflowStepActionLabel(pendingTask.title) : "",
+      }),
+    );
+    if (!confirmed) return;
     setBusy(true);
     try {
       const payload = {
@@ -458,7 +537,9 @@ export function OrgRequisitionDetailPanel({ projectId, requisitionId }) {
         ? "Form 5 Part II submitted. Contracts Committee must approve the method."
         : data.nextProcessStarted
           ? "Method approved. Procurement process started."
-          : "Decision recorded.";
+          : isPositiveWorkflowDecision(decision) && /^approve requisition/i.test(pendingTask.title || "")
+            ? "Requisition approved. Pending method selection by Procurement Officer."
+            : "Decision recorded.";
       showToast({ message: msg, severity: "success" });
       notifyOrgTasksChanged();
       await load();
@@ -556,20 +637,7 @@ export function OrgRequisitionDetailPanel({ projectId, requisitionId }) {
         status={row.stageLabel || row.statusLabel || row.status}
         organisation={organisation}
         sections={requisitionPrintSections(row, history)}
-        signatures={[
-          {
-            label: "Requested by",
-            name: row.requester?.displayName,
-            role: row.requester?.roleName,
-            date: row.submittedAt || row.createdAt,
-          },
-          {
-            label: "Approved by",
-            name: row.approvedBy?.displayName,
-            role: row.approvedBy?.roleName,
-            date: row.approvedAt,
-          },
-        ]}
+        signatures={requisitionSignatures(row, history)}
         printedBy={printedBy}
       />
 
@@ -814,14 +882,16 @@ export function OrgRequisitionDetailPanel({ projectId, requisitionId }) {
                 <TextField
                   label="CC Chair"
                   value={form5PartII.ccChairName || ""}
-                  InputProps={{ readOnly: true }}
+                  placeholder="Not assigned"
+                  slotProps={{ input: { readOnly: true }, inputLabel: { shrink: true } }}
                   fullWidth
                   sx={themedTextFieldSx}
                 />
                 <TextField
                   label="CC Secretary"
                   value={form5PartII.ccSecretaryName || ""}
-                  InputProps={{ readOnly: true }}
+                  placeholder="Not assigned"
+                  slotProps={{ input: { readOnly: true }, inputLabel: { shrink: true } }}
                   fullWidth
                   sx={themedTextFieldSx}
                 />
@@ -868,14 +938,16 @@ export function OrgRequisitionDetailPanel({ projectId, requisitionId }) {
                 <TextField
                   label="CC Chair"
                   value={form5PartII.ccChairName || ""}
-                  InputProps={{ readOnly: true }}
+                  placeholder="Not assigned"
+                  slotProps={{ input: { readOnly: true }, inputLabel: { shrink: true } }}
                   fullWidth
                   sx={themedTextFieldSx}
                 />
                 <TextField
                   label="CC Secretary"
                   value={form5PartII.ccSecretaryName || ""}
-                  InputProps={{ readOnly: true }}
+                  placeholder="Not assigned"
+                  slotProps={{ input: { readOnly: true }, inputLabel: { shrink: true } }}
                   fullWidth
                   sx={themedTextFieldSx}
                 />

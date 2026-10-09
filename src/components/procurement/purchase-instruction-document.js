@@ -14,8 +14,6 @@ import { RecordDetailsGrid } from "@/components/projects/record-details-grid";
 import { adminMutedTextSx, adminOutlinedTableContainerSx } from "@/lib/admin-mui-surfaces";
 import { formatMoneyUGX } from "@/lib/money";
 import { presentPurchaseInstructionStatus } from "@/lib/projects/purchase-instruction-presentation";
-import { approvalTrailSection } from "@/components/projects/org-procurement-print";
-
 /**
  * @typedef {{
  *   pi: any;
@@ -227,7 +225,6 @@ export function PurchaseInstructionPrint({ doc, row = null, printedBy }) {
         ...(pi.status === "DECLINED"
           ? [{ type: /** @type {const} */ ("text"), title: "Declined by provider", text: pi.declineReason || "—" }]
           : []),
-        ...(row ? [approvalTrailSection(row)] : []),
       ]}
       signatures={[
         {

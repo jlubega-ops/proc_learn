@@ -22,6 +22,7 @@ import VisibilityRounded from "@mui/icons-material/VisibilityRounded";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useToast } from "@/components/providers/toast-provider";
+import { decisionConfirmOptions, useConfirm } from "@/components/providers/confirm-provider";
 import {
   adminCenteredLoadingBoxSx,
   adminLoadingSpinnerSx,
@@ -39,6 +40,7 @@ import {
  */
 export function OrgProcurementPlansPanel({ projectId }) {
   const { showToast } = useToast();
+  const confirm = useConfirm();
   const router = useRouter();
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
@@ -71,6 +73,7 @@ export function OrgProcurementPlansPanel({ projectId }) {
   }, [load]);
 
   async function submitPlan(planId) {
+    if (!(await confirm(decisionConfirmOptions("SUBMIT", "this plan for review")))) return;
     setBusy(true);
     try {
       const res = await fetch(`/api/projects/${projectId}/procurement-plans`, {

@@ -4,7 +4,6 @@ import {
 import {
   createAwardFromApprovedEvaluation,
   communicateAward,
-  acceptAward,
   cancelAward,
   getLatestAward,
 } from "@/lib/projects/awards";
@@ -209,16 +208,8 @@ export async function actOnProcurementLifecycle(prisma, opts) {
       return communicateAward(prisma, { ...base, awardId });
     }
 
-    case "accept_award": {
-      const awardId =
-        typeof body.awardId === "string"
-          ? body.awardId.trim()
-          : (await getLatestAward(prisma, opts.projectId, opts.procurementId))?.id;
-      if (!awardId) {
-        return { ok: false, error: "No award exists for this procurement yet.", status: 400 };
-      }
-      return acceptAward(prisma, { ...base, awardId });
-    }
+    case "accept_award":
+      return { ok: false, error: "The provider accepts the award from the provider portal.", status: 403 };
 
     case "cancel_award": {
       const awardId =

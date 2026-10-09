@@ -22,6 +22,7 @@ import {
   adminTableSx,
 } from "@/lib/admin-mui-surfaces";
 import { workflowDecisionPastLabel } from "@/lib/projects/workflow-status-presentation";
+import { actingRoleLabel, isCommitteeAction } from "@/lib/projects/committee-labels";
 
 /** @param {unknown} value */
 function fmt(value) {
@@ -46,6 +47,10 @@ function decisionColor(decision) {
  *   actionLabel?: string | null;
  *   actorName?: string | null;
  *   actorRoleName?: string | null;
+ *   committeeId?: string | null;
+ *   committeeRole?: string | null;
+ *   committeeName?: string | null;
+ *   stepRoleName?: string | null;
  *   previousStatus?: string | null;
  *   newStatus?: string | null;
  *   statusLabel?: string | null;
@@ -159,10 +164,13 @@ export function WorkflowHistoryPanel({
                         <Typography variant="body2" sx={{ fontWeight: 600 }}>
                           {h.actorName || "—"}
                         </Typography>
-                        {h.actorRoleName ? (
-                          <Typography variant="caption" sx={adminMutedTextSx}>
-                            {h.actorRoleName}
+                        {actingRoleLabel(h) ? (
+                          <Typography variant="caption" component="p" sx={adminMutedTextSx}>
+                            {actingRoleLabel(h)}
                           </Typography>
+                        ) : null}
+                        {isCommitteeAction(h) ? (
+                          <Chip size="small" color="info" variant="outlined" label="Committee decision" sx={{ mt: 0.5 }} />
                         ) : null}
                       </TableCell>
                       {showStatusChange ? <TableCell>{statusText(h)}</TableCell> : null}

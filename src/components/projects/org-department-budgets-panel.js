@@ -29,6 +29,7 @@ import VisibilityRounded from "@mui/icons-material/VisibilityRounded";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useToast } from "@/components/providers/toast-provider";
+import { decisionConfirmOptions, useConfirm } from "@/components/providers/confirm-provider";
 import {
   adminCenteredLoadingBoxSx,
   adminDialogPaperSx,
@@ -51,6 +52,7 @@ import {
 export function OrgDepartmentBudgetsPanel({ projectId, readOnly = false, detailHrefBase }) {
   const detailBase = detailHrefBase || `/projects/${projectId}/budgets`;
   const { showToast } = useToast();
+  const confirm = useConfirm();
   const router = useRouter();
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
@@ -83,6 +85,7 @@ export function OrgDepartmentBudgetsPanel({ projectId, readOnly = false, detailH
   }, [load]);
 
   async function submitBudget(budgetId) {
+    if (!(await confirm(decisionConfirmOptions("SUBMIT", "this budget for review")))) return;
     setBusy(true);
     try {
       const res = await fetch(`/api/projects/${projectId}/budgets`, {

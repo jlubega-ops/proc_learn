@@ -6,8 +6,10 @@
 export const LIFECYCLE_ACTION_ROLES = {
   // PPDA: the Contracts Committee makes the award decision (see COMMITTEE_LIFECYCLE_AUTHORITY).
   create_award: [],
+  ask_offer_clarification: ["Procurement Officer", "Head PDU"],
   communicate_award: ["Procurement Officer", "Head PDU"],
-  accept_award: ["Procurement Officer", "Head PDU"],
+  // The winning provider accepts or declines the award itself (provider portal / auto-response).
+  accept_award: [],
   cancel_award: ["Accounting Officer", "Contracts Officer", "Head PDU"],
   update_delivery_address: ["Procurement Officer", "Contracts Officer", "Head PDU"],
   create_lpo: ["Procurement Officer", "Contracts Officer", "Head PDU"],

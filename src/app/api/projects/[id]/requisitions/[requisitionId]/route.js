@@ -15,6 +15,7 @@ import { fetchForm5OrgDefaults } from "@/lib/projects/form5-prefill";
 import { checkActingModeForTask, getActiveCommittee } from "@/lib/projects/committee-context";
 import {
   WORKFLOW_HISTORY_ACTION_SELECT,
+  attachCommitteeNames,
   loadPrintOrganisation,
   mapWorkflowHistoryActions,
   printedByFromAuth,
@@ -131,9 +132,10 @@ export async function GET(_request, context) {
     };
   }
 
-  const history = [...(row.instances || [])]
-    .reverse()
-    .flatMap((inst) => mapWorkflowHistoryActions(inst.actions));
+  const history = await attachCommitteeNames(
+    prisma,
+    [...(row.instances || [])].reverse().flatMap((inst) => mapWorkflowHistoryActions(inst.actions)),
+  );
   if (history.length) {
     const latest = history[history.length - 1];
     lastDecision = {

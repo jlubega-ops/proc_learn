@@ -22,6 +22,10 @@ import {
   normalizeProviderCompliance,
 } from "@/lib/projects/provider-compliance";
 import { serializeInvoice, invoiceInclude } from "@/lib/projects/invoices";
+import { loadPrintOrganisation } from "@/lib/projects/print-context";
+import { loadProviderHistory } from "@/lib/projects/provider-assignments";
+import { serializeClarification } from "@/lib/projects/offer-clarifications";
+import { draftQuoteForProvider } from "@/lib/projects/provider-auto-responses";
 
 const ACCEPTING_STATUSES = [OrgSolicitationStatus.ISSUED, OrgSolicitationStatus.ADVERTISED, OrgSolicitationStatus.OPEN];
 
@@ -191,9 +195,99 @@ function serializePortalOffer(offer) {
     source: offer.source || "OFFICER",
     deliveryDays: offer.deliveryDays ?? null,
     remarks: offer.remarks || null,
+    lineItems: Array.isArray(offer.lineItems) ? offer.lineItems : [],
     submittedAt: offer.submittedAt,
     withdrawnAt: offer.withdrawnAt || null,
+    clarifications: Array.isArray(offer.clarifications) ? offer.clarifications.map(serializeClarification) : [],
   };
+}
+
+/** @param {{ projectId: string; providerId: string }} opts */
+function opportunityWhere(opts) {
+  return {
+    projectId: opts.projectId,
+    status: { in: [...ACCEPTING_STATUSES, OrgSolicitationStatus.CLOSED] },
+    OR: [
+      { solicitationType: OrgSolicitationType.RFQ, invites: { some: { supplierId: opts.providerId } } },
+      { solicitationType: OrgSolicitationType.TENDER, status: { not: OrgSolicitationStatus.DRAFT } },
+    ],
+  };
+}
+
+const DECISION_COUNT_SELECT = { _count: { select: { evaluationReports: true, awards: true } } };
+
+/**
+ * What the provider may still do on one opportunity. Offers freeze at closing, at opening,
+ * and as soon as evaluation or an award exists for anyone.
+ * @param {any} s solicitation with `procurement._count`
+ * @param {any} myOffer
+ */
+function opportunityActions(s, myOffer) {
+  const now = Date.now();
+  const beforeClosing = !s.closingDate || s.closingDate.getTime() > now;
+  const decided = (s.procurement?._count?.evaluationReports || 0) + (s.procurement?._count?.awards || 0) > 0;
+  const accepting = ACCEPTING_STATUSES.includes(s.status) && beforeClosing && !decided;
+  const active = myOffer && myOffer.status !== OrgOfferStatus.WITHDRAWN ? myOffer : null;
+  const revising = Boolean(
+    !accepting &&
+      !decided &&
+      active &&
+      [OrgOfferStatus.SUBMITTED, OrgOfferStatus.OPENED].includes(active.status) &&
+      (active.clarifications?.length || 0) > 0,
+  );
+  /** @type {string | null} */
+  let lockedReason = null;
+  if (revising) {
+    lockedReason = null;
+  } else if (active?.status === OrgOfferStatus.LATE) {
+    lockedReason = "Late — not accepted.";
+  } else if (!accepting) {
+    if (decided) lockedReason = "Evaluation has started.";
+    else if (!beforeClosing || s.status === OrgSolicitationStatus.CLOSED) lockedReason = "Closed.";
+    else lockedReason = "Not accepting offers.";
+  } else if (active && active.status !== OrgOfferStatus.SUBMITTED) {
+    lockedReason = "Offers opened.";
+  }
+  return {
+    accepting,
+    decided,
+    lockedReason,
+    revising,
+    canEdit: Boolean((accepting && active?.status === OrgOfferStatus.SUBMITTED) || revising),
+    canWithdraw: Boolean(accepting && active?.status === OrgOfferStatus.SUBMITTED),
+    canSubmit: Boolean(accepting && !active),
+  };
+}
+
+/**
+ * Open opportunities waiting for the provider's first offer or an answer to a clarification.
+ * @param {import("@prisma/client").PrismaClient} prisma
+ * @param {{ projectId: string; providerId: string }} opts
+ */
+export async function countPortalOpportunitiesNeedingAction(prisma, opts) {
+  const now = Date.now();
+  const rows = await prisma.projectOrgSolicitation.findMany({
+    where: {
+      projectId: opts.projectId,
+      status: { in: [...ACCEPTING_STATUSES, OrgSolicitationStatus.CLOSED] },
+      OR: opportunityWhere(opts).OR,
+      procurement: { evaluationReports: { none: {} }, awards: { none: {} } },
+    },
+    select: {
+      status: true,
+      closingDate: true,
+      offers: {
+        where: { supplierId: opts.providerId, status: { not: OrgOfferStatus.WITHDRAWN } },
+        select: { status: true, _count: { select: { clarifications: { where: { respondedAt: null } } } } },
+        take: 1,
+      },
+    },
+  });
+  return rows.filter((r) => {
+    const offer = r.offers[0];
+    if (offer) return offer.status !== OrgOfferStatus.LATE && offer._count.clarifications > 0;
+    return ACCEPTING_STATUSES.includes(r.status) && (!r.closingDate || r.closingDate.getTime() > now);
+  }).length;
 }
 
 /**
@@ -203,14 +297,7 @@ function serializePortalOffer(offer) {
  * @param {{ projectId: string; providerId: string; page: number; pageSize: number; skip: number }} opts
  */
 export async function listPortalOpportunities(prisma, opts) {
-  const where = {
-    projectId: opts.projectId,
-    status: { in: [...ACCEPTING_STATUSES, OrgSolicitationStatus.CLOSED] },
-    OR: [
-      { solicitationType: OrgSolicitationType.RFQ, invites: { some: { supplierId: opts.providerId } } },
-      { solicitationType: OrgSolicitationType.TENDER, status: { not: OrgSolicitationStatus.DRAFT } },
-    ],
-  };
+  const where = opportunityWhere(opts);
   const [total, rows] = await Promise.all([
     prisma.projectOrgSolicitation.count({ where }),
     prisma.projectOrgSolicitation.findMany({
@@ -226,24 +313,25 @@ export async function listPortalOpportunities(prisma, opts) {
             title: true,
             procurementMethod: true,
             requisition: { select: { category: true, deliveryLocation: true } },
+            ...DECISION_COUNT_SELECT,
           },
         },
         offers: {
           where: { supplierId: opts.providerId },
           orderBy: { createdAt: "desc" },
           take: 1,
+          include: { _count: { select: { clarifications: { where: { respondedAt: null } } } } },
         },
       },
     }),
   ]);
-  const now = Date.now();
   return {
     total,
     page: opts.page,
     pageSize: opts.pageSize,
     items: rows.map((s) => {
-      const accepting = ACCEPTING_STATUSES.includes(s.status) && (!s.closingDate || s.closingDate.getTime() > now);
       const myOffer = s.offers[0] || null;
+      const actions = opportunityActions(s, myOffer);
       return {
         id: s.id,
         type: s.solicitationType,
@@ -251,7 +339,6 @@ export async function listPortalOpportunities(prisma, opts) {
         status: s.status,
         issueDate: s.issueDate,
         closingDate: s.closingDate,
-        accepting,
         procurement: {
           id: s.procurement?.id,
           number: s.procurement?.procurementNumber,
@@ -261,10 +348,123 @@ export async function listPortalOpportunities(prisma, opts) {
           deliveryLocation: s.procurement?.requisition?.deliveryLocation || null,
         },
         myOffer: serializePortalOffer(myOffer),
-        canEdit: Boolean(accepting && myOffer && myOffer.status === OrgOfferStatus.SUBMITTED),
-        canSubmit: Boolean(accepting && (!myOffer || myOffer.status === OrgOfferStatus.WITHDRAWN)),
+        openClarifications:
+          myOffer && myOffer.status !== OrgOfferStatus.WITHDRAWN ? myOffer._count?.clarifications || 0 : 0,
+        ...actions,
       };
     }),
+  };
+}
+
+/**
+ * Full provider view of one opportunity: the issued document, requested items, own offers and history.
+ * @param {import("@prisma/client").PrismaClient} prisma
+ * @param {{ projectId: string; providerId: string; solicitationId: string }} opts
+ */
+export async function loadPortalOpportunity(prisma, opts) {
+  const s = await prisma.projectOrgSolicitation.findFirst({
+    where: { ...opportunityWhere(opts), id: opts.solicitationId },
+    include: {
+      procurement: {
+        select: {
+          id: true,
+          procurementNumber: true,
+          title: true,
+          procurementMethod: true,
+          requisition: {
+            select: {
+              category: true,
+              deliveryLocation: true,
+              requestedDeliveryDate: true,
+              items: {
+                orderBy: { lineNumber: "asc" },
+                select: {
+                  lineNumber: true,
+                  itemName: true,
+                  description: true,
+                  specification: true,
+                  quantity: true,
+                  unitOfMeasure: true,
+                },
+              },
+            },
+          },
+          ...DECISION_COUNT_SELECT,
+        },
+      },
+      offers: {
+        where: { supplierId: opts.providerId },
+        orderBy: { createdAt: "desc" },
+        include: { clarifications: { orderBy: { askedAt: "asc" } } },
+      },
+      invites: { where: { supplierId: opts.providerId }, select: { noResponseAt: true } },
+    },
+  });
+  if (!s?.procurement) return null;
+
+  const myOffer = s.offers[0] || null;
+  const actions = opportunityActions(s, myOffer);
+  const [organisation, history, draftOffer] = await Promise.all([
+    loadPrintOrganisation(prisma, opts.projectId),
+    loadProviderHistory(prisma, {
+      projectId: opts.projectId,
+      procurementId: s.procurement.id,
+      procurementNumber: s.procurement.procurementNumber,
+      providerId: opts.providerId,
+    }),
+    actions.canSubmit
+      ? draftQuoteForProvider(prisma, {
+          projectId: opts.projectId,
+          procurementId: s.procurement.id,
+          providerId: opts.providerId,
+        })
+      : null,
+  ]);
+  const doc = s.bidDocument && typeof s.bidDocument === "object" ? s.bidDocument : {};
+  const req = s.procurement.requisition;
+
+  return {
+    id: s.id,
+    type: s.solicitationType,
+    title: s.title,
+    status: s.status,
+    issueDate: s.issueDate || doc.issueDate || null,
+    closingDate: s.closingDate,
+    organisation,
+    procurement: {
+      id: s.procurement.id,
+      number: s.procurement.procurementNumber,
+      title: s.procurement.title || null,
+      method: s.procurement.procurementMethod,
+      category: req?.category || null,
+      deliveryLocation: req?.deliveryLocation || null,
+      requestedDeliveryDate: req?.requestedDeliveryDate || null,
+    },
+    document: {
+      documentTitle: doc.documentTitle || null,
+      pdeName: doc.pdeName || organisation?.name || null,
+      reference: doc.procurementReference || s.procurement.procurementNumber,
+      subject: doc.subject || s.procurement.title || null,
+      specifications: doc.specifications || null,
+      submissionInstructions: doc.submissionInstructions || null,
+      evaluationCriteria: doc.evaluationCriteria || null,
+      issuedByName: doc.issuedByName || null,
+      issuedByPosition: doc.issuedByPosition || null,
+    },
+    items: (req?.items || []).map((i) => ({
+      lineNumber: i.lineNumber,
+      itemName: i.itemName,
+      description: i.description || null,
+      specification: i.specification || null,
+      quantity: i.quantity?.toString?.() ?? "",
+      unitOfMeasure: i.unitOfMeasure || null,
+    })),
+    myOffer: serializePortalOffer(myOffer),
+    offers: s.offers.map(serializePortalOffer),
+    noResponseAt: s.invites?.[0]?.noResponseAt || null,
+    draftOffer,
+    history,
+    ...actions,
   };
 }
 

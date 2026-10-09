@@ -208,13 +208,18 @@ export function signatureInitials(name) {
 
 /** @param {{ signatures: PrintSignature[] }} p */
 function SignaturesSection({ signatures }) {
+  const perRow = Math.min(signatures.length, 3);
+  /** @type {PrintSignature[][]} */
+  const rows = [];
+  for (let i = 0; i < signatures.length; i += perRow) rows.push(signatures.slice(i, i + perRow));
   return (
     <table className="print-section print-avoid-break w-full border-collapse">
       <tbody>
-        <SectionHead title="Sign-off" colSpan={signatures.length} />
-        <tr>
-          {signatures.map((s) => (
-            <td key={s.label} className={CELL} style={{ width: `${100 / signatures.length}%` }}>
+        <SectionHead title="Sign-off" colSpan={perRow} />
+        {rows.map((sigs, r) => (
+        <tr key={r}>
+          {sigs.map((s, i) => (
+            <td key={`${s.label}-${i}`} className={CELL} style={{ width: `${100 / perRow}%` }}>
               <p className="font-bold">{s.label}</p>
               <p>Name: {s.name || "—"}</p>
               <p>Role: {s.role || "—"}</p>
@@ -232,6 +237,7 @@ function SignaturesSection({ signatures }) {
             </td>
           ))}
         </tr>
+        ))}
       </tbody>
     </table>
   );

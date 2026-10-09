@@ -5,7 +5,7 @@ import {
   notifyOfficerOfPortalAction,
   requireProviderPortalSession,
 } from "@/lib/projects/provider-portal";
-import { receiveOffer } from "@/lib/projects/solicitations";
+import { offersLockedByDecision, receiveOffer } from "@/lib/projects/solicitations";
 
 export const runtime = "nodejs";
 
@@ -29,6 +29,12 @@ export async function POST(request) {
       })
     : null;
   if (!solicitation) return NextResponse.json({ error: "Opportunity not found." }, { status: 404 });
+  if (await offersLockedByDecision(prisma, solicitation.procurementId)) {
+    return NextResponse.json(
+      { error: "Evaluation has started. New offers are no longer accepted.", code: "OFFERS_LOCKED" },
+      { status: 400 },
+    );
+  }
 
   const result = await receiveOffer(prisma, {
     projectId: auth.project.id,
@@ -36,6 +42,7 @@ export async function POST(request) {
     solicitationType: solicitation.solicitationType,
     supplierId: auth.provider.id,
     amount: body?.amount,
+    lineItems: body?.lineItems,
     deliveryDays: body?.deliveryDays,
     remarks: body?.remarks,
     source: "PORTAL",

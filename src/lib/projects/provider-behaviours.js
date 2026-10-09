@@ -79,6 +79,51 @@ export const PROVIDER_BEHAVIOUR_OPTIONS = [
 ];
 
 /**
+ * Good-conduct traits on the provider form. Each unticked trait records its `issue`.
+ */
+export const PROVIDER_CONDUCT_TRAITS = [
+  { issue: PROVIDER_BEHAVIOUR.NON_RESPONSIVE, label: "Responds to invitations", problem: "Rarely responds" },
+  { issue: PROVIDER_BEHAVIOUR.LATE_SUBMITTER, label: "Submits before the deadline", problem: "Submits late" },
+  { issue: PROVIDER_BEHAVIOUR.COMPLIANT_EXPENSIVE, label: "Quotes competitive prices", problem: "High prices" },
+  { issue: PROVIDER_BEHAVIOUR.POOR_DELIVERY, label: "Delivers complete, correct items", problem: "Poor delivery" },
+  { issue: PROVIDER_BEHAVIOUR.INVOICE_MISMATCH, label: "Invoices match the order", problem: "Invoices mismatch" },
+];
+
+const CONDUCT_ISSUES = new Set(PROVIDER_CONDUCT_TRAITS.map((t) => t.issue));
+
+/**
+ * @param {unknown} value
+ * @returns {string[] | null} null when not an array
+ */
+export function normalizeConductIssues(value) {
+  if (!Array.isArray(value)) return null;
+  return [...new Set(value.map((v) => String(v || "").trim().toUpperCase()))].filter((v) => CONDUCT_ISSUES.has(v));
+}
+
+/**
+ * Conduct problems for a provider: the stored list, or the legacy single behaviour.
+ * @param {{ conductIssues?: unknown; behaviour?: string | null } | null | undefined} provider
+ * @returns {Set<string>}
+ */
+export function providerConductIssues(provider) {
+  const stored = normalizeConductIssues(provider?.conductIssues);
+  if (stored) return new Set(stored);
+  return new Set(provider?.behaviour && CONDUCT_ISSUES.has(provider.behaviour) ? [provider.behaviour] : []);
+}
+
+/**
+ * @param {{ conductIssues?: unknown; behaviour?: string | null }} provider
+ */
+export function providerConductLabel(provider) {
+  if (!Array.isArray(provider?.conductIssues)) return providerBehaviourLabel(provider?.behaviour);
+  const issues = providerConductIssues(provider);
+  if (!issues.size) return "Good conduct";
+  return PROVIDER_CONDUCT_TRAITS.filter((t) => issues.has(t.issue))
+    .map((t) => t.problem)
+    .join(", ");
+}
+
+/**
  * @param {unknown} value
  * @returns {string | null}
  */
@@ -108,18 +153,23 @@ export const GENERATE_MIX_OPTIONS = [
 
 export const MAX_GENERATE_COUNT = 20;
 
-const MIXED_POOL = [
+/** Share of a mixed batch given a problem behaviour; the rest are good providers. */
+const MIXED_PROBLEM_SHARE = 0.25;
+const MIXED_GOOD = [
+  PROVIDER_BEHAVIOUR.COMPLIANT_COMPETITIVE,
   PROVIDER_BEHAVIOUR.COMPLIANT_COMPETITIVE,
   PROVIDER_BEHAVIOUR.COMPLIANT_COMPETITIVE,
   PROVIDER_BEHAVIOUR.COMPLIANT_EXPENSIVE,
-  PROVIDER_BEHAVIOUR.TAX_EXPIRED,
+];
+const MIXED_PROBLEMS = [
   PROVIDER_BEHAVIOUR.NON_RESPONSIVE,
-  PROVIDER_BEHAVIOUR.MISSING_NSSF,
   PROVIDER_BEHAVIOUR.LATE_SUBMITTER,
   PROVIDER_BEHAVIOUR.TAX_EXPIRING,
+  PROVIDER_BEHAVIOUR.TAX_EXPIRED,
+  PROVIDER_BEHAVIOUR.MISSING_NSSF,
   PROVIDER_BEHAVIOUR.NOT_PPDA_REGISTERED,
-  PROVIDER_BEHAVIOUR.POOR_DELIVERY,
   PROVIDER_BEHAVIOUR.PPDA_SUSPENDED,
+  PROVIDER_BEHAVIOUR.POOR_DELIVERY,
   PROVIDER_BEHAVIOUR.INVOICE_MISMATCH,
 ];
 
@@ -153,20 +203,37 @@ function digits(len) {
 }
 
 /**
- * Behaviour sequence for N generated providers. Starts from a random offset in
- * the pool so successive batches differ.
+ * @template T
+ * @param {T[]} list
+ */
+function shuffled(list) {
+  const out = [...list];
+  for (let i = out.length - 1; i > 0; i -= 1) {
+    const j = randInt(0, i);
+    [out[i], out[j]] = [out[j], out[i]];
+  }
+  return out;
+}
+
+/**
+ * Behaviour sequence for N generated providers. A mixed batch is mostly good
+ * providers with a few distinct problem ones, shuffled.
  * @param {number} count
  * @param {string} mix
  */
 export function behavioursForBatch(count, mix) {
-  const pool =
-    mix === GENERATE_MIX.COMPLIANT
-      ? COMPLIANT_POOL
-      : mix === GENERATE_MIX.NON_COMPLIANT
-        ? NON_COMPLIANT_POOL
-        : MIXED_POOL;
-  const start = randInt(0, pool.length - 1);
-  return Array.from({ length: count }, (_, i) => pool[(start + i) % pool.length]);
+  if (mix === GENERATE_MIX.COMPLIANT || mix === GENERATE_MIX.NON_COMPLIANT) {
+    const pool = mix === GENERATE_MIX.COMPLIANT ? COMPLIANT_POOL : NON_COMPLIANT_POOL;
+    const start = randInt(0, pool.length - 1);
+    return Array.from({ length: count }, (_, i) => pool[(start + i) % pool.length]);
+  }
+  const problemCount = count < 3 ? 0 : Math.max(1, Math.round(count * MIXED_PROBLEM_SHARE));
+  const problems = shuffled(MIXED_PROBLEMS);
+  const batch = [
+    ...Array.from({ length: problemCount }, (_, i) => problems[i % problems.length]),
+    ...Array.from({ length: count - problemCount }, () => pick(MIXED_GOOD)),
+  ];
+  return shuffled(batch);
 }
 
 /**
@@ -282,5 +349,6 @@ export function buildGeneratedProviderProfile(opts) {
     compliance,
     ppdaSuspended: opts.behaviour === PROVIDER_BEHAVIOUR.PPDA_SUSPENDED,
     behaviour: opts.behaviour,
+    conductIssues: CONDUCT_ISSUES.has(opts.behaviour) ? [opts.behaviour] : [],
   };
 }
