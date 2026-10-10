@@ -12,7 +12,6 @@ import { serializeProviderSummary } from "@/lib/projects/providers";
 import { normalizeDeliveryAddress, resolveDeliveryAddress } from "@/lib/projects/delivery-address";
 import { notifyOrgUsers, OrgNotificationType } from "@/lib/projects/org-notifications";
 import { notifyProvider } from "@/lib/projects/provider-notifications";
-import { autoDispatchIfAutoResponse } from "@/lib/projects/delivery-notes";
 import {
   validatePurchaseInstructionResponse,
   validatePurchaseInstructionTerms,
@@ -293,7 +292,7 @@ const PI_ISSUER_ROLE = "Procurement Officer";
 export const PI_REISSUE_TASK_PREFIX = "Issue purchase instruction (provider declined)";
 
 /**
- * Tell the provider about a newly issued PI; auto-response providers accept straight away.
+ * Tell the provider about a newly issued PI; it accepts or declines in the provider portal.
  * @param {import("@prisma/client").PrismaClient} prisma
  * @param {{ projectId: string; procurementId: string; purchaseInstruction: any }} opts
  */
@@ -301,7 +300,7 @@ export async function afterPurchaseInstructionIssued(prisma, opts) {
   const pi = opts.purchaseInstruction;
   const supplier = await prisma.projectOrgProvider.findFirst({
     where: { id: pi.supplier?.id || "", projectId: opts.projectId },
-    select: { id: true, name: true, contactPerson: true, isGenerated: true },
+    select: { id: true, name: true },
   });
   if (!supplier) return;
   const proc = await prisma.projectOrgProcurement.findUnique({
@@ -320,20 +319,6 @@ export async function afterPurchaseInstructionIssued(prisma, opts) {
     relatedEntityType: "purchase_instruction",
     relatedEntityId: pi.id,
   });
-  if (!supplier.isGenerated) return;
-  const accepted = await respondToPurchaseInstruction(prisma, {
-    projectId: opts.projectId,
-    providerId: supplier.id,
-    procurementId: opts.procurementId,
-    body: { decision: "ACCEPT", acceptedByName: supplier.contactPerson || supplier.name },
-    auto: true,
-  });
-  if (!accepted.ok) return;
-  await autoDispatchIfAutoResponse(prisma, {
-    projectId: opts.projectId,
-    procurementId: opts.procurementId,
-    providerId: supplier.id,
-  });
 }
 
 /**
@@ -341,7 +326,7 @@ export async function afterPurchaseInstructionIssued(prisma, opts) {
  * Decline hands the case back to the Procurement Officer to re-issue or recommend a change to the Contracts Committee.
  *
  * @param {import("@prisma/client").PrismaClient} prisma
- * @param {{ projectId: string; providerId: string; procurementId: string; body: any; auto?: boolean }} opts
+ * @param {{ projectId: string; providerId: string; procurementId: string; body: any }} opts
  */
 export async function respondToPurchaseInstruction(prisma, opts) {
   const v = validatePurchaseInstructionResponse(opts.body || {});
@@ -385,7 +370,7 @@ export async function respondToPurchaseInstruction(prisma, opts) {
   }
 
   const proc = pi.procurement;
-  const providerLabel = `${pi.supplier?.name || "Provider"}${opts.auto ? " (auto-response)" : ""}`;
+  const providerLabel = pi.supplier?.name || "Provider";
   await writeAuditLog({
     eventType: accept
       ? AuditEvent.PROJECT_ORG_PURCHASE_INSTRUCTION_ACCEPTED
@@ -453,18 +438,6 @@ export async function respondToPurchaseInstruction(prisma, opts) {
     });
   } catch {
     // Best-effort.
-  }
-
-  if (opts.auto && accept) {
-    await notifyProvider(prisma, {
-      projectId: opts.projectId,
-      providerId: opts.providerId,
-      procurementId: proc.id,
-      title: `Purchase instruction accepted: ${pi.instructionNumber}`,
-      body: "Accepted automatically. Deliver by the required date.",
-      relatedEntityType: "purchase_instruction",
-      relatedEntityId: pi.id,
-    });
   }
 
   return { ok: true, status: accept ? OrgPurchaseInstructionStatus.ACCEPTED : OrgPurchaseInstructionStatus.DECLINED };

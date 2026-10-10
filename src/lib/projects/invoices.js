@@ -2,8 +2,8 @@ import { OrgInspectionStatus, OrgInvoiceStatus, OrgProcurementStatus, Prisma } f
 import { writeAuditLog, AuditEvent } from "@/lib/audit-log";
 import { getActiveOrderValue } from "@/lib/projects/contracts-lpo";
 import { hasAcceptedDelivery } from "@/lib/projects/deliveries";
-import { WORKFLOW_TRIGGERS } from "@/lib/projects/process-catalogue";
-import { startWorkflowFromTrigger } from "@/lib/projects/workflow-engine";
+import { PROCESS_FLOW_CODES } from "@/lib/projects/process-catalogue";
+import { assertProcessActive } from "@/lib/projects/process-activation";
 import { serializeProviderSummary } from "@/lib/projects/providers";
 import { notifyOrgUsers, OrgNotificationType } from "@/lib/projects/org-notifications";
 import { notifyProvider } from "@/lib/projects/provider-notifications";
@@ -104,7 +104,7 @@ export async function nextInvoiceNumber(prisma, projectId, procurementId) {
 }
 
 /**
- * Create a provider's invoice (portal or auto-response) against a procurement's active
+ * Create a provider's invoice (portal) against a procurement's active
  * order — the organisation never raises its own supplier invoice. Requires at least one
  * accepted delivery, and the running total of invoices must not exceed the order
  * value (Purchase Instruction amount, LPO value, or contract value).
@@ -133,6 +133,8 @@ export async function createInvoice(prisma, opts) {
     where: { id: opts.procurementId, projectId: opts.projectId },
   });
   if (!procurement) return { ok: false, error: "Procurement not found in this organisation.", status: 404 };
+  const inactive = await assertProcessActive(prisma, opts.projectId, PROCESS_FLOW_CODES.INVOICE_PROCESS);
+  if (inactive) return inactive;
 
   const delivered = await hasAcceptedDelivery(prisma, opts.projectId, procurement.id);
   if (!delivered) {
@@ -283,23 +285,6 @@ export async function createInvoice(prisma, opts) {
     },
   });
 
-  const workflowActorId = opts.actorOrgUserId || procurement.officerOrgUserId || null;
-  if (workflowActorId) {
-    try {
-      await startWorkflowFromTrigger(prisma, {
-        projectId: opts.projectId,
-        triggerKey: WORKFLOW_TRIGGERS.INVOICE_STARTED,
-        entityType: "procurement",
-        entityId: procurement.id,
-        procurementId: procurement.id,
-        entityTitle: `Invoice: ${invoiceNumber}`,
-        actorOrgUserId: workflowActorId,
-        actorRoleName: opts.actorRoleName,
-      });
-    } catch {
-      // Best-effort tracking workflow.
-    }
-  }
 
   if (source !== INVOICE_SOURCE.OFFICER && procurement.officerOrgUserId) {
     const officer = await prisma.projectOrgUser.findUnique({

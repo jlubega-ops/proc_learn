@@ -8,6 +8,10 @@ import {
   serializeProjectOrgProcessFlow,
 } from "@/lib/projects/org-process-flows";
 import { validateProjectOrgProcessFlowPatch } from "@/lib/validation/project-org-process-flow";
+import {
+  BUILT_IN_PROCESS_LOCKED_MESSAGE,
+  isBuiltInProcessCode,
+} from "@/lib/projects/process-catalogue";
 
 export const runtime = "nodejs";
 
@@ -42,6 +46,15 @@ export async function PATCH(request, context) {
       { error: "Please fix the highlighted fields.", fieldErrors: validated.errors },
       { status: 400 },
     );
+  }
+
+  if (isBuiltInProcessCode(existing.code)) {
+    const changesOtherThanName = Object.entries(validated.data).some(
+      ([key, value]) => key !== "name" && (value ?? null) !== (existing[key] ?? null),
+    );
+    if (changesOtherThanName) {
+      return NextResponse.json({ error: BUILT_IN_PROCESS_LOCKED_MESSAGE }, { status: 400 });
+    }
   }
 
   if (validated.data.triggerKey) {
@@ -112,9 +125,12 @@ export async function DELETE(_request, context) {
 
   const existing = await prisma.projectOrgProcessFlow.findUnique({
     where: { id: processFlowId },
-    select: { id: true, name: true },
+    select: { id: true, name: true, code: true },
   });
   if (!existing) return NextResponse.json({ error: "Not found." }, { status: 404 });
+  if (isBuiltInProcessCode(existing.code)) {
+    return NextResponse.json({ error: "Built-in processes cannot be deleted." }, { status: 400 });
+  }
 
   await prisma.projectOrgProcessFlow.delete({ where: { id: processFlowId } });
 

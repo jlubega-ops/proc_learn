@@ -16,8 +16,15 @@ import {
   awardedOffer,
 } from "@/components/projects/org-award-recommendation-summary";
 import {
+  APPROVE_BID_DOCS_STEP_RE,
   CERTIFY_DELIVERY_STEP_RE,
+  FINANCIAL_EVAL_STEP_RE,
+  OPEN_OFFERS_STEP_RE,
+  PREPARE_EVAL_REPORT_STEP_RE,
+  TECHNICAL_EVAL_STEP_RE,
+  REVIEW_BID_DOCS_STEP_RE,
   VERIFY_INVOICE_STEP_RE,
+  biddingPeriodDays,
   goodsReceivedEvidence,
   invoiceThreeWayMatch,
   latestStepSignOff,
@@ -60,7 +67,13 @@ function detailFields(row) {
   const dept = row.department;
   return [
     { label: "Procurement no.", value: row.procurementNumber },
-    { label: "Method", value: METHOD_LABELS[row.procurementMethod] || row.procurementMethod },
+    {
+      label: "Method",
+      value: `${METHOD_LABELS[row.procurementMethod] || row.procurementMethod || ""}${row.isEmergency ? " (emergency)" : ""}` || null,
+    },
+    ...(row.emergencyJustification
+      ? [{ label: "Emergency justification", value: row.emergencyJustification, full: true }]
+      : []),
     { label: "Subject", value: row.title, full: true },
     { label: "Requisition", value: req ? req.requisitionReference || req.title : null },
     { label: "Financial year", value: row.financialYear?.label },
@@ -382,6 +395,17 @@ function evaluationSections(title, row) {
         { label: "Report status", value: report ? human(report.status) : "Not started" },
         { label: "Bids opened on", value: formatPrintDate(sol?.openedAt) },
         { label: "Bids received", value: `${validOffers.length} valid of ${offers.length}` },
+        ...[
+          ["Technical evaluation by", latestStepSignOff(row.timeline, TECHNICAL_EVAL_STEP_RE)],
+          ["Financial evaluation by", latestStepSignOff(row.timeline, FINANCIAL_EVAL_STEP_RE)],
+          ["Report prepared by", latestStepSignOff(row.timeline, PREPARE_EVAL_REPORT_STEP_RE)],
+          ["Report cleared by (Head PDU)", latestStepSignOff(row.timeline, /^review evaluation report/i)],
+        ]
+          .filter(([, s]) => s)
+          .map(([label, s]) => ({
+            label: /** @type {string} */ (label),
+            value: `${/** @type {any} */ (s).by || "—"}, ${formatPrintDate(/** @type {any} */ (s).at)}`,
+          })),
         { label: "Report prepared on", value: formatPrintDate(report?.createdAt) },
         { label: "Report approved on", value: formatPrintDate(report?.approvedAt) },
         ...(sol?.bidDocument?.evaluationCriteria
@@ -562,21 +586,44 @@ function stageSections(key, row, piDoc) {
           title,
           fields: [
             { label: "Document", value: sol.title, full: true },
-            { label: "Status", value: inDocumentsPhase && row.stageLabel ? row.stageLabel : human(sol.status) },
+            {
+              label: "Status",
+              value: inDocumentsPhase && row.stageLabel ? row.stageLabel : sol.status === "OPEN" ? "Opened" : human(sol.status),
+            },
             { label: "Issued on", value: formatPrintDate(sol.issueDate || sol.bidDocument?.issueDate) },
             { label: "Closing date", value: formatPrintDate(sol.closingDate) },
-            { label: "Opened on", value: formatPrintDate(sol.openedAt) },
-            ...(sol.bidDocument
+            ...(biddingPeriodDays(sol.issueDate || doc?.issueDate, sol.closingDate) != null
               ? [
                   {
-                    label: "Issued by",
-                    value: [sol.bidDocument.issuedByName, sol.bidDocument.issuedByPosition]
-                      .filter(Boolean)
-                      .join(", "),
+                    label: "Bidding period",
+                    value: `${biddingPeriodDays(sol.issueDate || doc?.issueDate, sol.closingDate)} days`,
+                  },
+                ]
+              : []),
+            ...(sol.openedAt
+              ? [
+                  { label: "Opened on", value: formatPrintDate(sol.openedAt) },
+                  { label: "Opened by", value: latestStepSignOff(row.timeline, OPEN_OFFERS_STEP_RE)?.by || "—" },
+                ]
+              : []),
+            ...(doc
+              ? [
+                  {
+                    label: "Prepared by",
+                    value: [doc.issuedByName, doc.issuedByPosition].filter(Boolean).join(", "),
                   },
                   { label: "Document filled", value: formatPrintDate(sol.bidDocumentAt) },
                 ]
               : []),
+            ...[
+              ["Cleared by (Head PDU)", latestStepSignOff(row.timeline, REVIEW_BID_DOCS_STEP_RE)],
+              ["Approved by (Contracts Committee)", latestStepSignOff(row.timeline, APPROVE_BID_DOCS_STEP_RE)],
+            ]
+              .filter(([, s]) => s)
+              .map(([label, s]) => ({
+                label: /** @type {string} */ (label),
+                value: `${/** @type {any} */ (s).by || "—"}, ${formatPrintDate(/** @type {any} */ (s).at)}`,
+              })),
             {
               label: "Invited providers",
               value: (sol.invites || []).map((i) => i.supplier?.name).filter(Boolean).join(", ") || "Open advertisement",
@@ -595,33 +642,60 @@ function stageSections(key, row, piDoc) {
                   { label: "Procurement reference", value: doc.procurementReference },
                   { label: "Subject", value: doc.subject, full: true },
                   { label: "Specifications / scope", value: doc.specifications, full: true },
+                  { label: "Delivery location", value: row.requisition?.deliveryLocation, full: true },
+                  ...(sol.solicitationType === "TENDER" && doc.biddingDocumentCost
+                    ? [{ label: "Bidding document fee", value: formatMoneyUGX(doc.biddingDocumentCost) }]
+                    : []),
                   { label: "Submission instructions", value: doc.submissionInstructions, full: true },
                   { label: "Evaluation criteria", value: doc.evaluationCriteria, full: true },
                 ],
               },
+              {
+                type: "table",
+                title: "Schedule of requirements",
+                columns: [
+                  { id: "n", label: "#", width: "6%" },
+                  { id: "item", label: "Item" },
+                  { id: "qty", label: "Quantity", align: "right", width: "20%" },
+                ],
+                rows: (row.requisition?.items || []).map((it, idx) => ({
+                  key: it.id || idx,
+                  cells: {
+                    n: it.lineNumber || idx + 1,
+                    item: it.itemName,
+                    qty: `${formatMoneyAmount(it.quantity) || "0"}${it.unitOfMeasure ? ` ${it.unitOfMeasure}` : ""}`,
+                  },
+                  note: it.description || null,
+                })),
+                empty: "No items.",
+              },
             ]
           : []),
-        {
-          type: "table",
-          title: "Offers received",
-          columns: [
-            { id: "provider", label: "Provider" },
-            { id: "submitted", label: "Submitted", width: "18%" },
-            { id: "status", label: "Status", width: "16%" },
-            { id: "amount", label: "Amount", align: "right", width: "20%" },
-          ],
-          rows: (row.offers || []).map((o) => ({
-            key: o.id,
-            cells: {
-              provider: o.supplier?.name || "—",
-              submitted: formatPrintDate(o.submittedAt),
-              status: human(o.status),
-              amount: formatMoneyUGX(o.amount),
-            },
-            note: o.remarks || null,
-          })),
-          empty: "No offers.",
-        },
+        ...(inDocumentsPhase
+          ? []
+          : [
+              {
+                type: "table",
+                title: "Offers received",
+                columns: [
+                  { id: "provider", label: "Provider" },
+                  { id: "submitted", label: "Submitted", width: "18%" },
+                  { id: "status", label: "Status", width: "16%" },
+                  { id: "amount", label: "Amount", align: "right", width: "20%" },
+                ],
+                rows: (row.offers || []).map((o) => ({
+                  key: o.id,
+                  cells: {
+                    provider: o.supplier?.name || "—",
+                    submitted: formatPrintDate(o.submittedAt),
+                    status: human(o.status),
+                    amount: formatMoneyUGX(o.amount),
+                  },
+                  note: o.remarks || null,
+                })),
+                empty: "No offers.",
+              },
+            ]),
       ];
     }
     case "evaluation":
@@ -950,7 +1024,7 @@ function stageSections(key, row, piDoc) {
             ...(evidence.certifiedAt
               ? [
                   {
-                    label: "Delivery certified",
+                    label: "Goods accepted by",
                     value: `${evidence.certifiedBy || "—"} · ${formatPrintDate(evidence.certifiedAt)}`,
                   },
                 ]
@@ -1238,6 +1312,16 @@ function signaturesFor(row, keys, piDoc, stage = null) {
   }
   if (has("contract") && pi?.issuedBy) {
     out.push({ label: "Issued by", name: pi.issuedBy.displayName, role: pi.issuedBy.roleName || null, date: pi.issuedAt });
+  }
+  if (has("contract") && !pi) {
+    for (const { step, a } of stageStepDecisions(row, "contract")) {
+      out.push({
+        label: `${step} — ${workflowDecisionPastLabel(a.decision)}`,
+        name: a.actor?.displayName || null,
+        role: actingRoleLabel(a),
+        date: a.createdAt,
+      });
+    }
   }
   if (has("contract") && orderAcceptanceSignature(row)) out.push(orderAcceptanceSignature(row));
   if (has("delivery") && inspection) {

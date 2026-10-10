@@ -23,9 +23,11 @@ export function PortalOpportunityPrint({ data }) {
         { label: "Category", value: procurement.category },
         { label: "Issued on", value: formatPrintDate(data.issueDate) },
         { label: "Closing date", value: formatPrintDateTime(data.closingDate) },
-        { label: "Issued by", value: doc.issuedByName },
-        { label: "Position", value: doc.issuedByPosition },
+        { label: "Issued by", value: [doc.issuedByName, doc.issuedByPosition].filter(Boolean).join(", ") || null },
         { label: "Delivery location", value: procurement.deliveryLocation, full: true },
+        ...(doc.biddingDocumentCost
+          ? [{ label: "Bidding document fee", value: formatMoneyUGX(doc.biddingDocumentCost) }]
+          : []),
         { label: "Subject of procurement", value: doc.subject, full: true },
         { label: "Specifications / scope", value: doc.specifications, full: true },
         { label: "Submission instructions", value: doc.submissionInstructions, full: true },

@@ -5,7 +5,8 @@ import {
   Prisma,
 } from "@prisma/client";
 import { writeAuditLog, AuditEvent } from "@/lib/audit-log";
-import { WORKFLOW_TRIGGERS } from "@/lib/projects/process-catalogue";
+import { PROCESS_FLOW_CODES, WORKFLOW_TRIGGERS } from "@/lib/projects/process-catalogue";
+import { assertProcessActive } from "@/lib/projects/process-activation";
 import { resolveSelectableFinancialYear } from "@/lib/projects/org-financial-years";
 import {
   computeBudgetAvailability,
@@ -330,6 +331,9 @@ export async function listSelectableBudgetLines(prisma, opts) {
  * }} opts
  */
 export async function createBudgetWithLines(prisma, opts) {
+  const inactive = await assertProcessActive(prisma, opts.projectId, PROCESS_FLOW_CODES.BUDGETING);
+  if (inactive) return inactive;
+
   const b = opts.body || {};
   /** @type {Record<string, string>} */
   const fieldErrors = {};
@@ -897,6 +901,8 @@ export async function submitBudget(prisma, opts) {
   if (!row.lines?.length) {
     return { ok: false, error: "Add budget lines before submitting.", status: 400 };
   }
+  const inactive = await assertProcessActive(prisma, opts.projectId, PROCESS_FLOW_CODES.BUDGETING);
+  if (inactive) return inactive;
 
   await prisma.projectOrgWorkflowInstance.updateMany({
     where: {

@@ -41,7 +41,6 @@ import {
   themedTextFieldSx,
 } from "@/lib/admin-mui-surfaces";
 import {
-  validateProjectOrgProcessFlowInput,
   validateProjectOrgProcessFlowPatch,
   ENGINE_PROCESS_BINDINGS,
 } from "@/lib/validation/project-org-process-flow";
@@ -49,6 +48,7 @@ import {
   validateProjectOrgProcessFlowItemInput,
   validateProjectOrgProcessFlowItemPatch,
 } from "@/lib/validation/project-org-process-flow-item";
+import { isBuiltInProcessCode } from "@/lib/projects/process-catalogue";
 
 function emptyProcessForm() {
   return { name: "", description: "", engineEvent: "" };
@@ -85,14 +85,10 @@ export function ProjectProcessFlowsPanel({ apiBase }) {
   const [itemRowsPerPage, setItemRowsPerPage] = useState(10);
   const [itemTotal, setItemTotal] = useState(0);
 
-  const [openCreateProcess, setOpenCreateProcess] = useState(false);
-  const [createProcessBusy, setCreateProcessBusy] = useState(false);
-  const [createProcessForm, setCreateProcessForm] = useState(emptyProcessForm());
-  const [createProcessErrors, setCreateProcessErrors] = useState(
-    /** @type {Record<string, string>} */ ({}),
-  );
-
   const [editProcessRow, setEditProcessRow] = useState(/** @type {any} */ (null));
+  const editBuiltIn = isBuiltInProcessCode(editProcessRow?.code);
+  const selectedBuiltIn = isBuiltInProcessCode(selectedProcess?.code);
+  const stepsLocked = readOnly || selectedBuiltIn;
   const [editProcessForm, setEditProcessForm] = useState(emptyProcessForm());
   const [editProcessErrors, setEditProcessErrors] = useState(
     /** @type {Record<string, string>} */ ({}),
@@ -208,42 +204,6 @@ export function ProjectProcessFlowsPanel({ apiBase }) {
     const max = itemRows.reduce((acc, row) => Math.max(acc, Number(row.stepNumber) || 0), 0);
     return max + 1;
   }, [itemRows]);
-
-  async function createProcess() {
-    const validated = validateProjectOrgProcessFlowInput(createProcessForm);
-    if (!validated.ok) {
-      setCreateProcessErrors(validated.errors);
-      showToast({ message: "Please fix the highlighted fields.", severity: "error" });
-      return;
-    }
-
-    setCreateProcessBusy(true);
-    try {
-      const res = await fetch(apiBase, {
-        method: "POST",
-        credentials: "include",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(createProcessForm),
-      });
-      const data = await res.json().catch(() => ({}));
-      if (!res.ok) {
-        if (data.fieldErrors) setCreateProcessErrors(data.fieldErrors);
-        showToast({
-          message: typeof data.error === "string" ? data.error : "Could not create process.",
-          severity: "error",
-        });
-        return;
-      }
-      showToast({ message: "Process created.", severity: "success" });
-      setOpenCreateProcess(false);
-      setCreateProcessForm(emptyProcessForm());
-      setCreateProcessErrors({});
-      await loadProcesses({ silent: true });
-      if (data.processFlow) setSelectedProcess(data.processFlow);
-    } finally {
-      setCreateProcessBusy(false);
-    }
-  }
 
   function openEditProcess(row) {
     setEditProcessRow(row);
@@ -473,26 +433,10 @@ export function ProjectProcessFlowsPanel({ apiBase }) {
         <Typography variant="body2" sx={{ ...adminMutedTextSx, mb: 2 }}>
           {readOnly
             ? "These process flows are configured by system administrators and shared across all student project workspaces."
-            : "Add a process for student organisation workspaces, then define ordered steps with the role responsible for each task."}
+            : "Predefined processes. You can rename them; steps are fixed."}
         </Typography>
 
         <div className="mb-3 flex flex-wrap gap-2">
-          {!readOnly ? (
-            <Button
-              variant="contained"
-              startIcon={<AddRounded />}
-              disabled={processRefetching}
-              onClick={() => {
-                setCreateProcessErrors({});
-                setCreateProcessForm(emptyProcessForm());
-                setOpenCreateProcess(true);
-              }}
-              className="w-full sm:w-auto"
-              title="Add process"
-            >
-              Add process
-            </Button>
-          ) : null}
           <Button
             variant="outlined"
             startIcon={processRefetching ? <CircularProgress size={16} /> : <RefreshRounded />}
@@ -575,16 +519,18 @@ export function ProjectProcessFlowsPanel({ apiBase }) {
                                     <EditRounded fontSize="small" />
                                   </IconButton>
                                 </Tooltip>
-                                <Tooltip title="Delete process">
-                                  <IconButton
-                                    size="small"
-                                    color="error"
-                                    aria-label={`Delete ${row.name}`}
-                                    onClick={() => setDelProcessRow(row)}
-                                  >
-                                    <DeleteOutlineRounded fontSize="small" />
-                                  </IconButton>
-                                </Tooltip>
+                                {isBuiltInProcessCode(row.code) ? null : (
+                                  <Tooltip title="Delete process">
+                                    <IconButton
+                                      size="small"
+                                      color="error"
+                                      aria-label={`Delete ${row.name}`}
+                                      onClick={() => setDelProcessRow(row)}
+                                    >
+                                      <DeleteOutlineRounded fontSize="small" />
+                                    </IconButton>
+                                  </Tooltip>
+                                )}
                               </>
                             ) : null}
                           </Box>
@@ -622,12 +568,13 @@ export function ProjectProcessFlowsPanel({ apiBase }) {
             Process steps — {selectedProcess.name}
           </Typography>
           <Typography variant="body2" sx={{ ...adminMutedTextSx, mb: 2 }}>
-            Each step has a number, task description, and the organisation role required to perform
-            it. Admin is not listed as a required role.
+            {selectedBuiltIn
+              ? "Built-in process. Steps are fixed to match the workflow engine."
+              : "Each step has a number, task description, and the organisation role required to perform it. Admin is not listed as a required role."}
           </Typography>
 
           <div className="mb-3 flex flex-wrap gap-2">
-            {!readOnly ? (
+            {!stepsLocked ? (
               <Button
                 variant="contained"
                 startIcon={<AddRounded />}
@@ -659,7 +606,7 @@ export function ProjectProcessFlowsPanel({ apiBase }) {
             </Button>
           </div>
 
-          {assignableRoles.length === 0 && !readOnly ? (
+          {assignableRoles.length === 0 && !stepsLocked ? (
             <Typography variant="body2" sx={{ ...adminMutedTextSx, mb: 2 }}>
               Add organisation roles under Roles &amp; Permissions before defining process steps.
             </Typography>
@@ -683,13 +630,13 @@ export function ProjectProcessFlowsPanel({ apiBase }) {
                         <TableCell>Step</TableCell>
                         <TableCell>Task description</TableCell>
                         <TableCell>Required role</TableCell>
-                        {!readOnly ? <TableCell align="right">Actions</TableCell> : null}
+                        {!stepsLocked ? <TableCell align="right">Actions</TableCell> : null}
                       </TableRow>
                     </TableHead>
                     <TableBody>
                       {itemRows.length === 0 ? (
                         <TableRow>
-                          <TableCell colSpan={readOnly ? 3 : 4} align="center" sx={{ py: 5 }}>
+                          <TableCell colSpan={stepsLocked ? 3 : 4} align="center" sx={{ py: 5 }}>
                             <Typography variant="body2" sx={adminMutedTextSx}>
                               No steps yet for this process.
                             </Typography>
@@ -701,7 +648,7 @@ export function ProjectProcessFlowsPanel({ apiBase }) {
                             <TableCell>{row.stepNumber}</TableCell>
                             <TableCell>{row.taskDescription}</TableCell>
                             <TableCell>{row.requiredRole?.name || "—"}</TableCell>
-                            {!readOnly ? (
+                            {!stepsLocked ? (
                               <TableCell align="right">
                                 <Box sx={{ display: "inline-flex", gap: 0.25 }}>
                                   <Tooltip title="Edit process step">
@@ -767,88 +714,6 @@ export function ProjectProcessFlowsPanel({ apiBase }) {
       )}
 
       <Dialog
-        open={openCreateProcess}
-        onClose={() => !createProcessBusy && setOpenCreateProcess(false)}
-        fullWidth
-        maxWidth="sm"
-        slotProps={{ paper: { sx: adminDialogPaperSx } }}
-      >
-        <DialogTitle>Add process</DialogTitle>
-        <DialogContent>
-          <Box component="form" noValidate sx={{ display: "grid", gap: 2, pt: 1 }}>
-            <TextField
-              label="Process name"
-              value={createProcessForm.name}
-              onChange={(e) => setCreateProcessForm((f) => ({ ...f, name: e.target.value }))}
-              error={Boolean(createProcessErrors.name)}
-              helperText={createProcessErrors.name || ""}
-              fullWidth
-              sx={themedTextFieldSx}
-            />
-            <TextField
-              select
-              label="Engine event (optional)"
-              value={createProcessForm.engineEvent}
-              onChange={(e) =>
-                setCreateProcessForm((f) => ({ ...f, engineEvent: e.target.value }))
-              }
-              error={Boolean(createProcessErrors.engineEvent)}
-              helperText={
-                createProcessErrors.engineEvent ||
-                "Binds this process to a submit action. Code and trigger are filled automatically. Leave unbound for educational processes not yet wired in the app."
-              }
-              fullWidth
-              sx={themedTextFieldSx}
-            >
-              <MenuItem value="">Not wired (educational)</MenuItem>
-              {engineBindings.map((b) => (
-                <MenuItem key={b.triggerKey} value={b.triggerKey}>
-                  {b.label} — {b.triggerKey}
-                </MenuItem>
-              ))}
-            </TextField>
-            {createProcessForm.engineEvent ? (
-              <Typography variant="body2" sx={adminMutedTextSx}>
-                Auto: code{" "}
-                <strong>
-                  {engineBindings.find((b) => b.triggerKey === createProcessForm.engineEvent)
-                    ?.code || "—"}
-                </strong>
-                , trigger <strong>{createProcessForm.engineEvent}</strong>. Renaming later will not
-                change this binding.
-              </Typography>
-            ) : null}
-            <TextField
-              label="Description (optional)"
-              value={createProcessForm.description}
-              onChange={(e) =>
-                setCreateProcessForm((f) => ({ ...f, description: e.target.value }))
-              }
-              error={Boolean(createProcessErrors.description)}
-              helperText={createProcessErrors.description || ""}
-              fullWidth
-              multiline
-              minRows={2}
-              sx={themedTextFieldSx}
-            />
-          </Box>
-        </DialogContent>
-        <DialogActions sx={{ px: 3, pb: 2 }}>
-          <Button onClick={() => setOpenCreateProcess(false)} disabled={createProcessBusy}>
-            Cancel
-          </Button>
-          <Button
-            variant="contained"
-            onClick={() => void createProcess()}
-            disabled={createProcessBusy}
-            startIcon={createProcessBusy ? <CircularProgress size={16} color="inherit" /> : null}
-          >
-            {createProcessBusy ? "Saving…" : "Save"}
-          </Button>
-        </DialogActions>
-      </Dialog>
-
-      <Dialog
         open={Boolean(editProcessRow)}
         onClose={() => !editProcessBusy && setEditProcessRow(null)}
         fullWidth
@@ -872,6 +737,7 @@ export function ProjectProcessFlowsPanel({ apiBase }) {
               label="Engine event (optional)"
               value={editProcessForm.engineEvent}
               onChange={(e) => setEditProcessForm((f) => ({ ...f, engineEvent: e.target.value }))}
+              disabled={editBuiltIn}
               error={Boolean(editProcessErrors.engineEvent)}
               helperText={
                 editProcessErrors.engineEvent ||
@@ -901,6 +767,7 @@ export function ProjectProcessFlowsPanel({ apiBase }) {
               label="Description (optional)"
               value={editProcessForm.description}
               onChange={(e) => setEditProcessForm((f) => ({ ...f, description: e.target.value }))}
+              disabled={editBuiltIn}
               error={Boolean(editProcessErrors.description)}
               helperText={editProcessErrors.description || ""}
               fullWidth

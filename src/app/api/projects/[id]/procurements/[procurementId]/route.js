@@ -15,8 +15,8 @@ import { evaluateClosureReadiness } from "@/lib/projects/procurement-closure";
 import { healMissingStepTasks } from "@/lib/projects/workflow-engine";
 import {
   checkActingModeForTask,
+  committeeTypeForWorkflowRole,
   getActiveCommittee,
-  isCommitteeWorkflowRole,
   requireCommitteeMembership,
 } from "@/lib/projects/committee-context";
 import { loadProcurementWorkflowProgress } from "@/lib/projects/procurement-workflow-progress";
@@ -32,6 +32,7 @@ import {
 import {
   isRecommendationDecisionTask,
   mayRecommendToContractsCommittee,
+  procurementStepReturnable,
 } from "@/lib/projects/procurement-recommendation-options";
 import { loadPurchaseInstructionDoc } from "@/lib/projects/purchase-instructions";
 import { attachCommitteeNames, loadPrintOrganisation, printedByFromAuth } from "@/lib/projects/print-context";
@@ -254,11 +255,8 @@ export async function GET(_request, context) {
     recommendations,
     recommendation: {
       allowed: stage.allowed,
-      returnRejectAllowed: !stage.allowed || isCommitteeWorkflowRole(pendingTask?.requiredRoleName),
-      returnAllowed:
-        !stage.allowed ||
-        isCommitteeWorkflowRole(pendingTask?.requiredRoleName) ||
-        !mayRecommendToContractsCommittee(viewerRoleName),
+      returnRejectAllowed: !stage.allowed || committeeTypeForWorkflowRole(pendingTask?.requiredRoleName) === "CONTRACTS",
+      returnAllowed: procurementStepReturnable(pendingTask?.title),
       kinds: stage.kinds,
       currentProviderId: stage.currentProviderId,
       currentShortlist: stage.currentShortlist,

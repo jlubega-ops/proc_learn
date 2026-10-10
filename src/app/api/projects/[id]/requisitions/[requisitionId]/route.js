@@ -9,6 +9,7 @@ import {
   getRequesterRequisitionMutationFlags,
   createOrUpdateRequisitionDraft,
   deleteRequisitionByRequester,
+  buildRequisitionVerificationEvidence,
 } from "@/lib/projects/requisitions";
 import { healMissingStepTasks } from "@/lib/projects/workflow-engine";
 import { fetchForm5OrgDefaults } from "@/lib/projects/form5-prefill";
@@ -163,13 +164,31 @@ export async function GET(_request, context) {
     canDelete = flags.canDelete;
   }
 
+  const evidence = await buildRequisitionVerificationEvidence(prisma, row);
+  const planEvidence = /** @type {any} */ (evidence?.plan) || null;
+  const planCheck = planEvidence
+    ? {
+        plannedQuantity: planEvidence.plannedQuantity,
+        plannedAmount: planEvidence.plannedAmount,
+        otherConsumedQuantity: planEvidence.otherConsumedQuantity,
+        otherConsumedValue: planEvidence.otherConsumedValue,
+        requisitionQuantity: planEvidence.requisitionQuantity,
+        requisitionAmount: planEvidence.requisitionAmount,
+        remainingQuantity: planEvidence.remainingQuantity,
+        remainingPlannedValue: planEvidence.remainingPlannedValue,
+      }
+    : null;
+
   return NextResponse.json({
-    requisition: serializeRequisition({
-      ...row,
-      workflowStage,
-      lastDecision,
-      viewerHasPendingAction,
-    }),
+    requisition: {
+      ...serializeRequisition({
+        ...row,
+        workflowStage,
+        lastDecision,
+        viewerHasPendingAction,
+      }),
+      planCheck,
+    },
     form5Defaults,
     pendingTask: pendingTask
       ? {

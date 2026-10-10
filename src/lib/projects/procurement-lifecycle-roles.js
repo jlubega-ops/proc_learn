@@ -8,7 +8,7 @@ export const LIFECYCLE_ACTION_ROLES = {
   create_award: [],
   ask_offer_clarification: ["Procurement Officer", "Head PDU"],
   communicate_award: ["Procurement Officer", "Head PDU"],
-  // The winning provider accepts or declines the award itself (provider portal / auto-response).
+  // The winning provider accepts or declines the award itself in the provider portal.
   accept_award: [],
   cancel_award: ["Accounting Officer", "Contracts Officer", "Head PDU"],
   update_delivery_address: ["Procurement Officer", "Contracts Officer", "Head PDU"],
@@ -22,7 +22,7 @@ export const LIFECYCLE_ACTION_ROLES = {
   issue_contract: ["Contracts Officer", "Procurement Officer", "Head PDU"],
   record_delivery: ["User Department Officer", "Head User Department"],
   record_inspection: ["Head User Department", "User Department Officer", "Contracts Officer"],
-  // Invoices come from the provider (portal or auto-response), never from org users.
+  // Invoices come from the provider portal, never from org users.
   create_invoice: [],
   certify_invoice: ["Head User Department", "Contracts Officer", "Finance/Budget Officer"],
   verify_invoice: ["Contracts Officer", "Finance/Budget Officer"],

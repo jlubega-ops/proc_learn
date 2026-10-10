@@ -8,8 +8,15 @@ import DescriptionRounded from "@mui/icons-material/DescriptionRounded";
 import { useToast } from "@/components/providers/toast-provider";
 import { formatPrintDate } from "@/components/print/print-document";
 import { adminMutedTextSx, themedTextFieldSx } from "@/lib/admin-mui-surfaces";
+import { formatMoneyAmount, formatMoneyUGX } from "@/lib/money";
 import { usePersistedFormDraft } from "@/hooks/use-persisted-form-draft";
 import { buildBidDocument } from "@/lib/projects/ppda-forms";
+import {
+  APPROVE_BID_DOCS_STEP_RE,
+  REVIEW_BID_DOCS_STEP_RE,
+  biddingPeriodDays,
+  latestStepSignOff,
+} from "@/lib/projects/invoice-match";
 import { calendarDateInputConstraints, validateStartEndDateRange } from "@/lib/validation/date-range";
 
 /** @param {any} procurement */
@@ -56,6 +63,36 @@ function ReadField({ label, value, full, multiline }) {
   );
 }
 
+/** Schedule of requirements — the requisition lines providers price against. @param {{ items: any[] }} p */
+function RequirementsList({ items }) {
+  if (!items.length) return null;
+  return (
+    <div className="sm:col-span-2">
+      <Typography variant="caption" sx={{ ...adminMutedTextSx, display: "block", mb: 0.5 }}>
+        Schedule of requirements
+      </Typography>
+      <ol className="m-0 list-none space-y-1.5 p-0">
+        {items.map((it, idx) => (
+          <li key={it.id || idx} className="flex flex-wrap items-baseline justify-between gap-x-3 text-sm">
+            <span className="min-w-0 font-medium">
+              {it.lineNumber || idx + 1}. {it.itemName}
+              {it.description ? (
+                <Typography component="span" variant="caption" sx={{ ...adminMutedTextSx, display: "block" }}>
+                  {it.description}
+                </Typography>
+              ) : null}
+            </span>
+            <span className="shrink-0 tabular-nums">
+              {formatMoneyAmount(it.quantity)}
+              {it.unitOfMeasure ? ` ${it.unitOfMeasure}` : ""}
+            </span>
+          </li>
+        ))}
+      </ol>
+    </div>
+  );
+}
+
 /**
  * RFQ / tender document: inline form while preparing, read-only view afterwards.
  * The editable form exposes `validate()` and `save()` through `ref` so the task
@@ -75,6 +112,9 @@ export function OrgBidDocumentSection({ projectId, procurement, organisation, is
   const isTender = procurement?.procurementMethod === "TENDER";
   const heading = isTender ? "Tender document" : "Request for Quotations (RFQ) document";
   const saved = savedBidDocument(procurement);
+  const reqItems = Array.isArray(procurement?.requisition?.items) ? procurement.requisition.items : [];
+  const deliveryLocation = procurement?.requisition?.deliveryLocation || "";
+  const approvedCost = isTender ? procurement?.requisition?.biddingDocumentCost || "" : "";
   const systemFields = {
     pdeName: organisation?.name || "",
     issuedByName: issuer?.name || "",
@@ -184,6 +224,11 @@ export function OrgBidDocumentSection({ projectId, procurement, organisation, is
 
   if (!editable) {
     const doc = saved?.doc;
+    const period = doc ? biddingPeriodDays(doc.issueDate, doc.closingDate) : null;
+    const cleared = latestStepSignOff(procurement?.timeline, REVIEW_BID_DOCS_STEP_RE);
+    const approved = latestStepSignOff(procurement?.timeline, APPROVE_BID_DOCS_STEP_RE);
+    /** @param {{ by: string | null; at: string } | null} s */
+    const signOff = (s) => (s ? `${s.by || "—"} · ${formatPrintDate(s.at)}` : null);
     return (
       <div className="rounded-lg border border-[color:var(--border-subtle)] p-3">
         {header}
@@ -194,12 +239,29 @@ export function OrgBidDocumentSection({ projectId, procurement, organisation, is
             <ReadField label="Procurement reference" value={doc.procurementReference} />
             <ReadField label="Subject" value={doc.subject} full />
             <ReadField label="Specifications / scope" value={doc.specifications} full multiline />
+            <RequirementsList items={reqItems} />
+            <ReadField label="Delivery location" value={deliveryLocation} full />
             <ReadField label="Issue date" value={doc.issueDate ? formatPrintDate(doc.issueDate) : null} />
             <ReadField label="Closing date" value={doc.closingDate ? formatPrintDate(doc.closingDate) : null} />
+            {period != null ? (
+              <ReadField label="Bidding period" value={`${period} day${period === 1 ? "" : "s"}`} full />
+            ) : null}
+            {isTender && (doc.biddingDocumentCost || approvedCost) ? (
+              <ReadField
+                label="Bidding document fee"
+                value={formatMoneyUGX(doc.biddingDocumentCost || approvedCost)}
+                full
+              />
+            ) : null}
             <ReadField label="Submission instructions" value={doc.submissionInstructions} full multiline />
             <ReadField label="Evaluation criteria" value={doc.evaluationCriteria} full multiline />
-            <ReadField label="Issued by" value={doc.issuedByName} />
-            <ReadField label="Position" value={doc.issuedByPosition} />
+            <ReadField
+              label="Prepared by"
+              value={[doc.issuedByName, doc.issuedByPosition].filter(Boolean).join(" · ") || null}
+            />
+            <ReadField label="Document filled" value={saved?.at ? formatPrintDate(saved.at) : null} />
+            {cleared ? <ReadField label="Cleared by (Head PDU)" value={signOff(cleared)} /> : null}
+            {approved ? <ReadField label="Approved by (Contracts Committee)" value={signOff(approved)} /> : null}
           </div>
         ) : null}
       </div>
@@ -257,6 +319,8 @@ export function OrgBidDocumentSection({ projectId, procurement, organisation, is
           helperText={fieldErrors.specifications}
           sx={themedTextFieldSx}
         />
+        <RequirementsList items={reqItems} />
+        <ReadField label="Delivery location" value={deliveryLocation} full />
         <TextField
           label="Issue date"
           type="date"
@@ -277,6 +341,17 @@ export function OrgBidDocumentSection({ projectId, procurement, organisation, is
           helperText={fieldErrors.closingDate}
           sx={themedTextFieldSx}
         />
+        {isTender ? (
+          <TextField
+            label="Bidding document fee"
+            value={approvedCost ? formatMoneyUGX(approvedCost) : "None"}
+            helperText="From Form 5 Part II"
+            slotProps={{ input: { readOnly: true } }}
+            fullWidth
+            className="sm:col-span-2"
+            sx={themedTextFieldSx}
+          />
+        ) : null}
         <TextField
           label="Submission instructions"
           value={form.submissionInstructions || ""}

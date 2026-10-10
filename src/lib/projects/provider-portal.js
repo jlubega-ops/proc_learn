@@ -488,6 +488,8 @@ export async function loadPortalOpportunity(prisma, opts) {
       specifications: doc.specifications || null,
       submissionInstructions: doc.submissionInstructions || null,
       evaluationCriteria: doc.evaluationCriteria || null,
+      biddingDocumentCost:
+        s.solicitationType === "TENDER" && doc.biddingDocumentCost ? doc.biddingDocumentCost : null,
       issuedByName: doc.issuedByName || null,
       issuedByPosition: doc.issuedByPosition || null,
     },

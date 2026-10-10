@@ -1,3 +1,5 @@
+import { differenceInCalendarDays } from "date-fns";
+
 /**
  * Accepted goods priced per line (offer unit prices), falling back to the order value
  * scaled by the accepted share when lines are unpriced.
@@ -86,6 +88,26 @@ export function latestStepSignOff(timeline, re) {
       )
       .sort((a, b) => String(b.createdAt || "").localeCompare(String(a.createdAt || "")))[0] || null;
   return hit ? { by: hit.actor?.displayName || null, at: hit.createdAt } : null;
+}
+
+export const REVIEW_BID_DOCS_STEP_RE = /^review (rfq|tender) documents/i;
+export const APPROVE_BID_DOCS_STEP_RE = /^approve (rfq|tender) documents/i;
+export const OPEN_OFFERS_STEP_RE = /^open (quotations|bids)/i;
+export const TECHNICAL_EVAL_STEP_RE = /^technical evaluation/i;
+export const FINANCIAL_EVAL_STEP_RE = /^financial evaluation/i;
+export const PREPARE_EVAL_REPORT_STEP_RE = /^prepare evaluation report/i;
+
+/**
+ * Calendar days between issue and closing of a solicitation.
+ * @param {string | Date | null | undefined} issue
+ * @param {string | Date | null | undefined} closing
+ */
+export function biddingPeriodDays(issue, closing) {
+  if (!issue || !closing) return null;
+  const a = new Date(issue);
+  const b = new Date(closing);
+  if (Number.isNaN(a.getTime()) || Number.isNaN(b.getTime())) return null;
+  return differenceInCalendarDays(b, a);
 }
 
 export const CERTIFY_DELIVERY_STEP_RE = /^(certify delivery|inspection\/acceptance|verify\/accept delivery)/i;

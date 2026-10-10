@@ -77,6 +77,88 @@ export const METHOD_PROCESS_BY_ENUM = {
   },
 };
 
+/** Procurement lifecycle actions that belong to a phase process. */
+export const PHASE_PROCESS_BY_ACTION = {
+  save_evaluation: PROCESS_FLOW_CODES.EVALUATION_PROCESS,
+  submit_evaluation: PROCESS_FLOW_CODES.EVALUATION_PROCESS,
+  run_post_qualification: PROCESS_FLOW_CODES.POST_QUALIFICATION_PROCESS,
+  decide_post_qualification: PROCESS_FLOW_CODES.POST_QUALIFICATION_PROCESS,
+  create_lpo: PROCESS_FLOW_CODES.LPO_PROCESS,
+  approve_lpo: PROCESS_FLOW_CODES.LPO_PROCESS,
+  issue_lpo: PROCESS_FLOW_CODES.LPO_PROCESS,
+  create_contract: PROCESS_FLOW_CODES.CONTRACT_PROCESS,
+  approve_contract: PROCESS_FLOW_CODES.CONTRACT_PROCESS,
+  sign_contract: PROCESS_FLOW_CODES.CONTRACT_PROCESS,
+  issue_contract: PROCESS_FLOW_CODES.CONTRACT_PROCESS,
+  create_invoice: PROCESS_FLOW_CODES.INVOICE_PROCESS,
+  certify_invoice: PROCESS_FLOW_CODES.INVOICE_PROCESS,
+  verify_invoice: PROCESS_FLOW_CODES.INVOICE_PROCESS,
+  reject_invoice: PROCESS_FLOW_CODES.INVOICE_PROCESS,
+  create_payment: PROCESS_FLOW_CODES.PAYMENT_PROCESS,
+  approve_payment: PROCESS_FLOW_CODES.PAYMENT_PROCESS,
+  mark_payment_paid: PROCESS_FLOW_CODES.PAYMENT_PROCESS,
+  reject_payment: PROCESS_FLOW_CODES.PAYMENT_PROCESS,
+};
+
+/**
+ * Phase process a method-workflow task belongs to (null = the method process itself).
+ * Matches on the step part of the title ("<step>: <PROC no>: <title>").
+ * @param {string | null | undefined} title
+ * @param {string | null | undefined} method
+ * @returns {string | null}
+ */
+export function phaseProcessForTask(title, method) {
+  const step = String(title || "").split(":")[0].trim();
+  if (!step) return null;
+  if (/post-qualification/i.test(step)) return PROCESS_FLOW_CODES.POST_QUALIFICATION_PROCESS;
+  if (/technical evaluation|financial evaluation|evaluation report|evaluation\/recommendation/i.test(step)) {
+    return PROCESS_FLOW_CODES.EVALUATION_PROCESS;
+  }
+  if (/\blpo\b|contract|supplier acceptance/i.test(step) && !/purchase instruction/i.test(step)) {
+    const m = String(method || "").toUpperCase();
+    if (m === "TENDER") return PROCESS_FLOW_CODES.CONTRACT_PROCESS;
+    if (m === "QUOTATION") return PROCESS_FLOW_CODES.LPO_PROCESS;
+    return null;
+  }
+  if (/invoice/i.test(step)) return PROCESS_FLOW_CODES.INVOICE_PROCESS;
+  if (/payment/i.test(step)) return PROCESS_FLOW_CODES.PAYMENT_PROCESS;
+  return null;
+}
+
+/**
+ * Phase processes each method needs end to end. Post-qualification on QUOTATION is
+ * only needed when flagged, so it is checked when the checklist opens instead.
+ * @type {Record<string, string[]>}
+ */
+export const METHOD_REQUIRED_PHASES = {
+  MICRO: [PROCESS_FLOW_CODES.INVOICE_PROCESS, PROCESS_FLOW_CODES.PAYMENT_PROCESS],
+  QUOTATION: [
+    PROCESS_FLOW_CODES.EVALUATION_PROCESS,
+    PROCESS_FLOW_CODES.LPO_PROCESS,
+    PROCESS_FLOW_CODES.INVOICE_PROCESS,
+    PROCESS_FLOW_CODES.PAYMENT_PROCESS,
+  ],
+  TENDER: [
+    PROCESS_FLOW_CODES.EVALUATION_PROCESS,
+    PROCESS_FLOW_CODES.POST_QUALIFICATION_PROCESS,
+    PROCESS_FLOW_CODES.CONTRACT_PROCESS,
+    PROCESS_FLOW_CODES.INVOICE_PROCESS,
+    PROCESS_FLOW_CODES.PAYMENT_PROCESS,
+  ],
+};
+
+/**
+ * Method process plus every phase it needs.
+ * @param {string | null | undefined} method
+ * @returns {string[]}
+ */
+export function processCodesForMethod(method) {
+  const key = String(method || "").toUpperCase();
+  const meta = METHOD_PROCESS_BY_ENUM[key];
+  if (!meta) return [];
+  return [meta.code, ...(METHOD_REQUIRED_PHASES[key] || [])];
+}
+
 /**
  * Fixed app events the simulation engine currently listens for.
  * System Admin binds a catalogue process to one of these — rename never changes the trigger.
@@ -130,39 +212,50 @@ export const ENGINE_PROCESS_BINDINGS = [
     code: PROCESS_FLOW_CODES.EVALUATION_PROCESS,
     triggerKey: WORKFLOW_TRIGGERS.EVALUATION_STARTED,
     label: "Evaluation started",
-    description: "Starts when a committee opens an evaluation report for a procurement.",
+    description: "Phase gate: evaluation reports can only be opened while active.",
   },
   {
     code: PROCESS_FLOW_CODES.POST_QUALIFICATION_PROCESS,
     triggerKey: WORKFLOW_TRIGGERS.POST_QUALIFICATION_STARTED,
     label: "Post-qualification started",
-    description: "Starts when a post-qualification checklist is opened after an approved evaluation.",
+    description: "Phase gate: post-qualification checklists can only be opened while active.",
   },
   {
     code: PROCESS_FLOW_CODES.LPO_PROCESS,
     triggerKey: WORKFLOW_TRIGGERS.LPO_STARTED,
     label: "LPO started",
-    description: "Starts when a Local Purchase Order is drafted for a Quotation procurement.",
+    description: "Phase gate: LPOs can only be drafted while active.",
   },
   {
     code: PROCESS_FLOW_CODES.CONTRACT_PROCESS,
     triggerKey: WORKFLOW_TRIGGERS.CONTRACT_STARTED,
     label: "Contract started",
-    description: "Starts when a contract is drafted for a Tender procurement.",
+    description: "Phase gate: contracts can only be drafted while active.",
   },
   {
     code: PROCESS_FLOW_CODES.INVOICE_PROCESS,
     triggerKey: WORKFLOW_TRIGGERS.INVOICE_STARTED,
     label: "Invoice started",
-    description: "Starts when a supplier invoice is logged against a procurement.",
+    description: "Phase gate: invoices can only be submitted while active.",
   },
   {
     code: PROCESS_FLOW_CODES.PAYMENT_PROCESS,
     triggerKey: WORKFLOW_TRIGGERS.PAYMENT_STARTED,
     label: "Payment started",
-    description: "Starts when a payment is raised against a verified invoice.",
+    description: "Phase gate: payments can only be raised while active.",
   },
 ];
+
+/**
+ * Built-in engine processes: steps are owned by code, only the label can be renamed.
+ * @param {string | null | undefined} code
+ */
+export function isBuiltInProcessCode(code) {
+  return Boolean(code) && Object.values(PROCESS_FLOW_CODES).includes(String(code));
+}
+
+export const BUILT_IN_PROCESS_LOCKED_MESSAGE =
+  "Built-in process steps are fixed. You can only rename this process.";
 
 /**
  * @param {string | null | undefined} triggerKey
@@ -768,11 +861,35 @@ export const BASELINE_PROCESS_TEMPLATES = [
     code: PROCESS_FLOW_CODES.EVALUATION_PROCESS,
     name: "Evaluation Process",
     description:
-      "Tracks committee evaluation of offers/bids through to approval of the evaluation report.",
+      "Evaluation of quotations/bids through to approval of the evaluation report. Required by Quotation and Tender.",
     triggerKey: WORKFLOW_TRIGGERS.EVALUATION_STARTED,
     steps: [
       {
         stepNumber: 1,
+        taskDescription: "Technical Evaluation",
+        roleName: "Evaluation Committee",
+        actionKey: "COMPLETE",
+      },
+      {
+        stepNumber: 2,
+        taskDescription: "Financial Evaluation",
+        roleName: "Evaluation Committee",
+        actionKey: "COMPLETE",
+      },
+      {
+        stepNumber: 3,
+        taskDescription: "Prepare Evaluation Report",
+        roleName: "Evaluation Committee",
+        actionKey: "COMPLETE",
+      },
+      {
+        stepNumber: 4,
+        taskDescription: "Review Evaluation Report",
+        roleName: "Head PDU",
+        actionKey: "APPROVE",
+      },
+      {
+        stepNumber: 5,
         taskDescription: "Approve Evaluation Report",
         roleName: "Contracts Committee",
         actionKey: "APPROVE",
@@ -783,12 +900,18 @@ export const BASELINE_PROCESS_TEMPLATES = [
     code: PROCESS_FLOW_CODES.POST_QUALIFICATION_PROCESS,
     name: "Post-Qualification Process",
     description:
-      "Tracks verification of the recommended supplier's registration, tax compliance, and experience before award.",
+      "Checks the best evaluated bidder before award. Required by Tender, and by Quotation when flagged.",
     triggerKey: WORKFLOW_TRIGGERS.POST_QUALIFICATION_STARTED,
     steps: [
       {
         stepNumber: 1,
-        taskDescription: "Approve Post-Qualification Checklist",
+        taskDescription: "Post-Qualification Checklist",
+        roleName: "Evaluation Committee",
+        actionKey: "COMPLETE",
+      },
+      {
+        stepNumber: 2,
+        taskDescription: "Approve Evaluation/Recommendation",
         roleName: "Contracts Committee",
         actionKey: "APPROVE",
       },
@@ -797,41 +920,86 @@ export const BASELINE_PROCESS_TEMPLATES = [
   {
     code: PROCESS_FLOW_CODES.LPO_PROCESS,
     name: "LPO Process",
-    description: "Tracks Local Purchase Order approval and issuance for the Quotation path.",
+    description:
+      "Local Purchase Order preparation, approval, issue and supplier acceptance. Required by Quotation.",
     triggerKey: WORKFLOW_TRIGGERS.LPO_STARTED,
     steps: [
       {
         stepNumber: 1,
-        taskDescription: "Approve and Issue LPO",
-        roleName: "Head PDU",
+        taskDescription: "Prepare LPO",
+        roleName: "Contracts Officer",
+        actionKey: "COMPLETE",
+      },
+      {
+        stepNumber: 2,
+        taskDescription: "Approve/Sign LPO",
+        roleName: "Accounting Officer",
         actionKey: "APPROVE",
+      },
+      {
+        stepNumber: 3,
+        taskDescription: "Issue LPO",
+        roleName: "Procurement Officer",
+        actionKey: "COMPLETE",
+      },
+      {
+        stepNumber: 4,
+        taskDescription: "Confirm Supplier Acceptance",
+        roleName: "Procurement Officer",
+        actionKey: "COMPLETE",
       },
     ],
   },
   {
     code: PROCESS_FLOW_CODES.CONTRACT_PROCESS,
     name: "Contract Process",
-    description: "Tracks contract approval, signature, and issuance for the Tender path.",
+    description:
+      "Contract preparation, signature, issue and supplier acceptance. Required by Tender.",
     triggerKey: WORKFLOW_TRIGGERS.CONTRACT_STARTED,
     steps: [
       {
         stepNumber: 1,
-        taskDescription: "Approve and Issue Contract",
+        taskDescription: "Prepare Contract",
         roleName: "Contracts Officer",
+        actionKey: "COMPLETE",
+      },
+      {
+        stepNumber: 2,
+        taskDescription: "Sign/Approve Contract",
+        roleName: "Accounting Officer",
         actionKey: "APPROVE",
+      },
+      {
+        stepNumber: 3,
+        taskDescription: "Issue Contract",
+        roleName: "Contracts Officer",
+        actionKey: "COMPLETE",
+      },
+      {
+        stepNumber: 4,
+        taskDescription: "Supplier Acceptance",
+        roleName: "Procurement Officer",
+        actionKey: "COMPLETE",
       },
     ],
   },
   {
     code: PROCESS_FLOW_CODES.INVOICE_PROCESS,
     name: "Invoice Process",
-    description: "Tracks certification and verification of a supplier invoice.",
+    description:
+      "Receipt and verification of the supplier invoice. Required by Micro, Quotation and Tender.",
     triggerKey: WORKFLOW_TRIGGERS.INVOICE_STARTED,
     steps: [
       {
         stepNumber: 1,
-        taskDescription: "Certify and Verify Invoice",
+        taskDescription: "Receive/Record Invoice",
         roleName: "Finance/Budget Officer",
+        actionKey: "COMPLETE",
+      },
+      {
+        stepNumber: 2,
+        taskDescription: "Verify Invoice",
+        roleName: "Contracts Officer",
         actionKey: "VERIFY",
       },
     ],
@@ -839,14 +1007,21 @@ export const BASELINE_PROCESS_TEMPLATES = [
   {
     code: PROCESS_FLOW_CODES.PAYMENT_PROCESS,
     name: "Payment Process",
-    description: "Tracks approval and settlement of a payment against a verified invoice.",
+    description:
+      "Approval and recording of payment against a verified invoice. Required by Micro, Quotation and Tender.",
     triggerKey: WORKFLOW_TRIGGERS.PAYMENT_STARTED,
     steps: [
       {
         stepNumber: 1,
-        taskDescription: "Approve and Pay",
+        taskDescription: "Approve Payment",
         roleName: "Accounting Officer",
         actionKey: "APPROVE",
+      },
+      {
+        stepNumber: 2,
+        taskDescription: "Record Payment",
+        roleName: "Finance/Budget Officer",
+        actionKey: "COMPLETE",
       },
     ],
   },
@@ -875,7 +1050,6 @@ export async function ensureBaselineProcessTemplates(prisma) {
         triggerKey: tpl.triggerKey,
       },
       update: {
-        name: tpl.name,
         description: tpl.description,
         triggerKey: tpl.triggerKey,
       },

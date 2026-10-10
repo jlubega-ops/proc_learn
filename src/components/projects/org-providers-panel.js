@@ -331,6 +331,9 @@ export function OrgProvidersPanel({ projectId, detailBase }) {
                     <TableRow key={p.id} {...clickableTableRowProps({ href, router })}>
                       <TableCell sx={{ minWidth: 200 }}>
                         <span className="font-semibold">{p.name}</span>
+                        {p.isGenerated ? (
+                          <Chip size="small" variant="outlined" color="primary" label="Generated" sx={{ ml: 1 }} />
+                        ) : null}
                         <div className="text-xs opacity-70">
                           {p.linesOfBusiness || p.physicalAddress || "—"}
                         </div>

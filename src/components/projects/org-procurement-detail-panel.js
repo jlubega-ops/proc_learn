@@ -62,7 +62,12 @@ import {
   OrgAwardRecommendationSummary,
   OrgOrderSummary,
 } from "@/components/projects/org-award-recommendation-summary";
-import { OrgSubmissionWindow } from "@/components/projects/org-submission-window";
+import {
+  OrgReopenSubmissionsDialog,
+  OrgSubmissionWindow,
+  submissionsOpen,
+  submissionsReopenable,
+} from "@/components/projects/org-submission-window";
 import { OrgReceiveOffersPanel } from "@/components/projects/org-receive-offers-panel";
 import Alert from "@mui/material/Alert";
 import { ProcurementSectionGate } from "@/components/projects/org-procurement-stage-tracker";
@@ -78,15 +83,22 @@ import {
   OrgRecommendationDialog,
   OrgRecommendationsCard,
 } from "@/components/projects/org-procurement-recommendation";
-import { isRecommendationDecisionTask } from "@/lib/projects/procurement-recommendation-options";
+import {
+  isRecommendationDecisionTask,
+  recommendActionLabel,
+} from "@/lib/projects/procurement-recommendation-options";
 import GavelRounded from "@mui/icons-material/GavelRounded";
 import {
   DEFAULT_PI_PAYMENT_TERMS,
   validatePurchaseInstructionTerms,
 } from "@/lib/validation/purchase-instruction";
 import { toDateInputValue } from "@/lib/financial-year-dates";
+import { validateStartEndDateRange } from "@/lib/validation/date-range";
+import { minRfqProviders } from "@/lib/projects/procurement-thresholds";
+import { addDays, format } from "date-fns";
 import {
   CERTIFY_DELIVERY_STEP_RE,
+  OPEN_OFFERS_STEP_RE,
   VERIFY_INVOICE_STEP_RE,
   goodsReceivedEvidence,
   invoiceThreeWayMatch,
@@ -112,7 +124,11 @@ import BlockRounded from "@mui/icons-material/BlockRounded";
 import ReceiptLongRounded from "@mui/icons-material/ReceiptLongRounded";
 import PaymentsRounded from "@mui/icons-material/PaymentsRounded";
 import UndoRounded from "@mui/icons-material/UndoRounded";
+import LockOpenRounded from "@mui/icons-material/LockOpenRounded";
 import TaskAltRounded from "@mui/icons-material/TaskAltRounded";
+import { useProcessActivation } from "@/hooks/use-process-activation";
+import { ProcessGateTooltip } from "@/components/projects/process-gate";
+import { PROCESS_FLOW_CODES, phaseProcessForTask } from "@/lib/projects/process-catalogue";
 
 const APPROVE_PAYMENT_STEP_RE = /^approve payment|^payment approval/i;
 const RECORD_PAYMENT_STEP_RE = /^record payment|^payment recording/i;
@@ -126,7 +142,7 @@ const SOLICITATION_STATUS_LABELS = {
   APPROVED: "Approved",
   ISSUED: "Issued",
   ADVERTISED: "Advertised",
-  OPEN: "Open",
+  OPEN: "Opened",
   CLOSED: "Closed",
 };
 
@@ -147,10 +163,9 @@ const METHOD_LABELS = {
   TENDER: "Tender",
 };
 
-/** @param {string} title */
-function isCloseSubmissionStep(title) {
-  return /^close\/lock quotation submission|^close.?lock quotation|^close tender submission/i.test(title);
-}
+/** Receive, Close and Open quotations / bids — one officer step on screen. */
+const SUBMISSIONS_STEP_RE =
+  /^receive (quotations|bids)|^close.?lock quotation|^close tender submission|^open (quotations|bids)/i;
 
 /** @param {string | null | undefined} value */
 function dateOrNull(value) {
@@ -213,9 +228,13 @@ function procurementDetailFields(row, projectId, activeOrder) {
       wide: true,
     },
     { label: "Estimated value", value: formatMoneyUGX(req?.estimatedTotalValue) },
-    { label: "Order / contract no.", value: orderDoc?.number },
-    { label: "Order value", value: orderDoc ? formatMoneyUGX(orderDoc.value) : null },
-    { label: "Provider on order", value: orderDoc?.supplierName },
+    ...(orderDoc
+      ? [
+          { label: "Order / contract no.", value: orderDoc.number },
+          { label: "Order value", value: formatMoneyUGX(orderDoc.value) },
+          { label: "Provider on order", value: orderDoc.supplierName },
+        ]
+      : []),
     {
       label: "Delivery location",
       value: orderDoc?.deliveryAddress || req?.deliveryLocation,
@@ -223,7 +242,7 @@ function procurementDetailFields(row, projectId, activeOrder) {
     },
     { label: "Procurement officer", value: row.officer?.displayName, wide: true },
     { label: "Created on", value: dateOrNull(row.createdAt) },
-    { label: "Closed on", value: dateOrNull(row.closedAt) },
+    ...(row.closedAt ? [{ label: "Closed on", value: dateOrNull(row.closedAt) }] : []),
   ];
   if (row.closedBy?.displayName) {
     fields.push({ label: "Closed by", value: row.closedBy.displayName, wide: true });
@@ -267,9 +286,16 @@ export function OrgProcurementDetailPanel({ projectId, procurementId, stage = nu
     /** @type {{ ready?: boolean; blockers?: string[] } | null} */ (null),
   );
   const [decision, setDecision] = useState("APPROVE");
+  const [reopenOpen, setReopenOpen] = useState(false);
   const [comment, setComment] = useState("");
+  const [commentError, setCommentError] = useState("");
   const [approvalReference, setApprovalReference] = useState("");
   const [approvalReferenceError, setApprovalReferenceError] = useState("");
+  /** null = untouched, so the default period is used. */
+  const [contractStartInput, setContractStart] = useState(/** @type {string | null} */ (null));
+  const [contractEndInput, setContractEnd] = useState(/** @type {string | null} */ (null));
+  const [contractDateErrors, setContractDateErrors] = useState(/** @type {Record<string, string>} */ ({}));
+  const processes = useProcessActivation(projectId);
   const [suppliers, setSuppliers] = useState(/** @type {any[]} */ ([]));
   const [piSupplierIds, setPiSupplierIds] = useState(/** @type {string[]} */ ([]));
   const [inviteIds, setInviteIds] = useState(/** @type {string[]} */ ([]));
@@ -357,6 +383,9 @@ export function OrgProcurementDetailPanel({ projectId, procurementId, stage = nu
       setComment("");
       setApprovalReference("");
       setApprovalReferenceError("");
+      setContractStart(null);
+      setContractEnd(null);
+      setContractDateErrors({});
       const shortlistIds = (data.procurement?.requisition?.shortlist || [])
         .map((s) => s?.id)
         .filter(Boolean);
@@ -398,8 +427,7 @@ export function OrgProcurementDetailPanel({ projectId, procurementId, stage = nu
   const isIssuePi = /issue purchase instruction/i.test(taskTitle);
   const isRfqIssue = /issue rfqs to suppliers/i.test(taskTitle);
   const isTenderAdvertise = /advertise tender/i.test(taskTitle);
-  const isReceive = /receive quotations/i.test(taskTitle) || /receive bids/i.test(taskTitle);
-  const isCloseSubmissionTask = Boolean(pendingTask) && isCloseSubmissionStep(taskTitle);
+  const isReceive = Boolean(pendingTask) && SUBMISSIONS_STEP_RE.test(taskTitle);
   const taskStep = taskTitle.split(":")[0].trim();
   const isInvoiceTask = Boolean(pendingTask) && INVOICE_STEP_RE.test(taskStep);
   const isApprovePaymentTask = Boolean(pendingTask) && APPROVE_PAYMENT_STEP_RE.test(taskStep);
@@ -468,6 +496,29 @@ export function OrgProcurementDetailPanel({ projectId, procurementId, stage = nu
     (row?.procurementMethod === "QUOTATION" || row?.procurementMethod === "TENDER");
   const evalReportStep = evalInTaskCard && evalStep === "report" && isPositiveDecision;
   const isApproveAwardTask = evalStep === "award" && /^approve award$/i.test(taskStep);
+  const isPrepareContractTask = Boolean(pendingTask) && /^prepare contract$/i.test(taskStep);
+  const taskPhaseCode = pendingTask ? phaseProcessForTask(taskTitle, row?.procurementMethod) : null;
+  const taskPhaseOff = Boolean(taskPhaseCode) && !processes.isActive(taskPhaseCode);
+  const taskPhaseOffTitle = taskPhaseCode ? processes.inactiveTitle(taskPhaseCode) : "";
+  const orderPhaseCode =
+    row?.procurementMethod === "TENDER"
+      ? PROCESS_FLOW_CODES.CONTRACT_PROCESS
+      : row?.procurementMethod === "QUOTATION"
+        ? PROCESS_FLOW_CODES.LPO_PROCESS
+        : null;
+  const orderOff = Boolean(orderPhaseCode) && !processes.isActive(orderPhaseCode);
+  const orderOffTitle = orderPhaseCode ? processes.inactiveTitle(orderPhaseCode) : "";
+  const invoiceOff = !processes.isActive(PROCESS_FLOW_CODES.INVOICE_PROCESS);
+  const invoiceOffTitle = processes.inactiveTitle(PROCESS_FLOW_CODES.INVOICE_PROCESS);
+  const paymentOff = !processes.isActive(PROCESS_FLOW_CODES.PAYMENT_PROCESS);
+  const paymentOffTitle = processes.inactiveTitle(PROCESS_FLOW_CODES.PAYMENT_PROCESS);
+  const contractStart = contractStartInput ?? format(new Date(), "yyyy-MM-dd");
+  const contractDeliveryDays = Number(row?.award ? awardedOffer(row).offer?.deliveryDays : 0) || 0;
+  const contractEnd =
+    contractEndInput ??
+    (contractStart && contractDeliveryDays
+      ? toDateInputValue(addDays(new Date(`${contractStart}T00:00:00Z`), contractDeliveryDays))
+      : "");
   const stepActionInsidePanel = evalInTaskCard && evalActionInside && isPositiveDecision;
 
   /**
@@ -504,12 +555,7 @@ export function OrgProcurementDetailPanel({ projectId, procurementId, stage = nu
         });
         return false;
       }
-      showToast({
-        message: data.autoInvoice
-          ? `${successMessage} The ${providerWord} has sent invoice ${data.autoInvoice.invoiceNumber}.`
-          : successMessage,
-        severity: "success",
-      });
+      showToast({ message: successMessage, severity: "success" });
       await load();
       return true;
     } finally {
@@ -644,6 +690,16 @@ export function OrgProcurementDetailPanel({ projectId, procurementId, stage = nu
   /** @param {{ acknowledged?: boolean }} [opts] */
   async function submitDecision(opts = {}) {
     if (!pendingTask?.id) return;
+    if (decision === "REOPEN") {
+      setReopenOpen(true);
+      return;
+    }
+    if ((decision === "RETURN" || decision === "REJECT") && !comment.trim()) {
+      setCommentError("Enter the reason.");
+      showToast({ message: "Please fix the highlighted fields.", severity: "error" });
+      return;
+    }
+    setCommentError("");
     if (isIssuePi && isPositiveDecision && piProviderFailures.length && !opts.acknowledged) {
       setPiWarnOpen(true);
       return;
@@ -678,6 +734,14 @@ export function OrgProcurementDetailPanel({ projectId, procurementId, stage = nu
       return;
     }
     setApprovalReferenceError("");
+    if (isPrepareContractTask && isPositiveDecision) {
+      const range = validateStartEndDateRange(contractStart, contractEnd);
+      setContractDateErrors(range.errors);
+      if (!range.ok) {
+        showToast({ message: "Please fix the highlighted fields.", severity: "error" });
+        return;
+      }
+    }
     if (isPrepareDocsTask && !bidFormRef.current?.validate()) return;
     if (evalReportStep && !(await evalPanelRef.current?.prepare())) return;
     if (
@@ -708,6 +772,10 @@ export function OrgProcurementDetailPanel({ projectId, procurementId, stage = nu
       if (isIssuePi && isPositiveDecision) Object.assign(payload, piTerms);
       if (isRfqIssue) payload.inviteSupplierIds = inviteIds;
       if ((isRfqIssue || isTenderAdvertise) && closingDate) payload.closingDate = closingDate;
+      if (isPrepareContractTask && isPositiveDecision) {
+        payload.startDate = contractStart;
+        payload.endDate = contractEnd;
+      }
       if (isApproveAwardTask && isPositiveDecision && approvalReference.trim()) {
         payload.approvalReference = approvalReference.trim();
       }
@@ -730,6 +798,7 @@ export function OrgProcurementDetailPanel({ projectId, procurementId, stage = nu
         const fe = data.fieldErrors || {};
         setSelectionError(fe.supplierId || fe.inviteSupplierIds || "");
         if (isIssuePi) setPiErrors(fe);
+        if (isPrepareContractTask && (fe.startDate || fe.endDate)) setContractDateErrors(fe);
         showToast({
           message: typeof data.error === "string" ? data.error : "Could not record decision.",
           severity: "error",
@@ -746,7 +815,9 @@ export function OrgProcurementDetailPanel({ projectId, procurementId, stage = nu
             ? "Requests for quotations issued."
             : isTenderAdvertise && isPositiveDecision
               ? "Tender advertised."
-              : "Decision recorded.";
+              : isReceive && isPositiveDecision
+                ? `${row?.procurementMethod === "TENDER" ? "Bids" : "Quotations"} opened and submitted.`
+                : "Decision recorded.";
       showToast({ message, severity: "success" });
       notifyOrgTasksChanged();
       await load();
@@ -778,6 +849,8 @@ export function OrgProcurementDetailPanel({ projectId, procurementId, stage = nu
     !["DRAFT", "REVIEW", "APPROVED"].includes(latestSolicitation.status) &&
     (!sections || Boolean(sections.sourcing?.view));
   const isPrepareOrderTask = Boolean(pendingTask) && /^prepare (lpo|contract)/i.test(taskStep);
+  const isForwardBidsTask = Boolean(pendingTask) && /^forward bids for evaluation/i.test(taskStep);
+  const openedSignOff = latestSolicitation?.openedAt ? latestStepSignOff(row.timeline, OPEN_OFFERS_STEP_RE) : null;
   const awaitingAwardAcceptance =
     isPrepareOrderTask && Boolean(row.award) && row.award.status !== "ACCEPTED";
   const isConfirmOrderAcceptanceTask =
@@ -792,28 +865,38 @@ export function OrgProcurementDetailPanel({ projectId, procurementId, stage = nu
         : ["ACCEPTED", "ACTIVE"].includes(orderDocForTask.status)
           ? ""
           : `Waiting for the supplier to accept the ${row.contract ? "contract" : "LPO"}.`;
+  const offerWord = row.procurementMethod === "TENDER" ? "bids" : "quotations";
+  const receivingOpen = isReceive && !latestSolicitation?.openedAt && submissionsOpen(latestSolicitation);
   const receiveBlocker = !isPositiveDecision
     ? ""
     : isReceive
-      ? quotePool
-        ? quotePool.ready
+      ? receivingOpen
+        ? `Close ${offerWord} first.`
+        : latestSolicitation?.openedAt
           ? ""
-          : quotePool.blockers?.[0] || "Requirements not met."
-        : offers.some((o) => o.status !== "WITHDRAWN" && o.status !== "LATE")
-          ? ""
-          : `No ${providerWord.toLowerCase()} response yet`
-      : isCloseSubmissionTask
-        ? latestSolicitation?.closingDate && new Date(latestSolicitation.closingDate).getTime() > Date.now()
-          ? "Close submissions first."
-          : offers.some((o) => o.status !== "WITHDRAWN" && o.status !== "LATE")
-            ? ""
-            : `No ${providerWord.toLowerCase()} response yet`
-        : awaitingAwardAcceptance
-          ? "Waiting for the supplier to accept the award."
-          : orderAcceptanceBlocker;
+          : quotePool
+            ? quotePool.ready
+              ? ""
+              : quotePool.blockers?.[0] || "Requirements not met."
+            : offers.some((o) => o.status !== "WITHDRAWN" && o.status !== "LATE")
+              ? ""
+              : `No ${providerWord.toLowerCase()} response yet`
+      : awaitingAwardAcceptance
+        ? "Waiting for the supplier to accept the award."
+        : orderAcceptanceBlocker;
   const usesBidDocument = row.procurementMethod === "QUOTATION" || row.procurementMethod === "TENDER";
   const bidDocWord = row.procurementMethod === "TENDER" ? "Tender document" : "RFQ document";
-  const docInTaskCard = showTaskCard && (isPrepareDocsTask || isReviewDocsTask);
+  const docInTaskCard =
+    showTaskCard && (isPrepareDocsTask || isReviewDocsTask || ((isTenderAdvertise || isRfqIssue) && usesBidDocument));
+  const baseDecisionOptions = workflowDecisionOptions(actionKey, { isProcurementStep: true })
+    .filter((opt) => opt.value !== "RETURN" || Boolean(recommendation?.returnAllowed))
+    .filter((opt) => opt.value !== "REJECT" || recommendation?.returnRejectAllowed !== false);
+  const taskDecisionOptions =
+    isReceive && submissionsReopenable(latestSolicitation)
+      ? [baseDecisionOptions[0], { value: "REOPEN", label: `Reopen ${offerWord}` }, ...baseDecisionOptions.slice(1)].filter(
+          Boolean,
+        )
+      : baseDecisionOptions;
   const inDocumentsPhase =
     /^(prepare|review|approve) (rfq|tender) documents/i.test(String(row.currentStepLabel || "")) &&
     (!latestSolicitation || ["DRAFT", "REVIEW"].includes(latestSolicitation.status));
@@ -821,7 +904,7 @@ export function OrgProcurementDetailPanel({ projectId, procurementId, stage = nu
   const solicitationChip =
     inDocumentsPhase && row.stageLabel
       ? { label: row.stageLabel, color: "warning" }
-      : latestSolicitation?.status === "CLOSED" && latestSolicitation.openedAt
+      : latestSolicitation?.openedAt
         ? { label: `Opened ${formatPrintDate(latestSolicitation.openedAt)}`, color: "success" }
         : latestSolicitation
           ? {
@@ -1247,8 +1330,10 @@ export function OrgProcurementDetailPanel({ projectId, procurementId, stage = nu
       busy={busy}
       busyLabel={isIssuePi ? "Issuing purchase instruction…" : "Issuing RFQs…"}
       extraWarnings={
-        isRfqIssue && inviteIds.length > 0 && inviteIds.length < 3
-          ? [`Only ${inviteIds.length} invited — RFQ normally invites at least three.`]
+        isRfqIssue && inviteIds.length > 0 && inviteIds.length < minRfqProviders(row?.isEmergency)
+          ? [
+              `Only ${inviteIds.length} invited — RFQ normally invites at least ${row?.isEmergency ? "two" : "three"}.`,
+            ]
           : []
       }
       error={selectionError}
@@ -1315,6 +1400,9 @@ export function OrgProcurementDetailPanel({ projectId, procurementId, stage = nu
             </Typography>
           </div>
           <div className="flex flex-wrap gap-1">
+            {row.isEmergency ? (
+              <Chip size="small" color="warning" label="Emergency" title="From an emergency procurement plan" />
+            ) : null}
             {row.procurementMethod ? (
               <Chip
                 size="small"
@@ -1397,10 +1485,13 @@ export function OrgProcurementDetailPanel({ projectId, procurementId, stage = nu
       {showTaskCard ? (
         <Paper variant="outlined" sx={{ p: 2, ...adminOutlinedTableContainerSx }}>
           <Typography variant="subtitle1" sx={{ fontWeight: 600, mb: 1 }}>
-            {pendingTask.title.split(":")[0]}
+            {pendingTask.title.split(":")[0].replace(/\s+where applicable$/i, "")}
           </Typography>
+          {taskPhaseOff ? (
+            <Chip size="small" color="warning" label={taskPhaseOffTitle} sx={{ mb: 1 }} />
+          ) : null}
           {piApprovedProvider ? <div className="mb-3">{providerPicker}</div> : null}
-          {isPrepareDocsTask || isReviewDocsTask ? (
+          {isPrepareDocsTask || isReviewDocsTask || ((isTenderAdvertise || isRfqIssue) && usesBidDocument) ? (
             <div className="mb-3">{bidDocumentSection(isPrepareDocsTask)}</div>
           ) : null}
           {evalInTaskCard ? (
@@ -1417,20 +1508,34 @@ export function OrgProcurementDetailPanel({ projectId, procurementId, stage = nu
                 onStepActionInsideChange={setEvalActionInside}
                 hideStepAction={!isPositiveDecision}
                 stepBusy={busy}
+                phaseLocked={taskPhaseOff}
               />
             </div>
           ) : null}
-          {isCloseSubmissionTask && latestSolicitation ? (
+          {isReceive && latestSolicitation && !latestSolicitation.openedAt ? (
             <div className="mb-3">
               <OrgSubmissionWindow
                 projectId={projectId}
                 taskId={pendingTask.id}
-                decision={decision}
                 solicitation={latestSolicitation}
                 isTender={row.procurementMethod === "TENDER"}
                 busy={busy}
                 setBusy={setBusy}
                 onChanged={load}
+              />
+              <OrgReopenSubmissionsDialog
+                open={reopenOpen}
+                onClose={() => setReopenOpen(false)}
+                projectId={projectId}
+                taskId={pendingTask.id}
+                solicitation={latestSolicitation}
+                isTender={row.procurementMethod === "TENDER"}
+                busy={busy}
+                setBusy={setBusy}
+                onChanged={async () => {
+                  setDecision(defaultWorkflowDecision(actionKey));
+                  await load();
+                }}
               />
             </div>
           ) : null}
@@ -1444,13 +1549,29 @@ export function OrgProcurementDetailPanel({ projectId, procurementId, stage = nu
               {isPrepareOrderTask ? <OrgAwardOrderBasis row={row} /> : <OrgAwardDetails row={row} />}
             </div>
           ) : null}
-          {isReceive || isCloseSubmissionTask ? (
+          {isForwardBidsTask ? (
+            <div className="mb-4 space-y-3">
+              <RecordDetailsGrid
+                fields={[
+                  { label: "Closed on", value: dateOrNull(latestSolicitation?.closingDate) },
+                  { label: "Opened on", value: dateOrNull(latestSolicitation?.openedAt) },
+                  { label: "Opened by", value: openedSignOff?.by || null },
+                  {
+                    label: "Bids received",
+                    value: `${offers.filter((o) => o.status !== "WITHDRAWN" && o.status !== "LATE").length} valid of ${offers.length}`,
+                  },
+                ]}
+              />
+              <OrgOffersCard offers={offers} providerWord={providerWord} />
+            </div>
+          ) : null}
+          {isReceive ? (
             <div className="mb-4">
               <OrgReceiveOffersPanel
                 projectId={projectId}
                 procurementId={procurementId}
                 taskId={pendingTask.id}
-                decision={decision}
+                decision={defaultWorkflowDecision(actionKey)}
                 clarifyAllowed={clarifyAllowed}
                 isTender={row.procurementMethod === "TENDER"}
                 providerWord={providerWord}
@@ -1463,8 +1584,9 @@ export function OrgProcurementDetailPanel({ projectId, procurementId, stage = nu
               />
             </div>
           ) : null}
+          {receivingOpen ? null : (
           <div className="grid gap-3 sm:grid-cols-2">
-            {isPrepareDocsTask ? null : (
+            {isPrepareDocsTask || taskDecisionOptions.length < 2 ? null : (
               <TextField
                 select
                 label="Decision"
@@ -1473,12 +1595,7 @@ export function OrgProcurementDetailPanel({ projectId, procurementId, stage = nu
                 fullWidth
                 sx={themedTextFieldSx}
               >
-                {workflowDecisionOptions(actionKey, {
-                  isProcurementStep: true,
-                  includeReturnReject: recommendation ? recommendation.returnAllowed !== false : true,
-                })
-                  .filter((opt) => opt.value !== "REJECT" || recommendation?.returnRejectAllowed !== false)
-                  .map((opt) => (
+                {taskDecisionOptions.map((opt) => (
                   <MenuItem key={opt.value} value={opt.value}>
                     {workflowDecisionLabelForTask(opt, taskTitle)}
                   </MenuItem>
@@ -1488,8 +1605,7 @@ export function OrgProcurementDetailPanel({ projectId, procurementId, stage = nu
 
             {isTenderAdvertise ? (
               <Alert severity="info" variant="outlined" className="sm:col-span-2">
-                Open tender — the bid notice is advertised publicly, so no {providerWordPlural} are
-                picked here. Bidders are checked by the Evaluation Committee at eligibility.
+                Open tender — visible to all active {providerWordPlural}.
               </Alert>
             ) : null}
 
@@ -1563,6 +1679,41 @@ export function OrgProcurementDetailPanel({ projectId, procurementId, stage = nu
               />
             ) : null}
 
+            {isPrepareContractTask && isPositiveDecision ? (
+              <>
+                <TextField
+                  label="Contract start date"
+                  type="date"
+                  value={contractStart}
+                  onChange={(e) => {
+                    setContractStart(e.target.value);
+                    setContractDateErrors({});
+                  }}
+                  error={Boolean(contractDateErrors.startDate)}
+                  helperText={contractDateErrors.startDate || " "}
+                  fullWidth
+                  slotProps={{ inputLabel: { shrink: true } }}
+                  sx={themedTextFieldSx}
+                />
+                <TextField
+                  label="Contract end date"
+                  type="date"
+                  value={contractEnd}
+                  onChange={(e) => {
+                    setContractEnd(e.target.value);
+                    setContractDateErrors({});
+                  }}
+                  error={Boolean(contractDateErrors.endDate)}
+                  helperText={
+                    contractDateErrors.endDate || (contractDeliveryDays ? `Bid delivery period: ${contractDeliveryDays} days` : " ")
+                  }
+                  fullWidth
+                  slotProps={{ inputLabel: { shrink: true } }}
+                  sx={themedTextFieldSx}
+                />
+              </>
+            ) : null}
+
             {isApproveAwardTask && isPositiveDecision ? (
               <TextField
                 label="Approval reference"
@@ -1578,21 +1729,29 @@ export function OrgProcurementDetailPanel({ projectId, procurementId, stage = nu
               />
             ) : null}
 
+            {decision === "REOPEN" || evalReportStep ? null : (
             <TextField
-              label="Comment"
+              label={decision === "RETURN" || decision === "REJECT" ? "Comment" : "Comment (optional)"}
               value={comment}
-              onChange={(e) => setComment(e.target.value)}
+              onChange={(e) => {
+                setComment(e.target.value);
+                setCommentError("");
+              }}
               fullWidth
               multiline
               minRows={2}
               className="sm:col-span-2"
+              error={Boolean(commentError)}
+              helperText={commentError || undefined}
               sx={themedTextFieldSx}
             />
+            )}
           </div>
+          )}
           {usesProviderPicker && !piApprovedProvider ? (
             <div className="mt-3">{providerPicker}</div>
           ) : null}
-          {receiveBlocker ? (
+          {receiveBlocker && !receivingOpen ? (
             <div className="mt-3 flex sm:justify-end" role="status">
               <Chip
                 size="small"
@@ -1604,7 +1763,7 @@ export function OrgProcurementDetailPanel({ projectId, procurementId, stage = nu
           ) : null}
           <div className="mt-3 flex flex-wrap-reverse items-center justify-between gap-2">
             {recommendation?.canRecommend ? (
-              <Tooltip title="Recommend cancellation or a provider change to the Contracts Committee">
+              <Tooltip title="Sent to the Contracts Committee for decision">
                 <span>
                   <Button
                     variant="text"
@@ -1615,32 +1774,36 @@ export function OrgProcurementDetailPanel({ projectId, procurementId, stage = nu
                     disabled={busy}
                     sx={{ textTransform: "none" }}
                   >
-                    Recommend to Contracts Committee
+                    {recommendActionLabel(recommendation?.kinds)}
                   </Button>
                 </span>
               </Tooltip>
             ) : (
               <span />
             )}
-            {(!usesProviderPicker || piApprovedProvider) && !stepActionInsidePanel ? (
+            {(!usesProviderPicker || piApprovedProvider) && !stepActionInsidePanel && !receivingOpen ? (
               <Tooltip
                 title={
-                  isPrepareDocsTask
-                    ? `Save the ${bidDocWord.toLowerCase()} and send it for review`
-                    : receiveBlocker
+                  taskPhaseOff
+                    ? taskPhaseOffTitle
+                    : isPrepareDocsTask
+                      ? `Save the ${bidDocWord.toLowerCase()} and send it for review`
+                      : receiveBlocker
                 }
               >
                 <span className="w-full sm:w-auto">
                   <Button
                     variant="contained"
                     color={decision === "REJECT" ? "error" : "primary"}
-                    disabled={busy || Boolean(receiveBlocker)}
+                    disabled={busy || Boolean(receiveBlocker) || taskPhaseOff}
                     onClick={() => void submitDecision()}
                     startIcon={
                       busy ? (
                         <CircularProgress size={16} color="inherit" />
                       ) : isPrepareDocsTask ? (
                         <SendRounded />
+                      ) : decision === "REOPEN" ? (
+                        <LockOpenRounded />
                       ) : null
                     }
                     className="w-full sm:w-auto"
@@ -1649,6 +1812,8 @@ export function OrgProcurementDetailPanel({ projectId, procurementId, stage = nu
                       ? workflowDecisionButtonLabel(decision, { busy })
                       : isPrepareDocsTask
                         ? "Submit for review"
+                        : decision === "REOPEN"
+                          ? `Reopen ${offerWord}`
                         : stepActionLabel && isPositiveDecision
                           ? stepActionLabel
                           : decision === "COMPLETE"
@@ -1686,7 +1851,7 @@ export function OrgProcurementDetailPanel({ projectId, procurementId, stage = nu
               </div>
               <div>
                 <Typography variant="caption" sx={{ ...adminMutedTextSx, display: "block" }}>
-                  Closes
+                  {submissionsOpen(latestSolicitation) ? "Closes" : "Closed"}
                 </Typography>
                 {latestSolicitation.closingDate ? formatPrintDate(latestSolicitation.closingDate) : "—"}
               </div>
@@ -1711,7 +1876,7 @@ export function OrgProcurementDetailPanel({ projectId, procurementId, stage = nu
         </Paper>
       ) : null}
 
-      {showTaskCard && (isReceive || isCloseSubmissionTask) ? null : (
+      {showTaskCard && (isReceive || isForwardBidsTask) ? null : (
         <OrgOffersCard
           offers={offers}
           providerWord={providerWord}
@@ -1820,6 +1985,9 @@ export function OrgProcurementDetailPanel({ projectId, procurementId, stage = nu
             <Typography variant="subtitle1" sx={{ fontWeight: 600, mb: 1 }}>
               {row.procurementMethod === "TENDER" ? "Contract" : "Local purchase order"}
             </Typography>
+            {orderOff ? (
+              <Chip size="small" color="warning" label={orderOffTitle} sx={{ mb: 1 }} />
+            ) : null}
             {row.lpo ? (
               <div className="space-y-2 text-sm">
                 <OrgOrderSummary row={row} addressSlot={orderAddressLine} />
@@ -1828,7 +1996,7 @@ export function OrgProcurementDetailPanel({ projectId, procurementId, stage = nu
                     <Button
                       size="small"
                       variant="outlined"
-                      disabled={busy}
+                      disabled={busy || orderOff}
                       onClick={() =>
                         void confirmThen("Approve LPO", () => runLifecycle("approve_lpo", { lpoId: row.lpo.id }))
                       }
@@ -1840,7 +2008,7 @@ export function OrgProcurementDetailPanel({ projectId, procurementId, stage = nu
                     <Button
                       size="small"
                       variant="outlined"
-                      disabled={busy}
+                      disabled={busy || orderOff}
                       onClick={() =>
                         void confirmThen("Issue LPO", () => runLifecycle("issue_lpo", { lpoId: row.lpo.id }))
                       }
@@ -1858,7 +2026,7 @@ export function OrgProcurementDetailPanel({ projectId, procurementId, stage = nu
                     <Button
                       size="small"
                       variant="outlined"
-                      disabled={busy}
+                      disabled={busy || orderOff}
                       onClick={() =>
                         void confirmThen("Approve contract", () =>
                           runLifecycle("approve_contract", { contractId: row.contract.id }),
@@ -1872,7 +2040,7 @@ export function OrgProcurementDetailPanel({ projectId, procurementId, stage = nu
                     <Button
                       size="small"
                       variant="outlined"
-                      disabled={busy}
+                      disabled={busy || orderOff}
                       onClick={() =>
                         void confirmThen("Sign contract", () =>
                           runLifecycle("sign_contract", { contractId: row.contract.id }),
@@ -1886,7 +2054,7 @@ export function OrgProcurementDetailPanel({ projectId, procurementId, stage = nu
                     <Button
                       size="small"
                       variant="outlined"
-                      disabled={busy}
+                      disabled={busy || orderOff}
                       onClick={() =>
                         void confirmThen("Issue contract", () =>
                           runLifecycle("issue_contract", { contractId: row.contract.id }),
@@ -1904,7 +2072,7 @@ export function OrgProcurementDetailPanel({ projectId, procurementId, stage = nu
                   <Button
                     size="small"
                     variant="contained"
-                    disabled={busy || !row.award || row.award.status !== "ACCEPTED"}
+                    disabled={busy || orderOff || !row.award || row.award.status !== "ACCEPTED"}
                     onClick={() => void confirmThen("Create LPO", () => runLifecycle("create_lpo"))}
                     title={
                       row.award?.status === "ACCEPTED"
@@ -1919,8 +2087,12 @@ export function OrgProcurementDetailPanel({ projectId, procurementId, stage = nu
                   <Button
                     size="small"
                     variant="contained"
-                    disabled={busy || !row.award || row.award.status !== "ACCEPTED"}
-                    onClick={() => void confirmThen("Create contract", () => runLifecycle("create_contract"))}
+                    disabled={busy || orderOff || !row.award || row.award.status !== "ACCEPTED"}
+                    onClick={() =>
+                      void confirmThen("Create contract", () =>
+                        runLifecycle("create_contract", { startDate: contractStart, endDate: contractEnd }),
+                      )
+                    }
                   >
                     Create contract
                   </Button>
@@ -2089,7 +2261,7 @@ export function OrgProcurementDetailPanel({ projectId, procurementId, stage = nu
                     note: d.deliveryNote?.noteNumber || "—",
                     item: l.itemName,
                     received: `${formatMoneyAmount(l.receivedQuantity)}${l.unitOfMeasure ? ` ${l.unitOfMeasure}` : ""}`,
-                    ordered: formatMoneyAmount(l.orderedQuantity),
+                    ordered: `${formatMoneyAmount(l.orderedQuantity)}${l.unitOfMeasure ? ` ${l.unitOfMeasure}` : ""}`,
                     by: d.recordedBy?.displayName || "—",
                     remarks: d.remarks && !/^Received against /.test(d.remarks) ? d.remarks : "—",
                   })),
@@ -2483,7 +2655,7 @@ export function OrgProcurementDetailPanel({ projectId, procurementId, stage = nu
                     ...(goodsEvidence?.certifiedAt
                       ? [
                           {
-                            label: "Delivery certified",
+                            label: "Goods accepted by",
                             value: `${goodsEvidence.certifiedBy || "—"} · ${formatPrintDate(goodsEvidence.certifiedAt)}`,
                             wide: true,
                           },
@@ -2499,30 +2671,34 @@ export function OrgProcurementDetailPanel({ projectId, procurementId, stage = nu
             {invoiceAction || canRejectInvoice ? (
               <div className="mt-3 flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
                 {canRejectInvoice ? (
-                  <Button
-                    variant="outlined"
-                    color="error"
-                    startIcon={<BlockRounded />}
-                    disabled={busy}
-                    onClick={() => {
-                      setInvoiceRejectError("");
-                      setInvoiceToReject(openInvoice);
-                    }}
-                    className="w-full sm:w-auto"
-                  >
-                    Reject
-                  </Button>
+                  <ProcessGateTooltip inactive={invoiceOff} title={invoiceOffTitle} className="w-full sm:w-auto">
+                    <Button
+                      variant="outlined"
+                      color="error"
+                      startIcon={<BlockRounded />}
+                      disabled={busy || invoiceOff}
+                      onClick={() => {
+                        setInvoiceRejectError("");
+                        setInvoiceToReject(openInvoice);
+                      }}
+                      className="w-full sm:w-auto"
+                    >
+                      Reject
+                    </Button>
+                  </ProcessGateTooltip>
                 ) : null}
                 {invoiceAction ? (
-                  <Button
-                    variant="contained"
-                    startIcon={busy ? <CircularProgress size={16} color="inherit" /> : <ReceiptLongRounded />}
-                    disabled={busy}
-                    onClick={() => void confirmThen(invoiceAction.label, invoiceAction.run)}
-                    className="w-full sm:w-auto"
-                  >
-                    {invoiceAction.label}
-                  </Button>
+                  <ProcessGateTooltip inactive={invoiceOff} title={invoiceOffTitle} className="w-full sm:w-auto">
+                    <Button
+                      variant="contained"
+                      startIcon={busy ? <CircularProgress size={16} color="inherit" /> : <ReceiptLongRounded />}
+                      disabled={busy || invoiceOff}
+                      onClick={() => void confirmThen(invoiceAction.label, invoiceAction.run)}
+                      className="w-full sm:w-auto"
+                    >
+                      {invoiceAction.label}
+                    </Button>
+                  </ProcessGateTooltip>
                 ) : null}
               </div>
             ) : (
@@ -2679,31 +2855,35 @@ export function OrgProcurementDetailPanel({ projectId, procurementId, stage = nu
             {paymentAction || paymentSecondary ? (
               <div className="mt-3 flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
                 {paymentSecondary ? (
-                  <Button
-                    variant="outlined"
-                    color={paymentSecondary === "return" ? "warning" : "error"}
-                    startIcon={paymentSecondary === "return" ? <UndoRounded /> : <BlockRounded />}
-                    disabled={busy}
-                    onClick={() => {
-                      setPaymentReasonError("");
-                      setPaymentReasonOpen(true);
-                    }}
-                    className="w-full sm:w-auto"
-                  >
-                    {paymentSecondary === "return" ? "Return" : "Reject"}
-                  </Button>
+                  <ProcessGateTooltip inactive={paymentOff} title={paymentOffTitle} className="w-full sm:w-auto">
+                    <Button
+                      variant="outlined"
+                      color={paymentSecondary === "return" ? "warning" : "error"}
+                      startIcon={paymentSecondary === "return" ? <UndoRounded /> : <BlockRounded />}
+                      disabled={busy || paymentOff}
+                      onClick={() => {
+                        setPaymentReasonError("");
+                        setPaymentReasonOpen(true);
+                      }}
+                      className="w-full sm:w-auto"
+                    >
+                      {paymentSecondary === "return" ? "Return" : "Reject"}
+                    </Button>
+                  </ProcessGateTooltip>
                 ) : null}
                 {paymentAction ? (
-                  <Button
-                    variant="contained"
-                    color={paymentAction.kind === "record" ? "success" : "primary"}
-                    startIcon={busy ? <CircularProgress size={16} color="inherit" /> : <PaymentsRounded />}
-                    disabled={busy}
-                    onClick={() => void runPaymentAction()}
-                    className="w-full sm:w-auto"
-                  >
-                    {paymentAction.label}
-                  </Button>
+                  <ProcessGateTooltip inactive={paymentOff} title={paymentOffTitle} className="w-full sm:w-auto">
+                    <Button
+                      variant="contained"
+                      color={paymentAction.kind === "record" ? "success" : "primary"}
+                      startIcon={busy ? <CircularProgress size={16} color="inherit" /> : <PaymentsRounded />}
+                      disabled={busy || paymentOff}
+                      onClick={() => void runPaymentAction()}
+                      className="w-full sm:w-auto"
+                    >
+                      {paymentAction.label}
+                    </Button>
+                  </ProcessGateTooltip>
                 ) : null}
               </div>
             ) : currentPayment?.status === "PAID" ? null : (

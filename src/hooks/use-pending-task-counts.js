@@ -15,9 +15,10 @@ export function notifyOrgTasksChanged() {
  * Pending workflow task counts for the signed-in org user, keyed by sidebar href.
  * @param {string} projectId
  * @param {boolean} enabled
+ * @param {string} [contextKey] acting context (org role + committee seat); counts reload when it changes
  * @returns {Record<string, number>}
  */
-export function usePendingTaskCounts(projectId, enabled) {
+export function usePendingTaskCounts(projectId, enabled, contextKey = "") {
   const pathname = usePathname();
   const [byHref, setByHref] = useState(/** @type {Record<string, number>} */ ({}));
   const active = Boolean(enabled && projectId);
@@ -56,7 +57,7 @@ export function usePendingTaskCounts(projectId, enabled) {
       window.removeEventListener(TASKS_CHANGED_EVENT, load);
       window.removeEventListener("focus", load);
     };
-  }, [active, projectId, pathname]);
+  }, [active, projectId, pathname, contextKey]);
 
   return active ? byHref : {};
 }

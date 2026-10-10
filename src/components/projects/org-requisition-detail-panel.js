@@ -68,6 +68,9 @@ import {
   OrgProviderShortlistSummary,
 } from "@/components/projects/org-provider-selection";
 import Alert from "@mui/material/Alert";
+import { minRfqProviders } from "@/lib/projects/procurement-thresholds";
+import { useProcessActivation } from "@/hooks/use-process-activation";
+import { processCodesForMethod } from "@/lib/projects/process-catalogue";
 
 const REQUISITION_ITEM_COLUMNS = [
   {
@@ -115,34 +118,200 @@ function budgetLineLabel(row) {
   return b ? [b.code, b.name].filter(Boolean).join(" — ") : null;
 }
 
-/** @param {any} row */
-function requisitionDetailFields(row) {
-  const fields = [
+/**
+ * @param {any} row
+ * @param {any[]} history
+ */
+function requisitionDetailFields(row, history) {
+  const endorsed = stepSignOff(history, ENDORSE_STEP_RE);
+  return [
+    { label: "Current stage", value: row.stageLabel || row.statusLabel || row.status, wide: true },
     { label: "Financial year", value: row.financialYear?.label },
     { label: "Department", value: deptLabel(row) },
-    { label: "Current stage", value: row.stageLabel || row.statusLabel || row.status, wide: true },
     { label: "Category", value: row.category },
-    { label: "Procurement method", value: METHOD_LABELS[row.procurementMethod] || row.procurementMethod },
     { label: "Required by", value: row.requiredByDate ? formatPrintDate(row.requiredByDate) : null },
-    { label: "Items", value: String(row.items?.length || 0) },
+    ...(row.procurementMethod
+      ? [{ label: "Procurement method", value: METHOD_LABELS[row.procurementMethod] || row.procurementMethod }]
+      : []),
+    { label: "Delivery location", value: row.deliveryLocation, wide: true },
+    { label: "Requested by", value: recordPersonLine(row.requester, row.submittedAt || row.createdAt), wide: true },
+    ...(endorsed ? [{ label: "Endorsed by", value: signOffLine(endorsed), wide: true }] : []),
+    ...(row.approvedBy
+      ? [{ label: "Approved by", value: recordPersonLine(row.approvedBy, row.approvedAt), wide: true }]
+      : []),
+  ];
+}
+
+const ENDORSE_STEP_RE = /^review requisition/i;
+const PLAN_STEP_RE = /^verify procurement plan/i;
+const FUNDING_STEP_RE = /^verify funding/i;
+
+/**
+ * Latest forward decision on a requisition step, e.g. who verified funding.
+ * @param {any[]} history
+ * @param {RegExp} re
+ */
+function stepSignOff(history, re) {
+  return (
+    [...(history || [])]
+      .filter(
+        (h) =>
+          h.decision &&
+          !["RETURN", "REJECT"].includes(h.decision) &&
+          re.test(String(h.taskTitle || "").split(":")[0].trim()),
+      )
+      .sort((a, b) => String(b.createdAt || "").localeCompare(String(a.createdAt || "")))[0] || null
+  );
+}
+
+/**
+ * @param {any} h
+ */
+function signOffLine(h) {
+  return h ? `${h.actorName || "—"}${h.actorRoleName ? ` · ${h.actorRoleName}` : ""} · ${formatPrintDate(h.createdAt)}` : null;
+}
+
+/**
+ * Form 5 Part II as submitted by the Procurement Officer.
+ * @param {any} row
+ * @param {{ ccChairName?: string, ccSecretaryName?: string }} [cc]
+ */
+function methodRecommendationFields(row, cc = {}) {
+  const p = {
+    ...(row.form5PartII && typeof row.form5PartII === "object" ? row.form5PartII : {}),
+    ...(cc.ccChairName ? { ccChairName: cc.ccChairName } : {}),
+    ...(cc.ccSecretaryName ? { ccSecretaryName: cc.ccSecretaryName } : {}),
+  };
+  const recommendedBy = [p.pduOfficerName, p.pduOfficerPosition].filter(Boolean).join(" · ");
+  return [
+    { label: "Recommended method", value: METHOD_LABELS[row.procurementMethod] || row.procurementMethod || null },
+    {
+      label: "Recommended by",
+      value: recommendedBy
+        ? `${recommendedBy}${p.dateSubmittedToCc ? ` · ${formatPrintDate(p.dateSubmittedToCc)}` : ""}`
+        : null,
+    },
+    ...(row.isEmergency
+      ? [{ label: "Emergency reasons", value: p.emergencyReasons || row.procurementPlan?.emergencyJustification || null, full: true }]
+      : []),
+    { label: "Method justification", value: p.methodJustification || null, full: true },
+    { label: "Bidding document preparers", value: p.biddingDocumentPreparers || null },
+    { label: "Evaluation committee nominees", value: p.evaluationCommitteeNominees || null },
+    ...(row.procurementMethod === "TENDER" && p.biddingDocumentCost
+      ? [{ label: "Bidding document cost", value: formatMoneyUGX(p.biddingDocumentCost) }]
+      : []),
+    { label: "CC chairperson", value: p.ccChairName || null },
+    { label: "CC secretary", value: p.ccSecretaryName || null },
+    ...(p.otherInformation ? [{ label: "Other information", value: p.otherInformation, full: true }] : []),
+  ];
+}
+
+/**
+ * @param {number | null | undefined} qty
+ * @param {string | null | undefined} unit
+ */
+function qtyLabel(qty, unit) {
+  return `${formatMoneyAmount(qty) || "0"}${unit ? ` ${unit}` : ""}`;
+}
+
+/** @param {any} row */
+function planCheckResult(row) {
+  const c = row.planCheck;
+  if (!c) return null;
+  const overQty = c.remainingQuantity < -0.009;
+  const overValue = c.remainingPlannedValue < -0.5;
+  return overQty || overValue
+    ? { label: overQty ? "Exceeds planned quantity" : "Exceeds planned value", color: "error" }
+    : { label: "Within plan", color: "success" };
+}
+
+/**
+ * @param {any} row
+ * @param {any[]} history
+ */
+function requisitionPlanFields(row, history) {
+  const verified = stepSignOff(history, PLAN_STEP_RE);
+  const c = row.planCheck;
+  const unit = row.procurementPlanItem?.unitOfMeasure;
+  const result = planCheckResult(row);
+  return [
     { label: "Procurement plan", value: planLabel(row), wide: true },
     { label: "Plan item", value: row.procurementPlanItem?.title, wide: true },
+    ...(c
+      ? [
+          { label: "Planned", value: `${qtyLabel(c.plannedQuantity, unit)} · ${formatMoneyUGX(c.plannedAmount)}` },
+          {
+            label: "Other requisitions",
+            value: `${qtyLabel(c.otherConsumedQuantity, unit)} · ${formatMoneyUGX(c.otherConsumedValue)}`,
+          },
+          {
+            label: "This requisition",
+            value: `${qtyLabel(c.requisitionQuantity, unit)} · ${formatMoneyUGX(c.requisitionAmount)}`,
+          },
+          {
+            label: "Remaining on plan",
+            value: (
+              <span className="inline-flex flex-wrap items-center gap-1">
+                {`${qtyLabel(c.remainingQuantity, unit)} · ${formatMoneyUGX(c.remainingPlannedValue)}`}
+                {result ? <Chip size="small" color={/** @type {any} */ (result.color)} label={result.label} /> : null}
+              </span>
+            ),
+          },
+        ]
+      : []),
+    ...(verified ? [{ label: "Verified by", value: signOffLine(verified), wide: true }] : []),
+  ];
+}
+
+/**
+ * @param {any} row
+ * @param {any[]} history
+ */
+function requisitionFundingFields(row, history) {
+  const verified = stepSignOff(history, FUNDING_STEP_RE);
+  const b = row.budgetLine;
+  return [
     { label: "Budget line", value: budgetLineLabel(row), wide: true },
+    ...(b
+      ? [
+          { label: "Approved on line", value: formatMoneyUGX(b.approvedAmount) },
+          { label: b.selfCommitted ? "Committed by others" : "Committed", value: formatMoneyUGX(b.committedAmount) },
+        ]
+      : []),
+    { label: "Available on line", value: b ? formatMoneyUGX(b.availableBalance) : null },
     {
-      label: "Available on line",
-      value: row.budgetLine ? formatMoneyUGX(row.budgetLine.availableBalance) : null,
+      label: b?.selfCommitted ? "This requisition (committed)" : "This requisition",
+      value: formatMoneyUGX(row.estimatedTotalValue),
     },
-    { label: "Estimated total", value: formatMoneyUGX(row.estimatedTotalValue) },
-    { label: "Delivery location", value: row.deliveryLocation, wide: true },
-    { label: "Created on", value: row.createdAt ? formatPrintDate(row.createdAt) : null },
-    { label: "Submitted on", value: row.submittedAt ? formatPrintDate(row.submittedAt) : null },
-    { label: "Requested by", value: recordPersonLine(row.requester), wide: true },
-    { label: "Approved by", value: recordPersonLine(row.approvedBy, row.approvedAt), wide: true },
+    ...(b
+      ? [
+          {
+            label: "Balance after",
+            value: (
+              <span className="inline-flex flex-wrap items-center gap-1">
+                {formatMoneyUGX(b.projectedBalance)}
+                <Chip
+                  size="small"
+                  color={b.selfCommitted || b.sufficient ? "success" : "error"}
+                  label={b.selfCommitted ? "Funds committed" : b.sufficient ? "Funds available" : "Insufficient funds"}
+                />
+              </span>
+            ),
+            wide: true,
+          },
+        ]
+      : []),
+    ...(verified ? [{ label: "Verified by", value: signOffLine(verified), wide: true }] : []),
+  ];
+}
+
+/** @param {any} row */
+function requisitionNeedFields(row) {
+  return [
     { label: "Justification", value: row.justification, full: true },
     { label: "Need", value: row.needDescription, full: true },
+    ...(row.remarks ? [{ label: "Remarks", value: row.remarks, full: true }] : []),
   ];
-  if (row.remarks) fields.push({ label: "Remarks", value: row.remarks, full: true });
-  return fields;
 }
 
 /**
@@ -172,7 +341,22 @@ function requisitionPrintSections(row, history) {
         { label: "Delivery location", value: row.deliveryLocation },
         { label: "Procurement plan", value: planLabel(row), full: true },
         { label: "Plan item", value: row.procurementPlanItem?.title, full: true },
-        { label: "Created on", value: formatPrintDateTime(row.createdAt) },
+        ...(row.planCheck
+          ? [
+              {
+                label: "Planned",
+                value: `${qtyLabel(row.planCheck.plannedQuantity, row.procurementPlanItem?.unitOfMeasure)} · ${formatMoneyUGX(row.planCheck.plannedAmount)}`,
+              },
+              {
+                label: "Remaining on plan",
+                value: `${qtyLabel(row.planCheck.remainingQuantity, row.procurementPlanItem?.unitOfMeasure)} · ${formatMoneyUGX(row.planCheck.remainingPlannedValue)} (${planCheckResult(row)?.label})`,
+              },
+            ]
+          : []),
+        {
+          label: "Requested by",
+          value: [row.requester?.displayName, row.requester?.roleName].filter(Boolean).join(", ") || null,
+        },
         { label: "Submitted on", value: row.submittedAt ? formatPrintDateTime(row.submittedAt) : null },
         { label: "Justification", value: row.justification, full: true },
         { label: "Description of need", value: row.needDescription, full: true },
@@ -186,13 +370,40 @@ function requisitionPrintSections(row, history) {
         { label: "Programme", value: partI.programme },
         { label: "Sub-programme", value: partI.subProgramme },
         { label: "Funding item", value: partI.fundingItem || budgetLineLabel(row) },
+        ...(row.budgetLine
+          ? [
+              { label: "Approved on line", value: formatMoneyUGX(row.budgetLine.approvedAmount) },
+              {
+                label: row.budgetLine.selfCommitted ? "Committed by others" : "Committed",
+                value: formatMoneyUGX(row.budgetLine.committedAmount),
+              },
+            ]
+          : []),
+        {
+          label: "Available on line",
+          value: row.budgetLine ? formatMoneyUGX(row.budgetLine.availableBalance) : null,
+        },
         { label: "Estimated total cost", value: formatMoneyUGX(row.estimatedTotalValue) },
-        { label: "Market price", value: partI.marketPrice ? formatMoneyUGX(partI.marketPrice) : null },
+        ...(partI.marketPrice ? [{ label: "Market price", value: formatMoneyUGX(partI.marketPrice) }] : []),
         {
           label: "Balance remaining",
-          value: partI.balanceRemaining ? formatMoneyUGX(partI.balanceRemaining) : null,
+          value: partI.balanceRemaining
+            ? formatMoneyUGX(partI.balanceRemaining)
+            : row.budgetLine
+              ? formatMoneyUGX(row.budgetLine.projectedBalance)
+              : null,
         },
-        { label: "Multi-year contracting", value: partI.multiYearContracting },
+        {
+          label: "Funds",
+          value: row.budgetLine
+            ? row.budgetLine.selfCommitted
+              ? "Committed"
+              : row.budgetLine.sufficient
+                ? "Available"
+                : "Insufficient"
+            : null,
+        },
+        ...(partI.multiYearContracting ? [{ label: "Multi-year contracting", value: partI.multiYearContracting }] : []),
       ],
     },
     {
@@ -241,6 +452,19 @@ function requisitionPrintSections(row, history) {
       })),
       empty: "None.",
     });
+    if (row.form5PartII?.shortlistJustification) {
+      sections.push({
+        type: "fields",
+        title: "Shortlist justification",
+        fields: [
+          {
+            label: row.isEmergency ? "Fewer than two" : "Fewer than three",
+            value: row.form5PartII.shortlistJustification,
+            full: true,
+          },
+        ],
+      });
+    }
   }
   const partII = row.form5PartII && typeof row.form5PartII === "object" ? row.form5PartII : {};
   const committeeActions = latestCommitteeDecisions(history);
@@ -254,9 +478,19 @@ function requisitionPrintSections(row, history) {
           value: METHOD_LABELS[row.procurementMethod] || row.procurementMethod,
         },
         { label: "PDU officer", value: [partII.pduOfficerName, partII.pduOfficerPosition].filter(Boolean).join(", ") || null },
+        ...(row.isEmergency
+          ? [{ label: "Emergency reasons", value: partII.emergencyReasons || row.procurementPlan?.emergencyJustification, full: true }]
+          : []),
         { label: "Method justification", value: partII.methodJustification, full: true },
+        { label: "Bidding document preparers", value: partII.biddingDocumentPreparers, full: true },
+        { label: "Evaluation committee nominees", value: partII.evaluationCommitteeNominees, full: true },
+        ...(partII.biddingDocumentCost
+          ? [{ label: "Bidding document cost", value: formatMoneyUGX(partII.biddingDocumentCost) }]
+          : []),
+        { label: "Date submitted to Contracts Committee", value: partII.dateSubmittedToCc ? formatPrintDate(partII.dateSubmittedToCc) : null },
         { label: "Contracts Committee chairperson", value: partII.ccChairName },
         { label: "Contracts Committee secretary", value: partII.ccSecretaryName },
+        ...(partII.otherInformation ? [{ label: "Other information", value: partII.otherInformation, full: true }] : []),
       ],
     });
   }
@@ -315,6 +549,14 @@ function requisitionSignatures(row, history) {
       date: row.submittedAt || row.createdAt,
     },
   ];
+  for (const [label, re] of /** @type {[string, RegExp][]} */ ([
+    ["Endorsed by", ENDORSE_STEP_RE],
+    ["Plan availability verified by", PLAN_STEP_RE],
+    ["Funds availability verified by", FUNDING_STEP_RE],
+  ])) {
+    const h = stepSignOff(history, re);
+    if (h) out.push({ label, name: h.actorName, role: h.actorRoleName || h.stepRoleName, date: h.createdAt });
+  }
   for (const h of latestCommitteeDecisions(history)) {
     if (finalApproval && h.id === finalApproval.id) continue;
     out.push({
@@ -360,10 +602,16 @@ export function OrgRequisitionDetailPanel({ projectId, requisitionId }) {
   const [fieldErrors, setFieldErrors] = useState(/** @type {Record<string, string>} */ ({}));
   const providerWord = providerTerm(row?.category);
   const providerWordPlural = providerTerm(row?.category, { plural: true });
+  const minShortlist = minRfqProviders(row?.isEmergency);
+  const minShortlistWord = minShortlist === 2 ? "two" : "three";
+  const processes = useProcessActivation(projectId);
+  /** @param {string} m */
+  const methodProcessOff = (m) => processCodesForMethod(m).some((c) => !processes.isActive(c));
 
   const methodBlockReason = (() => {
     if (decision !== "SELECT_METHOD") return "";
     if (!procurementMethod) return "Choose a method.";
+    if (methodProcessOff(procurementMethod)) return "A process this method needs is inactive.";
     if (!methodAllowedForValue(procurementMethod, row?.estimatedTotalValue)) {
       return "This value is above the limit for the chosen method.";
     }
@@ -428,6 +676,8 @@ export function OrgRequisitionDetailPanel({ projectId, requisitionId }) {
       setFieldErrors({});
       setForm5PartII({
         methodJustification: partII.methodJustification || "",
+        emergencyReasons:
+          partII.emergencyReasons || data.requisition?.procurementPlan?.emergencyJustification || "",
         shortlistedProviders: partII.shortlistedProviders || "",
         shortlistJustification: partII.shortlistJustification || "",
         biddingDocumentPreparers:
@@ -456,6 +706,11 @@ export function OrgRequisitionDetailPanel({ projectId, requisitionId }) {
 
   async function submitDecision() {
     if (!pendingTask?.id) return;
+    if (["RETURN", "REJECT"].includes(decision) && !comment.trim()) {
+      setFieldErrors({ comment: "Enter a comment." });
+      showToast({ message: "Please fix the highlighted fields.", severity: "error" });
+      return;
+    }
     if (decision === "SELECT_METHOD" && !procurementMethod) {
       showToast({ message: "Choose a procurement method.", severity: "error" });
       return;
@@ -463,11 +718,15 @@ export function OrgRequisitionDetailPanel({ projectId, requisitionId }) {
     if (decision === "SELECT_METHOD") {
       /** @type {Record<string, string>} */
       const errs = {};
+      if (row?.isEmergency && !String(form5PartII.emergencyReasons || "").trim()) {
+        errs.emergencyReasons = "Enter the reasons for the emergency.";
+      }
       if (!String(form5PartII.methodJustification || "").trim()) {
         errs.methodJustification = "Enter the justification for the recommended method.";
       }
-      if (!String(form5PartII.pduOfficerName || "").trim()) {
-        errs.pduOfficerName = "Enter the PDU officer name.";
+      const cost = String(form5PartII.biddingDocumentCost || "").replace(/,/g, "").trim();
+      if (procurementMethod === "TENDER" && cost && !(Number(cost) >= 0)) {
+        errs.biddingDocumentCost = "Enter an amount.";
       }
       if (procurementMethod === "QUOTATION" && shortlistIds.length === 0) {
         errs.shortlistedProviderIds = `Shortlist at least one ${providerWord}.`;
@@ -481,10 +740,10 @@ export function OrgRequisitionDetailPanel({ projectId, requisitionId }) {
       if (
         procurementMethod === "QUOTATION" &&
         shortlistIds.length > 0 &&
-        shortlistIds.length < 3 &&
+        shortlistIds.length < minShortlist &&
         !String(form5PartII.shortlistJustification || "").trim()
       ) {
-        errs.shortlistJustification = `Explain why fewer than three ${providerWordPlural} are shortlisted.`;
+        errs.shortlistJustification = `Explain why fewer than ${minShortlistWord} ${providerWordPlural} are shortlisted.`;
       }
       setFieldErrors(errs);
       if (Object.keys(errs).length) {
@@ -586,6 +845,7 @@ export function OrgRequisitionDetailPanel({ projectId, requisitionId }) {
   }
 
   const actionKey = String(pendingTask?.actionKey || "").toUpperCase();
+  const decisionOptions = workflowDecisionOptions(actionKey);
 
   return (
     <div className="space-y-4">
@@ -670,7 +930,12 @@ export function OrgRequisitionDetailPanel({ projectId, requisitionId }) {
           </div>
         </div>
 
-        <RecordDetailsGrid fields={requisitionDetailFields(row)} />
+        <RecordDetailsGrid fields={requisitionDetailFields(row, history)} />
+
+        <Typography variant="subtitle2" sx={{ fontWeight: 600, mt: 2 }}>
+          Justification
+        </Typography>
+        <RecordDetailsGrid fields={requisitionNeedFields(row)} />
 
         <div className="mt-3">
           <OrgLineItemsTable
@@ -678,11 +943,22 @@ export function OrgRequisitionDetailPanel({ projectId, requisitionId }) {
             columns={REQUISITION_ITEM_COLUMNS}
             rows={row.items || []}
             getRowKey={(item, index) => item.id || item.lineNumber || index}
+            getRowNote={(item) => [item.description, item.specification].filter(Boolean).join(" — ")}
             emptyMessage="No line items."
             footerLabel="Estimated total"
             footerTotal={row.estimatedTotalValue ?? null}
           />
         </div>
+
+        <Typography variant="subtitle2" sx={{ fontWeight: 600, mt: 2 }}>
+          Plan check
+        </Typography>
+        <RecordDetailsGrid fields={requisitionPlanFields(row, history)} />
+
+        <Typography variant="subtitle2" sx={{ fontWeight: 600, mt: 2 }}>
+          Budget check
+        </Typography>
+        <RecordDetailsGrid fields={requisitionFundingFields(row, history)} />
 
         {pendingTask?.requiredRoleName !== "Contracts Committee" &&
         Array.isArray(row.form5PartII?.shortlist) &&
@@ -692,6 +968,7 @@ export function OrgRequisitionDetailPanel({ projectId, requisitionId }) {
               shortlist={row.form5PartII.shortlist}
               category={row.category}
               justification={row.form5PartII?.shortlistJustification}
+              minimum={minShortlist}
             />
           </div>
         ) : null}
@@ -705,9 +982,14 @@ export function OrgRequisitionDetailPanel({ projectId, requisitionId }) {
 
       {pendingTask ? (
         <Paper variant="outlined" sx={{ p: 2, ...adminOutlinedTableContainerSx }}>
-          <Typography variant="subtitle1" sx={{ fontWeight: 600, mb: 2 }}>
-            {pendingTask.title}
-          </Typography>
+          <div className="mb-2 flex flex-wrap items-center gap-2">
+            <Typography variant="subtitle1" sx={{ fontWeight: 600 }}>
+              {pendingTask.title}
+            </Typography>
+            {row.isEmergency ? (
+              <Chip size="small" color="warning" label="Emergency" title="From an emergency procurement plan" />
+            ) : null}
+          </div>
           {decision === "SELECT_METHOD" || pendingTask.requiredRoleName === "Contracts Committee" ? (
             <div className="mb-3">
               <OrgMethodEligibility
@@ -717,23 +999,54 @@ export function OrgRequisitionDetailPanel({ projectId, requisitionId }) {
               />
             </div>
           ) : null}
+          {pendingTask.requiredRoleName === "Contracts Committee" ? (
+            <div className="mb-3 grid gap-3">
+              <div>
+                <RecordDetailsGrid
+                  fields={methodRecommendationFields(row, {
+                    ccChairName: form5PartII.ccChairName,
+                    ccSecretaryName: form5PartII.ccSecretaryName,
+                  })}
+                />
+              </div>
+              <div>
+                {row.procurementMethod === "TENDER" ? (
+                  <Typography variant="body2" sx={adminMutedTextSx}>
+                    Open tender — advertised, no shortlist.
+                  </Typography>
+                ) : Array.isArray(row.form5PartII?.shortlist) &&
+                  row.form5PartII.shortlist.length ? (
+                  <OrgProviderShortlistSummary
+                    shortlist={row.form5PartII.shortlist}
+                    category={row.category}
+                    justification={row.form5PartII?.shortlistJustification}
+                    minimum={minShortlist}
+                  />
+                ) : (
+                  <Typography variant="body2" sx={adminMutedTextSx}>
+                    No {providerWord} shortlisted on Form 5 Part II.
+                  </Typography>
+                )}
+              </div>
+            </div>
+          ) : null}
           <div className="grid gap-3 sm:grid-cols-2">
-            <TextField
-              select
-              label="Decision"
-              value={decision}
-              onChange={(e) => setDecision(e.target.value)}
-              fullWidth
-              sx={themedTextFieldSx}
-            >
-              {workflowDecisionOptions(actionKey, {
-                includeFlagException: actionKey === "VERIFY",
-              }).map((opt) => (
-                <MenuItem key={opt.value} value={opt.value}>
-                  {workflowDecisionLabelForTask(opt, pendingTask.title)}
-                </MenuItem>
-              ))}
-            </TextField>
+            {decisionOptions.length > 1 ? (
+              <TextField
+                select
+                label="Decision"
+                value={decision}
+                onChange={(e) => setDecision(e.target.value)}
+                fullWidth
+                sx={themedTextFieldSx}
+              >
+                {decisionOptions.map((opt) => (
+                  <MenuItem key={opt.value} value={opt.value}>
+                    {workflowDecisionLabelForTask(opt, pendingTask.title)}
+                  </MenuItem>
+                ))}
+              </TextField>
+            ) : null}
 
             {actionKey === "SELECT_METHOD" || decision === "SELECT_METHOD" ? (
               <>
@@ -754,14 +1067,29 @@ export function OrgRequisitionDetailPanel({ projectId, requisitionId }) {
                     ["TENDER", "Tender"],
                   ].map(([value, label]) => {
                     const allowed = methodAllowedForValue(value, row.estimatedTotalValue);
+                    const inactive = methodProcessOff(value);
                     return (
-                      <MenuItem key={value} value={value} disabled={!allowed}>
+                      <MenuItem key={value} value={value} disabled={!allowed || inactive}>
                         {label}
-                        {allowed ? "" : " — above limit"}
+                        {inactive ? " — process inactive" : allowed ? "" : " — above limit"}
                       </MenuItem>
                     );
                   })}
                 </TextField>
+                {row.isEmergency ? (
+                  <TextField
+                    label="Emergency reasons"
+                    value={form5PartII.emergencyReasons || ""}
+                    onChange={(e) => setForm5PartII((f) => ({ ...f, emergencyReasons: e.target.value }))}
+                    fullWidth
+                    multiline
+                    minRows={2}
+                    className="sm:col-span-2"
+                    sx={themedTextFieldSx}
+                    error={Boolean(fieldErrors.emergencyReasons)}
+                    helperText={fieldErrors.emergencyReasons || "From the emergency plan; edit if needed"}
+                  />
+                ) : null}
                 <TextField
                   label="Method justification"
                   value={form5PartII.methodJustification || ""}
@@ -812,9 +1140,9 @@ export function OrgRequisitionDetailPanel({ projectId, requisitionId }) {
                       extraWarnings={
                         procurementMethod === "QUOTATION" &&
                         shortlistIds.length > 0 &&
-                        shortlistIds.length < 3
+                        shortlistIds.length < minShortlist
                           ? [
-                              `Fewer than three ${providerWordPlural} — add a justification.`,
+                              `Fewer than ${minShortlistWord} ${providerWordPlural} — add a justification.`,
                             ]
                           : []
                       }
@@ -830,9 +1158,9 @@ export function OrgRequisitionDetailPanel({ projectId, requisitionId }) {
                 </div>
                 {procurementMethod === "QUOTATION" &&
                 shortlistIds.length > 0 &&
-                shortlistIds.length < 3 ? (
+                shortlistIds.length < minShortlist ? (
                   <TextField
-                    label="Justification for fewer than three"
+                    label={`Justification for fewer than ${minShortlistWord}`}
                     value={form5PartII.shortlistJustification || ""}
                     onChange={(e) =>
                       setForm5PartII((f) => ({ ...f, shortlistJustification: e.target.value }))
@@ -847,25 +1175,29 @@ export function OrgRequisitionDetailPanel({ projectId, requisitionId }) {
                   />
                 ) : null}
                 <TextField
-                  label="PDU officer"
-                  error={Boolean(fieldErrors.pduOfficerName)}
-                  helperText={fieldErrors.pduOfficerName || " "}
-                  value={form5PartII.pduOfficerName || ""}
+                  label="Bidding document preparers"
+                  value={form5PartII.biddingDocumentPreparers || ""}
                   onChange={(e) =>
-                    setForm5PartII((f) => ({ ...f, pduOfficerName: e.target.value }))
+                    setForm5PartII((f) => ({ ...f, biddingDocumentPreparers: e.target.value }))
                   }
                   fullWidth
+                  className={procurementMethod === "TENDER" ? "" : "sm:col-span-2"}
                   sx={themedTextFieldSx}
                 />
-                <TextField
-                  label="PDU position"
-                  value={form5PartII.pduOfficerPosition || ""}
-                  onChange={(e) =>
-                    setForm5PartII((f) => ({ ...f, pduOfficerPosition: e.target.value }))
-                  }
-                  fullWidth
-                  sx={themedTextFieldSx}
-                />
+                {procurementMethod === "TENDER" ? (
+                  <TextField
+                    label="Bidding document cost (UGX)"
+                    value={form5PartII.biddingDocumentCost || ""}
+                    onChange={(e) => {
+                      setForm5PartII((f) => ({ ...f, biddingDocumentCost: e.target.value }));
+                      setFieldErrors((fe) => ({ ...fe, biddingDocumentCost: "" }));
+                    }}
+                    fullWidth
+                    sx={themedTextFieldSx}
+                    error={Boolean(fieldErrors.biddingDocumentCost)}
+                    helperText={fieldErrors.biddingDocumentCost || "Optional"}
+                  />
+                ) : null}
                 <TextField
                   label="Evaluation committee nominees"
                   value={form5PartII.evaluationCommitteeNominees || ""}
@@ -895,89 +1227,52 @@ export function OrgRequisitionDetailPanel({ projectId, requisitionId }) {
                   fullWidth
                   sx={themedTextFieldSx}
                 />
-              </>
-            ) : null}
-
-            {pendingTask.requiredRoleName === "Contracts Committee" ? (
-              <>
                 <TextField
-                  label="Recommended method"
-                  value={row.procurementMethod || "—"}
-                  InputProps={{ readOnly: true }}
-                  fullWidth
-                  sx={themedTextFieldSx}
-                />
-                <TextField
-                  label="Method justification"
-                  value={row.form5PartII?.methodJustification || "—"}
-                  InputProps={{ readOnly: true }}
+                  label="Other information (optional)"
+                  value={form5PartII.otherInformation || ""}
+                  onChange={(e) => setForm5PartII((f) => ({ ...f, otherInformation: e.target.value }))}
                   fullWidth
                   multiline
                   minRows={2}
                   className="sm:col-span-2"
                   sx={themedTextFieldSx}
                 />
-                <div className="sm:col-span-2">
-                  {row.procurementMethod === "TENDER" ? (
-                    <Typography variant="body2" sx={adminMutedTextSx}>
-                      Open tender — advertised, no shortlist.
-                    </Typography>
-                  ) : Array.isArray(row.form5PartII?.shortlist) &&
-                    row.form5PartII.shortlist.length ? (
-                    <OrgProviderShortlistSummary
-                      shortlist={row.form5PartII.shortlist}
-                      category={row.category}
-                      justification={row.form5PartII?.shortlistJustification}
-                    />
-                  ) : (
-                    <Typography variant="body2" sx={adminMutedTextSx}>
-                      No {providerWord} shortlisted on Form 5 Part II.
-                    </Typography>
-                  )}
-                </div>
-                <TextField
-                  label="CC Chair"
-                  value={form5PartII.ccChairName || ""}
-                  placeholder="Not assigned"
-                  slotProps={{ input: { readOnly: true }, inputLabel: { shrink: true } }}
-                  fullWidth
-                  sx={themedTextFieldSx}
-                />
-                <TextField
-                  label="CC Secretary"
-                  value={form5PartII.ccSecretaryName || ""}
-                  placeholder="Not assigned"
-                  slotProps={{ input: { readOnly: true }, inputLabel: { shrink: true } }}
-                  fullWidth
-                  sx={themedTextFieldSx}
-                />
               </>
             ) : null}
 
+            {decision === "SELECT_METHOD" ? null : (
             <TextField
-              label="Comment"
+              label={["RETURN", "REJECT"].includes(decision) ? "Comment" : "Comment (optional)"}
               value={comment}
-              onChange={(e) => setComment(e.target.value)}
+              onChange={(e) => {
+                setComment(e.target.value);
+                setFieldErrors((f) => ({ ...f, comment: "" }));
+              }}
               fullWidth
               multiline
               minRows={2}
               className="sm:col-span-2"
               sx={themedTextFieldSx}
+              error={Boolean(fieldErrors.comment)}
+              helperText={fieldErrors.comment || " "}
             />
+            )}
           </div>
           <div className="mt-3 flex flex-wrap items-center gap-2">
             <Tooltip title={methodBlockReason || ""}>
               <span>
                 <Button
                   variant="contained"
-                  color={decision === "REJECT" || decision === "FLAG_EXCEPTION" ? "error" : "primary"}
+                  color={decision === "REJECT" ? "error" : "primary"}
                   disabled={busy || Boolean(methodBlockReason)}
                   onClick={() => void submitDecision()}
                   startIcon={busy ? <CircularProgress size={16} color="inherit" /> : null}
                 >
                   {!busy && isPositiveWorkflowDecision(decision) && workflowStepActionLabel(pendingTask.title)
                     ? workflowStepActionLabel(pendingTask.title)
-                    : workflowDecisionButtonLabel(decision, { busy })}
+                    : !busy && decision === "RETURN"
+                      ? workflowDecisionLabelForTask({ value: "RETURN", label: workflowDecisionButtonLabel(decision) }, pendingTask.title)
+                      : workflowDecisionButtonLabel(decision, { busy })}
                 </Button>
               </span>
             </Tooltip>

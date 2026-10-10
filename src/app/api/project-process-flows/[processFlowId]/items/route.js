@@ -14,12 +14,14 @@ import {
 } from "@/lib/projects/org-process-flows";
 import { validateProjectOrgProcessFlowItemInput } from "@/lib/validation/project-org-process-flow-item";
 
+import { BUILT_IN_PROCESS_LOCKED_MESSAGE, isBuiltInProcessCode } from "@/lib/projects/process-catalogue";
+
 export const runtime = "nodejs";
 
 async function resolveProcessFlow(processFlowId) {
   return prisma.projectOrgProcessFlow.findUnique({
     where: { id: processFlowId },
-    select: { id: true, name: true },
+    select: { id: true, name: true, code: true },
   });
 }
 
@@ -83,6 +85,9 @@ export async function POST(request, context) {
 
   const processFlow = await resolveProcessFlow(processFlowId);
   if (!processFlow) return NextResponse.json({ error: "Not found." }, { status: 404 });
+  if (isBuiltInProcessCode(processFlow.code)) {
+    return NextResponse.json({ error: BUILT_IN_PROCESS_LOCKED_MESSAGE }, { status: 400 });
+  }
 
   let body;
   try {

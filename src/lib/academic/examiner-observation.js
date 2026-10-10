@@ -33,6 +33,7 @@ import {
  *   academicYearId?: string | null;
  *   db?: import("@prisma/client").PrismaClient;
  *   orgProjectId?: string | null;
+ *   lite?: boolean;
  * }} [opts]
  */
 export async function getExaminerStudentObservation(studentUserId, opts = {}) {
@@ -122,14 +123,9 @@ export async function getExaminerStudentObservation(studentUserId, opts = {}) {
 
   if (org?.id) {
     progress = await deriveOrganisationProcurementProgress(org.id, { db });
+    const lite = Boolean(opts.lite);
     const [audits, orgUsers, workflowActions, openTasks] = await Promise.all([
-      db.auditLog.findMany({
-        where: {
-          eventType: { startsWith: "PROJECT_ORG_" },
-        },
-        orderBy: { createdAt: "desc" },
-        take: 80,
-      }),
+      lite ? Promise.resolve([]) : loadOrgAudits(db, org.id, 80),
       db.projectOrgUser.findMany({
         where: { projectId: org.id },
         orderBy: { createdAt: "asc" },
@@ -141,7 +137,7 @@ export async function getExaminerStudentObservation(studentUserId, opts = {}) {
       db.projectOrgWorkflowAction.findMany({
         where: { projectId: org.id },
         orderBy: { createdAt: "desc" },
-        take: 80,
+        take: lite ? 0 : 80,
         include: {
           actor: {
             select: {
@@ -181,10 +177,6 @@ export async function getExaminerStudentObservation(studentUserId, opts = {}) {
       }),
     ]);
     recentActivity = audits
-      .filter((a) => {
-        const meta = /** @type {any} */ (a.meta);
-        return meta && meta.projectId === org.id;
-      })
       .slice(0, 15)
       .map((a) => ({
         id: a.id,
@@ -228,7 +220,7 @@ export async function getExaminerStudentObservation(studentUserId, opts = {}) {
       createdAt: t.createdAt,
     }));
 
-    work = await loadObservationWorkDossier(db, org.id);
+    work = lite ? null : await loadObservationWorkDossier(db, org.id);
   }
 
   const years = await db.academicYear.findMany({
@@ -530,7 +522,7 @@ export async function listExaminerObservationStudents(opts = {}) {
       currentStageKey: extra?.summary?.currentStageKey || null,
       currentStageLabel: extra?.summary?.currentStageLabel || (extra ? "Not started" : null),
       progressPercent: extra?.summary?.percent ?? null,
-      openTask: extra?.openTask || null,
+      counts: extra?.counts || null,
     };
   });
 
@@ -564,10 +556,13 @@ function serializeObservationRow(user, enrollment) {
     email: user.email,
     displayName: formatUserDisplayName(user),
     studentNumber: user.studentProfile?.studentNumber || null,
+    registrationNumber: user.studentProfile?.registrationNumber || null,
     programmeShortName: user.studentProfile?.programme?.shortName || null,
     programmeName: user.studentProfile?.programme?.name || null,
+    yearOfStudy: user.studentProfile?.yearOfStudy || null,
     campus: user.studentProfile?.campus || null,
     campusLabel: campusLabel(user.studentProfile?.campus) || null,
+    lastLoginAt: user.lastLoginAt || null,
     enrollmentStatus: enrollment?.status || null,
     participationType,
     demoBadge: badge,
@@ -575,6 +570,34 @@ function serializeObservationRow(user, enrollment) {
     academicYearLabel: enrollment?.academicYear?.label || user.studentProfile?.academicYearLabel || null,
     observePath: `/students/${user.id}/observe`,
   };
+}
+
+/**
+ * Latest organisation audit events, filtered by organisation in the query.
+ * @param {import("@prisma/client").PrismaClient} db
+ * @param {string} projectId
+ * @param {number} take
+ */
+async function loadOrgAudits(db, projectId, take) {
+  try {
+    return await db.auditLog.findMany({
+      where: {
+        eventType: { startsWith: "PROJECT_ORG_" },
+        meta: { path: "$.projectId", equals: projectId },
+      },
+      orderBy: { createdAt: "desc" },
+      take,
+    });
+  } catch {
+    const rows = await db.auditLog.findMany({
+      where: { eventType: { startsWith: "PROJECT_ORG_" } },
+      orderBy: { createdAt: "desc" },
+      take: 5000,
+    });
+    return rows
+      .filter((a) => a.meta && typeof a.meta === "object" && /** @type {any} */ (a.meta).projectId === projectId)
+      .slice(0, take);
+  }
 }
 
 /** @param {string} eventType */

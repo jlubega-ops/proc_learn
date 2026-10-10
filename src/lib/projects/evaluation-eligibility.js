@@ -132,7 +132,11 @@ export async function getEvaluationContext(prisma, opts) {
   const pqRequired = postQualificationRequired(procurement);
   const pq = pqRequired
     ? await prisma.projectOrgPostQualificationReport.findFirst({
-        where: { projectId: opts.projectId, procurementId: procurement.id },
+        where: {
+          projectId: opts.projectId,
+          procurementId: procurement.id,
+          status: { not: OrgPostQualificationStatus.REJECTED },
+        },
         orderBy: { createdAt: "desc" },
       })
     : null;

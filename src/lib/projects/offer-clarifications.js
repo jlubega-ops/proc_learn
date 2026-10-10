@@ -2,7 +2,6 @@ import { OrgOfferStatus, OrgSolicitationStatus } from "@prisma/client";
 import { writeAuditLog, AuditEvent } from "@/lib/audit-log";
 import { notifyProvider } from "@/lib/projects/provider-notifications";
 import { offersLockedByDecision } from "@/lib/projects/solicitations";
-import { formatMoneyUGX } from "@/lib/money";
 
 const ISSUED_STATUSES = [
   OrgSolicitationStatus.ISSUED,
@@ -54,22 +53,7 @@ export async function procurementClarificationsOpen(prisma, procurementId) {
 }
 
 /**
- * @param {any} offer with `supplier`
- * @param {string | null} deliveryLocation
- */
-function autoReplyFor(offer, deliveryLocation) {
-  const parts = [
-    `Our total of ${formatMoneyUGX(offer.amount)} covers every item as specified, inclusive of all taxes`,
-    deliveryLocation ? ` and delivery to ${deliveryLocation}.` : ".",
-  ];
-  if (offer.deliveryDays) parts.push(` We will deliver within ${offer.deliveryDays} days of receiving the order.`);
-  parts.push(" We confirm our quotation stands as submitted.");
-  return parts.join("");
-}
-
-/**
- * Officer asks a provider to clarify its quotation / bid. Auto-response providers
- * (generated, never logged in) answer straight away.
+ * Officer asks a provider to clarify its quotation / bid; the provider answers in the portal.
  * @param {import("@prisma/client").PrismaClient} prisma
  * @param {{ projectId: string; procurementId: string; offerId: unknown; question: unknown; actorOrgUserId: string | null; actorRoleName: string }} opts
  */
@@ -87,8 +71,7 @@ export async function askOfferClarification(prisma, opts) {
         where: { id: offerId, projectId: opts.projectId, procurementId: opts.procurementId },
         include: {
           solicitation: true,
-          supplier: { select: { id: true, name: true, isGenerated: true, portalLastLoginAt: true } },
-          procurement: { select: { requisition: { select: { deliveryLocation: true } } } },
+          supplier: { select: { id: true, name: true } },
         },
       })
     : null;
@@ -105,8 +88,6 @@ export async function askOfferClarification(prisma, opts) {
         select: { firstName: true, lastName: true },
       })
     : null;
-  const autoReply = offer.supplier?.isGenerated && !offer.supplier.portalLastLoginAt;
-  const now = new Date();
   const created = await prisma.projectOrgOfferClarification.create({
     data: {
       projectId: opts.projectId,
@@ -116,13 +97,6 @@ export async function askOfferClarification(prisma, opts) {
       question,
       askedByName: asker ? `${asker.firstName} ${asker.lastName}`.trim() : null,
       askedByRole: opts.actorRoleName || null,
-      ...(autoReply
-        ? {
-            response: autoReplyFor(offer, offer.procurement?.requisition?.deliveryLocation || null),
-            responseSource: "AUTO",
-            respondedAt: new Date(now.getTime() + 60 * 1000),
-          }
-        : {}),
     },
   });
 
@@ -138,23 +112,15 @@ export async function askOfferClarification(prisma, opts) {
     actorUserId: null,
     meta: { ...baseMeta, comment: question, actorOrgUserId: opts.actorOrgUserId, actorRoleName: opts.actorRoleName },
   });
-  if (autoReply) {
-    await writeAuditLog({
-      eventType: AuditEvent.PROJECT_ORG_OFFER_CLARIFICATION_ANSWERED,
-      actorUserId: null,
-      meta: { ...baseMeta, source: "AUTO", comment: created.response },
-    });
-  } else {
-    await notifyProvider(prisma, {
-      projectId: opts.projectId,
-      providerId: offer.supplierId,
-      title: "Clarification requested",
-      body: `The procuring entity asked about your offer for "${offer.solicitation?.title || "the request"}": ${question} You can answer and revise your offer until evaluation starts.`,
-      linkUrl: offer.solicitationId ? `/provider-portal/opportunities/${offer.solicitationId}` : null,
-      relatedEntityType: "offer",
-      relatedEntityId: offer.id,
-    });
-  }
+  await notifyProvider(prisma, {
+    projectId: opts.projectId,
+    providerId: offer.supplierId,
+    title: "Clarification requested",
+    body: `The procuring entity asked about your offer for "${offer.solicitation?.title || "the request"}": ${question} You can answer and revise your offer until evaluation starts.`,
+    linkUrl: offer.solicitationId ? `/provider-portal/opportunities/${offer.solicitationId}` : null,
+    relatedEntityType: "offer",
+    relatedEntityId: offer.id,
+  });
   return { ok: true, clarification: serializeClarification(created) };
 }
 

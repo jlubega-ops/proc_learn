@@ -153,12 +153,13 @@ function providerProgress(s) {
 
   const orderAccepted = s.pi ? s.pi.status === "ACCEPTED" : ["ACCEPTED", "ACTIVE"].includes(s.order?.status);
   const orderWord = s.order && "contractNumber" in s.order ? "contract" : "LPO";
+  const orderLabel = !s.order ? "Order" : orderWord === "contract" ? "Contract" : "LPO";
   const award = s.award || null;
   const steps = [
     { key: "selected", label: award ? "Awarded" : "Selected", done: true },
     ...(award ? [{ key: "award", label: "Award accepted", done: award.status === "ACCEPTED" }] : []),
-    { key: "order", label: s.pi ? "Purchase instruction" : "Order issued", done: Boolean(s.pi || s.order) },
-    { key: "accepted", label: "Order accepted", done: orderAccepted },
+    { key: "order", label: s.pi ? "Purchase instruction" : `${orderLabel} issued`, done: Boolean(s.pi || s.order) },
+    { key: "accepted", label: `${s.pi ? "Order" : orderLabel} accepted`, done: orderAccepted },
     { key: "dispatched", label: "Dispatched", done: s.notes.length > 0 || s.deliveries.length > 0 },
     { key: "received", label: "Received", done: s.deliveries.length > 0 },
     { key: "inspected", label: "Inspected", done: accepted || rejected },

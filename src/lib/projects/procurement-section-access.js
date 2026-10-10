@@ -3,6 +3,7 @@ import {
   committeeMayPerformLifecycleAction,
 } from "@/lib/projects/procurement-lifecycle-roles";
 import { PROJECT_ORG_ENTRY_ROLE_NAME } from "@/lib/project-org-role";
+import { COMMITTEE_TYPE_WORKFLOW_ROLES } from "@/lib/projects/committee-context";
 
 /** Lifecycle actions that each procurement-page section exposes. */
 export const PROCUREMENT_SECTION_ACTIONS = {
@@ -62,7 +63,7 @@ export function procurementSectionAccess(viewer) {
         act,
         reason: act
           ? ""
-          : "This committee can view this stage; switch back to your organisation role to act here.",
+          : `${COMMITTEE_TYPE_WORKFLOW_ROLES[committeeType]?.[0] || "This committee"} does not act on this stage.`,
       };
       continue;
     }

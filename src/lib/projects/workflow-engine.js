@@ -617,7 +617,8 @@ export function computeBudgetAvailability(line, requested) {
  *   committeeId?: string | null;
  *   committeeRole?: string | null;
  *   metadata?: object | null;
- * }} opts
+ *   returnToStep?: RegExp | null;
+ * }} opts `returnToStep` sends a RETURN back to the latest earlier step whose description matches.
  */
 export async function completeWorkflowTask(prisma, opts) {
   const task = await prisma.projectOrgWorkflowTask.findUnique({
@@ -846,8 +847,21 @@ export async function completeWorkflowTask(prisma, opts) {
   let newBudgetStatus = previousStatus;
   let newProcurementStatus = previousStatus;
 
+  // Return goes back one step (record status unchanged) after the Accounting Officer's
+  // approval of a requisition, and on every procurement step (documents, reports, award).
+  const procurementOnly = Boolean(instance.procurement) && !instance.requisition;
+  const returnToPreviousStep =
+    decision === OrgWorkflowDecision.RETURN &&
+    ((Boolean(instance.requisition) && previousStatus === OrgRequisitionStatus.APPROVED) || procurementOnly);
+  const rejectAfterApproval =
+    Boolean(instance.requisition) &&
+    decision === OrgWorkflowDecision.REJECT &&
+    previousStatus === OrgRequisitionStatus.APPROVED;
+
   if (instance.requisition) {
-    if (decision === OrgWorkflowDecision.RETURN) {
+    if (returnToPreviousStep) {
+      newReqStatus = OrgRequisitionStatus.APPROVED;
+    } else if (decision === OrgWorkflowDecision.RETURN) {
       newReqStatus = OrgRequisitionStatus.RETURNED;
     } else if (decision === OrgWorkflowDecision.REJECT) {
       newReqStatus = OrgRequisitionStatus.REJECTED;
@@ -904,16 +918,8 @@ export async function completeWorkflowTask(prisma, opts) {
     }
   }
 
-  if (instance.procurement && !instance.requisition) {
-    // Procurement-only instances (Micro/Quotation/Tender) have no RETURNED
-    // status of their own — a return/reject on these steps cancels this
-    // procurement attempt rather than looping back for correction, since the
-    // requisition that spawned it is not re-editable from here.
-    if (decision === OrgWorkflowDecision.RETURN) {
-      newProcurementStatus = OrgProcurementStatus.CANCELLED;
-    } else if (decision === OrgWorkflowDecision.REJECT) {
-      newProcurementStatus = OrgProcurementStatus.REJECTED;
-    }
+  if (procurementOnly && decision === OrgWorkflowDecision.REJECT) {
+    newProcurementStatus = OrgProcurementStatus.REJECTED;
   }
 
   const newEntityStatus = instance.budget
@@ -1004,6 +1010,23 @@ export async function completeWorkflowTask(prisma, opts) {
             });
           }
         }
+
+        if (rejectAfterApproval && instance.requisition.budgetLineId) {
+          const line = await tx.projectOrgBudgetLine.findUnique({
+            where: { id: instance.requisition.budgetLineId },
+            select: { id: true, committedAmount: true },
+          });
+          if (line) {
+            const released = Math.max(
+              0,
+              Number(line.committedAmount || 0) - Number(instance.requisition.estimatedTotalValue || 0),
+            );
+            await tx.projectOrgBudgetLine.update({
+              where: { id: line.id },
+              data: { committedAmount: new Prisma.Decimal(released.toFixed(2)) },
+            });
+          }
+        }
       }
 
       if (instance.procurementPlan) {
@@ -1068,6 +1091,48 @@ export async function completeWorkflowTask(prisma, opts) {
           },
         },
       });
+
+      const earlierSteps = instance.processFlow.items.filter((i) => i.stepNumber < task.stepNumber);
+      const targetStep =
+        opts.returnToStep instanceof RegExp
+          ? earlierSteps.filter((i) => opts.returnToStep.test(String(i.taskDescription || ""))).pop() || null
+          : null;
+      const previousStep = returnToPreviousStep ? targetStep || earlierSteps.pop() || null : null;
+
+      if (returnToPreviousStep && !previousStep && procurementOnly) {
+        const err = new Error("This is the first step; there is nothing to return to.");
+        // @ts-ignore
+        err.code = "NO_PREVIOUS_STEP";
+        throw err;
+      }
+
+      if (previousStep) {
+        await tx.projectOrgWorkflowInstance.update({
+          where: { id: instance.id },
+          data: { currentStepNumber: previousStep.stepNumber },
+        });
+        const reopened = await createTasksForStep(tx, {
+          projectId: task.projectId,
+          instanceId: instance.id,
+          step: previousStep,
+          departmentId: instance.requisition?.departmentId || instance.procurement?.departmentId || null,
+          entityTitle:
+            instance.requisition?.title ||
+            (instance.procurement
+              ? `${instance.procurement.procurementNumber}: ${instance.procurement.title}`
+              : null),
+        });
+        if ((reopened.eligibleCount || 0) === 0) {
+          const missingRole = reopened.roleName || previousStep.projectOrgRole?.name || "previous step";
+          const err = new Error(
+            `No organisation users with role “${missingRole}” are available to receive the returned task.`,
+          );
+          // @ts-ignore
+          err.code = "NO_ELIGIBLE_ASSIGNEES";
+          throw err;
+        }
+        return { advanced: false, completed: false, nextStep: previousStep, tasks: reopened.tasks || [] };
+      }
 
       if (
         decision === OrgWorkflowDecision.RETURN ||
@@ -1315,6 +1380,9 @@ export async function completeWorkflowTask(prisma, opts) {
         code: "INSUFFICIENT_FUNDS",
         status: 400,
       };
+    }
+    if (e?.code === "NO_PREVIOUS_STEP") {
+      return { ok: false, error: e.message, code: "NO_PREVIOUS_STEP", status: 400 };
     }
     throw e;
   }

@@ -15,8 +15,6 @@ import {
   offersLockedByDecision,
 } from "@/lib/projects/solicitations";
 import { notifyProvider } from "@/lib/projects/provider-notifications";
-import { getActiveOrderValue } from "@/lib/projects/contracts-lpo";
-import { acceptedShareOfOrder, createInvoice, INVOICE_SOURCE } from "@/lib/projects/invoices";
 
 export const OFFER_SOURCE = Object.freeze({ OFFICER: "OFFICER", PORTAL: "PORTAL", AUTO: "AUTO" });
 
@@ -367,58 +365,4 @@ export async function generateQuotes(prisma, opts) {
   }
 
   return { ok: true, ...results };
-}
-
-/**
- * After a delivery passes inspection, a simulated (generated) provider sends its
- * invoice automatically. INVOICE_MISMATCH providers deliberately send an amount
- * that does not match the order so the verifier has something to catch.
- *
- * @param {import("@prisma/client").PrismaClient} prisma
- * @param {{ projectId: string; procurementId: string }} opts
- */
-export async function autoInvoiceFromGeneratedProvider(prisma, opts) {
-  const order = await getActiveOrderValue(prisma, opts.projectId, opts.procurementId);
-  if (!order?.supplierId) return { ok: true, skipped: "NO_ORDER" };
-
-  const provider = await prisma.projectOrgProvider.findFirst({
-    where: { id: order.supplierId, projectId: opts.projectId },
-    select: { id: true, name: true, isGenerated: true, behaviour: true, conductIssues: true },
-  });
-  if (!provider?.isGenerated) return { ok: true, skipped: "NOT_SIMULATED" };
-
-  const open = await prisma.projectOrgInvoice.count({
-    where: {
-      projectId: opts.projectId,
-      procurementId: opts.procurementId,
-      status: { in: ["RECEIVED", "CERTIFIED", "VERIFIED", "APPROVED_FOR_PAYMENT"] },
-    },
-  });
-  if (open > 0) return { ok: true, skipped: "ALREADY_INVOICED" };
-
-  const due = await acceptedShareOfOrder(prisma, {
-    projectId: opts.projectId,
-    procurementId: opts.procurementId,
-    orderValue: order.value,
-  });
-  const mismatch = providerConductIssues(provider).has(PROVIDER_BEHAVIOUR.INVOICE_MISMATCH);
-  const amount = mismatch ? Math.round(due * randBetween(0.9, 0.97)) : Math.round(due * 100) / 100;
-
-  const reference = `${provider.name
-    .replace(/[^A-Za-z]/g, "")
-    .slice(0, 4)
-    .toUpperCase() || "PROV"}-INV-${Math.floor(randBetween(1000, 9999))}`;
-
-  return createInvoice(prisma, {
-    projectId: opts.projectId,
-    procurementId: opts.procurementId,
-    actorOrgUserId: null,
-    actorRoleName: "Provider (auto-response)",
-    amount,
-    source: INVOICE_SOURCE.AUTO,
-    supplierReference: reference,
-    notes: mismatch
-      ? `Invoice issued against ${order.number}. Check the total against the order before verifying.`
-      : `Invoice issued against ${order.number}.`,
-  });
 }

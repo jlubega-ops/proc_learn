@@ -10,7 +10,18 @@ import {
 } from "@/lib/projects/org-process-flows";
 import { validateProjectOrgProcessFlowItemPatch } from "@/lib/validation/project-org-process-flow-item";
 
+import { BUILT_IN_PROCESS_LOCKED_MESSAGE, isBuiltInProcessCode } from "@/lib/projects/process-catalogue";
+
 export const runtime = "nodejs";
+
+/** @param {string} processFlowId */
+async function isBuiltInFlow(processFlowId) {
+  const flow = await prisma.projectOrgProcessFlow.findUnique({
+    where: { id: processFlowId },
+    select: { code: true },
+  });
+  return isBuiltInProcessCode(flow?.code);
+}
 
 async function resolveItem(processFlowId, itemId) {
   return prisma.projectOrgProcessFlowItem.findFirst({
@@ -34,6 +45,9 @@ export async function PATCH(request, context) {
 
   const existing = await resolveItem(processFlowId, itemId);
   if (!existing) return NextResponse.json({ error: "Not found." }, { status: 404 });
+  if (await isBuiltInFlow(processFlowId)) {
+    return NextResponse.json({ error: BUILT_IN_PROCESS_LOCKED_MESSAGE }, { status: 400 });
+  }
 
   let body;
   try {
@@ -114,6 +128,9 @@ export async function DELETE(_request, context) {
 
   const existing = await resolveItem(processFlowId, itemId);
   if (!existing) return NextResponse.json({ error: "Not found." }, { status: 404 });
+  if (await isBuiltInFlow(processFlowId)) {
+    return NextResponse.json({ error: BUILT_IN_PROCESS_LOCKED_MESSAGE }, { status: 400 });
+  }
 
   await prisma.projectOrgProcessFlowItem.delete({ where: { id: itemId } });
 

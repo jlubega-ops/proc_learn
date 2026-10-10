@@ -9,6 +9,14 @@ export const METHOD_VALUE_CEILINGS_UGX = {
 /** Providers an RFQ must go to; fewer only with a recorded justification. */
 export const MIN_RFQ_PROVIDERS = 3;
 
+/** Emergency situations allow a shortlist of at least two (Rules and Methods Regulations 2023, reg. 7(6)). */
+export const MIN_RFQ_PROVIDERS_EMERGENCY = 2;
+
+/** @param {boolean | null | undefined} isEmergency */
+export function minRfqProviders(isEmergency) {
+  return isEmergency ? MIN_RFQ_PROVIDERS_EMERGENCY : MIN_RFQ_PROVIDERS;
+}
+
 /**
  * @param {string | null | undefined} method
  * @param {unknown} estimatedValue

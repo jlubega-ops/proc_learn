@@ -28,6 +28,9 @@ import { WorkflowHistoryPanel } from "@/components/projects/workflow-history-pan
 import { useToast } from "@/components/providers/toast-provider";
 import { decisionConfirmOptions, useConfirm } from "@/components/providers/confirm-provider";
 import { notifyOrgTasksChanged } from "@/hooks/use-pending-task-counts";
+import { useProcessActivation } from "@/hooks/use-process-activation";
+import { ProcessGateTooltip } from "@/components/projects/process-gate";
+import { PROCESS_FLOW_CODES } from "@/lib/projects/process-catalogue";
 import {
   adminCenteredLoadingBoxSx,
   adminDialogPaperSx,
@@ -195,6 +198,8 @@ export function OrgBudgetDetailPanel({ projectId, budgetId, listHref, readOnly =
   const [organisation, setOrganisation] = useState({ name: "", code: null });
   const [printedBy, setPrintedBy] = useState(/** @type {any} */ (null));
   const [canSubmit, setCanSubmit] = useState(false);
+  const processes = useProcessActivation(projectId);
+  const budgetingOff = !processes.isActive(PROCESS_FLOW_CODES.BUDGETING);
   const [canEditDraft, setCanEditDraft] = useState(false);
   const [canDeleteDraft, setCanDeleteDraft] = useState(false);
   const [deleteOpen, setDeleteOpen] = useState(false);
@@ -470,14 +475,19 @@ export function OrgBudgetDetailPanel({ projectId, budgetId, listHref, readOnly =
             </Button>
           ) : null}
           {canSubmit && (budget.status === "DRAFT" || budget.status === "RETURNED") ? (
-            <Button
-              variant="contained"
-              startIcon={busy ? <CircularProgress size={16} color="inherit" /> : <SendRounded />}
-              disabled={busy}
-              onClick={() => void submitBudget()}
+            <ProcessGateTooltip
+              inactive={budgetingOff}
+              title={processes.inactiveTitle(PROCESS_FLOW_CODES.BUDGETING)}
             >
-              Submit for review
-            </Button>
+              <Button
+                variant="contained"
+                startIcon={busy ? <CircularProgress size={16} color="inherit" /> : <SendRounded />}
+                disabled={busy || budgetingOff}
+                onClick={() => void submitBudget()}
+              >
+                Submit for review
+              </Button>
+            </ProcessGateTooltip>
           ) : null}
           {allowClose && budget.status === "APPROVED" ? (
             <Button

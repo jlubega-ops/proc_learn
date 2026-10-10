@@ -8,7 +8,8 @@ import { writeAuditLog, AuditEvent } from "@/lib/audit-log";
 import {
   METHOD_PROCESS_BY_ENUM,
 } from "@/lib/projects/process-catalogue";
-import { startWorkflowFromTrigger, findActiveProcessForTrigger } from "@/lib/projects/workflow-engine";
+import { startWorkflowFromTrigger } from "@/lib/projects/workflow-engine";
+import { assertMethodProcessesActive } from "@/lib/projects/process-activation";
 import { financialYearRefToken } from "@/lib/projects/org-reference";
 import { serializePurchaseInstruction } from "@/lib/projects/purchase-instructions";
 import { serializeSolicitation, serializeOffer } from "@/lib/projects/solicitations";
@@ -74,6 +75,7 @@ export const procurementInclude = {
       estimatedUnitPrice: true,
       estimatedTotal: true,
       unitOfMeasure: true,
+      procurementPlan: { select: { isEmergency: true, emergencyJustification: true } },
     },
   },
   budgetLine: {
@@ -267,6 +269,7 @@ export function serializeProcurement(row, opts = {}) {
           shortlist: Array.isArray(row.requisition.form5PartII?.shortlist)
             ? row.requisition.form5PartII.shortlist
             : [],
+          biddingDocumentCost: row.requisition.form5PartII?.biddingDocumentCost || null,
           estimatedTotalValue:
             row.requisition.estimatedTotalValue?.toString?.() ??
             String(row.requisition.estimatedTotalValue ?? ""),
@@ -286,6 +289,8 @@ export function serializeProcurement(row, opts = {}) {
             : [],
         }
       : null,
+    isEmergency: Boolean(row.procurementPlanItem?.procurementPlan?.isEmergency),
+    emergencyJustification: row.procurementPlanItem?.procurementPlan?.emergencyJustification || null,
     procurementPlanItem: row.procurementPlanItem
       ? {
           id: row.procurementPlanItem.id,
@@ -537,19 +542,8 @@ export async function createProcurementFromApprovedRequisition(prisma, opts) {
     };
   }
 
-  const adoption = await findActiveProcessForTrigger(
-    prisma,
-    opts.projectId,
-    methodMeta.triggerKey,
-  );
-  if (!adoption) {
-    return {
-      ok: false,
-      error: `The ${methodMeta.label} Process is currently inactive for this organisation. An Organization Administrator must activate it before this procurement can proceed.`,
-      status: 400,
-      code: "WORKFLOW_INACTIVE",
-    };
-  }
+  const methodBlocked = await assertMethodProcessesActive(prisma, opts.projectId, method);
+  if (methodBlocked) return methodBlocked;
 
   const procurementNumber = await nextProcurementNumber(
     prisma,

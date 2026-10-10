@@ -146,9 +146,10 @@ function Pager({ total, page, pageSize, setPage, setPageSize }) {
 /* ------------------------------------------------------------------ */
 
 /**
- * @param {{ opportunity: any; onClose: () => void; onSaved: () => void }} p
+ * Inline quotation / bid form on the opportunity page (submit, or edit while allowed).
+ * @param {{ opportunity: any; onCancel?: (() => void) | null; onSaved: () => void }} p
  */
-export function OfferDialog({ opportunity, onClose, onSaved }) {
+export function OfferForm({ opportunity, onCancel = null, onSaved }) {
   const { showToast } = useToast();
   const confirm = useConfirm();
   const existing = opportunity.myOffer && opportunity.canEdit ? opportunity.myOffer : null;
@@ -233,109 +234,110 @@ export function OfferDialog({ opportunity, onClose, onSaved }) {
   }
 
   return (
-    <Dialog open onClose={busy ? undefined : onClose} maxWidth="sm" fullWidth>
-      <form noValidate onSubmit={submit}>
-        <DialogTitle>{existing ? `Edit ${word}` : `Submit ${word}`}</DialogTitle>
-        <DialogContent dividers className="space-y-3">
-          <p className="text-sm text-zinc-700">
-            <span className="font-semibold">{opportunity.title}</span> · {opportunity.procurement?.number}
-            {opportunity.closingDate ? ` · closes ${formatPortalDateTime(opportunity.closingDate)}` : ""}
+    <form noValidate onSubmit={submit} className="space-y-3" aria-busy={busy}>
+      {byLine ? (
+        <div className="space-y-2">
+          {items.map((i) => {
+            const key = String(i.lineNumber);
+            const err = errors[`line_${i.lineNumber}`];
+            const unit = Number(parseMoneyInput(unitPrices[key] || ""));
+            const qty = Number(i.quantity);
+            return (
+              <div
+                key={key}
+                className="grid grid-cols-1 items-start gap-2 rounded-lg border border-zinc-200 p-2 sm:grid-cols-[1fr_12rem]"
+              >
+                <div className="min-w-0 text-sm">
+                  <p className="font-semibold wrap-break-word">
+                    {i.lineNumber}. {i.itemName}
+                  </p>
+                  <p className="text-xs text-zinc-600">
+                    {qty} {i.unitOfMeasure || "units"}
+                    {Number.isFinite(unit) && unit > 0 ? ` · ${formatMoneyUGX(unit * qty)}` : ""}
+                  </p>
+                </div>
+                <TextField
+                  label="Unit price (UGX)"
+                  value={unitPrices[key] || ""}
+                  onChange={(e) => {
+                    const v = e.target.value;
+                    setUnitPrices((p) => ({ ...p, [key]: v }));
+                    setErrors((p) => ({ ...p, [`line_${i.lineNumber}`]: "" }));
+                  }}
+                  error={Boolean(err)}
+                  helperText={err || " "}
+                  inputMode="decimal"
+                  fullWidth
+                />
+              </div>
+            );
+          })}
+          <p className="text-right text-sm">
+            Total <span className="font-bold">{formatMoneyUGX(lineTotal)}</span>
           </p>
-          {byLine ? (
-            <div className="space-y-2">
-              {items.map((i) => {
-                const key = String(i.lineNumber);
-                const err = errors[`line_${i.lineNumber}`];
-                const unit = Number(parseMoneyInput(unitPrices[key] || ""));
-                const qty = Number(i.quantity);
-                return (
-                  <div
-                    key={key}
-                    className="grid grid-cols-1 items-start gap-2 rounded-lg border border-zinc-200 p-2 sm:grid-cols-[1fr_10rem]"
-                  >
-                    <div className="min-w-0 text-sm">
-                      <p className="font-semibold wrap-break-word">
-                        {i.lineNumber}. {i.itemName}
-                      </p>
-                      <p className="text-xs text-zinc-600">
-                        {qty} {i.unitOfMeasure || "units"}
-                        {Number.isFinite(unit) && unit > 0 ? ` · ${formatMoneyUGX(unit * qty)}` : ""}
-                      </p>
-                    </div>
-                    <TextField
-                      label="Unit price (UGX)"
-                      value={unitPrices[key] || ""}
-                      onChange={(e) => {
-                        const v = e.target.value;
-                        setUnitPrices((p) => ({ ...p, [key]: v }));
-                        setErrors((p) => ({ ...p, [`line_${i.lineNumber}`]: "" }));
-                      }}
-                      error={Boolean(err)}
-                      helperText={err || " "}
-                      inputMode="decimal"
-                      fullWidth
-                    />
-                  </div>
-                );
-              })}
-              <p className="text-right text-sm">
-                Total <span className="font-bold">{formatMoneyUGX(lineTotal)}</span>
-              </p>
-            </div>
-          ) : (
-            <TextField
-              label="Total price (UGX)"
-              value={amount}
-              onChange={(e) => {
-                setAmount(e.target.value);
-                setErrors((p) => ({ ...p, amount: "" }));
-              }}
-              error={Boolean(errors.amount)}
-              helperText={errors.amount || "Inclusive of taxes"}
-              inputMode="decimal"
-              fullWidth
-              autoFocus
-            />
-          )}
-          <TextField
-            label="Delivery period in days (optional)"
-            value={deliveryDays}
-            onChange={(e) => {
-              setDeliveryDays(e.target.value);
-              setErrors((p) => ({ ...p, deliveryDays: "" }));
-            }}
-            error={Boolean(errors.deliveryDays)}
-            helperText={errors.deliveryDays || "How many days after the order you will deliver"}
-            inputMode="numeric"
-            fullWidth
-          />
-          <TextField
-            label="Remarks (optional)"
-            value={remarks}
-            onChange={(e) => setRemarks(e.target.value)}
-            fullWidth
-            multiline
-            minRows={2}
-          />
-          <p className="text-xs text-zinc-600">
-            {opportunity.revising ? "Editable until evaluation starts." : "Editable until the closing date."}
-          </p>
-        </DialogContent>
-        <DialogActions className="flex-wrap gap-2">
-          <Button onClick={onClose} disabled={busy}>
-            Cancel
-          </Button>
+        </div>
+      ) : (
+        <TextField
+          label="Total price (UGX)"
+          value={amount}
+          onChange={(e) => {
+            setAmount(e.target.value);
+            setErrors((p) => ({ ...p, amount: "" }));
+          }}
+          error={Boolean(errors.amount)}
+          helperText={errors.amount || "Inclusive of taxes"}
+          inputMode="decimal"
+          fullWidth
+        />
+      )}
+      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+        <TextField
+          label="Delivery period in days (optional)"
+          value={deliveryDays}
+          onChange={(e) => {
+            setDeliveryDays(e.target.value);
+            setErrors((p) => ({ ...p, deliveryDays: "" }));
+          }}
+          error={Boolean(errors.deliveryDays)}
+          helperText={errors.deliveryDays || "Days after the order"}
+          inputMode="numeric"
+          fullWidth
+        />
+        <TextField
+          label="Remarks (optional)"
+          value={remarks}
+          onChange={(e) => setRemarks(e.target.value)}
+          fullWidth
+          multiline
+          minRows={1}
+        />
+      </div>
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <p className="text-xs text-zinc-600">
+          {opportunity.revising
+            ? "Editable until evaluation starts."
+            : opportunity.closingDate
+              ? `Editable until ${formatPortalDateTime(opportunity.closingDate)}.`
+              : "Editable until the closing date."}
+        </p>
+        <div className="flex w-full flex-wrap justify-end gap-2 sm:w-auto">
+          {onCancel ? (
+            <Button onClick={onCancel} disabled={busy} className="w-full sm:w-auto">
+              Cancel
+            </Button>
+          ) : null}
           <Button
             type="submit"
             variant="contained"
             disabled={busy}
             startIcon={busy ? <CircularProgress size={16} color="inherit" /> : <SendRounded />}
+            className="w-full sm:w-auto"
           >
             {busy ? "Saving…" : existing ? `Update ${word}` : `Submit ${word}`}
           </Button>
-        </DialogActions>
-      </form>
-    </Dialog>
+        </div>
+      </div>
+    </form>
   );
 }
 

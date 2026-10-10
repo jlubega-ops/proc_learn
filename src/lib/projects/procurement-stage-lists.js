@@ -56,8 +56,10 @@ function sectionStatus(stageKey, r, inst, head) {
   }
   const active = inst && ["ACTIVE", "IN_PROGRESS"].includes(inst.status);
   if (active && head && procurementTaskStage(head.title) === stageKey) {
-    const step = String(head.title).split(":")[0].trim();
-    const action = step
+    const step = String(head.title).split(":")[0].trim().replace(/\s+where applicable$/i, "");
+    const action = isReceiveGoodsStep(step)
+      ? "receipt of goods"
+      : step
       ? step
           .split(/\s+/)
           .map((w) => (/[A-Z]{2,}/.test(w) ? w : w.toLowerCase()))

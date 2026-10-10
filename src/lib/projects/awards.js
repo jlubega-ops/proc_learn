@@ -165,7 +165,7 @@ export async function createAwardFromApprovedEvaluation(prisma, opts) {
 }
 
 /**
- * Communicate an APPROVED award to the winning supplier (simulated).
+ * Communicate an APPROVED award: award notice to the winner, unsuccessful notice to the other live bidders.
  * @param {import("@prisma/client").PrismaClient} prisma
  * @param {{ projectId: string; awardId: string; actorOrgUserId: string; actorRoleName: string }} opts
  */
@@ -208,8 +208,12 @@ export async function communicateAward(prisma, opts) {
   });
 
   const others = await prisma.projectOrgOffer.findMany({
-    where: { procurementId: row.procurementId, supplierId: { not: row.supplierId } },
-    select: { supplierId: true },
+    where: {
+      procurementId: row.procurementId,
+      supplierId: { not: row.supplierId },
+      status: { notIn: ["WITHDRAWN", "LATE"] },
+    },
+    select: { supplierId: true, solicitationId: true },
     distinct: ["supplierId"],
   });
   for (const o of others) {
@@ -218,17 +222,8 @@ export async function communicateAward(prisma, opts) {
       providerId: o.supplierId,
       procurementId: row.procurementId,
       title: "Award decision",
+      linkUrl: o.solicitationId ? `/provider-portal/opportunities/${o.solicitationId}` : null,
       body: `Your bid was not successful. The award went to ${row.supplier?.name || "another bidder"} at ${formatMoneyUGX(row.awardedAmount?.toString?.())}.`,
-    });
-  }
-
-  if (row.supplier?.isGenerated) {
-    await respondToAward(prisma, {
-      projectId: opts.projectId,
-      providerId: row.supplierId,
-      procurementId: row.procurementId,
-      body: { decision: "ACCEPT", acceptedByName: row.supplier.contactPerson || row.supplier.name },
-      auto: true,
     });
   }
 
@@ -236,10 +231,10 @@ export async function communicateAward(prisma, opts) {
 }
 
 /**
- * The winning provider accepts or declines its COMMUNICATED award (portal, or auto-response).
+ * The winning provider accepts or declines its COMMUNICATED award in the provider portal.
  * Acceptance lets the PDU prepare the LPO / contract; a decline goes back to the PDU.
  * @param {import("@prisma/client").PrismaClient} prisma
- * @param {{ projectId: string; providerId: string; procurementId: string; body: any; auto?: boolean }} opts
+ * @param {{ projectId: string; providerId: string; procurementId: string; body: any }} opts
  */
 export async function respondToAward(prisma, opts) {
   const v = validatePurchaseInstructionResponse(opts.body || {});
@@ -284,7 +279,7 @@ export async function respondToAward(prisma, opts) {
   }
 
   const proc = row.procurement;
-  const providerLabel = `${row.supplier?.name || "Provider"}${opts.auto ? " (auto-response)" : ""}`;
+  const providerLabel = row.supplier?.name || "Provider";
   await writeAuditLog({
     eventType: accept ? AuditEvent.PROJECT_ORG_AWARD_ACCEPTED : AuditEvent.PROJECT_ORG_AWARD_DECLINED,
     actorUserId: null,

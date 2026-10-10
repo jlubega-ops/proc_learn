@@ -17,7 +17,15 @@ export async function GET(_request, context) {
         procurementId,
       })
     : null;
-  if (!data) return NextResponse.json({ error: "Not found." }, { status: 404 });
+  if (!data) {
+    const bid = procurementId
+      ? await prisma.projectOrgOffer.findFirst({
+          where: { procurementId, supplierId: auth.provider.id, procurement: { projectId: auth.project.id } },
+          select: { solicitationId: true },
+        })
+      : null;
+    return NextResponse.json({ error: "Not found.", opportunityId: bid?.solicitationId || null }, { status: 404 });
+  }
   return NextResponse.json({
     ...data,
     printedBy: { name: auth.provider.contactPerson || auth.provider.name, role: auth.provider.name },

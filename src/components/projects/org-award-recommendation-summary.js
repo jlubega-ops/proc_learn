@@ -10,7 +10,7 @@ import { actingRoleLabel } from "@/lib/projects/committee-labels";
 import { procurementTaskStage } from "@/lib/projects/procurement-task-stage";
 import { workflowDecisionPastLabel } from "@/lib/projects/workflow-status-presentation";
 
-const DECISION_COLOR = { APPROVE: "success", RETURN: "warning", REJECT: "error" };
+const DECISION_COLOR = { APPROVE: "success", COMPLETE: "success", RETURN: "warning", REJECT: "error" };
 
 /**
  * Latest decision on each workflow step of one stage, oldest first.
@@ -120,7 +120,8 @@ export function OrgAwardDetails({ row }) {
   /** @type {Map<string, string>} */
   const bidders = new Map();
   for (const o of row.offers || []) {
-    if (o.supplierId && !bidders.has(o.supplierId)) bidders.set(o.supplierId, o.supplier?.name || "—");
+    if (!o.supplierId || bidders.has(o.supplierId) || ["WITHDRAWN", "LATE"].includes(o.status)) continue;
+    bidders.set(o.supplierId, o.supplier?.name || "—");
   }
   const unsuccessful = [...bidders.entries()].filter(([id]) => id !== award.supplierId);
 
@@ -149,7 +150,9 @@ export function OrgAwardDetails({ row }) {
           </span>,
         )}
         {fact("Award date", formatPrintDate(award.awardDate) || "—")}
-        {fact("Approval reference", <span className="wrap-break-word">{award.approvalReference || "—"}</span>)}
+        {award.approvalReference
+          ? fact("Approval reference", <span className="wrap-break-word">{award.approvalReference}</span>)
+          : null}
         {award.communicatedAt ? fact("Communicated on", formatPrintDate(award.communicatedAt)) : null}
       </div>
 

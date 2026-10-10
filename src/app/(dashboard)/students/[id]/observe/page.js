@@ -1,7 +1,8 @@
+import { Suspense } from "react";
 import { redirect } from "next/navigation";
 import { getSessionUser, sessionActiveRole } from "@/lib/api/get-session-user";
 import { canObserveStudentOrganisation } from "@/lib/academic/examiner-observation-access";
-import { ExaminerStudentObservePanel } from "@/components/examiner/examiner-student-observe-panel";
+import { ExaminerOrgExplorer } from "@/components/examiner/examiner-org-explorer";
 
 export const metadata = {
   title: "Observe student",
@@ -22,5 +23,9 @@ export default async function ObserveStudentPage({ params }) {
 
   const { id } = await params;
 
-  return <ExaminerStudentObservePanel studentId={id} />;
+  return (
+    <Suspense fallback={null}>
+      <ExaminerOrgExplorer studentId={id} />
+    </Suspense>
+  );
 }

@@ -25,6 +25,9 @@ import { WorkflowHistoryPanel } from "@/components/projects/workflow-history-pan
 import { useToast } from "@/components/providers/toast-provider";
 import { decisionConfirmOptions, useConfirm } from "@/components/providers/confirm-provider";
 import { notifyOrgTasksChanged } from "@/hooks/use-pending-task-counts";
+import { useProcessActivation } from "@/hooks/use-process-activation";
+import { ProcessGateTooltip } from "@/components/projects/process-gate";
+import { PROCESS_FLOW_CODES } from "@/lib/projects/process-catalogue";
 import {
   adminCenteredLoadingBoxSx,
   adminLoadingSpinnerSx,
@@ -108,6 +111,9 @@ function planPrintSections(plan) {
           value: dept ? `${dept.name}${dept.code ? ` (${dept.code})` : ""}` : null,
         },
         { label: "Plan type", value: plan.isEmergency ? "Emergency plan" : "Annual plan" },
+        ...(plan.emergencyJustification
+          ? [{ label: "Emergency justification", value: plan.emergencyJustification, full: true }]
+          : []),
         { label: "Circular sheet", value: SHEET_LABELS[plan.sheetType] || plan.sheetType },
         {
           label: "Planning period",
@@ -203,6 +209,9 @@ function PlanDetailsGrid({ plan }) {
     { label: "Submitted on", value: plan.submittedAt ? formatPrintDate(plan.submittedAt) : null },
     { label: "Prepared by", value: recordPersonLine(plan.createdBy), wide: true },
     { label: "Approved by", value: recordPersonLine(plan.approvedBy, plan.approvedAt), wide: true },
+    ...(plan.emergencyJustification
+      ? [{ label: "Emergency justification", value: plan.emergencyJustification, wide: true }]
+      : []),
   ];
 
   return <RecordDetailsGrid fields={fields} />;
@@ -224,6 +233,11 @@ export function OrgProcurementPlanDetailPanel({ projectId, planId }) {
   const [printedBy, setPrintedBy] = useState(/** @type {any} */ (null));
   const [decision, setDecision] = useState("APPROVE");
   const [comment, setComment] = useState("");
+  const processes = useProcessActivation(projectId);
+  const planCode = plan?.isEmergency
+    ? PROCESS_FLOW_CODES.EMERGENCY_PLANNING
+    : PROCESS_FLOW_CODES.PROCUREMENT_PLANNING;
+  const planProcessOff = !processes.isActive(planCode);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -411,14 +425,16 @@ export function OrgProcurementPlanDetailPanel({ projectId, planId }) {
 
         {canSubmit && (plan.status === "DRAFT" || plan.status === "RETURNED") ? (
           <div className="mt-4">
-            <Button
-              variant="contained"
-              startIcon={busy ? <CircularProgress size={16} color="inherit" /> : <SendRounded />}
-              disabled={busy}
-              onClick={() => void submitPlan()}
-            >
-              Submit for review
-            </Button>
+            <ProcessGateTooltip inactive={planProcessOff} title={processes.inactiveTitle(planCode)}>
+              <Button
+                variant="contained"
+                startIcon={busy ? <CircularProgress size={16} color="inherit" /> : <SendRounded />}
+                disabled={busy || planProcessOff}
+                onClick={() => void submitPlan()}
+              >
+                Submit for review
+              </Button>
+            </ProcessGateTooltip>
           </div>
         ) : null}
       </Paper>

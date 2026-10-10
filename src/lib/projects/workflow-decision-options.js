@@ -6,7 +6,6 @@
  * @param {{
  *   isEmergencyPlan?: boolean;
  *   includeReturnReject?: boolean;
- *   includeFlagException?: boolean;
  *   isProcurementStep?: boolean;
  * }} [opts]
  * @returns {{ value: string; label: string }[]}
@@ -41,10 +40,6 @@ export function workflowDecisionOptions(actionKey, opts = {}) {
     options.push({ value: "REJECT", label: "Reject" });
   }
 
-  if (opts.includeFlagException) {
-    options.push({ value: "FLAG_EXCEPTION", label: "Flag exception" });
-  }
-
   return options;
 }
 
@@ -58,13 +53,24 @@ const STEP_ACTION_LABELS = [
   [/^verify funding/i, "Confirm funds available and forward"],
   [/^approve requisition/i, "Approve requisition and forward"],
   [/^approve procurement method/i, "Approve procurement method"],
+  [/^review (rfq|tender) documents/i, "Clear document and forward"],
+  [/^approve (rfq|tender) documents/i, "Approve document"],
   [/^issue purchase instruction/i, "Issue purchase instruction"],
   [/^issue rfqs/i, "Issue RFQs"],
   [/^advertise tender/i, "Advertise tender"],
+  [/^forward bids for evaluation/i, "Forward to Evaluation Committee"],
+  [/^receive (quotations|bids)|^close.?lock quotation|^close tender submission|^open (quotations|bids)/i, "Approve and submit"],
   [/^technical evaluation/i, "Complete technical evaluation"],
   [/^financial evaluation/i, "Complete financial evaluation"],
   [/^prepare evaluation report/i, "Submit evaluation report"],
+  [/^review evaluation report/i, "Clear report and forward"],
+  [/^approve evaluation\/recommendation/i, "Approve evaluation and recommendation"],
+  [/^approve evaluation report/i, "Approve evaluation report"],
   [/^post-qualification/i, "Submit post-qualification"],
+  [/^prepare award recommendation/i, "Submit award recommendation"],
+  [/^review award recommendation/i, "Clear award recommendation and forward"],
+  [/^approve award$/i, "Approve award"],
+  [/^communicate award/i, "Communicate award"],
   [/^prepare lpo/i, "Create LPO and forward"],
   [/^prepare contract/i, "Create contract and forward"],
   [/^approve\/sign lpo/i, "Approve LPO and forward"],
@@ -97,6 +103,19 @@ export function workflowStepActionLabel(title) {
  */
 export function workflowDecisionLabelForTask(opt, title) {
   const stepLabel = workflowStepActionLabel(title);
+  const step = String(title || "").trim();
+  if (opt.value === "RETURN" && /^(approve procurement method|review (rfq|tender) documents)/i.test(step)) {
+    return "Return to Procurement Officer";
+  }
+  if (opt.value === "RETURN" && /^approve (rfq|tender) documents/i.test(step)) {
+    return "Return to Head PDU";
+  }
+  if (opt.value === "RETURN" && /^(review|approve) evaluation/i.test(step)) {
+    return "Return to Evaluation Committee";
+  }
+  if (opt.value === "REJECT" && /^approve (evaluation|award)/i.test(step)) {
+    return "Reject and cancel procurement";
+  }
   return stepLabel && POSITIVE_DECISIONS.has(opt.value) ? stepLabel : opt.label;
 }
 
@@ -142,9 +161,6 @@ export function workflowDecisionHelp(decision) {
   }
   if (d === "SELECT_METHOD") {
     return "Saves Form 5 Part II and sends the recommended method to the Contracts Committee for approval.";
-  }
-  if (d === "FLAG_EXCEPTION") {
-    return "Flags a funding or compliance concern for follow-up without fully approving.";
   }
   return "";
 }

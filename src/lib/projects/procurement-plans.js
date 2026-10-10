@@ -6,7 +6,15 @@ import {
   Prisma,
 } from "@prisma/client";
 import { writeAuditLog, AuditEvent } from "@/lib/audit-log";
-import { WORKFLOW_TRIGGERS } from "@/lib/projects/process-catalogue";
+import { PROCESS_FLOW_CODES, WORKFLOW_TRIGGERS } from "@/lib/projects/process-catalogue";
+import { assertProcessActive } from "@/lib/projects/process-activation";
+
+/** @param {boolean} isEmergency */
+function planProcessCode(isEmergency) {
+  return isEmergency
+    ? PROCESS_FLOW_CODES.EMERGENCY_PLANNING
+    : PROCESS_FLOW_CODES.PROCUREMENT_PLANNING;
+}
 import {
   computePlanningPeriodStatus,
 } from "@/lib/projects/org-planning-periods";
@@ -145,6 +153,7 @@ export function serializeProcurementPlan(row) {
     stageLabel: neutral.label,
     sheetType: row.sheetType || "GOODS_WORKS_NON_CONSULTANCY",
     isEmergency: Boolean(row.isEmergency),
+    emergencyJustification: row.emergencyJustification || null,
     status: row.status,
     statusLabel: presentation.label,
     statusColor: presentation.color,
@@ -335,8 +344,21 @@ export async function createOrUpdateProcurementPlanDraft(prisma, opts) {
   const sheetType =
     sheetTypeRaw === "CONSULTANCY" ? "CONSULTANCY" : "GOODS_WORKS_NON_CONSULTANCY";
   const isEmergency = Boolean(b.isEmergency);
+  const emergencyJustification = isEmergency
+    ? String(b.emergencyJustification ?? "").trim() || null
+    : null;
+
+  if (!opts.planId) {
+    const inactive = await assertProcessActive(prisma, opts.projectId, planProcessCode(isEmergency));
+    if (inactive) return inactive;
+  }
 
   if (!title) fieldErrors.title = "Enter a plan title.";
+  if (isEmergency && !emergencyJustification) {
+    fieldErrors.emergencyJustification = "Enter the emergency justification.";
+  } else if (emergencyJustification && emergencyJustification.length > 4000) {
+    fieldErrors.emergencyJustification = "Keep it under 4000 characters.";
+  }
   if (!financialYearId) fieldErrors.financialYearId = "Choose a financial year.";
   if (!opts.departmentId) fieldErrors.departmentId = "Your account must belong to a department.";
 
@@ -451,6 +473,7 @@ export async function createOrUpdateProcurementPlanDraft(prisma, opts) {
         planReference,
         sheetType,
         isEmergency,
+        emergencyJustification,
         financialYearId,
         planningPeriodId: planningPeriod?.id || null,
         departmentId: opts.departmentId,
@@ -467,6 +490,7 @@ export async function createOrUpdateProcurementPlanDraft(prisma, opts) {
         planReference,
         sheetType,
         isEmergency,
+        emergencyJustification,
         financialYearId,
         planningPeriodId: planningPeriod?.id || null,
         departmentId: opts.departmentId,
@@ -547,6 +571,8 @@ export async function submitProcurementPlan(prisma, opts) {
       };
     }
   }
+  const inactive = await assertProcessActive(prisma, opts.projectId, planProcessCode(isEmergency));
+  if (inactive) return inactive;
 
   await prisma.projectOrgWorkflowInstance.updateMany({
     where: {

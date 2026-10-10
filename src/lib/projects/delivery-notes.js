@@ -88,30 +88,6 @@ export function orderNotOpenForDelivery(order) {
 }
 
 /**
- * Auto-response providers dispatch the full outstanding quantity as soon as the order is open.
- * @param {import("@prisma/client").PrismaClient} prisma
- * @param {{ projectId: string; procurementId: string; providerId: string }} opts
- */
-export async function autoDispatchIfAutoResponse(prisma, opts) {
-  const provider = await prisma.projectOrgProvider.findFirst({
-    where: { id: opts.providerId, projectId: opts.projectId },
-    select: { isGenerated: true },
-  });
-  if (!provider?.isGenerated) return null;
-  const outstanding = await outstandingDeliveryLines(prisma, opts);
-  const lines = (outstanding || []).filter((l) => l.outstanding > 0);
-  if (!lines.length) return null;
-  return submitDeliveryNote(prisma, {
-    ...opts,
-    auto: true,
-    body: {
-      remarks: "Dispatched in full.",
-      lines: lines.map((l) => ({ itemName: l.itemName, quantity: String(l.outstanding) })),
-    },
-  });
-}
-
-/**
  * @param {import("@prisma/client").PrismaClient} prisma
  * @param {string} procurementId
  * @param {string} procurementNumber
@@ -131,7 +107,6 @@ async function nextNoteNumber(prisma, procurementId, procurementNumber) {
  *   procurementId: string;
  *   providerId: string;
  *   body: any;
- *   auto?: boolean;
  * }} opts
  */
 export async function submitDeliveryNote(prisma, opts) {
@@ -164,7 +139,7 @@ export async function submitDeliveryNote(prisma, opts) {
   const remarks = typeof body.remarks === "string" ? body.remarks.trim() : "";
   if (remarks.length > 2000) fieldErrors.remarks = "Max 2000 characters.";
   const deliveredBy = typeof body.deliveredBy === "string" ? body.deliveredBy.trim() : "";
-  if (!deliveredBy && !opts.auto) fieldErrors.deliveredBy = "Enter who is delivering.";
+  if (!deliveredBy) fieldErrors.deliveredBy = "Enter who is delivering.";
   else if (deliveredBy.length > 160) fieldErrors.deliveredBy = "Max 160 characters.";
   const vehicleNumber = typeof body.vehicleNumber === "string" ? body.vehicleNumber.trim().toUpperCase() : "";
   if (vehicleNumber.length > 32) fieldErrors.vehicleNumber = "Max 32 characters.";
@@ -231,7 +206,7 @@ export async function submitDeliveryNote(prisma, opts) {
     include: { supplier: { select: { id: true, name: true } } },
   });
 
-  const providerLabel = `${supplier?.name || "Provider"}${opts.auto ? " (auto-response)" : ""}`;
+  const providerLabel = supplier?.name || "Provider";
   await writeAuditLog({
     eventType: AuditEvent.PROJECT_ORG_DELIVERY_NOTE_SUBMITTED,
     actorUserId: null,

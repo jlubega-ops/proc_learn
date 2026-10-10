@@ -51,6 +51,9 @@ import {
   validateLineText,
 } from "@/lib/projects/line-item-options";
 import { usePersistedFormDraft } from "@/hooks/use-persisted-form-draft";
+import { useProcessActivation } from "@/hooks/use-process-activation";
+import { ProcessGateTooltip } from "@/components/projects/process-gate";
+import { PROCESS_FLOW_CODES } from "@/lib/projects/process-catalogue";
 
 function emptyItem() {
   return {
@@ -119,11 +122,19 @@ export function OrgProcurementPlanCreateForm({ projectId }) {
     planningPeriodId: "",
     sheetType: PLAN_SHEET_TYPE.GOODS_WORKS_NON_CONSULTANCY,
     isEmergency: false,
+    emergencyJustification: "",
     items: [emptyItem()],
   });
   const [metaReady, setMetaReady] = useState(false);
   const isConsultancy = form.sheetType === PLAN_SHEET_TYPE.CONSULTANCY;
   const isEmergency = Boolean(form.isEmergency);
+  const processes = useProcessActivation(projectId);
+  const annualOff = !processes.isActive(PROCESS_FLOW_CODES.PROCUREMENT_PLANNING);
+  const emergencyOff = !processes.isActive(PROCESS_FLOW_CODES.EMERGENCY_PLANNING);
+  const selectedPlanCode = isEmergency
+    ? PROCESS_FLOW_CODES.EMERGENCY_PLANNING
+    : PROCESS_FLOW_CODES.PROCUREMENT_PLANNING;
+  const selectedTypeOff = isEmergency ? emergencyOff : annualOff;
 
   const { serverSyncState, clearDraft } = usePersistedFormDraft({
     formKey: "procurement-plan:new",
@@ -271,6 +282,9 @@ export function OrgProcurementPlanCreateForm({ projectId }) {
     if (!form.financialYearId) {
       errors.financialYearId =
         fyEmptyMessage || "Choose a financial year.";
+    }
+    if (isEmergency && !String(form.emergencyJustification || "").trim()) {
+      errors.emergencyJustification = "Enter the emergency justification.";
     }
     if (!isEmergency && !form.planningPeriodId) {
       errors.planningPeriodId = periodsEmpty
@@ -444,9 +458,36 @@ export function OrgProcurementPlanCreateForm({ projectId }) {
           sx={themedTextFieldSx}
           className="sm:col-span-2"
         >
-          <MenuItem value="ANNUAL">Annual procurement plan</MenuItem>
-          <MenuItem value="EMERGENCY">Emergency / unplanned plan</MenuItem>
+          <MenuItem value="ANNUAL" disabled={annualOff}>
+            {annualOff ? "Annual procurement plan (process inactive)" : "Annual procurement plan"}
+          </MenuItem>
+          <MenuItem value="EMERGENCY" disabled={emergencyOff}>
+            {emergencyOff
+              ? "Emergency / unplanned plan (process inactive)"
+              : "Emergency / unplanned plan"}
+          </MenuItem>
         </TextField>
+        {isEmergency ? (
+          <TextField
+            label="Emergency justification"
+            value={form.emergencyJustification || ""}
+            onChange={(e) => {
+              setForm((f) => ({ ...f, emergencyJustification: e.target.value }));
+              setFieldErrors((fe) => {
+                const n = { ...fe };
+                delete n.emergencyJustification;
+                return n;
+              });
+            }}
+            fullWidth
+            multiline
+            minRows={2}
+            className="sm:col-span-2"
+            error={Boolean(fieldErrors.emergencyJustification)}
+            helperText={fieldErrors.emergencyJustification || "Urgent, unforeseeable, not caused by delay"}
+            sx={themedTextFieldSx}
+          />
+        ) : null}
         <TextField
           label="Plan title"
           value={form.title}
@@ -984,9 +1025,14 @@ export function OrgProcurementPlanCreateForm({ projectId }) {
         </div>
 
         <div className="flex flex-wrap gap-2 sm:col-span-2">
-          <Button type="submit" variant="contained" disabled={busy}>
-            {busy ? "Saving…" : "Save draft"}
-          </Button>
+          <ProcessGateTooltip
+            inactive={selectedTypeOff}
+            title={processes.inactiveTitle(selectedPlanCode)}
+          >
+            <Button type="submit" variant="contained" disabled={busy || selectedTypeOff}>
+              {busy ? "Saving…" : "Save draft"}
+            </Button>
+          </ProcessGateTooltip>
         </div>
       </form>
     </Paper>

@@ -40,6 +40,9 @@ import {
 import { ORG_REF_DOC, nextOrgDocumentReference } from "@/lib/projects/org-reference";
 import { PPDA_YES_NO } from "@/lib/projects/ppda-forms";
 import { usePersistedFormDraft } from "@/hooks/use-persisted-form-draft";
+import { useProcessActivation } from "@/hooks/use-process-activation";
+import { ProcessGateTooltip } from "@/components/projects/process-gate";
+import { PROCESS_FLOW_CODES } from "@/lib/projects/process-catalogue";
 
 /**
  * @param {unknown} current
@@ -66,6 +69,7 @@ export function OrgRequisitionCreateForm({ projectId, requisitionId = "" }) {
   const { session } = useAuthSession();
   const router = useRouter();
   const isEdit = Boolean(requisitionId);
+  const processes = useProcessActivation(projectId);
   const listHref = `/projects/${projectId}/requisitions`;
   const detailHref = isEdit ? `/projects/${projectId}/requisitions/${requisitionId}` : listHref;
   const [loading, setLoading] = useState(true);
@@ -623,6 +627,7 @@ export function OrgRequisitionCreateForm({ projectId, requisitionId = "" }) {
   }
 
   const saveOnly = isEdit && (awaitingHodReview || existingStatus === "SUBMITTED");
+  const requisitionOff = !saveOnly && !processes.isActive(PROCESS_FLOW_CODES.PROCUREMENT_REQUISITION);
 
   async function submit(e) {
     e.preventDefault();
@@ -1331,19 +1336,28 @@ export function OrgRequisitionCreateForm({ projectId, requisitionId = "" }) {
         />
 
         <div className="sm:col-span-2">
-          <Button type="submit" variant="contained" disabled={busy || !canCreateRequisition}>
-            {busy
-              ? saveOnly
-                ? "Saving…"
-                : "Submitting…"
-              : saveOnly
-                ? "Save changes"
-                : isEdit
-                  ? existingStatus === "RETURNED"
-                    ? "Save and resubmit"
-                    : "Save and submit"
-                  : "Submit requisition"}
-          </Button>
+          <ProcessGateTooltip
+            inactive={requisitionOff}
+            title={processes.inactiveTitle(PROCESS_FLOW_CODES.PROCUREMENT_REQUISITION)}
+          >
+            <Button
+              type="submit"
+              variant="contained"
+              disabled={busy || !canCreateRequisition || requisitionOff}
+            >
+              {busy
+                ? saveOnly
+                  ? "Saving…"
+                  : "Submitting…"
+                : saveOnly
+                  ? "Save changes"
+                  : isEdit
+                    ? existingStatus === "RETURNED"
+                      ? "Save and resubmit"
+                      : "Save and submit"
+                    : "Submit requisition"}
+            </Button>
+          </ProcessGateTooltip>
         </div>
       </form>
     </Paper>

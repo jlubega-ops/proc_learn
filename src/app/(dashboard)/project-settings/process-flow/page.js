@@ -13,7 +13,7 @@ export default function ProjectProcessFlowSettingsPage() {
     <div className={BRAND_PAGE_SHELL_CLASS}>
       <DashboardPageIntro
         title="Process flow"
-        description="Define organisation process flows and ordered steps for all student project workspaces. Only system administrators can create or edit processes."
+        description="Predefined processes used by all project workspaces."
       />
       <ProjectProcessFlowsPanel apiBase="/api/project-process-flows" />
     </div>

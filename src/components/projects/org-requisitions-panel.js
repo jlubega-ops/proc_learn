@@ -27,6 +27,9 @@ import DialogTitle from "@mui/material/DialogTitle";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useToast } from "@/components/providers/toast-provider";
+import { useProcessActivation } from "@/hooks/use-process-activation";
+import { ProcessGateTooltip } from "@/components/projects/process-gate";
+import { PROCESS_FLOW_CODES } from "@/lib/projects/process-catalogue";
 import {
   adminCenteredLoadingBoxSx,
   adminLoadingSpinnerSx,
@@ -48,6 +51,8 @@ export function OrgRequisitionsPanel({ projectId }) {
   const router = useRouter();
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
+  const processes = useProcessActivation(projectId);
+  const requisitionOff = !processes.isActive(PROCESS_FLOW_CODES.PROCUREMENT_REQUISITION);
   const [rows, setRows] = useState(/** @type {any[]} */ ([]));
   const [deleteTarget, setDeleteTarget] = useState(/** @type {any | null} */ (null));
 
@@ -128,16 +133,23 @@ export function OrgRequisitionsPanel({ projectId }) {
         >
           Refresh
         </Button>
-        <Button
-          component={Link}
-          href={`/projects/${projectId}/requisitions/new`}
-          variant="contained"
-          startIcon={<AddRounded />}
+        <ProcessGateTooltip
+          inactive={requisitionOff}
+          title={processes.inactiveTitle(PROCESS_FLOW_CODES.PROCUREMENT_REQUISITION)}
           className="w-full sm:w-auto"
-          title="Create a new requisition"
         >
-          Create new
-        </Button>
+          <Button
+            component={Link}
+            href={`/projects/${projectId}/requisitions/new`}
+            variant="contained"
+            startIcon={<AddRounded />}
+            className="w-full sm:w-auto"
+            title={requisitionOff ? undefined : "Create a new requisition"}
+            disabled={requisitionOff}
+          >
+            Create new
+          </Button>
+        </ProcessGateTooltip>
       </div>
 
       {rows.length === 0 ? (

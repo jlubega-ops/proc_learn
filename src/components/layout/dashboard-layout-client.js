@@ -393,6 +393,7 @@ export default function DashboardLayoutClient({ children }) {
   const taskCounts = usePendingTaskCounts(
     orgProjectId,
     isOrgSession && orgPermissions.includes(ORG_PERMISSION.VIEW_TASKS),
+    `${session?.orgRoleName || ""}|${session?.activeCommittee?.id || ""}|${session?.activeCommittee?.committeeRole || ""}`,
   );
 
   const authed = Boolean(session?.authenticated);

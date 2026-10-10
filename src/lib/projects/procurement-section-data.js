@@ -104,6 +104,14 @@ const EVENT_SECTIONS = [
 ];
 
 /**
+ * Procurement section a domain audit event belongs to, or null.
+ * @param {string | null | undefined} eventType
+ */
+export function domainEventSection(eventType) {
+  return EVENT_SECTIONS.find((m) => m.re.test(String(eventType || "")))?.section || null;
+}
+
+/**
  * Domain history entries limited to the sections the viewer may view.
  * @param {any[]} entries
  * @param {Record<string, { view: boolean }> | null} sections
@@ -111,8 +119,8 @@ const EVENT_SECTIONS = [
 export function filterDomainTimeline(entries, sections) {
   if (!sections) return entries;
   return entries.filter((e) => {
-    const match = EVENT_SECTIONS.find((m) => m.re.test(String(e.eventType || "")));
-    return !match || Boolean(sections[match.section]?.view);
+    const section = domainEventSection(e.eventType);
+    return !section || Boolean(sections[section]?.view);
   });
 }
 

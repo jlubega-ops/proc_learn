@@ -43,7 +43,7 @@ export function OrgMethodEligibility({ requisition, selecting = false, selectedM
         {line ? (
           <span>
             <span className="font-semibold">Budget line:</span> {formatMoneyUGX(line.approvedAmount)} approved ·{" "}
-            {formatMoneyUGX(line.availableBalance)} free
+            {formatMoneyUGX(committed ? line.projectedBalance : line.availableBalance)} free
           </span>
         ) : null}
         <Chip

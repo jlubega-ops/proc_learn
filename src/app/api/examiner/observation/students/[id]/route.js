@@ -3,6 +3,8 @@ import { getSessionUser, sessionActiveRole } from "@/lib/api/get-session-user";
 import { canObserveStudentOrganisation } from "@/lib/academic/examiner-observation-access";
 import { getExaminerStudentObservation } from "@/lib/academic/examiner-observation";
 import { writeAuditLog, AuditEvent } from "@/lib/audit-log";
+import { prisma } from "@/lib/prisma";
+import { countExplorerSections } from "@/lib/academic/examiner-org-explorer";
 
 export const runtime = "nodejs";
 
@@ -25,7 +27,17 @@ export async function GET(request, context) {
   const academicYearId = request.nextUrl.searchParams.get("academicYearId") || null;
 
   try {
-    const data = await getExaminerStudentObservation(id, { academicYearId });
+    const lite = request.nextUrl.searchParams.get("view") === "explorer";
+    const data = await getExaminerStudentObservation(id, { academicYearId, lite });
+    if (lite && data.organisation?.projectId) {
+      const projectId = data.organisation.projectId;
+      const [counts, project] = await Promise.all([
+        countExplorerSections(prisma, projectId),
+        prisma.project.findUnique({ where: { id: projectId }, select: { createdAt: true } }),
+      ]);
+      data.counts = counts;
+      data.organisation.createdAt = project?.createdAt || null;
+    }
 
     await writeAuditLog({
       eventType: AuditEvent.EXAMINER_STUDENT_OBSERVED,

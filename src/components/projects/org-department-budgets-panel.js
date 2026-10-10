@@ -39,6 +39,9 @@ import {
   adminTableSx,
 } from "@/lib/admin-mui-surfaces";
 import { formatMoneyAmount } from "@/lib/money";
+import { useProcessActivation } from "@/hooks/use-process-activation";
+import { ProcessGateTooltip } from "@/components/projects/process-gate";
+import { PROCESS_FLOW_CODES } from "@/lib/projects/process-catalogue";
 import {
   clickableTableRowProps,
   stopRowClick,
@@ -60,6 +63,8 @@ export function OrgDepartmentBudgetsPanel({ projectId, readOnly = false, detailH
   const [canCreate, setCanCreate] = useState(false);
   const [deleteTarget, setDeleteTarget] = useState(/** @type {any} */ (null));
   const [deleteBusy, setDeleteBusy] = useState(false);
+  const processes = useProcessActivation(projectId);
+  const budgetingOff = !processes.isActive(PROCESS_FLOW_CODES.BUDGETING);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -154,16 +159,23 @@ export function OrgDepartmentBudgetsPanel({ projectId, readOnly = false, detailH
           Refresh
         </Button>
         {canCreate ? (
-          <Button
-            component={Link}
-            href={`/projects/${projectId}/budgets/new`}
-            variant="contained"
-            startIcon={<AddRounded />}
+          <ProcessGateTooltip
+            inactive={budgetingOff}
+            title={processes.inactiveTitle(PROCESS_FLOW_CODES.BUDGETING)}
             className="w-full sm:w-auto"
-            title="Create a new department budget"
           >
-            Create new
-          </Button>
+            <Button
+              component={Link}
+              href={`/projects/${projectId}/budgets/new`}
+              variant="contained"
+              startIcon={<AddRounded />}
+              className="w-full sm:w-auto"
+              title={budgetingOff ? undefined : "Create a new department budget"}
+              disabled={budgetingOff}
+            >
+              Create new
+            </Button>
+          </ProcessGateTooltip>
         ) : null}
       </div>
 
@@ -265,13 +277,19 @@ export function OrgDepartmentBudgetsPanel({ projectId, readOnly = false, detailH
                           </Tooltip>
                         ) : null}
                         {canCreate && (b.status === "DRAFT" || b.status === "RETURNED") ? (
-                          <Tooltip title="Submit for review">
+                          <Tooltip
+                            title={
+                              budgetingOff
+                                ? processes.inactiveTitle(PROCESS_FLOW_CODES.BUDGETING)
+                                : "Submit for review"
+                            }
+                          >
                             <span>
                               <IconButton
                                 size="small"
                                 color="info"
                                 aria-label={`Submit budget ${b.title}`}
-                                disabled={busy}
+                                disabled={busy || (budgetingOff)}
                                 onClick={() => submitBudget(b.id)}
                               >
                                 {busy ? (

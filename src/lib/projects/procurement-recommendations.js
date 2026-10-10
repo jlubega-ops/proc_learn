@@ -22,7 +22,7 @@ import {
   recommendationReasonLabel,
   recommendationReasons,
 } from "@/lib/projects/procurement-recommendation-options";
-import { MIN_RFQ_PROVIDERS } from "@/lib/projects/procurement-thresholds";
+import { minRfqProviders } from "@/lib/projects/procurement-thresholds";
 
 const CONTRACTS_COMMITTEE_ROLE = "Contracts Committee";
 const TERMINAL_STATUSES = new Set([
@@ -508,6 +508,7 @@ export async function decideRecommendation(prisma, opts) {
           budgetLineId: true,
           estimatedTotalValue: true,
           form5PartII: true,
+          procurementPlan: { select: { isEmergency: true } },
         },
       },
     },
@@ -665,7 +666,7 @@ export async function decideRecommendation(prisma, opts) {
               shortlist: newShortlist,
               shortlistedProviders: newShortlist.map((p) => p.name).join(", "),
               shortlistValidatedAt: now.toISOString(),
-              ...(newShortlist.length < MIN_RFQ_PROVIDERS && !String(partII.shortlistJustification || "").trim()
+              ...(newShortlist.length < minRfqProviders(proc.requisition.procurementPlan?.isEmergency) && !String(partII.shortlistJustification || "").trim()
                 ? { shortlistJustification: String(rec.details || "").trim() }
                 : {}),
             },

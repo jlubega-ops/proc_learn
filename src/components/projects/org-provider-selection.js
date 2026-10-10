@@ -342,11 +342,18 @@ export function OrgProviderRunValidation({
       </div>
 
       {!hasRun && !confirmed ? (
-        <Typography variant="body2" sx={{ ...adminMutedTextSx, mt: 1 }}>
-          {disabled && disabledReason
-            ? disabledReason
-            : "Run validation before continuing."}
-        </Typography>
+        <>
+          <ul className="mt-2 space-y-1">
+            {providers.map((p) => (
+              <li key={p.id} className="text-sm font-medium wrap-break-word">
+                {p.name}
+              </li>
+            ))}
+          </ul>
+          <Typography variant="body2" sx={{ ...adminMutedTextSx, mt: 1 }}>
+            {disabled && disabledReason ? disabledReason : "Run validation before continuing."}
+          </Typography>
+        </>
       ) : (
         <ul className="mt-2 space-y-1">
           {providers.map((p) => (
@@ -862,9 +869,9 @@ function ProviderInfoDialog({ provider, term, onClose }) {
 
 /**
  * Read-only shortlist (as validated at Form 5 Part II) for reviewers.
- * @param {{ shortlist: any[]; category?: string | null; justification?: string | null }} p
+ * @param {{ shortlist: any[]; category?: string | null; justification?: string | null; minimum?: number }} p
  */
-export function OrgProviderShortlistSummary({ shortlist, category, justification }) {
+export function OrgProviderShortlistSummary({ shortlist, category, justification, minimum = 3 }) {
   if (!Array.isArray(shortlist) || shortlist.length === 0) return null;
   const termPlural = providerTerm(category, { plural: true, capitalize: true });
   return (
@@ -894,9 +901,9 @@ export function OrgProviderShortlistSummary({ shortlist, category, justification
           </li>
         ))}
       </ul>
-      {shortlist.length < 3 && justification ? (
+      {shortlist.length < minimum && justification ? (
         <Typography variant="caption" sx={adminMutedTextSx}>
-          Justification for fewer than three: {justification}
+          Justification for fewer than {minimum === 2 ? "two" : "three"}: {justification}
         </Typography>
       ) : null}
     </div>

@@ -53,12 +53,36 @@ export const RECOMMENDATION_STATUS_PRESENTATION = {
   DECLINED: { label: "Declined", color: "error" },
 };
 
+/**
+ * Button / dialog label for what the PDU may recommend at this stage. The decision always rests
+ * with the Contracts Committee, whichever role or committee acted last.
+ * @param {string[] | null | undefined} kinds
+ */
+export function recommendActionLabel(kinds) {
+  const list = Array.isArray(kinds) ? kinds : [];
+  if (list.includes(RECOMMENDATION_KIND.CHANGE_PROVIDER)) return "Recommend cancellation or provider change";
+  if (list.includes(RECOMMENDATION_KIND.CHANGE_SHORTLIST)) return "Recommend cancellation or shortlist change";
+  return "Recommend cancellation";
+}
+
 /** PDU roles that hold the case and may recommend to the Contracts Committee. */
 export const RECOMMEND_ROLES = ["Head PDU", "Procurement Officer"];
 
 /** @param {string | null | undefined} roleName */
 export function mayRecommendToContractsCommittee(roleName) {
   return RECOMMEND_ROLES.includes(String(roleName || "").trim());
+}
+
+/** Review / approval steps that may send the work back one step for correction. */
+const RETURNABLE_STEP_RE =
+  /^(review|approve) (rfq|tender) documents|^review evaluation report|^approve evaluation report|^approve evaluation\/recommendation/i;
+
+/**
+ * True when Return (back one step) is available on this procurement task.
+ * @param {string | null | undefined} title task title, "<step>: …"
+ */
+export function procurementStepReturnable(title) {
+  return RETURNABLE_STEP_RE.test(String(title || "").split(":")[0].trim());
 }
 
 /** Title prefix of the Contracts Committee decision task. */

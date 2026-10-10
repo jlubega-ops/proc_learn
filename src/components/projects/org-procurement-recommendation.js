@@ -39,6 +39,7 @@ import {
   RECOMMENDATION_KIND,
   RECOMMENDATION_KIND_LABELS,
   RECOMMENDATION_STATUS_PRESENTATION,
+  recommendActionLabel,
   recommendationReasons,
 } from "@/lib/projects/procurement-recommendation-options";
 
@@ -134,7 +135,7 @@ export function OrgRecommendationDialog({
       showToast({ message: "Please fix the highlighted fields.", severity: "error" });
       return;
     }
-    if (!(await confirm(actionConfirmOptions("Send to committee")))) return;
+    if (!(await confirm(actionConfirmOptions("Send to Contracts Committee")))) return;
     setBusy(true);
     try {
       const { ok, data } = await postAction(projectId, procurementId, {
@@ -178,7 +179,7 @@ export function OrgRecommendationDialog({
       <form noValidate onSubmit={submit}>
         <DialogTitle id="recommend-cc-title" className="flex items-center gap-2">
           <GavelRounded color="primary" aria-hidden />
-          Recommend to Contracts Committee
+          {recommendActionLabel(kinds)}
         </DialogTitle>
         <DialogContent dividers>
           <div className="grid gap-3">
@@ -331,7 +332,7 @@ export function OrgRecommendationDialog({
             disabled={busy}
             startIcon={busy ? <CircularProgress size={16} color="inherit" /> : <GavelRounded />}
           >
-            {busy ? "Sending…" : "Send to committee"}
+            {busy ? "Sending…" : "Send to Contracts Committee"}
           </Button>
         </DialogActions>
       </form>

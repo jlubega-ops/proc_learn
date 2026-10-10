@@ -807,6 +807,13 @@ export async function listPersonalOrgProgressSummaries(ownerUserIds, opts = {}) 
         status: org.status,
       },
       summary: computed.summary,
+      counts: {
+        budgets: (budgetBy.get(org.id) || []).length,
+        plans: (planBy.get(org.id) || []).length,
+        requisitions: (reqBy.get(org.id) || []).length,
+        procurements: (procBy.get(org.id) || []).length,
+      },
+      lastActivityAt: bestProc?.updatedAt || null,
       openTask: openTask
         ? {
             title: openTask.title,

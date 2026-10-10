@@ -9,7 +9,7 @@ export const WORKFLOW_HISTORY_ACTION_SELECT = {
   committeeId: true,
   committeeRole: true,
   actor: { select: { firstName: true, lastName: true } },
-  task: { select: { requiredRoleName: true } },
+  task: { select: { requiredRoleName: true, title: true } },
 };
 
 /**
@@ -20,6 +20,7 @@ export function mapWorkflowHistoryActions(actions) {
     ...a,
     actorName: actor ? `${actor.firstName || ""} ${actor.lastName || ""}`.trim() || null : null,
     stepRoleName: task?.requiredRoleName || null,
+    taskTitle: task?.title || null,
   }));
 }
 

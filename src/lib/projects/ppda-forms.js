@@ -204,6 +204,7 @@ export function buildForm5PartII(body = {}, ctx = {}) {
     recommendedMethod:
       trimOrNull(body.recommendedMethod) || trimOrNull(ctx.method) || "",
     methodJustification: trimOrNull(body.methodJustification) || "",
+    emergencyReasons: trimOrNull(body.emergencyReasons) || "",
     shortlistedProviders: trimOrNull(body.shortlistedProviders) || "",
     shortlistJustification: trimOrNull(body.shortlistJustification) || "",
     shortlist: Array.isArray(ctx.shortlist) ? ctx.shortlist : [],
@@ -229,12 +230,12 @@ export function buildForm5PartII(body = {}, ctx = {}) {
  */
 export function buildBidDocument(procurement, body = {}) {
   const req = procurement?.requisition || {};
+  const isTender = procurement?.procurementMethod === "TENDER";
+  const approvedCost = req.form5PartII?.biddingDocumentCost ?? req.biddingDocumentCost ?? "";
   return {
     documentTitle:
       trimOrNull(body.documentTitle) ||
-      (procurement?.procurementMethod === "TENDER"
-        ? "Bidding document"
-        : "Request for quotations"),
+      (isTender ? "Bidding document" : "Request for quotations"),
     pdeName: trimOrNull(body.pdeName) || "",
     procurementReference:
       trimOrNull(body.procurementReference) ||
@@ -252,10 +253,13 @@ export function buildBidDocument(procurement, body = {}) {
     closingDate: dateOrNull(body.closingDate) || "",
     submissionInstructions:
       trimOrNull(body.submissionInstructions) ||
-      "Submit a sealed quotation/bid before the closing date stated above.",
+      (isTender
+        ? "Submit a sealed bid before the closing date stated above."
+        : "Submit a sealed quotation before the closing date stated above."),
     evaluationCriteria:
       trimOrNull(body.evaluationCriteria) ||
       "Technical compliance and lowest evaluated price among substantially responsive offers.",
+    biddingDocumentCost: isTender ? String(approvedCost || "").trim() : "",
     issuedByName: trimOrNull(body.issuedByName) || "",
     issuedByPosition: trimOrNull(body.issuedByPosition) || "Procurement Officer",
     issueDate: dateOrNull(body.issueDate) || new Date().toISOString().slice(0, 10),

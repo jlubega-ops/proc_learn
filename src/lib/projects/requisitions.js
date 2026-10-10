@@ -6,7 +6,11 @@ import {
   Prisma,
 } from "@prisma/client";
 import { writeAuditLog, AuditEvent } from "@/lib/audit-log";
-import { WORKFLOW_TRIGGERS } from "@/lib/projects/process-catalogue";
+import { PROCESS_FLOW_CODES, WORKFLOW_TRIGGERS } from "@/lib/projects/process-catalogue";
+import {
+  assertMethodProcessesActive,
+  assertProcessActive,
+} from "@/lib/projects/process-activation";
 import {
   startWorkflowFromTrigger,
   completeWorkflowTask,
@@ -132,8 +136,20 @@ export async function computePlanItemConsumption(prisma, planItemId, excludeRequ
 export function serializeRequisition(row) {
   const budget = row.budgetLine
     ? (() => {
-        const funding = computeBudgetAvailability(row.budgetLine, row.estimatedTotalValue);
+        // An approved requisition is already inside committedAmount; show the line as it stood before it.
+        const selfCommitted = row.status === OrgRequisitionStatus.APPROVED;
+        const line = selfCommitted
+          ? {
+              approvedAmount: row.budgetLine.approvedAmount,
+              committedAmount: Math.max(
+                0,
+                Number(row.budgetLine.committedAmount || 0) - Number(row.estimatedTotalValue || 0),
+              ),
+            }
+          : row.budgetLine;
+        const funding = computeBudgetAvailability(line, row.estimatedTotalValue);
         return {
+          selfCommitted,
           id: row.budgetLine.id,
           code: row.budgetLine.code,
           name: row.budgetLine.name,
@@ -210,8 +226,11 @@ export function serializeRequisition(row) {
           title: row.procurementPlan.title,
           status: row.procurementPlan.status,
           planReference: row.procurementPlan.planReference || null,
+          isEmergency: Boolean(row.procurementPlan.isEmergency),
+          emergencyJustification: row.procurementPlan.emergencyJustification || null,
         }
       : null,
+    isEmergency: Boolean(row.procurementPlan?.isEmergency),
     procurementPlanItem: row.procurementPlanItem
       ? {
           id: row.procurementPlanItem.id,
@@ -247,7 +266,16 @@ export function serializeRequisition(row) {
 export const requisitionInclude = {
   financialYear: { select: { id: true, label: true } },
   department: { select: { id: true, name: true, code: true } },
-  procurementPlan: { select: { id: true, title: true, status: true, planReference: true } },
+  procurementPlan: {
+    select: {
+      id: true,
+      title: true,
+      status: true,
+      planReference: true,
+      isEmergency: true,
+      emergencyJustification: true,
+    },
+  },
   procurementPlanItem: {
     select: {
       id: true,
@@ -317,6 +345,15 @@ export async function createOrUpdateRequisitionDraft(prisma, opts) {
   const deliveryLocation =
     typeof b.deliveryLocation === "string" ? b.deliveryLocation.trim() || null : null;
   const remarks = typeof b.remarks === "string" ? b.remarks.trim() || null : null;
+
+  if (!opts.requisitionId) {
+    const inactive = await assertProcessActive(
+      prisma,
+      opts.projectId,
+      PROCESS_FLOW_CODES.PROCUREMENT_REQUISITION,
+    );
+    if (inactive) return inactive;
+  }
 
   if (!title) fieldErrors.title = "Enter a procurement title.";
   if (!justification) fieldErrors.justification = "Enter a justification.";
@@ -813,6 +850,12 @@ export async function submitRequisition(prisma, opts) {
       funding,
     };
   }
+  const inactive = await assertProcessActive(
+    prisma,
+    opts.projectId,
+    PROCESS_FLOW_CODES.PROCUREMENT_REQUISITION,
+  );
+  if (inactive) return inactive;
 
   // Close prior suspended instances / correction tasks on resubmit
   await prisma.projectOrgWorkflowInstance.updateMany({
@@ -958,9 +1001,19 @@ export async function actOnRequisitionTask(prisma, opts) {
 
     const reqRow = await prisma.projectOrgRequisition.findUnique({
       where: { id: taskPreview.instance.requisitionId },
-      select: { category: true, estimatedTotalValue: true },
+      select: { category: true, estimatedTotalValue: true, procurementPlan: { select: { isEmergency: true } } },
     });
-    const { checkMethodValueCeiling, MIN_RFQ_PROVIDERS } = await import("@/lib/projects/procurement-thresholds");
+    const { checkMethodValueCeiling, minRfqProviders } = await import("@/lib/projects/procurement-thresholds");
+    const isEmergency = Boolean(reqRow?.procurementPlan?.isEmergency);
+    const minProviders = minRfqProviders(isEmergency);
+    if (isEmergency && !String(form5Body.emergencyReasons || "").trim()) {
+      return {
+        ok: false,
+        error: "Enter the reasons for the emergency.",
+        status: 400,
+        fieldErrors: { emergencyReasons: "Enter the reasons for the emergency." },
+      };
+    }
     const ceiling = checkMethodValueCeiling(method, reqRow?.estimatedTotalValue);
     if (!ceiling.ok) {
       return {
@@ -969,6 +1022,14 @@ export async function actOnRequisitionTask(prisma, opts) {
         status: 400,
         fieldErrors: { procurementMethod: ceiling.error },
       };
+    }
+    const methodBlocked = await assertMethodProcessesActive(
+      prisma,
+      taskPreview.instance.projectId,
+      method,
+    );
+    if (methodBlocked) {
+      return { ...methodBlocked, fieldErrors: { procurementMethod: methodBlocked.error } };
     }
     const rawIds = method === "TENDER" ? [] : form5Body.shortlistedProviderIds;
     const assessed = await assessProviderSelection(prisma, {
@@ -999,22 +1060,42 @@ export async function actOnRequisitionTask(prisma, opts) {
     }
     if (
       method === "QUOTATION" &&
-      picked.length < MIN_RFQ_PROVIDERS &&
+      picked.length < minProviders &&
       !String(form5Body.shortlistJustification || "").trim()
     ) {
+      const word = isEmergency ? "two" : "three";
       return {
         ok: false,
-        error: "Fewer than three providers are shortlisted. Enter the justification.",
+        error: `Fewer than ${word} providers are shortlisted. Enter the justification.`,
         status: 400,
         fieldErrors: {
-          shortlistJustification: "Explain why fewer than three providers are shortlisted.",
+          shortlistJustification: `Explain why fewer than ${word} providers are shortlisted.`,
         },
       };
     }
 
+    const costRaw = String(form5Body.biddingDocumentCost ?? "").replace(/,/g, "").trim();
+    if (method === "TENDER" && costRaw && !(Number(costRaw) >= 0)) {
+      return {
+        ok: false,
+        error: "Enter a valid bidding document cost.",
+        status: 400,
+        fieldErrors: { biddingDocumentCost: "Enter an amount." },
+      };
+    }
+    const actor = await prisma.projectOrgUser.findUnique({
+      where: { id: opts.actorOrgUserId },
+      select: { firstName: true, lastName: true },
+    });
+    const actorName = `${actor?.firstName || ""} ${actor?.lastName || ""}`.trim();
+
     const snapshot = buildForm5PartII(
       {
         ...form5Body,
+        pduOfficerName: actorName || form5Body.pduOfficerName,
+        pduOfficerPosition: opts.actorRoleName || form5Body.pduOfficerPosition,
+        dateSubmittedToCc: new Date().toISOString().slice(0, 10),
+        biddingDocumentCost: method === "TENDER" ? costRaw : "",
         recommendedMethod: method,
         shortlistedProviders: picked.length
           ? picked.map((p) => p.name).join(", ")
@@ -1041,15 +1122,6 @@ export async function actOnRequisitionTask(prisma, opts) {
         fieldErrors: { methodJustification: "Enter the justification for the method." },
       };
     }
-    if (!snapshot.pduOfficerName) {
-      return {
-        ok: false,
-        error: "Enter the PDU officer name.",
-        status: 400,
-        fieldErrors: { pduOfficerName: "Enter the PDU officer name." },
-      };
-    }
-
     await prisma.projectOrgRequisition.update({
       where: { id: taskPreview.instance.requisitionId },
       data: {

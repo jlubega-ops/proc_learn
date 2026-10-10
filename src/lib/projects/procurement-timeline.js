@@ -51,7 +51,7 @@ export const DOMAIN_TIMELINE_EVENT_LABELS = {
   PROJECT_ORG_OFFER_RECORDED: "Quotation / bid submitted",
   PROJECT_ORG_OFFER_UPDATED: "Provider revised offer",
   PROJECT_ORG_OFFER_WITHDRAWN: "Provider withdrew offer",
-  PROJECT_ORG_OFFER_AUTO_RESPONDED: "Auto-response providers submitted offers",
+  PROJECT_ORG_OFFER_AUTO_RESPONDED: "Offers recorded for providers",
   PROJECT_ORG_OFFER_GENERATED: "Quotation / bid recorded for provider",
   PROJECT_ORG_OFFER_LATE: "Late submission received — not accepted",
   PROJECT_ORG_OFFER_NO_RESPONSE: "Recorded as no response",
@@ -215,7 +215,7 @@ const PROVIDER_EVENTS = new Set([
 ]);
 
 /**
- * True when the provider (portal user or auto-response) performed the action.
+ * True when the provider performed the action (portal, or recorded by the officer).
  * @param {string} eventType
  * @param {Record<string, any>} meta
  */
@@ -255,10 +255,10 @@ export function serializeDomainAuditTimelineEntry(auditRow, ctx = {}) {
     : [];
   const providerName =
     eventType === "PROJECT_ORG_OFFER_AUTO_RESPONDED"
-      ? "Auto-response providers"
+      ? "Providers"
       : supplierId && ctx.providerNameById?.[supplierId]
         ? `${ctx.providerNameById[supplierId]}${
-            meta.source === "AUTO" && eventType === "PROJECT_ORG_OFFER_RECORDED" ? " (auto-response)" : ""
+            meta.source === "AUTO" && eventType === "PROJECT_ORG_OFFER_RECORDED" ? " (recorded by officer)" : ""
           }`
         : null;
   const amountRaw =

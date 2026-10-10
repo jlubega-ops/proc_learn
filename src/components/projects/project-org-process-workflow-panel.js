@@ -22,6 +22,7 @@ import Typography from "@mui/material/Typography";
 import ExpandMoreRounded from "@mui/icons-material/ExpandMoreRounded";
 import RefreshRounded from "@mui/icons-material/RefreshRounded";
 import { useToast } from "@/components/providers/toast-provider";
+import { notifyProcessActivationChanged } from "@/hooks/use-process-activation";
 import {
   adminCenteredLoadingBoxSx,
   adminLoadingSpinnerSx,
@@ -231,6 +232,7 @@ export function ProjectOrgProcessWorkflowPanel({ projectId }) {
         message: enable ? `${row.name} enabled.` : `${row.name} disabled.`,
         severity: "success",
       });
+      notifyProcessActivationChanged();
       await load({ silent: true });
     } finally {
       setBusyId(null);

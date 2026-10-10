@@ -3,8 +3,8 @@ import { writeAuditLog, AuditEvent } from "@/lib/audit-log";
 import { notifyOrgUsers, OrgNotificationType } from "@/lib/projects/org-notifications";
 import { notifyProvider } from "@/lib/projects/provider-notifications";
 import { formatMoneyUGX } from "@/lib/money";
-import { WORKFLOW_TRIGGERS } from "@/lib/projects/process-catalogue";
-import { startWorkflowFromTrigger } from "@/lib/projects/workflow-engine";
+import { PROCESS_FLOW_CODES } from "@/lib/projects/process-catalogue";
+import { assertProcessActive } from "@/lib/projects/process-activation";
 
 /** @param {any} row */
 export function serializePayment(row) {
@@ -79,6 +79,8 @@ export async function createPayment(prisma, opts) {
     where: { id: opts.invoiceId, projectId: opts.projectId, procurementId: opts.procurementId },
   });
   if (!invoice) return { ok: false, error: "Invoice not found for this procurement.", status: 404 };
+  const inactive = await assertProcessActive(prisma, opts.projectId, PROCESS_FLOW_CODES.PAYMENT_PROCESS);
+  if (inactive) return inactive;
   if (![OrgInvoiceStatus.VERIFIED, OrgInvoiceStatus.APPROVED_FOR_PAYMENT].includes(invoice.status)) {
     return {
       ok: false,
@@ -134,21 +136,6 @@ export async function createPayment(prisma, opts) {
       actorRoleName: opts.actorRoleName,
     },
   });
-
-  try {
-    await startWorkflowFromTrigger(prisma, {
-      projectId: opts.projectId,
-      triggerKey: WORKFLOW_TRIGGERS.PAYMENT_STARTED,
-      entityType: "procurement",
-      entityId: opts.procurementId,
-      procurementId: opts.procurementId,
-      entityTitle: `Payment against ${invoice.invoiceNumber}`,
-      actorOrgUserId: opts.actorOrgUserId,
-      actorRoleName: opts.actorRoleName,
-    });
-  } catch {
-    // Best-effort tracking workflow.
-  }
 
   return { ok: true, payment: serializePayment(row) };
 }

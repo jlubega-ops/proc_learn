@@ -4,6 +4,8 @@
  * Pending your action (assignee) → Approved / Rejected by X / Returned….
  */
 
+import { isReceiveGoodsStep } from "@/lib/projects/procurement-task-stage";
+
 /** @type {Record<string, string>} */
 const ROLE_SHORT = {
   "Head User Department": "HOD",
@@ -123,11 +125,13 @@ export function presentProcurementStatus(opts) {
   const progress = opts?.progress || null;
   const step = progress?.currentStep || null;
   const role = shortOrgRoleName(progress?.waitingOnRole || step?.roleName);
-  const stepLabel = String(step?.label || "").trim();
-  const stepPhrase = stepLabel
-    .split(/\s+/)
-    .map((w) => (/[A-Z]{2,}/.test(w) ? w : w.toLowerCase()))
-    .join(" ");
+  const stepLabel = String(step?.label || "").trim().replace(/\s+where applicable$/i, "");
+  const stepPhrase = isReceiveGoodsStep(stepLabel)
+    ? "receipt of goods"
+    : stepLabel
+        .split(/\s+/)
+        .map((w) => (/[A-Z]{2,}/.test(w) ? w : w.toLowerCase()))
+        .join(" ");
   const stageLabel =
     stepPhrase && role ? `Pending ${stepPhrase} by ${role}` : role ? `Pending ${role}` : "";
 

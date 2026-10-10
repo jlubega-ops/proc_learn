@@ -2,9 +2,9 @@ import { addDays, format, subDays } from "date-fns";
 import { PROVIDER_CATEGORY } from "@/lib/projects/provider-terms";
 
 /**
- * Simulated provider behaviours. Compliance-related behaviours shape the
- * generated documents; response/delivery behaviours drive later auto-responses
- * (quotations, bids, deliveries, invoices).
+ * Provider behaviours (profile traits). Compliance-related behaviours shape the
+ * generated documents; price/response behaviours shape the offers the officer
+ * records for providers. Delivery and invoicing are done by the provider in the portal.
  */
 export const PROVIDER_BEHAVIOUR = {
   COMPLIANT_COMPETITIVE: "COMPLIANT_COMPETITIVE",

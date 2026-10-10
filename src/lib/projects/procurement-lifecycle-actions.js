@@ -25,7 +25,6 @@ import {
   evaluateClosureReadiness,
 } from "@/lib/projects/procurement-closure";
 import { PROJECT_ORG_ENTRY_ROLE_NAME } from "@/lib/project-org-role";
-import { autoInvoiceFromGeneratedProvider } from "@/lib/projects/provider-auto-responses";
 import {
   decidePostQualification,
   getEvaluationContext,
@@ -39,8 +38,21 @@ import {
   committeeMayPerformLifecycleAction,
 } from "@/lib/projects/procurement-lifecycle-roles";
 import { COMMITTEE_TYPE_WORKFLOW_ROLES } from "@/lib/projects/committee-context";
+import { PHASE_PROCESS_BY_ACTION } from "@/lib/projects/process-catalogue";
+import { assertProcessActive } from "@/lib/projects/process-activation";
 
 export { LIFECYCLE_ACTION_ROLES };
+
+/** Evaluation actions that belong to one workflow step and only run while it is pending. */
+const EVALUATION_ACTION_STEPS = {
+  save_evaluation: { re: /^prepare evaluation report/i, step: "Prepare Evaluation Report" },
+  submit_evaluation: { re: /^prepare evaluation report/i, step: "Prepare Evaluation Report" },
+  run_post_qualification: { re: /^post-qualification/i, step: "Post-Qualification" },
+  decide_post_qualification: {
+    re: /^approve evaluation\/recommendation/i,
+    step: "Approve Evaluation/Recommendation",
+  },
+};
 
 /**
  * @param {string} action
@@ -151,6 +163,23 @@ export async function actOnProcurementLifecycle(prisma, opts) {
     actorOrgUserId: opts.actorOrgUserId,
     actorRoleName: opts.actorRoleName,
   };
+
+  const phaseCode = PHASE_PROCESS_BY_ACTION[action];
+  if (phaseCode) {
+    const inactive = await assertProcessActive(prisma, opts.projectId, phaseCode);
+    if (inactive) return inactive;
+  }
+
+  const stepGate = EVALUATION_ACTION_STEPS[action];
+  if (stepGate) {
+    const pending = await prisma.projectOrgWorkflowTask.findFirst({
+      where: { projectId: opts.projectId, status: "PENDING", instance: { procurementId: opts.procurementId } },
+      select: { title: true },
+    });
+    if (!stepGate.re.test(String(pending?.title || "").split(":")[0].trim())) {
+      return { ok: false, error: `This is done at the ${stepGate.step} step.`, status: 400, code: "WRONG_STEP" };
+    }
+  }
 
   switch (action) {
     case "evaluate_closure":
@@ -280,7 +309,7 @@ export async function actOnProcurementLifecycle(prisma, opts) {
       if (!body.deliveryId) {
         return { ok: false, error: "deliveryId is required for inspection.", status: 400 };
       }
-      const inspected = await recordInspection(prisma, {
+      return recordInspection(prisma, {
         ...base,
         deliveryId: String(body.deliveryId),
         resultNotes: typeof body.resultNotes === "string" ? body.resultNotes : null,
@@ -288,18 +317,6 @@ export async function actOnProcurementLifecycle(prisma, opts) {
         committeeId: body.committeeId || null,
         committeeRole: body.committeeRole || null,
       });
-      if (inspected.ok && inspected.delivery?.inspection?.status !== "REJECTED") {
-        try {
-          const auto = await autoInvoiceFromGeneratedProvider(prisma, {
-            projectId: opts.projectId,
-            procurementId: opts.procurementId,
-          });
-          if (auto?.ok && auto.invoice) return { ...inspected, autoInvoice: auto.invoice };
-        } catch {
-          // Simulated invoicing is best-effort; the officer can still receive the invoice manually.
-        }
-      }
-      return inspected;
     }
 
     case "create_invoice":

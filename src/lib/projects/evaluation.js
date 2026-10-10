@@ -8,8 +8,8 @@ import {
 import { writeAuditLog, AuditEvent } from "@/lib/audit-log";
 import { notifyOrgUsers, OrgNotificationType } from "@/lib/projects/org-notifications";
 import { requireCommitteeMembership, resolveCommitteeContext } from "@/lib/projects/committee-context";
-import { WORKFLOW_TRIGGERS } from "@/lib/projects/process-catalogue";
-import { startWorkflowFromTrigger } from "@/lib/projects/workflow-engine";
+import { PROCESS_FLOW_CODES } from "@/lib/projects/process-catalogue";
+import { assertProcessActive } from "@/lib/projects/process-activation";
 
 /**
  * Evaluation reports compare offers received for QUOTATION / TENDER procurements
@@ -107,6 +107,12 @@ export async function createEvaluationReport(prisma, opts) {
       status: 400,
     };
   }
+  const inactive = await assertProcessActive(
+    prisma,
+    opts.projectId,
+    PROCESS_FLOW_CODES.EVALUATION_PROCESS,
+  );
+  if (inactive) return inactive;
   if ((procurement.offers || []).length === 0) {
     return {
       ok: false,
@@ -197,21 +203,6 @@ export async function createEvaluationReport(prisma, opts) {
       actorRoleName: opts.actorRoleName,
     },
   });
-
-  try {
-    await startWorkflowFromTrigger(prisma, {
-      projectId: opts.projectId,
-      triggerKey: WORKFLOW_TRIGGERS.EVALUATION_STARTED,
-      entityType: "procurement",
-      entityId: procurement.id,
-      procurementId: procurement.id,
-      entityTitle: `Evaluation: ${row.id}`,
-      actorOrgUserId: opts.actorOrgUserId,
-      actorRoleName: opts.actorRoleName,
-    });
-  } catch {
-    // Best-effort tracking workflow — the evaluation report itself is the source of truth.
-  }
 
   return { ok: true, evaluationReport: serializeEvaluationReport(row) };
 }

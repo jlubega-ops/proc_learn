@@ -20,7 +20,7 @@ import { WorkflowHistoryPanel } from "@/components/projects/workflow-history-pan
 import { PORTAL_NOTIFICATIONS_CHANGED } from "@/components/provider-portal/provider-portal-shell";
 import {
   OFFER_STATUS,
-  OfferDialog,
+  OfferForm,
   StatusChip,
   opportunityStateChip,
 } from "@/components/provider-portal/provider-portal-sections";
@@ -275,6 +275,7 @@ export function PortalOpportunityDetail({ solicitationId }) {
   const state = opportunityStateChip(data);
   const activeOffer = myOffer && myOffer.status !== "WITHDRAWN" ? myOffer : null;
   const pastOffers = (data.offers || []).filter((o) => o.id !== activeOffer?.id);
+  const showForm = Boolean(data.canSubmit) || (Boolean(data.canEdit) && editing);
 
   return (
     <div className="space-y-4">
@@ -286,7 +287,7 @@ export function PortalOpportunityDetail({ solicitationId }) {
             <p className="text-xs font-semibold uppercase tracking-wide text-zinc-500">
               {data.type === "RFQ" ? "Request for quotation" : "Open tender"} · {procurement.number}
             </p>
-            <h2 className="text-lg font-bold wrap-break-word">{data.title}</h2>
+            <h2 className="text-lg font-bold wrap-break-word">{procurement.title || data.title}</h2>
             <p className="text-xs text-zinc-600 wrap-break-word">
               {doc.pdeName || data.organisation?.name}
               {procurement.deliveryLocation ? ` · Deliver to ${procurement.deliveryLocation}` : ""}
@@ -297,42 +298,6 @@ export function PortalOpportunityDetail({ solicitationId }) {
             {myOffer ? <StatusChip map={OFFER_STATUS} status={myOffer.status} /> : null}
           </div>
         </div>
-        {data.canSubmit || data.canEdit ? (
-          <div className="mt-3 flex flex-wrap gap-2">
-            {data.canSubmit ? (
-              <Button
-                variant="contained"
-                startIcon={<SendRounded />}
-                onClick={() => setEditing(true)}
-                className="w-full sm:w-auto"
-              >
-                Submit {word}
-              </Button>
-            ) : null}
-            {data.canEdit ? (
-              <Button
-                variant="contained"
-                startIcon={<EditRounded />}
-                onClick={() => setEditing(true)}
-                className="w-full sm:w-auto"
-              >
-                {data.revising ? `Revise ${word}` : `Edit ${word}`}
-              </Button>
-            ) : null}
-            {data.canWithdraw ? (
-              <Button
-                variant="outlined"
-                color="error"
-                startIcon={withdrawing ? <CircularProgress size={16} color="inherit" /> : <UndoRounded />}
-                onClick={() => void withdraw()}
-                disabled={withdrawing}
-                className="w-full sm:w-auto"
-              >
-                {withdrawing ? "Withdrawing…" : `Withdraw ${word}`}
-              </Button>
-            ) : null}
-          </div>
-        ) : null}
         {data.revising ? (
           <Alert severity="info" variant="outlined" sx={{ mt: 2 }}>
             Clarification requested. You can revise your {word} until evaluation starts.
@@ -372,12 +337,17 @@ export function PortalOpportunityDetail({ solicitationId }) {
           <ReadField label="Category" value={procurement.category} />
           <ReadField label="Issued on" value={formatPortalDate(data.issueDate)} />
           <ReadField label="Closing date" value={formatPortalDateTime(data.closingDate)} />
-          <ReadField label="Issued by" value={doc.issuedByName} />
-          <ReadField label="Position" value={doc.issuedByPosition} />
+          <ReadField
+            label="Issued by"
+            value={[doc.issuedByName, doc.issuedByPosition].filter(Boolean).join(" · ") || null}
+          />
+          {doc.biddingDocumentCost ? (
+            <ReadField label="Bidding document fee" value={formatMoneyUGX(doc.biddingDocumentCost)} />
+          ) : null}
           {procurement.requestedDeliveryDate ? (
             <ReadField label="Deliver by" value={formatPortalDate(procurement.requestedDeliveryDate)} />
           ) : null}
-          <ReadField label="Delivery location" value={procurement.deliveryLocation} />
+          <ReadField label="Delivery location" value={procurement.deliveryLocation} full />
           <ReadField label="Subject of procurement" value={doc.subject} full />
           <ReadField label="Specifications / scope" value={doc.specifications} full />
           <ReadField label="Submission instructions" value={doc.submissionInstructions} full />
@@ -419,20 +389,52 @@ export function PortalOpportunityDetail({ solicitationId }) {
       ) : null}
 
       <Card
-        title={`Your ${word}`}
+        title={showForm ? (activeOffer ? `Edit your ${word}` : `Submit your ${word}`) : `Your ${word}`}
         action={
-          activeOffer && activeOffer.source !== "PORTAL" ? (
-            <Chip
-              size="small"
-              variant="outlined"
-              color="info"
-              label="Recorded by the organisation"
-              title="Entered on your behalf by the procurement unit"
-            />
-          ) : null
+          showForm ? null : (
+            <div className="flex flex-wrap items-center gap-2">
+              {activeOffer && activeOffer.source !== "PORTAL" ? (
+                <Chip
+                  size="small"
+                  variant="outlined"
+                  color="info"
+                  label="Recorded by the organisation"
+                  title="Entered on your behalf by the procurement unit"
+                />
+              ) : null}
+              {data.canEdit ? (
+                <Button size="small" variant="outlined" startIcon={<EditRounded />} onClick={() => setEditing(true)}>
+                  {data.revising ? `Revise ${word}` : `Edit ${word}`}
+                </Button>
+              ) : null}
+              {data.canWithdraw ? (
+                <Button
+                  size="small"
+                  variant="outlined"
+                  color="error"
+                  startIcon={withdrawing ? <CircularProgress size={16} color="inherit" /> : <UndoRounded />}
+                  onClick={() => void withdraw()}
+                  disabled={withdrawing}
+                >
+                  {withdrawing ? "Withdrawing…" : `Withdraw ${word}`}
+                </Button>
+              ) : null}
+            </div>
+          )
         }
       >
-        {activeOffer ? (
+        {showForm ? (
+          <OfferForm
+            key={activeOffer?.id || "new"}
+            opportunity={data}
+            onCancel={activeOffer ? () => setEditing(false) : null}
+            onSaved={() => {
+              setEditing(false);
+              notifyPortal();
+              reload();
+            }}
+          />
+        ) : activeOffer ? (
           <>
             <dl className="grid grid-cols-1 gap-3 sm:grid-cols-2">
               <ReadField label="Total price" value={formatMoneyUGX(activeOffer.amount)} />
@@ -495,18 +497,6 @@ export function PortalOpportunityDetail({ solicitationId }) {
       />
 
       <PortalOpportunityPrint data={data} />
-
-      {editing ? (
-        <OfferDialog
-          opportunity={data}
-          onClose={() => setEditing(false)}
-          onSaved={() => {
-            setEditing(false);
-            notifyPortal();
-            reload();
-          }}
-        />
-      ) : null}
     </div>
   );
 }

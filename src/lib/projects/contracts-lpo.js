@@ -8,40 +8,19 @@ import {
   OrgWorkflowTaskStatus,
 } from "@prisma/client";
 import { validatePurchaseInstructionResponse } from "@/lib/validation/purchase-instruction";
+import { validateStartEndDateRange } from "@/lib/validation/date-range";
 import { writeAuditLog, AuditEvent } from "@/lib/audit-log";
 import { notifyOrgUsers, OrgNotificationType } from "@/lib/projects/org-notifications";
 import { notifyProvider } from "@/lib/projects/provider-notifications";
 import { financialYearRefToken } from "@/lib/projects/org-reference";
 import { serializeProviderSummary } from "@/lib/projects/providers";
-import { WORKFLOW_TRIGGERS } from "@/lib/projects/process-catalogue";
-import { startWorkflowFromTrigger } from "@/lib/projects/workflow-engine";
+import { PROCESS_FLOW_CODES } from "@/lib/projects/process-catalogue";
+import { assertProcessActive } from "@/lib/projects/process-activation";
 import {
   normalizeDeliveryAddress,
   resolveDeliveryAddress,
   validateDeliveryAddressInput,
 } from "@/lib/projects/delivery-address";
-
-/**
- * @param {import("@prisma/client").PrismaClient} prisma
- * @param {string} triggerKey
- * @param {{ projectId: string; procurementId: string; entityTitle: string; actorOrgUserId: string; actorRoleName: string }} opts
- */
-async function bestEffortStartTracking(prisma, triggerKey, opts) {
-  try {
-    await startWorkflowFromTrigger(prisma, {
-      projectId: opts.projectId,
-      triggerKey,
-      entityType: "procurement",
-      entityId: opts.procurementId,
-      procurementId: opts.procurementId,
-      entityTitle: opts.entityTitle,
-      actorOrgUserId: opts.actorOrgUserId,
-      actorRoleName: opts.actorRoleName,
-    });
-  } catch {
-    // Best-effort tracking workflow — the contract/LPO record is the source of truth.
-  }
-}
 
 /**
  * Contracts are used for the TENDER path; LPOs (Local Purchase Orders) for QUOTATION.
@@ -173,12 +152,19 @@ export async function createContract(prisma, opts) {
       code: "CONTRACT_REQUIRES_TENDER",
     };
   }
+  const contractOff = await assertProcessActive(prisma, opts.projectId, PROCESS_FLOW_CODES.CONTRACT_PROCESS);
+  if (contractOff) return contractOff;
 
   const existing = await prisma.projectOrgContract.findFirst({
     where: { projectId: opts.projectId, procurementId: procurement.id, status: { not: OrgContractStatus.CANCELLED } },
   });
   if (existing) {
     return { ok: false, error: "A contract already exists for this procurement.", status: 400, code: "CONTRACT_EXISTS" };
+  }
+
+  const period = validateStartEndDateRange(opts.startDate, opts.endDate);
+  if (!period.ok) {
+    return { ok: false, error: "Enter a valid contract period.", status: 400, fieldErrors: period.errors };
   }
 
   const award = await loadAcceptedAward(prisma, opts.projectId, procurement.id);
@@ -206,8 +192,8 @@ export async function createContract(prisma, opts) {
         normalizeDeliveryAddress(opts.deliveryAddress) ||
         (await resolveDeliveryAddress(prisma, { projectId: opts.projectId, procurementId: procurement.id })),
       status: OrgContractStatus.DRAFT,
-      startDate: opts.startDate ? new Date(opts.startDate) : null,
-      endDate: opts.endDate ? new Date(opts.endDate) : null,
+      startDate: period.startDate,
+      endDate: period.endDate,
     },
     include: { supplier: true },
   });
@@ -223,14 +209,6 @@ export async function createContract(prisma, opts) {
       actorOrgUserId: opts.actorOrgUserId,
       actorRoleName: opts.actorRoleName,
     },
-  });
-
-  await bestEffortStartTracking(prisma, WORKFLOW_TRIGGERS.CONTRACT_STARTED, {
-    projectId: opts.projectId,
-    procurementId: procurement.id,
-    entityTitle: `Contract: ${contractNumber}`,
-    actorOrgUserId: opts.actorOrgUserId,
-    actorRoleName: opts.actorRoleName,
   });
 
   return { ok: true, contract: serializeContract(row) };
@@ -318,25 +296,8 @@ export async function issueContract(prisma, opts) {
     title: `Contract issued: ${row.contractNumber}`,
     body: "Accept or decline the contract in your portal.",
   });
-  await autoAcceptOrder(prisma, { projectId: opts.projectId, procurementId: row.procurementId, supplier: updated.supplier });
 
   return { ok: true, contract: serializeContract(updated) };
-}
-
-/**
- * Auto-response providers accept an issued LPO / contract straight away.
- * @param {import("@prisma/client").PrismaClient} prisma
- * @param {{ projectId: string; procurementId: string; supplier: any }} opts
- */
-async function autoAcceptOrder(prisma, opts) {
-  if (!opts.supplier?.isGenerated) return;
-  await respondToOrder(prisma, {
-    projectId: opts.projectId,
-    providerId: opts.supplier.id,
-    procurementId: opts.procurementId,
-    body: { decision: "ACCEPT", acceptedByName: opts.supplier.contactPerson || opts.supplier.name },
-    auto: true,
-  });
 }
 
 /**
@@ -368,6 +329,8 @@ export async function createLpo(prisma, opts) {
       code: "LPO_REQUIRES_QUOTATION",
     };
   }
+  const lpoOff = await assertProcessActive(prisma, opts.projectId, PROCESS_FLOW_CODES.LPO_PROCESS);
+  if (lpoOff) return lpoOff;
 
   const existing = await prisma.projectOrgLpo.findFirst({
     where: { projectId: opts.projectId, procurementId: procurement.id, status: { not: OrgLpoStatus.CANCELLED } },
@@ -416,14 +379,6 @@ export async function createLpo(prisma, opts) {
       actorOrgUserId: opts.actorOrgUserId,
       actorRoleName: opts.actorRoleName,
     },
-  });
-
-  await bestEffortStartTracking(prisma, WORKFLOW_TRIGGERS.LPO_STARTED, {
-    projectId: opts.projectId,
-    procurementId: procurement.id,
-    entityTitle: `LPO: ${lpoNumber}`,
-    actorOrgUserId: opts.actorOrgUserId,
-    actorRoleName: opts.actorRoleName,
   });
 
   return { ok: true, lpo: serializeLpo(row) };
@@ -483,16 +438,15 @@ export async function issueLpo(prisma, opts) {
     title: `LPO issued: ${row.lpoNumber}`,
     body: "Accept or decline the local purchase order in your portal.",
   });
-  await autoAcceptOrder(prisma, { projectId: opts.projectId, procurementId: row.procurementId, supplier: updated.supplier });
 
   return { ok: true, lpo: serializeLpo(updated) };
 }
 
 /**
- * The provider accepts or declines its ISSUED LPO / contract (portal, or auto-response).
+ * The provider accepts or declines its ISSUED LPO / contract in the provider portal.
  * Acceptance opens the order for delivery (CONTRACT_ACTIVE); a decline goes back to the PDU.
  * @param {import("@prisma/client").PrismaClient} prisma
- * @param {{ projectId: string; providerId: string; procurementId: string; body: any; auto?: boolean }} opts
+ * @param {{ projectId: string; providerId: string; procurementId: string; body: any }} opts
  */
 export async function respondToOrder(prisma, opts) {
   const v = validatePurchaseInstructionResponse(opts.body || {});
@@ -545,7 +499,7 @@ export async function respondToOrder(prisma, opts) {
   });
   if (claimed !== 1) return { ok: false, status: 409, error: `You have already responded to this ${word}.` };
 
-  const providerLabel = `${row.supplier?.name || "Provider"}${opts.auto ? " (auto-response)" : ""}`;
+  const providerLabel = row.supplier?.name || "Provider";
   const eventType = isContract
     ? accept
       ? AuditEvent.PROJECT_ORG_CONTRACT_ACCEPTED
@@ -603,15 +557,6 @@ export async function respondToOrder(prisma, opts) {
       linkUrl: `/projects/${opts.projectId}/procurements/${row.procurementId}`,
       relatedEntityType: isContract ? "contract" : "lpo",
       relatedEntityId: row.id,
-    });
-  }
-
-  if (accept) {
-    const { autoDispatchIfAutoResponse } = await import("@/lib/projects/delivery-notes");
-    await autoDispatchIfAutoResponse(prisma, {
-      projectId: opts.projectId,
-      procurementId: row.procurementId,
-      providerId: row.supplierId,
     });
   }
 

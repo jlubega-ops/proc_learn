@@ -1262,6 +1262,8 @@ model ProjectOrgProcurementPlan {
   sheetType              String                      @default("GOODS_WORKS_NON_CONSULTANCY") @map("sheet_type") @db.VarChar(48)
   /// True = emergency / unplanned plan (uses Emergency Planning Process).
   isEmergency            Boolean                     @default(false) @map("is_emergency")
+  /// Why the need is urgent, unforeseeable and not caused by dilatory conduct (emergency plans only).
+  emergencyJustification String?                     @map("emergency_justification") @db.Text
   status                 OrgProcurementPlanStatus    @default(DRAFT)
   /// When set, this plan is an organisation-level consolidation of department plans.
   isConsolidated         Boolean                     @default(false) @map("is_consolidated")

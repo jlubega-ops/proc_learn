@@ -1,13 +1,13 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
-import Link from "next/link";
 import { useRouter } from "next/navigation";
+import { format } from "date-fns";
 import Box from "@mui/material/Box";
 import Button from "@mui/material/Button";
 import Chip from "@mui/material/Chip";
 import CircularProgress from "@mui/material/CircularProgress";
-import IconButton from "@mui/material/IconButton";
+import LinearProgress from "@mui/material/LinearProgress";
 import MenuItem from "@mui/material/MenuItem";
 import Paper from "@mui/material/Paper";
 import Table from "@mui/material/Table";
@@ -18,10 +18,8 @@ import TableHead from "@mui/material/TableHead";
 import TablePagination from "@mui/material/TablePagination";
 import TableRow from "@mui/material/TableRow";
 import TextField from "@mui/material/TextField";
-import Tooltip from "@mui/material/Tooltip";
 import Typography from "@mui/material/Typography";
 import RefreshRounded from "@mui/icons-material/RefreshRounded";
-import VisibilityRounded from "@mui/icons-material/VisibilityRounded";
 import {
   DashboardPageIntro,
   BRAND_PAGE_SHELL_CLASS,
@@ -36,6 +34,10 @@ import {
 } from "@/lib/admin-mui-surfaces";
 import { useToast } from "@/components/providers/toast-provider";
 import { campusSelectOptions } from "@/lib/campuses";
+
+const HIDE_BELOW_SM = { display: { xs: "none", sm: "table-cell" } };
+const HIDE_BELOW_MD = { display: { xs: "none", md: "table-cell" } };
+const HIDE_BELOW_LG = { display: { xs: "none", lg: "table-cell" } };
 
 /**
  * Examiner roster: students + personal organisation + current procurement stage.
@@ -94,7 +96,7 @@ export function ExaminerParticipationPanel() {
       <DashboardPageIntro
         hero
         title="Student participation"
-        description="Each student has one organisation. Open a row to see where they are in procurement, who acted, and what remains — read-only."
+        description="Students and their organisations."
       >
         <div className="mt-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
           <TextField
@@ -192,102 +194,114 @@ export function ExaminerParticipationPanel() {
             <TableHead>
               <TableRow>
                 <TableCell>Student</TableCell>
-                <TableCell>Organisation</TableCell>
-                <TableCell>Current stage</TableCell>
-                <TableCell>Open task / player</TableCell>
-                <TableCell align="right">Actions</TableCell>
+                <TableCell sx={HIDE_BELOW_MD}>Programme</TableCell>
+                <TableCell sx={HIDE_BELOW_LG}>Campus</TableCell>
+                <TableCell sx={HIDE_BELOW_SM}>Organisation</TableCell>
+                <TableCell>Progress</TableCell>
+                <TableCell sx={HIDE_BELOW_LG}>Work</TableCell>
               </TableRow>
             </TableHead>
             <TableBody>
               {!rows.length ? (
                 <TableRow>
-                  <TableCell colSpan={5}>
-                    <p className={BRAND_PAGE_LEAD_CLASS}>
-                      No students found for this academic year. Change the year filter or add
-                      students first.
-                    </p>
+                  <TableCell colSpan={6}>
+                    <p className={BRAND_PAGE_LEAD_CLASS}>No students found.</p>
                   </TableCell>
                 </TableRow>
               ) : (
-                rows.map((row) => (
-                  <TableRow
-                    key={row.id}
-                    hover
-                    className="cursor-pointer"
-                    onClick={() => router.push(`/students/${row.id}/observe`)}
-                  >
-                    <TableCell>
-                      <div className="font-medium">{row.displayName}</div>
-                      <div className="text-xs opacity-70">{row.email}</div>
-                      {row.studentNumber ? (
-                        <div className="text-xs opacity-70">{row.studentNumber}</div>
-                      ) : null}
-                      {row.campusLabel ? (
-                        <div className="text-xs opacity-70">Campus: {row.campusLabel}</div>
-                      ) : null}
-                      {row.demoBadge ? (
-                        <Chip size="small" color="warning" className="mt-1" label={row.demoBadge.label} />
-                      ) : null}
-                    </TableCell>
-                    <TableCell>
-                      {row.organisation ? (
-                        <>
-                          <div className="font-medium">{row.organisation.name}</div>
-                          {row.organisation.displayName &&
-                          row.organisation.displayName !== row.organisation.name ? (
-                            <div className="text-xs">Shown as: {row.organisation.displayName}</div>
-                          ) : null}
-                          <div className="text-xs opacity-70">{row.organisation.projectCode || "—"}</div>
-                        </>
-                      ) : (
-                        <span className="opacity-70">No organisation yet</span>
-                      )}
-                    </TableCell>
-                    <TableCell>
-                      {row.currentStageLabel ? (
-                        <Chip
-                          size="small"
-                          color="info"
-                          label={row.currentStageLabel}
-                          title={
-                            row.progressPercent != null ? `${row.progressPercent}% complete` : ""
+                rows.map((row) => {
+                  const open = () => router.push(`/students/${row.id}/observe`);
+                  return (
+                      <TableRow
+                        key={row.id}
+                        hover
+                        title="Open student organisation"
+                        tabIndex={0}
+                        role="link"
+                        aria-label={`Open ${row.displayName}`}
+                        className="cursor-pointer"
+                        onClick={open}
+                        onKeyDown={(e) => {
+                          if (e.key === "Enter" || e.key === " ") {
+                            e.preventDefault();
+                            open();
                           }
-                        />
-                      ) : (
-                        "—"
-                      )}
-                      {row.progressPercent != null ? (
-                        <div className="mt-1 text-xs opacity-70">{row.progressPercent}%</div>
-                      ) : null}
-                    </TableCell>
-                    <TableCell>
-                      {row.openTask ? (
-                        <>
-                          <div>{row.openTask.title}</div>
+                        }}
+                      >
+                        <TableCell>
+                          <div className="font-medium text-foreground">{row.displayName}</div>
+                          <div className="break-all text-xs opacity-70">{row.email}</div>
                           <div className="text-xs opacity-70">
-                            {[row.openTask.assignee, row.openTask.role].filter(Boolean).join(" · ") ||
-                              "Unassigned"}
+                            {[row.studentNumber, row.registrationNumber].filter(Boolean).join(" · ")}
                           </div>
-                        </>
-                      ) : (
-                        "—"
-                      )}
-                    </TableCell>
-                    <TableCell align="right" sx={{ whiteSpace: "nowrap" }} onClick={(e) => e.stopPropagation()}>
-                      <Tooltip title="Open organisation progress (read-only)">
-                        <IconButton
-                          size="small"
-                          color="info"
-                          component={Link}
-                          href={`/students/${row.id}/observe`}
-                          aria-label={`View ${row.displayName} organisation`}
-                        >
-                          <VisibilityRounded fontSize="small" />
-                        </IconButton>
-                      </Tooltip>
-                    </TableCell>
-                  </TableRow>
-                ))
+                          {row.demoBadge ? (
+                            <Chip size="small" color="warning" className="mt-1" label={row.demoBadge.label} />
+                          ) : null}
+                        </TableCell>
+                        <TableCell sx={HIDE_BELOW_MD}>
+                          <div>{row.programmeShortName || row.programmeName || "—"}</div>
+                          <div className="text-xs opacity-70">
+                            {[row.yearOfStudy ? `Year ${row.yearOfStudy}` : null, row.academicYearLabel]
+                              .filter(Boolean)
+                              .join(" · ")}
+                          </div>
+                        </TableCell>
+                        <TableCell sx={HIDE_BELOW_LG}>{row.campusLabel || "—"}</TableCell>
+                        <TableCell sx={HIDE_BELOW_SM}>
+                          {row.organisation ? (
+                            <>
+                              <div className="font-medium">
+                                {row.organisation.displayName || row.organisation.name}
+                              </div>
+                              <div className="text-xs opacity-70">{row.organisation.projectCode || "—"}</div>
+                            </>
+                          ) : (
+                            <span className="opacity-70">No organisation yet</span>
+                          )}
+                        </TableCell>
+                        <TableCell sx={{ minWidth: 140 }}>
+                          {row.currentStageLabel ? (
+                            <Chip
+                              size="small"
+                              color={row.progressPercent >= 100 ? "success" : row.progressPercent > 0 ? "info" : "warning"}
+                              variant={row.progressPercent > 0 ? "filled" : "outlined"}
+                              label={row.currentStageLabel}
+                            />
+                          ) : (
+                            "—"
+                          )}
+                          {row.progressPercent != null ? (
+                            <div className="mt-1 flex items-center gap-2">
+                              <LinearProgress
+                                variant="determinate"
+                                value={Math.min(100, Math.max(0, row.progressPercent))}
+                                sx={{ flex: 1, height: 6, borderRadius: 3 }}
+                                aria-label={`${row.progressPercent}% complete`}
+                              />
+                              <span className="text-xs tabular-nums opacity-70">{row.progressPercent}%</span>
+                            </div>
+                          ) : null}
+                        </TableCell>
+                        <TableCell sx={HIDE_BELOW_LG}>
+                          {row.counts ? (
+                            <div className="text-xs leading-5">
+                              <div>
+                                {row.counts.procurements} procurement{row.counts.procurements === 1 ? "" : "s"}
+                              </div>
+                              <div className="opacity-70">
+                                {row.counts.requisitions} req · {row.counts.plans} plans · {row.counts.budgets} budgets
+                              </div>
+                            </div>
+                          ) : (
+                            "—"
+                          )}
+                          <div className="text-xs opacity-70">
+                            Last sign-in: {row.lastLoginAt ? format(new Date(row.lastLoginAt), "MMM d, yyyy") : "Never"}
+                          </div>
+                        </TableCell>
+                      </TableRow>
+                  );
+                })
               )}
             </TableBody>
           </Table>

@@ -5,8 +5,8 @@ import {
 } from "@prisma/client";
 import { writeAuditLog, AuditEvent } from "@/lib/audit-log";
 import { notifyOrgUsers, OrgNotificationType } from "@/lib/projects/org-notifications";
-import { WORKFLOW_TRIGGERS } from "@/lib/projects/process-catalogue";
-import { startWorkflowFromTrigger } from "@/lib/projects/workflow-engine";
+import { PROCESS_FLOW_CODES } from "@/lib/projects/process-catalogue";
+import { assertProcessActive } from "@/lib/projects/process-activation";
 
 /**
  * Post-qualification verifies a recommended supplier's registration, tax compliance,
@@ -94,6 +94,12 @@ export async function createPostQualificationChecklist(prisma, opts) {
       code: "PQ_NOT_REQUIRED",
     };
   }
+  const inactive = await assertProcessActive(
+    prisma,
+    opts.projectId,
+    PROCESS_FLOW_CODES.POST_QUALIFICATION_PROCESS,
+  );
+  if (inactive) return inactive;
   if (!evaluation || !evaluation.recommendedSupplierId) {
     return {
       ok: false,
@@ -142,21 +148,6 @@ export async function createPostQualificationChecklist(prisma, opts) {
       actorRoleName: opts.actorRoleName,
     },
   });
-
-  try {
-    await startWorkflowFromTrigger(prisma, {
-      projectId: opts.projectId,
-      triggerKey: WORKFLOW_TRIGGERS.POST_QUALIFICATION_STARTED,
-      entityType: "procurement",
-      entityId: procurement.id,
-      procurementId: procurement.id,
-      entityTitle: `Post-qualification: ${row.id}`,
-      actorOrgUserId: opts.actorOrgUserId,
-      actorRoleName: opts.actorRoleName,
-    });
-  } catch {
-    // Best-effort tracking workflow.
-  }
 
   return { ok: true, postQualificationReport: serializePostQualificationReport(row) };
 }

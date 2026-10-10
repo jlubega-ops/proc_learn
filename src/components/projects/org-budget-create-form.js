@@ -35,6 +35,9 @@ import {
 } from "@/lib/money";
 import { ORG_REF_DOC, nextOrgDocumentReference } from "@/lib/projects/org-reference";
 import { usePersistedFormDraft } from "@/hooks/use-persisted-form-draft";
+import { useProcessActivation } from "@/hooks/use-process-activation";
+import { ProcessGateTooltip } from "@/components/projects/process-gate";
+import { PROCESS_FLOW_CODES } from "@/lib/projects/process-catalogue";
 
 function emptyLine() {
   return {
@@ -84,6 +87,8 @@ export function OrgBudgetCreateForm({ projectId, budgetId = "" }) {
     lines: [emptyLine()],
   });
   const [metaReady, setMetaReady] = useState(false);
+  const processes = useProcessActivation(projectId);
+  const createBlocked = !isEdit && !processes.isActive(PROCESS_FLOW_CODES.BUDGETING);
 
   const departmentLabel = actorDepartment?.name || "Your department";
 
@@ -513,14 +518,19 @@ export function OrgBudgetCreateForm({ projectId, budgetId = "" }) {
         </div>
 
         <div className="sm:col-span-2 flex flex-wrap gap-2">
-          <Button
-            type="submit"
-            variant="contained"
-            disabled={busy || (!isEdit && years.length === 0)}
-            startIcon={busy ? <CircularProgress size={16} color="inherit" /> : <AddRounded />}
+          <ProcessGateTooltip
+            inactive={createBlocked}
+            title={processes.inactiveTitle(PROCESS_FLOW_CODES.BUDGETING)}
           >
-            {isEdit ? "Save changes" : "Save draft"}
-          </Button>
+            <Button
+              type="submit"
+              variant="contained"
+              disabled={busy || (!isEdit && years.length === 0) || createBlocked}
+              startIcon={busy ? <CircularProgress size={16} color="inherit" /> : <AddRounded />}
+            >
+              {isEdit ? "Save changes" : "Save draft"}
+            </Button>
+          </ProcessGateTooltip>
         </div>
       </form>
     </Paper>

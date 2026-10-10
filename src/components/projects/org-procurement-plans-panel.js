@@ -23,6 +23,9 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useToast } from "@/components/providers/toast-provider";
 import { decisionConfirmOptions, useConfirm } from "@/components/providers/confirm-provider";
+import { useProcessActivation } from "@/hooks/use-process-activation";
+import { ProcessGateTooltip } from "@/components/projects/process-gate";
+import { PROCESS_FLOW_CODES } from "@/lib/projects/process-catalogue";
 import {
   adminCenteredLoadingBoxSx,
   adminLoadingSpinnerSx,
@@ -46,6 +49,15 @@ export function OrgProcurementPlansPanel({ projectId }) {
   const [busy, setBusy] = useState(false);
   const [plans, setPlans] = useState(/** @type {any[]} */ ([]));
   const [canCreate, setCanCreate] = useState(false);
+  const processes = useProcessActivation(projectId);
+  const allPlanningOff =
+    !processes.isActive(PROCESS_FLOW_CODES.PROCUREMENT_PLANNING) &&
+    !processes.isActive(PROCESS_FLOW_CODES.EMERGENCY_PLANNING);
+  /** @param {any} p */
+  const planCode = (p) =>
+    p.isEmergency ? PROCESS_FLOW_CODES.EMERGENCY_PLANNING : PROCESS_FLOW_CODES.PROCUREMENT_PLANNING;
+  /** @param {any} p */
+  const planProcessOff = (p) => !processes.isActive(planCode(p));
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -125,16 +137,23 @@ export function OrgProcurementPlansPanel({ projectId }) {
           Refresh
         </Button>
         {canCreate ? (
-          <Button
-            component={Link}
-            href={`/projects/${projectId}/procurement-plans/new`}
-            variant="contained"
-            startIcon={<AddRounded />}
+          <ProcessGateTooltip
+            inactive={allPlanningOff}
+            title={processes.inactiveTitle(PROCESS_FLOW_CODES.PROCUREMENT_PLANNING)}
             className="w-full sm:w-auto"
-            title="Create a new procurement plan"
           >
-            Create new
-          </Button>
+            <Button
+              component={Link}
+              href={`/projects/${projectId}/procurement-plans/new`}
+              variant="contained"
+              startIcon={<AddRounded />}
+              className="w-full sm:w-auto"
+              title={allPlanningOff ? undefined : "Create a new procurement plan"}
+              disabled={allPlanningOff}
+            >
+              Create new
+            </Button>
+          </ProcessGateTooltip>
         ) : null}
       </div>
 
@@ -211,13 +230,19 @@ export function OrgProcurementPlansPanel({ projectId }) {
                           </IconButton>
                         </Tooltip>
                         {canCreate && ["DRAFT", "RETURNED"].includes(p.status) ? (
-                          <Tooltip title="Submit for planning review">
+                          <Tooltip
+                            title={
+                              planProcessOff(p)
+                                ? processes.inactiveTitle(planCode(p))
+                                : "Submit for planning review"
+                            }
+                          >
                             <span>
                               <IconButton
                                 size="small"
                                 color="info"
                                 aria-label={`Submit plan ${p.title}`}
-                                disabled={busy}
+                                disabled={busy || planProcessOff(p)}
                                 onClick={() => submitPlan(p.id)}
                               >
                                 {busy ? (

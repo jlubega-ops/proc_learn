@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import Alert from "@mui/material/Alert";
 import Button from "@mui/material/Button";
 import Chip from "@mui/material/Chip";
@@ -488,12 +489,17 @@ export function PortalAssignmentDetail({ procurementId }) {
   const [respond, setRespond] = useState(
     /** @type {{ decision: "ACCEPT" | "DECLINE"; target: "pi" | "award" | "order" } | null} */ (null),
   );
+  const router = useRouter();
   const reload = useCallback(() => setReloadKey((k) => k + 1), []);
 
   useEffect(() => {
     let cancelled = false;
     void portalFetch(`/api/provider-portal/assignments/${procurementId}`).then(({ ok, data: body }) => {
       if (cancelled) return;
+      if (!ok && body?.opportunityId) {
+        router.replace(`/provider-portal/opportunities/${body.opportunityId}`);
+        return;
+      }
       setLoading(false);
       if (ok) {
         setData(body);
@@ -503,7 +509,7 @@ export function PortalAssignmentDetail({ procurementId }) {
     return () => {
       cancelled = true;
     };
-  }, [procurementId, reloadKey]);
+  }, [procurementId, reloadKey, router]);
 
   const backRow = (
     <div className="flex flex-wrap items-center justify-between gap-2">

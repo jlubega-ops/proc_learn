@@ -15,10 +15,8 @@ import TextField from "@mui/material/TextField";
 import Typography from "@mui/material/Typography";
 import GavelRounded from "@mui/icons-material/GavelRounded";
 import SaveRounded from "@mui/icons-material/SaveRounded";
-import SendRounded from "@mui/icons-material/SendRounded";
 import WarningAmberRounded from "@mui/icons-material/WarningAmberRounded";
 import { useToast } from "@/components/providers/toast-provider";
-import { actionConfirmOptions, useConfirm } from "@/components/providers/confirm-provider";
 import {
   adminDialogPaperSx,
   adminMutedTextSx,
@@ -31,6 +29,12 @@ import { OrgProviderRunValidation } from "@/components/projects/org-provider-sel
 import { ProviderComplianceChecklist } from "@/components/projects/org-provider-compliance";
 import { OrgAwardDecisionTrail } from "@/components/projects/org-award-recommendation-summary";
 import { actingRoleLabel } from "@/lib/projects/committee-labels";
+import {
+  FINANCIAL_EVAL_STEP_RE,
+  PREPARE_EVAL_REPORT_STEP_RE,
+  TECHNICAL_EVAL_STEP_RE,
+  latestStepSignOff,
+} from "@/lib/projects/invoice-match";
 
 const REPORT_STATUS_COLOR = {
   DRAFT: "warning",
@@ -39,6 +43,20 @@ const REPORT_STATUS_COLOR = {
   APPROVED: "success",
   REJECTED: "error",
 };
+
+/** @type {Record<string, string>} */
+const REPORT_STATUS_LABEL = {
+  DRAFT: "Draft",
+  RETURNED: "Returned",
+  SUBMITTED: "Submitted",
+  APPROVED: "Approved",
+  REJECTED: "Rejected",
+};
+
+/** @param {{ by: string | null; at: any } | null} s */
+function signOffLine(s) {
+  return s ? `${s.by || "—"} · ${formatPrintDate(s.at)}` : "—";
+}
 
 /**
  * @param {any[]} bidders
@@ -67,13 +85,13 @@ function lowestEligible(bidders) {
  *   onStepActionInsideChange?: (inside: boolean) => void;
  *   hideStepAction?: boolean;
  *   stepBusy?: boolean;
+ *   phaseLocked?: boolean;
  *   ref?: import("react").Ref<{ prepare: () => Promise<boolean>; submit: () => Promise<boolean> }>;
  * }} p
  */
 export function OrgEvaluationPanel({
   projectId,
   procurement,
-  providerWord,
   onChanged,
   step = null,
   stepActionLabel = "",
@@ -81,24 +99,20 @@ export function OrgEvaluationPanel({
   onStepActionInsideChange,
   hideStepAction = false,
   stepBusy = false,
+  phaseLocked = false,
   ref,
 }) {
   const { showToast } = useToast();
-  const confirm = useConfirm();
   const warnResolveRef = useRef(/** @type {((ok: boolean) => void) | null} */ (null));
   const [ctx, setCtx] = useState(/** @type {any} */ (null));
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
-  const [eligibilityConfirmed, setEligibilityConfirmed] = useState(false);
   const [recommendedId, setRecommendedId] = useState("");
   const [recommendation, setRecommendation] = useState("");
   const [comments, setComments] = useState("");
   /** @type {[Record<string, string>, Function]} */
   const [errors, setErrors] = useState({});
   const [confirmSubmit, setConfirmSubmit] = useState(/** @type {string[] | null} */ (null));
-  const [pqComment, setPqComment] = useState("");
-  const [pqCommentError, setPqCommentError] = useState("");
-
   const refreshKey = `${procurement?.updatedAt || ""}-${(procurement?.offers || []).length}`;
 
   const call = useCallback(
@@ -129,7 +143,6 @@ export function OrgEvaluationPanel({
       setRecommendedId(report?.recommendedSupplierId || fallback?.id || "");
       setRecommendation(report?.recommendation || "");
       setComments(report?.comments || "");
-      setEligibilityConfirmed(Boolean(report?.eligibility));
       setErrors({});
     } finally {
       setLoading(false);
@@ -251,17 +264,6 @@ export function OrgEvaluationPanel({
     };
   }
 
-  async function startSubmit() {
-    if (!validate(true)) return;
-    const w = recommendationWarnings();
-    if (w.length) {
-      setConfirmSubmit(w);
-      return;
-    }
-    if (!(await confirm(actionConfirmOptions("Submit evaluation report")))) return;
-    void mutate("submit_evaluation", payload(), "Evaluation report submitted for approval.");
-  }
-
   /** @param {boolean} ok */
   function resolveWarnings(ok) {
     const resolve = warnResolveRef.current;
@@ -325,17 +327,7 @@ export function OrgEvaluationPanel({
           color="warning"
           startIcon={<WarningAmberRounded />}
           onClick={() => {
-            if (resolveWarnings(true)) return;
-            setConfirmSubmit(null);
-            if (pq?.status === "SUBMITTED" && ctx.permissions?.canDecidePostQualification) {
-              void mutate(
-                "decide_post_qualification",
-                { decision: "APPROVE", comment: pqComment.trim() || null },
-                "Post-qualification approved with warnings.",
-              );
-            } else {
-              void mutate("submit_evaluation", payload(), "Evaluation report submitted for approval.");
-            }
+            if (!resolveWarnings(true)) setConfirmSubmit(null);
           }}
         >
           Continue anyway
@@ -483,17 +475,30 @@ export function OrgEvaluationPanel({
         </Typography>
       );
     } else if (step === "technical") {
-      body = canEvaluate ? (
-        <OrgProviderRunValidation
-          providers={bidders}
-          actionLabel={stepActionLabel || "Complete technical evaluation"}
-          busy={stepBusy || busy}
-          busyLabel="Completing…"
-          hideAction={hideStepAction}
-          onConfirm={() => onStepAction?.()}
-        />
-      ) : (
-        notMemberAlert
+      const criteria = procurement?.solicitations?.[0]?.bidDocument?.evaluationCriteria || "";
+      body = (
+        <div className="space-y-3">
+          {criteria ? (
+            <div className="rounded-lg border border-(--border-subtle) p-3 text-sm">
+              <Typography variant="caption" sx={{ ...adminMutedTextSx, display: "block" }}>
+                Evaluation criteria
+              </Typography>
+              <p className="whitespace-pre-line wrap-break-word">{criteria}</p>
+            </div>
+          ) : null}
+          {canEvaluate ? (
+            <OrgProviderRunValidation
+              providers={bidders}
+              actionLabel={stepActionLabel || "Complete technical evaluation"}
+              busy={stepBusy || busy}
+              busyLabel="Completing…"
+              hideAction={hideStepAction || phaseLocked}
+              onConfirm={() => onStepAction?.()}
+            />
+          ) : (
+            notMemberAlert
+          )}
+        </div>
       );
     } else if (step === "financial") {
       body = rankedTable(liveRanking);
@@ -601,6 +606,22 @@ export function OrgEvaluationPanel({
               </Typography>
               {report.committee?.name || "—"}
             </div>
+            {fact("Estimated value", estimate ? formatMoneyUGX(estimate) : "—")}
+            {fact(
+              "Against estimate",
+              estimate ? (
+                <Chip
+                  size="small"
+                  color={variance > 0 ? "error" : "success"}
+                  label={variance > 0 ? `Over by ${formatMoneyUGX(variance)}` : "Within estimate"}
+                />
+              ) : (
+                "—"
+              ),
+            )}
+            {fact("Report prepared by", signOffLine(latestStepSignOff(procurement?.timeline, PREPARE_EVAL_REPORT_STEP_RE)))}
+            {fact("Technical evaluation", signOffLine(latestStepSignOff(procurement?.timeline, TECHNICAL_EVAL_STEP_RE)))}
+            {fact("Financial evaluation", signOffLine(latestStepSignOff(procurement?.timeline, FINANCIAL_EVAL_STEP_RE)))}
             {report.recommendation ? (
               <div className="sm:col-span-3">
                 <Typography variant="caption" sx={{ ...adminMutedTextSx, display: "block" }}>
@@ -642,12 +663,29 @@ export function OrgEvaluationPanel({
                 <Typography variant="body2" sx={{ fontWeight: 600 }}>
                   Post-qualification
                 </Typography>
-                <Chip
-                  size="small"
-                  color={/** @type {any} */ (REPORT_STATUS_COLOR[pq.status] || "info")}
-                  label={pq.status}
-                />
+                <div className="flex flex-wrap items-center gap-2">
+                  {pq.validation ? (
+                    <Chip
+                      size="small"
+                      color={pq.validation.qualifies ? "success" : "error"}
+                      label={pq.validation.qualifies ? "Qualifies" : "Does not qualify"}
+                    />
+                  ) : null}
+                  <Chip
+                    size="small"
+                    variant="outlined"
+                    color={/** @type {any} */ (REPORT_STATUS_COLOR[pq.status] || "info")}
+                    label={REPORT_STATUS_LABEL[pq.status] || pq.status}
+                  />
+                </div>
               </div>
+              <p className="mt-1 text-sm">
+                {pq.validation?.name || report.recommendedSupplier?.name || "—"} · post-qualified by{" "}
+                {signOffLine(latestStepSignOff(procurement?.timeline, /^post-qualification/i))}
+              </p>
+              {pq.validation?.failedReasons?.length ? (
+                <p className="mt-1 text-xs text-brand-red wrap-break-word">{pq.validation.failedReasons.join(" · ")}</p>
+              ) : null}
               {pq.validation?.checks?.length ? (
                 <ProviderComplianceChecklist checks={pq.validation.checks} />
               ) : null}
@@ -656,13 +694,63 @@ export function OrgEvaluationPanel({
         </div>
       );
     } else if (step === "report") {
+      const estimate = Number(procurement?.requisition?.estimatedTotalValue) || 0;
+      const overBy = chosen && estimate ? Number(chosen.amount) - estimate : 0;
+      const results = (
+        <div className="space-y-3">
+          <div className="grid gap-3 rounded-lg border border-(--border-subtle) p-3 text-sm sm:grid-cols-3">
+            <div>
+              <Typography variant="caption" sx={{ ...adminMutedTextSx, display: "block" }}>
+                Technical evaluation
+              </Typography>
+              <span className="wrap-break-word">{signOffLine(latestStepSignOff(procurement?.timeline, TECHNICAL_EVAL_STEP_RE))}</span>
+            </div>
+            <div>
+              <Typography variant="caption" sx={{ ...adminMutedTextSx, display: "block" }}>
+                Financial evaluation
+              </Typography>
+              <span className="wrap-break-word">{signOffLine(latestStepSignOff(procurement?.timeline, FINANCIAL_EVAL_STEP_RE))}</span>
+            </div>
+            <div>
+              <Typography variant="caption" sx={{ ...adminMutedTextSx, display: "block" }}>
+                Estimated value
+              </Typography>
+              {estimate ? formatMoneyUGX(estimate) : "—"}
+            </div>
+          </div>
+          {rankedTable(liveRanking, recommendedId || null)}
+        </div>
+      );
+      const returned =
+        report?.status === "RETURNED"
+          ? [...(procurement?.timeline || [])]
+              .filter((a) => a.decision === "RETURN" && /^(review|approve) evaluation/i.test(String(a.taskTitle || "")))
+              .sort((a, b) => String(b.createdAt || "").localeCompare(String(a.createdAt || "")))[0] || null
+          : null;
       body = editable ? (
         <form noValidate onSubmit={(e) => e.preventDefault()} className="space-y-3">
+          {returned ? (
+            <Alert severity="warning" variant="outlined">
+              Returned by {returned.actor?.displayName || "—"}
+              {actingRoleLabel(returned) ? ` (${actingRoleLabel(returned)})` : ""} · {formatPrintDate(returned.createdAt)}
+              {returned.comment ? `: ${returned.comment}` : ""}
+            </Alert>
+          ) : null}
+          {results}
           {reportFields}
           <div className="flex flex-wrap items-center justify-between gap-2">
             {chosen ? (
-              <p className="text-sm">
-                Evaluated amount: <span className="font-semibold">{formatMoneyUGX(chosen.amount)}</span>
+              <p className="flex flex-wrap items-center gap-2 text-sm">
+                <span>
+                  Evaluated amount: <span className="font-semibold">{formatMoneyUGX(chosen.amount)}</span>
+                </span>
+                {estimate ? (
+                  <Chip
+                    size="small"
+                    color={overBy > 0 ? "error" : "success"}
+                    label={overBy > 0 ? `Over estimate by ${formatMoneyUGX(overBy)}` : "Within estimate"}
+                  />
+                ) : null}
               </p>
             ) : (
               <span />
@@ -670,7 +758,7 @@ export function OrgEvaluationPanel({
             <Button
               variant="outlined"
               startIcon={<SaveRounded />}
-              disabled={busy || stepBusy}
+              disabled={busy || stepBusy || phaseLocked}
               onClick={() => {
                 if (validate(false)) void mutate("save_evaluation", payload(), "Evaluation draft saved.");
               }}
@@ -688,13 +776,43 @@ export function OrgEvaluationPanel({
     } else if (step === "postQualification") {
       body = (
         <div className="space-y-2">
+          <div className="grid gap-3 rounded-lg border border-(--border-subtle) p-3 text-sm sm:grid-cols-3">
+            <div>
+              <Typography variant="caption" sx={{ ...adminMutedTextSx, display: "block" }}>
+                Recommended bidder
+              </Typography>
+              <span className="font-semibold wrap-break-word">
+                {report?.recommendedSupplier?.name || recommended?.name || "—"}
+              </span>
+            </div>
+            <div>
+              <Typography variant="caption" sx={{ ...adminMutedTextSx, display: "block" }}>
+                Evaluated amount
+              </Typography>
+              <span className="font-semibold">{formatMoneyUGX(report?.evaluatedAmount)}</span>
+            </div>
+            <div>
+              <Typography variant="caption" sx={{ ...adminMutedTextSx, display: "block" }}>
+                Report cleared by (Head PDU)
+              </Typography>
+              <span className="wrap-break-word">
+                {signOffLine(latestStepSignOff(procurement?.timeline, /^review evaluation report/i))}
+              </span>
+            </div>
+            <div className="sm:col-span-3">
+              <Typography variant="caption" sx={{ ...adminMutedTextSx, display: "block" }}>
+                Checks
+              </Typography>
+              Registration, tax compliance and experience in the category.
+            </div>
+          </div>
           {stepActionInside && recommended ? (
             <OrgProviderRunValidation
               providers={[recommended]}
               actionLabel={stepActionLabel || "Submit post-qualification"}
               busy={stepBusy || busy}
               busyLabel="Submitting post-qualification…"
-              hideAction={hideStepAction}
+              hideAction={hideStepAction || phaseLocked}
               onConfirm={() => runPostQualificationStep()}
             />
           ) : !canEvaluate ? (
@@ -717,7 +835,7 @@ export function OrgEvaluationPanel({
           <Chip
             size="small"
             color={/** @type {any} */ (REPORT_STATUS_COLOR[report.status] || "info")}
-            label={`Report ${report.status}`}
+            label={`Report ${(REPORT_STATUS_LABEL[report.status] || report.status).toLowerCase()}`}
           />
         ) : null}
         {body}
@@ -726,6 +844,17 @@ export function OrgEvaluationPanel({
     );
   }
 
+  const recordedRanking = Array.isArray(report?.eligibility?.bidders)
+    ? report.eligibility.bidders.map((b) => ({
+        id: b.supplierId,
+        name: b.name,
+        amount: b.amount,
+        qualifies: Boolean(b.qualifies),
+        failedReasons: b.failedReasons || [],
+      }))
+    : null;
+  const reportIn = Boolean(report) && !["DRAFT", "RETURNED"].includes(report.status);
+
   return (
     <Paper variant="outlined" sx={{ p: 2, ...adminOutlinedTableContainerSx }}>
       <div className="flex flex-wrap items-center justify-between gap-2">
@@ -733,159 +862,41 @@ export function OrgEvaluationPanel({
           <GavelRounded fontSize="small" color="primary" aria-hidden />
           Evaluation
         </Typography>
-        {report ? (
-          <Chip
-            size="small"
-            color={/** @type {any} */ (REPORT_STATUS_COLOR[report.status] || "info")}
-            label={`Report ${report.status}`}
-          />
-        ) : null}
+        <Chip
+          size="small"
+          color={/** @type {any} */ (reportIn ? REPORT_STATUS_COLOR[report.status] || "info" : "warning")}
+          label={reportIn ? `Report ${(REPORT_STATUS_LABEL[report.status] || report.status).toLowerCase()}` : "Report not submitted"}
+        />
       </div>
 
       {!bidders.length ? (
         <Typography variant="body2" sx={{ ...adminMutedTextSx, mt: 1 }}>
-          No quotations or bids yet. Evaluation starts once offers have been received and opened.
+          No opened quotations or bids.
         </Typography>
       ) : (
         <div className="mt-2 space-y-3">
-          {editable ? (
-            <>
-              <Typography variant="body2" sx={adminMutedTextSx}>
-                As a member of the Evaluation Committee, run the eligibility validation on all{" "}
-                {bidders.length} bidder(s), then recommend the {providerWord} for award.
-              </Typography>
-              <OrgProviderRunValidation
-                providers={bidders}
-                actionLabel="Confirm eligibility results"
-                confirmed={eligibilityConfirmed}
-                confirmedLabel="Eligibility results confirmed"
-                onConfirm={() => setEligibilityConfirmed(true)}
-              />
-            </>
-          ) : !canEvaluate && (!report || ["DRAFT", "RETURNED"].includes(report.status)) ? (
-            <Alert severity="info" variant="outlined">
-              The Evaluation Committee runs eligibility on the bidders and submits its recommendation
-              here. Only Evaluation Committee members can do this, after switching to their
-              Evaluation Committee seat.
-            </Alert>
-          ) : null}
-
-          {editable && eligibilityConfirmed ? (
-            <form noValidate onSubmit={(e) => e.preventDefault()} className="space-y-3">
-              {reportFields}
-              {chosen ? (
-                <p className="text-sm">
-                  Evaluated amount: <span className="font-semibold">{formatMoneyUGX(chosen.amount)}</span>{" "}
-                  (the recommended bidder&apos;s offer)
-                </p>
-              ) : null}
-              <div className="flex flex-wrap gap-2">
-                <Button
-                  variant="outlined"
-                  startIcon={<SaveRounded />}
-                  disabled={busy}
-                  onClick={() => {
-                    if (validate(false)) void mutate("save_evaluation", payload(), "Evaluation draft saved.");
-                  }}
-                  className="w-full sm:w-auto"
-                >
-                  Save draft
-                </Button>
-                <Button
-                  variant="contained"
-                  startIcon={busy ? <CircularProgress size={16} color="inherit" /> : <SendRounded />}
-                  disabled={busy}
-                  onClick={() => void startSubmit()}
-                  className="w-full sm:w-auto"
-                >
-                  {busy ? "Submitting…" : "Submit evaluation report"}
-                </Button>
-              </div>
-            </form>
-          ) : null}
-
-          {report && report.status !== "DRAFT" ? (
-            <div className="space-y-1 text-sm">
-              <p>
-                <span className="font-semibold">Recommended:</span> {report.recommendedSupplier?.name || "—"} ·{" "}
-                {formatMoneyUGX(report.evaluatedAmount)}
-                {report.committee?.name ? ` · ${report.committee.name}` : ""}
-              </p>
-              {report.recommendation ? <p className="wrap-break-word">{report.recommendation}</p> : null}
-              {report.status === "SUBMITTED" ? (
-                <Alert severity="info" variant="outlined">
-                  Awaiting approval. The approver records the decision at the &ldquo;Approve evaluation
-                  report&rdquo; workflow step.
-                </Alert>
-              ) : null}
-            </div>
-          ) : null}
-
-          {report?.eligibility?.bidders?.length ? (
-            <div>
-              <Typography variant="body2" sx={{ fontWeight: 600 }}>
-                Recorded eligibility results
-              </Typography>
-              <ul className="mt-1 space-y-1 text-sm">
-                {report.eligibility.bidders.map((b) => (
-                  <li key={b.supplierId} className="flex flex-wrap items-center gap-2">
-                    <span className="wrap-break-word">{b.name}</span>
-                    <span className="opacity-80">{formatMoneyUGX(b.amount)}</span>
-                    <Chip
-                      size="small"
-                      color={b.qualifies ? "success" : "error"}
-                      label={b.qualifies ? "Eligible" : "Not eligible"}
-                    />
-                    {!b.qualifies && b.failedReasons?.length ? (
-                      <span className="w-full text-xs opacity-75">{b.failedReasons.join("; ")}</span>
-                    ) : null}
-                  </li>
-                ))}
-              </ul>
-              {(report.eligibility.warnings || []).map((w) => (
-                <Alert key={w} severity="warning" variant="outlined" sx={{ mt: 1 }}>
+          {reportIn ? reportSummary : null}
+          {rankedTable(reportIn && recordedRanking ? recordedRanking : liveRanking, reportIn ? report.recommendedSupplierId : null)}
+          {reportIn
+            ? (report.eligibility?.warnings || []).map((w) => (
+                <Alert key={w} severity="warning" variant="outlined">
                   {w}
                 </Alert>
-              ))}
-            </div>
-          ) : null}
+              ))
+            : null}
 
-          {ctx.postQualificationRequired && ["SUBMITTED", "APPROVED"].includes(report?.status) ? (
+          {ctx.postQualificationRequired && reportIn ? (
             <div className="space-y-2 border-t border-(--border-subtle) pt-3">
               <div className="flex flex-wrap items-center justify-between gap-2">
                 <Typography variant="body2" sx={{ fontWeight: 600 }}>
                   Post-qualification
                 </Typography>
-                {pq ? (
-                  <Chip
-                    size="small"
-                    color={/** @type {any} */ (REPORT_STATUS_COLOR[pq.status] || "info")}
-                    label={pq.status}
-                  />
-                ) : null}
+                <Chip
+                  size="small"
+                  color={/** @type {any} */ (pq ? REPORT_STATUS_COLOR[pq.status] || "info" : "warning")}
+                  label={pq ? REPORT_STATUS_LABEL[pq.status] || pq.status : "Not started"}
+                />
               </div>
-              {!pq || pq.status === "DRAFT" ? (
-                canEvaluate && recommended ? (
-                  <>
-                    <Typography variant="body2" sx={adminMutedTextSx}>
-                      Confirm the recommended bidder still meets the requirements before award.
-                    </Typography>
-                    <OrgProviderRunValidation
-                      providers={[recommended]}
-                      actionLabel="Submit post-qualification"
-                      busy={busy}
-                      busyLabel="Submitting post-qualification…"
-                      onConfirm={() =>
-                        mutate("run_post_qualification", {}, "Post-qualification submitted for approval.")
-                      }
-                    />
-                  </>
-                ) : (
-                  <Typography variant="body2" sx={adminMutedTextSx}>
-                    The Evaluation Committee post-qualifies the recommended bidder before the award.
-                  </Typography>
-                )
-              ) : null}
               {pq?.validation?.checks?.length ? (
                 <div className="rounded-md bg-surface-card p-2">
                   <Typography variant="body2" fontWeight={700}>
@@ -894,80 +905,10 @@ export function OrgEvaluationPanel({
                   <ProviderComplianceChecklist checks={pq.validation.checks} />
                 </div>
               ) : null}
-              {pq?.status === "SUBMITTED" && ctx.permissions?.canDecidePostQualification ? (
-                <div className="space-y-2">
-                  <TextField
-                    label="Comment"
-                    value={pqComment}
-                    onChange={(e) => {
-                      setPqComment(e.target.value);
-                      setPqCommentError("");
-                    }}
-                    error={Boolean(pqCommentError)}
-                    helperText={pqCommentError || "Required when rejecting"}
-                    fullWidth
-                    multiline
-                    minRows={2}
-                    sx={themedTextFieldSx}
-                  />
-                  <div className="flex flex-wrap gap-2">
-                    <Button
-                      variant="contained"
-                      color={pq.validation?.qualifies === false ? "warning" : "success"}
-                      startIcon={pq.validation?.qualifies === false ? <WarningAmberRounded /> : <GavelRounded />}
-                      disabled={busy}
-                      onClick={async () => {
-                        if (pq.validation?.qualifies === false) {
-                          setConfirmSubmit(pq.validation.failedReasons?.length ? pq.validation.failedReasons : ["Some checks failed."]);
-                          return;
-                        }
-                        if (!(await confirm(actionConfirmOptions("Approve post-qualification")))) return;
-                        void mutate(
-                          "decide_post_qualification",
-                          { decision: "APPROVE", comment: pqComment.trim() || null },
-                          "Post-qualification approved.",
-                        );
-                      }}
-                      className="w-full sm:w-auto"
-                    >
-                      {pq.validation?.qualifies === false
-                        ? "Approve post-qualification with warnings"
-                        : "Approve post-qualification"}
-                    </Button>
-                    <Button
-                      variant="outlined"
-                      color="error"
-                      disabled={busy}
-                      onClick={async () => {
-                        if (!pqComment.trim()) {
-                          setPqCommentError("Enter the reason for rejecting.");
-                          showToast({ message: "Please fix the highlighted fields.", severity: "error" });
-                          return;
-                        }
-                        if (!(await confirm(actionConfirmOptions("Reject post-qualification", { color: "error" })))) return;
-                        void mutate(
-                          "decide_post_qualification",
-                          { decision: "REJECT", comment: pqComment.trim() },
-                          "Post-qualification rejected.",
-                        );
-                      }}
-                      className="w-full sm:w-auto"
-                    >
-                      Reject
-                    </Button>
-                  </div>
-                </div>
-              ) : pq?.status === "SUBMITTED" ? (
-                <Typography variant="body2" sx={adminMutedTextSx}>
-                  Pending Contracts Committee decision on post-qualification.
-                </Typography>
-              ) : null}
             </div>
           ) : null}
         </div>
       )}
-
-      {warningsDialog}
     </Paper>
   );
 }
