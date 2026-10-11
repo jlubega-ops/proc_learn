@@ -1,5 +1,5 @@
 import { prisma } from "@/lib/prisma";
-import { findStudentAttemptOrg } from "@/lib/projects/student-attempt-org";
+import { resolveParticipantWorkspace } from "@/lib/academic/participant-workspace";
 import { getExaminerStudentObservation } from "@/lib/academic/examiner-observation";
 import {
   computeAttemptTimer,
@@ -49,19 +49,7 @@ export async function getExaminerAcademicProjectStudentReport(opts) {
   }
 
   const latest = enrollment.attempts[0] || null;
-  let workspace = null;
-  if (latest?.workspaceProjectId) {
-    workspace = await db.project.findFirst({
-      where: { id: latest.workspaceProjectId, ownerUserId: opts.studentUserId },
-      select: { id: true },
-    });
-  }
-  if (!workspace) {
-    workspace = await findStudentAttemptOrg(db, {
-      studentUserId: opts.studentUserId,
-      academicProjectId: opts.academicProjectId,
-    });
-  }
+  const workspace = await resolveParticipantWorkspace(db, opts.academicProjectId, opts.studentUserId);
 
   const observation = await getExaminerStudentObservation(opts.studentUserId, {
     academicYearId: opts.academicYearId,
@@ -126,6 +114,15 @@ export async function getExaminerAcademicProjectStudentReport(opts) {
             allowedCount: live?.allowedCount ?? null,
           }
         : null,
-    processScores: live?.processes || null,
+    processScores: live?.processes || sectionSnapshot(grade?.checkpointResults),
   };
+}
+
+/**
+ * Stored section scores from the last auto-evaluation (older grades used flat checkpoints).
+ * @param {unknown} results
+ */
+function sectionSnapshot(results) {
+  if (!Array.isArray(results) || !results.length) return null;
+  return results.every((r) => r && Array.isArray(r.items)) ? results : null;
 }

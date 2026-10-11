@@ -1,6 +1,8 @@
 /**
  * Sidebar sections of the examiner's read-only organisation explorer (shared client + server).
  */
+import { PROCESS_FLOW_CODES } from "@/lib/projects/process-catalogue";
+
 export const EXPLORER_SECTION_GROUPS = [
   {
     key: "organisation",
@@ -39,6 +41,28 @@ export const EXPLORER_SECTION_GROUPS = [
 ];
 
 export const EXPLORER_SECTION_KEYS = EXPLORER_SECTION_GROUPS.flatMap((g) => g.items.map((i) => i.key));
+
+const C = PROCESS_FLOW_CODES;
+
+/** Explorer section → scoring section keys whose marks it shows. */
+export const EXPLORER_SCORING_SECTIONS = {
+  "financial-years": ["ORG_FINANCIAL_YEARS"],
+  "planning-periods": ["ORG_FINANCIAL_YEARS"],
+  budgets: [C.BUDGETING],
+  plans: [C.PROCUREMENT_PLANNING, C.EMERGENCY_PLANNING],
+  users: ["ORG_USERS"],
+  committees: ["ORG_COMMITTEES"],
+  departments: ["ORG_DEPARTMENTS"],
+  structure: ["ORG_DEPARTMENTS"],
+  providers: ["ORG_PROVIDERS"],
+  requisitions: [C.PROCUREMENT_REQUISITION],
+  sourcing: [C.MICRO_PROCUREMENT, C.QUOTATION_PROCESS, C.TENDER_PROCESS],
+  evaluations: [C.EVALUATION_PROCESS],
+  awards: [C.POST_QUALIFICATION_PROCESS],
+  orders: [C.LPO_PROCESS, C.CONTRACT_PROCESS],
+  invoices: [C.INVOICE_PROCESS],
+  payments: [C.PAYMENT_PROCESS],
+};
 
 /** @param {string} key */
 export function explorerSectionLabel(key) {

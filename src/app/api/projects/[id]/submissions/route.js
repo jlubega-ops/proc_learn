@@ -22,10 +22,6 @@ export async function GET(_request, context) {
   if (!project || project.creatorRole !== Role.EXAMINER) {
     return NextResponse.json({ error: "Not found." }, { status: 404 });
   }
-  if (activeRole === Role.EXAMINER && project.ownerUserId !== user.id) {
-    return NextResponse.json({ error: "Not found." }, { status: 404 });
-  }
-
   const [notStarted, inProgress, submitted, totalEnrolled, rows] = await Promise.all([
     prisma.projectEnrollment.count({
       where: { projectId: id, status: ProjectEnrollmentStatus.NOT_STARTED },

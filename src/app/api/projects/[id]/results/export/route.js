@@ -2,15 +2,16 @@ import { NextResponse } from "next/server";
 import { Role } from "@prisma/client";
 import { getSessionUser, sessionActiveRole } from "@/lib/api/get-session-user";
 import { buildProjectGradesWorkbook } from "@/lib/academic/project-grades-export";
+import { parseResultsView } from "@/lib/academic/assessment-config";
 import { prisma } from "@/lib/prisma";
 import { canManageExaminerProject } from "@/lib/projects/access";
 
 export const runtime = "nodejs";
 
 /**
- * Excel of enrolled students: identity, times, live/stored score over total marks.
+ * Excel of enrolled students. ?view=summary → scores only; ?view=details (default) → full breakdown.
  */
-export async function GET(_request, context) {
+export async function GET(request, context) {
   const user = await getSessionUser();
   if (!user) return NextResponse.json({ error: "Unauthorized." }, { status: 401 });
   const activeRole = sessionActiveRole(user) || Role.STUDENT;
@@ -31,9 +32,11 @@ export async function GET(_request, context) {
     return NextResponse.json({ error: "Not found." }, { status: 404 });
   }
 
+  const view = parseResultsView(new URL(request.url).searchParams.get("view")) || "DETAILS";
   const exported = await buildProjectGradesWorkbook({
     projectId: id,
     actorUserId: user.id,
+    view,
   });
   if (!exported) return NextResponse.json({ error: "Not found." }, { status: 404 });
 

@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import Button from "@mui/material/Button";
 import Chip from "@mui/material/Chip";
 import CircularProgress from "@mui/material/CircularProgress";
@@ -38,11 +39,13 @@ import {
 import { useToast } from "@/components/providers/toast-provider";
 import { formatDurationClock } from "@/lib/academic/attempt-timer-format";
 import { campusSelectOptions } from "@/lib/campuses";
+import { clickableRowProps } from "@/lib/clickable-row";
 
 /**
  * @param {{ projectId: string }} props
  */
 export function AcademicProjectParticipantsPanel({ projectId }) {
+  const router = useRouter();
   const { showToast } = useToast();
   const [loading, setLoading] = useState(true);
   const [data, setData] = useState(/** @type {any} */ (null));
@@ -121,8 +124,8 @@ export function AcademicProjectParticipantsPanel({ projectId }) {
     <div className={BRAND_PAGE_SHELL_CLASS}>
       <DashboardPageIntro
         hero
-        title={p.name}
-        description="Enrolled students, live stage, and current automatic score. Open a student for the full project report."
+        title="Participants"
+        description="Enrolled students and their progress."
       >
         <div className="mt-3 flex flex-wrap gap-2">
           <Chip size="small" color="primary" label={p.purpose} />
@@ -198,7 +201,10 @@ export function AcademicProjectParticipantsPanel({ projectId }) {
               </TableHead>
               <TableBody>
                 {paged.map((row) => (
-                  <TableRow key={row.enrollmentId}>
+                  <TableRow
+                    key={row.enrollmentId}
+                    {...clickableRowProps(router, `/projects/${projectId}/participants/${row.studentUserId}`)}
+                  >
                     <TableCell>
                       <div className="font-medium">{row.displayName}</div>
                       <div className="text-xs text-zinc-500">{row.email}</div>

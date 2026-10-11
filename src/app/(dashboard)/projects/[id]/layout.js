@@ -9,6 +9,7 @@ import {
   fetchAuthorizedOrgUserWorkspace,
 } from "@/lib/projects/workspace-access";
 import { ProjectTabs } from "@/components/projects/project-tabs";
+import { projectCampusesLabel } from "@/lib/academic/project-campuses";
 
 export default async function ProjectDetailLayout({ children, params }) {
   const p = await params;
@@ -46,14 +47,59 @@ export default async function ProjectDetailLayout({ children, params }) {
   const { project } = access;
 
   const canSeeSubmissionsTab =
-    actsAsExaminerRole(activeRole) &&
-    project.creatorRole === Role.EXAMINER &&
-    (activeRole === Role.SYSTEM_ADMIN || project.ownerUserId === user.id);
+    actsAsExaminerRole(activeRole) && project.creatorRole === Role.EXAMINER;
+
+  const info = await prisma.project.findUnique({
+    where: { id },
+    select: {
+      name: true,
+      organizationName: true,
+      purpose: true,
+      openAt: true,
+      closeAt: true,
+      owner: { select: { firstName: true, lastName: true } },
+      academicYear: { select: { label: true } },
+      programme: { select: { name: true, shortName: true } },
+      campuses: { select: { campus: true } },
+    },
+  });
+  const header = info
+    ? {
+        name: info.name,
+        organizationName: info.organizationName,
+        purpose: info.purpose,
+        windowState: projectWindowState(info),
+        facts: [
+          info.academicYear ? { label: "Academic year", value: info.academicYear.label } : null,
+          info.programme
+            ? { label: "Programme", value: info.programme.shortName || info.programme.name }
+            : null,
+          canSeeSubmissionsTab
+            ? { label: "Campuses", value: projectCampusesLabel(info.campuses) }
+            : null,
+          {
+            label: "Created by",
+            value: `${info.owner?.firstName || ""} ${info.owner?.lastName || ""}`.trim() || "—",
+          },
+        ].filter(Boolean),
+      }
+    : null;
 
   return (
     <div className="w-full space-y-4">
-      <ProjectTabs projectId={id} canSeeSubmissionsTab={canSeeSubmissionsTab} />
+      <ProjectTabs projectId={id} canSeeSubmissionsTab={canSeeSubmissionsTab} header={header} />
       {children}
     </div>
   );
+}
+
+/**
+ * @param {{ openAt: Date | null; closeAt: Date | null }} p
+ * @returns {'upcoming' | 'open' | 'closed'}
+ */
+function projectWindowState({ openAt, closeAt }) {
+  const now = Date.now();
+  if (openAt && now < new Date(openAt).getTime()) return "upcoming";
+  if (closeAt && now > new Date(closeAt).getTime()) return "closed";
+  return "open";
 }

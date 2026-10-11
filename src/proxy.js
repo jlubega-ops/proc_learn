@@ -11,6 +11,16 @@ import {
   readSiteSettings,
   sessionHasMaintenanceAccess,
 } from "@/lib/site-settings";
+import { prisma } from "@/lib/prisma";
+import {
+  attemptLockedMessage,
+  loadAttemptWorkspaceState,
+} from "@/lib/academic/attempt-workspace";
+
+const READ_METHODS = new Set(["GET", "HEAD", "OPTIONS"]);
+const PROJECT_API_RE = /^\/api\/projects\/([0-9a-f-]{36})(?:\/(.*))?$/i;
+/** Writes still allowed in a locked attempt organisation (local drafts only). */
+const LOCKED_WRITE_ALLOWLIST = new Set(["form-drafts"]);
 
 /**
  * @param {string} pathname
@@ -86,6 +96,53 @@ function blockForMaintenance(request, isApi) {
   return NextResponse.redirect(url);
 }
 
+/**
+ * Workspace a write request targets, for the submitted-attempt lock.
+ * @param {import("next/server").NextRequest} request
+ * @param {string} pathname
+ * @returns {Promise<string | null>}
+ */
+async function writeTargetWorkspaceId(request, pathname) {
+  const m = PROJECT_API_RE.exec(pathname);
+  if (m) {
+    const firstSegment = String(m[2] || "").split("/")[0];
+    if (LOCKED_WRITE_ALLOWLIST.has(firstSegment)) return null;
+    return m[1];
+  }
+  if (pathname.startsWith("/api/provider-portal/") && pathname !== "/api/provider-portal/logout") {
+    const session = await readSessionData(request);
+    const providerId = session && typeof session === "object" ? session.providerId : null;
+    if (!providerId) return null;
+    const provider = await prisma.projectOrgProvider.findUnique({
+      where: { id: String(providerId) },
+      select: { projectId: true },
+    });
+    return provider?.projectId || null;
+  }
+  return null;
+}
+
+/**
+ * Submitted (or timed-out) attempt organisations are read-only for everyone.
+ * @param {import("next/server").NextRequest} request
+ * @param {string} pathname
+ */
+async function blockLockedAttemptWrite(request, pathname) {
+  if (READ_METHODS.has(request.method)) return null;
+  try {
+    const workspaceId = await writeTargetWorkspaceId(request, pathname);
+    if (!workspaceId) return null;
+    const state = await loadAttemptWorkspaceState(prisma, workspaceId);
+    if (!state?.locked) return null;
+    return NextResponse.json(
+      { error: attemptLockedMessage(state.lockReason), code: "ATTEMPT_LOCKED" },
+      { status: 403, headers: { "Cache-Control": "no-store" } },
+    );
+  } catch {
+    return null;
+  }
+}
+
 /** Next.js 16+ request interception (replaces deprecated `middleware`). */
 export async function proxy(request) {
   const { pathname } = request.nextUrl;
@@ -96,7 +153,10 @@ export async function proxy(request) {
     return blockForMaintenance(request, isApi);
   }
 
-  if (isApi) return NextResponse.next();
+  if (isApi) {
+    const locked = await blockLockedAttemptWrite(request, pathname);
+    return locked || NextResponse.next();
+  }
 
   const requestHeaders = new Headers(request.headers);
   requestHeaders.set("x-pl-pathname", pathname);

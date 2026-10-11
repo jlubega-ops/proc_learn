@@ -15,7 +15,6 @@ import { isOfficialStudentParticipation, observationDemoBadge } from "@/lib/acad
 import {
   humanGradeStatus,
   humanPassFail,
-  humanGradingMode,
 } from "@/lib/academic/assessment-scoring";
 import { getOrCreateProjectAssessment, serializeAssessmentConfig } from "@/lib/academic/assessment-config";
 import { ensureCurrentAcademicContext } from "@/lib/academic/academic-context";
@@ -296,52 +295,73 @@ export async function getExaminerAssessmentResults(opts = {}) {
 }
 
 /**
- * Student-visible own results (released only).
- * @param {{ studentUserId: string; db?: import("@prisma/client").PrismaClient }} opts
+ * @param {unknown} results
  */
-export async function listStudentOwnResults(opts) {
-  const db = opts.db || prisma;
-  const attempts = await db.projectAttempt.findMany({
-    where: {
-      enrollment: {
-        studentUserId: opts.studentUserId,
-        project: { isPersonalOrg: false, isAttemptOrg: false, assessment: { isNot: null } },
-      },
-    },
-    include: {
-      grade: true,
-      enrollment: {
-        include: {
-          project: { include: { assessment: true } },
-        },
-      },
-    },
-    orderBy: { updatedAt: "desc" },
-    take: 100,
-  });
+function studentSectionResults(results) {
+  if (!Array.isArray(results) || !results.every((r) => r && Array.isArray(r.items))) return [];
+  return results.map((s) => ({
+    sectionKey: s.sectionKey || s.processCode,
+    label: s.label,
+    group: s.group || null,
+    marks: s.marks,
+    awarded: s.awarded,
+    completedItems: s.completedItems,
+    totalItems: s.totalItems,
+    satisfied: Boolean(s.satisfied),
+    items: s.items.map((i) => ({
+      key: i.key,
+      label: i.label,
+      marks: i.marks,
+      awarded: i.awarded,
+      count: i.count,
+      satisfied: Boolean(i.satisfied),
+    })),
+  }));
+}
 
-  return attempts.map((attempt) => {
-    const project = attempt.enrollment.project;
-    const released = Boolean(project.assessment?.resultsReleased);
-    const graded = attempt.grade?.status === AttemptGradeStatus.GRADED;
-    return {
-      projectId: project.id,
-      projectName: project.name,
-      purpose: project.purpose,
-      attemptId: attempt.id,
-      attemptNumber: attempt.attemptNumber,
-      attemptStatus: attempt.status,
-      submittedAt: attempt.submittedAt,
-      resultsReleased: released,
-      gradingModeLabel: humanGradingMode(project.assessment?.gradingMode),
-      grade:
-        released && graded
-          ? serializeGrade(attempt.grade, { includeFeedback: true })
-          : null,
-      scoreVisible: released && graded,
-      pendingRelease: Boolean(attempt.grade) && !released,
-    };
+/**
+ * Released result of the student's latest graded attempt on one project.
+ * SUMMARY → score only; DETAILS → also sections, items and feedback.
+ * @param {{ studentUserId: string; projectId: string; db?: import("@prisma/client").PrismaClient }} opts
+ */
+export async function getStudentProjectResult(opts) {
+  const db = opts.db || prisma;
+  const enrollment = await db.projectEnrollment.findFirst({
+    where: {
+      projectId: opts.projectId,
+      studentUserId: opts.studentUserId,
+      project: { isPersonalOrg: false, isAttemptOrg: false },
+    },
+    select: { id: true, project: { select: { assessment: true } } },
   });
+  const assessment = enrollment?.project?.assessment;
+  if (!enrollment || !assessment?.resultsReleased) return { released: false, result: null };
+
+  const attempt = await db.projectAttempt.findFirst({
+    where: { enrollmentId: enrollment.id, grade: { status: AttemptGradeStatus.GRADED } },
+    include: { grade: true },
+    orderBy: { attemptNumber: "desc" },
+  });
+  const view = assessment.resultsView === "DETAILS" ? "DETAILS" : "SUMMARY";
+  if (!attempt?.grade) return { released: true, view, result: null };
+
+  const g = attempt.grade;
+  /** @type {Record<string, unknown>} */
+  const result = {
+    attemptNumber: attempt.attemptNumber,
+    finalScore: g.finalScore,
+    totalMarks: assessment.totalMarks,
+    finalPercent: g.finalPercent,
+    passFail: g.passFail,
+    passFailLabel: humanPassFail(g.passFail).label,
+    passMarkPercent: assessment.passMarkPercent,
+    gradedAt: g.gradedAt || g.autoEvaluatedAt,
+  };
+  if (view === "DETAILS") {
+    result.sections = studentSectionResults(g.checkpointResults);
+    result.feedback = g.feedback || null;
+  }
+  return { released: true, view, result };
 }
 
 /**

@@ -92,9 +92,9 @@ function StageRecord({ record }) {
 
 /**
  * Read-only A–Z of one procurement: every stage, its records, and who did what in which role.
- * @param {{ studentId: string; procurementId: string; onBack: () => void }} props
+ * @param {{ apiBase: string; procurementId: string; onBack: () => void }} props
  */
-export function ExaminerExplorerProcurement({ studentId, procurementId, onBack }) {
+export function ExaminerExplorerProcurement({ apiBase, procurementId, onBack }) {
   const { showToast } = useToast();
   const [loading, setLoading] = useState(true);
   const [data, setData] = useState(/** @type {any} */ (null));
@@ -103,7 +103,7 @@ export function ExaminerExplorerProcurement({ studentId, procurementId, onBack }
     setLoading(true);
     try {
       const res = await fetch(
-        `/api/examiner/observation/students/${encodeURIComponent(studentId)}/org/procurement/${encodeURIComponent(procurementId)}`,
+        `${apiBase}/org/procurement/${encodeURIComponent(procurementId)}`,
         { credentials: "include" },
       );
       const json = await res.json().catch(() => ({}));
@@ -119,7 +119,7 @@ export function ExaminerExplorerProcurement({ studentId, procurementId, onBack }
     } finally {
       setLoading(false);
     }
-  }, [studentId, procurementId, showToast]);
+  }, [apiBase, procurementId, showToast]);
 
   useEffect(() => {
     void load();

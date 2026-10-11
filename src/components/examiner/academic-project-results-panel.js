@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import Button from "@mui/material/Button";
 import Checkbox from "@mui/material/Checkbox";
 import Chip from "@mui/material/Chip";
@@ -22,6 +23,7 @@ import DialogActions from "@mui/material/DialogActions";
 import DialogContent from "@mui/material/DialogContent";
 import DialogTitle from "@mui/material/DialogTitle";
 import VisibilityRounded from "@mui/icons-material/VisibilityRounded";
+import VisibilityOffRounded from "@mui/icons-material/VisibilityOffRounded";
 import RefreshRounded from "@mui/icons-material/RefreshRounded";
 import AutorenewRounded from "@mui/icons-material/AutorenewRounded";
 import ReplayRounded from "@mui/icons-material/ReplayRounded";
@@ -47,11 +49,16 @@ import {
 } from "@/lib/admin-mui-surfaces";
 import { useToast } from "@/components/providers/toast-provider";
 import { campusSelectOptions } from "@/lib/campuses";
+import { formatMarks } from "@/lib/academic/assessment-sections";
+import { ResultsViewDialog } from "@/components/examiner/results-view-dialog";
+import { clickableRowProps } from "@/lib/clickable-row";
+import { actionConfirmOptions, useConfirm } from "@/components/providers/confirm-provider";
 
 /**
  * @param {{ projectId: string }} props
  */
 export function AcademicProjectResultsPanel({ projectId }) {
+  const router = useRouter();
   const { showToast } = useToast();
   const [loading, setLoading] = useState(true);
   const [data, setData] = useState(/** @type {any} */ (null));
@@ -60,6 +67,10 @@ export function AcademicProjectResultsPanel({ projectId }) {
   const [campusFilter, setCampusFilter] = useState("");
   const [busy, setBusy] = useState("");
   const [exporting, setExporting] = useState(false);
+  const [exportOpen, setExportOpen] = useState(false);
+  const [releaseOpen, setReleaseOpen] = useState(false);
+  const [releasing, setReleasing] = useState(false);
+  const confirmModal = useConfirm();
   /** @type {[Set<string>, function]} */
   const [selected, setSelected] = useState(() => new Set());
   const [confirm, setConfirm] = useState(
@@ -68,11 +79,54 @@ export function AcademicProjectResultsPanel({ projectId }) {
     ),
   );
 
-  async function exportExcel() {
+  /**
+   * @param {{ release: true; view: "SUMMARY" | "DETAILS" } | { release: false }} opts
+   */
+  async function updateRelease(opts) {
+    if (!opts.release) {
+      const ok = await confirmModal(
+        actionConfirmOptions("Hide results", {
+          message: "Students will no longer see their scores.",
+          color: "warning",
+        }),
+      );
+      if (!ok) return;
+    }
+    setReleasing(true);
+    try {
+      const res = await fetch(`/api/projects/${encodeURIComponent(projectId)}/assessment`, {
+        method: "PUT",
+        credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(opts.release ? { action: "release", view: opts.view } : { action: "unrelease" }),
+      });
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        showToast({
+          message: typeof json.error === "string" ? json.error : "Could not update release.",
+          severity: "error",
+        });
+        return;
+      }
+      setReleaseOpen(false);
+      showToast({
+        message: opts.release
+          ? `${opts.view === "DETAILS" ? "Full results" : "Results overview"} released to students.`
+          : "Results hidden from students.",
+        severity: "success",
+      });
+      await load({ silent: true });
+    } finally {
+      setReleasing(false);
+    }
+  }
+
+  /** @param {"SUMMARY" | "DETAILS"} view */
+  async function exportExcel(view) {
     setExporting(true);
     try {
       const res = await fetch(
-        `/api/projects/${encodeURIComponent(projectId)}/results/export`,
+        `/api/projects/${encodeURIComponent(projectId)}/results/export?view=${view.toLowerCase()}`,
         { credentials: "include" },
       );
       if (!res.ok) {
@@ -93,7 +147,11 @@ export function AcademicProjectResultsPanel({ projectId }) {
       a.download = filename;
       a.click();
       URL.revokeObjectURL(url);
-      showToast({ message: "Student grades exported.", severity: "success" });
+      setExportOpen(false);
+      showToast({
+        message: view === "SUMMARY" ? "Results overview exported." : "Full results exported.",
+        severity: "success",
+      });
     } catch {
       showToast({ message: "Export failed.", severity: "error" });
     } finally {
@@ -277,19 +335,32 @@ export function AcademicProjectResultsPanel({ projectId }) {
   const p = data.project;
   const counts = data.counts || {};
   const selectedCount = selected.size;
+  const released = Boolean(data.scoring?.resultsReleased);
 
   return (
     <div className={BRAND_PAGE_SHELL_CLASS}>
       <DashboardPageIntro
         hero
         title="Results"
-        description={`${p.name}: live scores for enrolled students. Regrade submits in-progress work first, then marks. You can select one or many students.`}
+        description="Scores for enrolled students."
       >
         <div className="mt-3 flex flex-wrap gap-2">
           <Chip size="small" color="primary" label={p.purpose} />
           <Chip size="small" color="info" label={`Enrolled ${counts.enrolled || 0}`} />
           <Chip size="small" color="warning" label={`In progress ${counts.inProgress || 0}`} />
           <Chip size="small" color="success" label={`Submitted ${counts.submitted || 0}`} />
+          {data.scoring ? (
+            <Chip
+              size="small"
+              variant="outlined"
+              color={data.scoring.resultsReleased ? "success" : "warning"}
+              label={
+                data.scoring.resultsReleased
+                  ? `Released · ${data.scoring.resultsView === "DETAILS" ? "Full details" : "Overview"}`
+                  : "Results hidden"
+              }
+            />
+          ) : null}
           {selectedCount > 0 ? (
             <Chip size="small" color="secondary" label={`${selectedCount} selected`} />
           ) : null}
@@ -317,12 +388,48 @@ export function AcademicProjectResultsPanel({ projectId }) {
                     <DownloadRounded />
                   )
                 }
-                onClick={() => void exportExcel()}
+                onClick={() => setExportOpen(true)}
               >
                 Download Excel
               </Button>
             </span>
           </Tooltip>
+          {data.scoring ? (
+            <>
+              <Tooltip title={released ? "Change what students see" : "Show results to students"}>
+                <span>
+                  <Button
+                    type="button"
+                    variant="outlined"
+                    color="success"
+                    disabled={releasing}
+                    className="cursor-pointer disabled:cursor-not-allowed"
+                    onClick={() => setReleaseOpen(true)}
+                    startIcon={releasing ? <CircularProgress size={14} color="inherit" /> : <VisibilityRounded />}
+                  >
+                    {released ? "Change release" : "Release results"}
+                  </Button>
+                </span>
+              </Tooltip>
+              {released ? (
+                <Tooltip title="Hide results from students">
+                  <span>
+                    <Button
+                      type="button"
+                      variant="outlined"
+                      color="warning"
+                      disabled={releasing}
+                      className="cursor-pointer disabled:cursor-not-allowed"
+                      onClick={() => void updateRelease({ release: false })}
+                      startIcon={<VisibilityOffRounded />}
+                    >
+                      Hide results
+                    </Button>
+                  </span>
+                </Tooltip>
+              ) : null}
+            </>
+          ) : null}
           <Button
             type="button"
             className="cursor-pointer disabled:cursor-not-allowed"
@@ -425,15 +532,17 @@ export function AcademicProjectResultsPanel({ projectId }) {
               <TableBody>
                 {paged.map((row) => {
                   const attemptId = row.latestAttempt?.id || "";
-                  const completed = (row.processScores || []).filter((x) => x.satisfied);
-                  const remaining = (row.processScores || []).filter((x) => !x.satisfied);
                   const passAt = data.scoring?.passMarkPercent ?? 50;
                   const score = row.marks?.finalScore;
                   const total = row.marks?.totalMarks;
                   const percent = row.marks?.finalPercent;
                   return (
-                    <TableRow key={row.enrollmentId} selected={attemptId ? selected.has(attemptId) : false}>
-                      <TableCell padding="checkbox">
+                    <TableRow
+                      key={row.enrollmentId}
+                      selected={attemptId ? selected.has(attemptId) : false}
+                      {...clickableRowProps(router, `/projects/${projectId}/participants/${row.studentUserId}`)}
+                    >
+                      <TableCell padding="checkbox" data-row-click="ignore">
                         <Checkbox
                           className="cursor-pointer disabled:cursor-not-allowed"
                           disabled={!attemptId}
@@ -459,37 +568,16 @@ export function AcademicProjectResultsPanel({ projectId }) {
                           <div className="text-xs opacity-70">{row.progressPercent}% of path</div>
                         ) : null}
                       </TableCell>
-                      <TableCell>
-                        {row.marks?.completedCount != null ? (
-                          <div>
-                            {row.marks.completedCount}/{row.marks.allowedCount} processes
-                          </div>
-                        ) : (
-                          "—"
-                        )}
-                        {completed.length ? (
-                          <div className="mt-1 flex flex-wrap gap-1">
-                            {completed.slice(0, 4).map((proc) => (
-                              <Chip
-                                key={proc.processCode}
-                                size="small"
-                                color="success"
-                                label={`${proc.label} +${proc.awarded}`}
-                              />
-                            ))}
-                          </div>
-                        ) : null}
-                        {remaining.length && completed.length ? (
-                          <div className="mt-1 text-xs text-zinc-500">
-                            Next: {remaining[0]?.label}
-                          </div>
-                        ) : null}
+                      <TableCell className="tabular-nums">
+                        {row.marks?.completedCount != null
+                          ? `${row.marks.completedCount}/${row.marks.allowedCount}`
+                          : "—"}
                       </TableCell>
                       <TableCell>
                         {score != null && total != null ? (
                           <div>
                             <span className="font-medium">
-                              {score}/{total}
+                              {formatMarks(score)}/{formatMarks(total)}
                             </span>
                             {percent != null ? (
                               <Chip
@@ -589,6 +677,24 @@ export function AcademicProjectResultsPanel({ projectId }) {
           </Button>
         </DialogActions>
       </Dialog>
+      <ResultsViewDialog
+        open={releaseOpen}
+        title={released ? "Change release" : "Release results"}
+        confirmLabel="Release"
+        initialView={data.scoring?.resultsView}
+        busy={releasing}
+        onClose={() => setReleaseOpen(false)}
+        onConfirm={(view) => void updateRelease({ release: true, view })}
+      />
+      <ResultsViewDialog
+        open={exportOpen}
+        title="Download Excel"
+        confirmLabel="Download"
+        initialView="DETAILS"
+        busy={exporting}
+        onClose={() => setExportOpen(false)}
+        onConfirm={(view) => void exportExcel(view)}
+      />
     </div>
   );
 }

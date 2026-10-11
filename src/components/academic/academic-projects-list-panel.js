@@ -2,8 +2,8 @@
 
 import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
-import Button from "@mui/material/Button";
 import Chip from "@mui/material/Chip";
+import ChevronRightRounded from "@mui/icons-material/ChevronRightRounded";
 import CircularProgress from "@mui/material/CircularProgress";
 import Box from "@mui/material/Box";
 import { format, parseISO } from "date-fns";
@@ -22,6 +22,7 @@ import {
   adminLoadingSpinnerSx,
 } from "@/lib/admin-mui-surfaces";
 import { useToast } from "@/components/providers/toast-provider";
+import { formatDurationHms } from "@/lib/academic/attempt-timer-format";
 
 /**
  * @param {{ purpose: 'PRACTICE' | 'ASSESSMENT'; title: string; description: string }} props
@@ -89,87 +90,51 @@ export function AcademicProjectsListPanel({ purpose, title, description }) {
       ) : (
         <ul className="space-y-3">
           {projects.map((p) => (
-            <li key={p.id} className={`${BRAND_CARD_CLASS} p-4 sm:p-5`}>
-              <div className="flex flex-wrap items-start justify-between gap-3">
-                <div className="min-w-0">
-                  <h2 className={BRAND_SECTION_TITLE_CLASS}>{p.name}</h2>
-                  {p.description ? (
-                    <p className={`mt-1 ${BRAND_PAGE_LEAD_CLASS}`}>{p.description}</p>
-                  ) : null}
-                  <div className="mt-2 flex flex-wrap gap-2">
-                    <Chip
-                      size="small"
-                      color={
-                        p.status?.key === "closed"
-                          ? "error"
-                          : p.status?.key === "in_progress"
-                            ? "info"
-                            : "primary"
-                      }
-                      label={p.status?.label || "—"}
-                    />
-                    {p.durationSeconds ? (
-                      <Chip
-                        size="small"
-                        color="warning"
-                        label={`Timed · ${Math.round(p.durationSeconds / 60)} min`}
-                      />
-                    ) : p.closeAt ? (
-                      <Chip size="small" label="Closes with window" />
-                    ) : null}
-                    {p.timer?.remainingSeconds != null && !p.timer?.expired ? (
-                      <Chip
-                        size="small"
-                        color="warning"
-                        label={`${Math.ceil(p.timer.remainingSeconds / 60)} min left`}
-                      />
-                    ) : null}
-                    {p.attemptCount > 0 ? (
-                      <Chip size="small" label={`Attempts: ${p.attemptCount}`} />
+            <li key={p.id}>
+              <Link
+                href={p.href}
+                title={`View ${p.name}`}
+                className={`${BRAND_CARD_CLASS} group block cursor-pointer p-4 transition hover:border-primary/50 hover:shadow-md focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary sm:p-5`}
+              >
+                <div className="flex flex-wrap items-start justify-between gap-3">
+                  <div className="min-w-0 flex-1">
+                    <h2 className={`${BRAND_SECTION_TITLE_CLASS} group-hover:underline`}>{p.name}</h2>
+                    {p.description ? (
+                      <p className={`mt-1 line-clamp-2 ${BRAND_PAGE_LEAD_CLASS}`}>{p.description}</p>
                     ) : null}
                   </div>
-                  <p className="mt-2 text-xs text-zinc-500">
-                    {p.openAt ? `Opens ${fmt(p.openAt)}` : "Open"}
-                    {p.closeAt ? ` · Closes ${fmt(p.closeAt)}` : ""}
-                    {!p.canEnroll && !p.enrolled ? " · Enrollment closed" : ""}
-                  </p>
-                </div>
-                <div className="flex flex-wrap gap-2">
-                  <Button
-                    component={Link}
-                    href={p.href}
-                    variant="outlined"
-                    className="cursor-pointer"
-                  >
+                  <span className="inline-flex shrink-0 items-center gap-1 rounded-lg border border-primary px-3 py-1.5 text-sm font-semibold text-primary transition group-hover:bg-primary group-hover:text-white">
                     View project
-                  </Button>
-                  {p.latestAttempt?.status === "IN_PROGRESS" ||
-                  p.latestAttempt?.status === "RETURNED" ? (
-                    <Button
-                      component={Link}
-                      href={p.href}
-                      variant="contained"
-                      className={`${BRAND_BTN_PRIMARY_CLASS} cursor-pointer`}
-                    >
-                      Continue
-                    </Button>
-                  ) : (
-                    <Button
-                      component={Link}
-                      href={p.href}
-                      variant="contained"
-                      disabled={p.status?.key === "closed" && !p.enrolled}
-                      className={`${BRAND_BTN_PRIMARY_CLASS} cursor-pointer disabled:cursor-not-allowed`}
-                    >
-                      {p.status?.key === "closed" && !p.enrolled
-                        ? "Closed"
-                        : p.latestAttempt
-                          ? "Open"
-                          : "Start"}
-                    </Button>
-                  )}
+                    <ChevronRightRounded sx={{ fontSize: 18 }} aria-hidden />
+                  </span>
                 </div>
-              </div>
+                <dl className="mt-3 grid grid-cols-2 gap-3 text-sm sm:grid-cols-4">
+                  <div>
+                    <dt className={CARD_FACT_LABEL_CLASS}>Status</dt>
+                    <dd className="mt-0.5">
+                      <Chip size="small" color={statusChipColor(p.status?.key)} label={p.status?.label || "—"} />
+                    </dd>
+                  </div>
+                  <div>
+                    <dt className={CARD_FACT_LABEL_CLASS}>Time allowed</dt>
+                    <dd className="mt-0.5 font-medium tabular-nums text-foreground">
+                      {formatDurationHms(p.durationSeconds)}
+                    </dd>
+                  </div>
+                  <div>
+                    <dt className={CARD_FACT_LABEL_CLASS}>Opens on</dt>
+                    <dd className="mt-0.5 font-medium text-foreground">
+                      {p.openAt ? fmt(p.openAt) : "Now"}
+                    </dd>
+                  </div>
+                  <div>
+                    <dt className={CARD_FACT_LABEL_CLASS}>Ends on</dt>
+                    <dd className="mt-0.5 font-medium text-foreground">
+                      {p.closeAt ? fmt(p.closeAt) : "No end date"}
+                    </dd>
+                  </div>
+                </dl>
+              </Link>
             </li>
           ))}
         </ul>
@@ -178,11 +143,25 @@ export function AcademicProjectsListPanel({ purpose, title, description }) {
   );
 }
 
+const CARD_FACT_LABEL_CLASS =
+  "text-[11px] font-semibold uppercase tracking-wide text-zinc-500 dark:text-zinc-400";
+
+/**
+ * @param {string | undefined} key
+ * @returns {'warning' | 'primary' | 'success' | 'error'}
+ */
+function statusChipColor(key) {
+  if (key === "in_progress") return "primary";
+  if (key === "submitted" || key === "completed") return "success";
+  if (key === "closed") return "error";
+  return "warning";
+}
+
 /** @param {unknown} v */
 function fmt(v) {
   try {
     const d = typeof v === "string" ? parseISO(v) : new Date(/** @type {any} */ (v));
-    return format(d, "MMM d, yyyy");
+    return format(d, "MMM d, yyyy h:mm a");
   } catch {
     return "—";
   }

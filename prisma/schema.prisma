@@ -77,6 +77,12 @@ enum AssessmentGradingMode {
   COMBINED
 }
 
+/// Released results: SUMMARY = score only; DETAILS = score plus marks per section and item.
+enum AssessmentResultsView {
+  SUMMARY
+  DETAILS
+}
+
 /// Domain-backed checkpoint kinds — evaluation READS procurement progress / records.
 enum AssessmentCheckpointKind {
   /// Macro teaching stage is fully done (deriveOrganisationProcurementProgress).
@@ -702,6 +708,8 @@ model Project {
   updatedAt               DateTime          @updatedAt @map("updated_at")
 
   enrollments                   ProjectEnrollment[]
+  /// Campuses allowed to take an examiner project. No rows = all campuses.
+  campuses                      ProjectCampus[]
   orgUsers                      ProjectOrgUser[]
   orgDepartments                ProjectOrgDepartment[]
   orgFinancialYears             ProjectOrgFinancialYear[]
@@ -735,6 +743,17 @@ model Project {
   @@index([visibility, isPublished])
   @@index([academicYearId, programmeId])
   @@map("project")
+}
+
+model ProjectCampus {
+  id        String  @id @default(uuid())
+  projectId String  @map("project_id")
+  project   Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  campus    Campus
+
+  @@unique([projectId, campus])
+  @@index([campus])
+  @@map("project_campus")
 }
 
 model ProjectEnrollment {
@@ -811,6 +830,8 @@ model ProjectAssessment {
   scoringEnabled  Boolean               @default(true) @map("scoring_enabled")
   /// When true, students may see their final score and feedback.
   resultsReleased Boolean               @default(false) @map("results_released")
+  /// What released results show students: score only, or the full section/item breakdown.
+  resultsView     AssessmentResultsView @default(SUMMARY) @map("results_view")
   createdAt       DateTime              @default(now()) @map("created_at")
   updatedAt       DateTime              @updatedAt @map("updated_at")
 
@@ -846,10 +867,11 @@ model AssessmentProcess {
   id           String            @id @default(uuid())
   assessmentId String            @map("assessment_id")
   assessment   ProjectAssessment @relation(fields: [assessmentId], references: [id], onDelete: Cascade)
+  /// Section key (e.g. BUDGETING, ORG_USERS) or item key "SECTION:ITEM".
   processCode  String            @map("process_code") @db.VarChar(64)
   sortOrder    Int               @default(0) @map("sort_order")
   isAllowed    Boolean           @default(true) @map("is_allowed")
-  marks        Int               @default(0)
+  marks        Float             @default(0)
   /// When true, examiner set this mark; remaining allowed processes share what is left.
   marksPinned  Boolean           @default(false) @map("marks_pinned")
   createdAt    DateTime          @default(now()) @map("created_at")
@@ -867,9 +889,9 @@ model ProjectAttemptGrade {
   attempt           ProjectAttempt     @relation(fields: [attemptId], references: [id], onDelete: Cascade)
   assessmentId      String             @map("assessment_id")
   assessment        ProjectAssessment  @relation(fields: [assessmentId], references: [id], onDelete: Cascade)
-  autoScore         Int                @default(0) @map("auto_score")
+  autoScore         Float              @default(0) @map("auto_score")
   manualScore       Int?               @map("manual_score")
-  finalScore        Int?               @map("final_score")
+  finalScore        Float?             @map("final_score")
   finalPercent      Int?               @map("final_percent")
   passFail          PassFailResult?    @map("pass_fail")
   feedback          String?            @db.Text

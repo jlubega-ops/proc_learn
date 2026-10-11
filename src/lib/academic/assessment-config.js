@@ -6,16 +6,23 @@ import { prisma } from "@/lib/prisma";
 import { AuditEvent, writeAuditLog } from "@/lib/audit-log";
 import { getOrCreateProjectAssessment } from "@/lib/academic/assessment-evaluate";
 import { humanGradingMode, computeFinalScore } from "@/lib/academic/assessment-scoring";
+import { notifyStudentsResultsReleased } from "@/lib/academic/student-academic-notifications";
 import {
-  ASSESSMENT_PASS_MARK_PRESETS,
   ASSESSMENT_PROCESS_CATALOGUE,
   DEFAULT_ASSESSMENT_PASS_MARK,
   DEFAULT_ASSESSMENT_TOTAL_MARKS,
   assessmentProcessMeta,
   processDisableBlockers,
-  redistributeProcessMarks,
   validateAllowedProcessSet,
 } from "@/lib/academic/assessment-process-catalogue";
+import {
+  PROCESS_SECTION_CODES,
+  SCORING_GROUP_LABELS,
+  SCORING_SECTIONS,
+  buildScoringTree,
+  scoringItemRowKey,
+  scoringTreeToRows,
+} from "@/lib/academic/assessment-sections";
 
 /**
  * @param {unknown} value
@@ -29,46 +36,34 @@ function cleanText(value) {
  */
 export function serializeAssessmentConfig(assessment) {
   if (!assessment) return null;
-  const processes = (assessment.processes || []).map((p) => {
-    const meta = assessmentProcessMeta(p.processCode);
+  const totalMarks = Math.max(0, assessment.totalMarks || DEFAULT_ASSESSMENT_TOTAL_MARKS);
+  const tree = buildScoringTree(assessment.processes || [], totalMarks);
+  const allowedCodes = tree.sections
+    .filter((s) => s.processCode && s.isAllowed)
+    .map((s) => s.key);
+  const sections = tree.sections.map((s) => {
+    const meta = s.processCode ? assessmentProcessMeta(s.processCode) : null;
     return {
-      id: p.id,
-      processCode: p.processCode,
-      name: meta?.name || p.processCode,
-      summary: meta?.summary || "",
-      group: meta?.group || "CORE",
+      ...s,
       dependsOn: meta?.dependsOn || [],
       dependsOnAny: meta?.dependsOnAny || [],
-      sortOrder: p.sortOrder,
-      isAllowed: p.isAllowed !== false,
-      marks: p.marks,
-      marksPinned: Boolean(p.marksPinned),
-      disableBlockers: [],
+      disableBlockers: s.processCode ? processDisableBlockers(s.key, allowedCodes) : [],
     };
   });
-  const allowedCodes = processes.filter((p) => p.isAllowed).map((p) => p.processCode);
-  for (const row of processes) {
-    row.disableBlockers = processDisableBlockers(row.processCode, allowedCodes);
-  }
-  const autoMaxMarks = processes
-    .filter((p) => p.isAllowed)
-    .reduce((s, p) => s + Math.max(0, p.marks || 0), 0);
-  const totalMarks = Math.max(0, assessment.totalMarks || autoMaxMarks || DEFAULT_ASSESSMENT_TOTAL_MARKS);
   return {
     id: assessment.id,
     projectId: assessment.projectId,
     gradingMode: AssessmentGradingMode.AUTOMATIC,
     gradingModeLabel: humanGradingMode(AssessmentGradingMode.AUTOMATIC),
     manualMaxMarks: 0,
-    autoMaxMarks,
+    autoMaxMarks: totalMarks,
     totalMarks,
     totalPossibleMarks: totalMarks,
     passMarkPercent: assessment.passMarkPercent,
     scoringEnabled: assessment.scoringEnabled !== false,
     resultsReleased: assessment.resultsReleased,
-    scoringRule:
-      "Automatic: each allowed process scores its marks when that process is completed in the organisation. Pass when final % ≥ pass mark.",
-    processes,
+    resultsView: assessment.resultsView || "SUMMARY",
+    sections,
     checkpoints: [],
     createdAt: assessment.createdAt,
     updatedAt: assessment.updatedAt,
@@ -77,9 +72,9 @@ export function serializeAssessmentConfig(assessment) {
 
 export function assessmentScoringCatalogue() {
   return {
-    passMarkPresets: ASSESSMENT_PASS_MARK_PRESETS,
     defaultTotalMarks: DEFAULT_ASSESSMENT_TOTAL_MARKS,
     defaultPassMarkPercent: DEFAULT_ASSESSMENT_PASS_MARK,
+    groups: SCORING_GROUP_LABELS,
     processes: ASSESSMENT_PROCESS_CATALOGUE.map((p) => ({
       code: p.code,
       name: p.name,
@@ -123,42 +118,43 @@ export function validateAssessmentProcessConfig(body) {
     }
   }
 
-  const byCode = new Map(ASSESSMENT_PROCESS_CATALOGUE.map((p) => [p.code, p]));
-  const raw = Array.isArray(body?.processes) ? body.processes : [];
+  const known = new Set(SCORING_SECTIONS.map((s) => s.key));
+  const raw = Array.isArray(body?.sections) ? body.sections : [];
   /** @type {Array<{ processCode: string; isAllowed: boolean; marks: number; marksPinned: boolean }>} */
   const incoming = [];
-  raw.forEach((row, index) => {
-    const code = cleanText(row?.processCode).toUpperCase();
-    if (!byCode.has(code)) {
-      errors[`processes.${index}.processCode`] = "Unknown process.";
-      return;
-    }
+  /** @param {any} row */
+  const marksOf = (row) => Math.max(0, Math.round((Number(row?.marks) || 0) * 100) / 100);
+  for (const section of raw) {
+    const key = cleanText(section?.key).toUpperCase();
+    if (!known.has(key)) continue;
     incoming.push({
-      processCode: code,
-      isAllowed: row?.isAllowed !== false,
-      marksPinned: row?.marksPinned === true,
-      marks: Math.max(0, Math.round(Number(row?.marks) || 0)),
+      processCode: key,
+      isAllowed: section?.isAllowed !== false,
+      marksPinned: section?.marksPinned === true,
+      marks: marksOf(section),
     });
-  });
+    for (const item of Array.isArray(section?.items) ? section.items : []) {
+      const itemKey = cleanText(item?.key).toUpperCase();
+      if (!itemKey) continue;
+      incoming.push({
+        processCode: scoringItemRowKey(key, itemKey),
+        isAllowed: item?.isAllowed !== false,
+        marksPinned: item?.marksPinned === true,
+        marks: marksOf(item),
+      });
+    }
+  }
 
-  const merged = ASSESSMENT_PROCESS_CATALOGUE.map((meta) => {
-    const found = incoming.find((r) => r.processCode === meta.code);
-    return (
-      found || {
-        processCode: meta.code,
-        isAllowed: true,
-        marksPinned: false,
-        marks: 0,
-      }
-    );
-  });
-
-  const allowedCodes = merged.filter((p) => p.isAllowed).map((p) => p.processCode);
+  const tree = buildScoringTree(incoming, totalMarks);
+  const allowedCodes = tree.sections
+    .filter((s) => s.processCode && s.isAllowed)
+    .map((s) => s.key);
   const depErrors = validateAllowedProcessSet(allowedCodes);
-  if (depErrors.length) errors.processes = depErrors[0];
-
-  const split = redistributeProcessMarks(merged, totalMarks);
-  if (!split.ok && split.error) errors.marks = split.error;
+  if (depErrors.length) errors.sections = depErrors[0];
+  if (tree.error) errors.marks = tree.error;
+  for (const [key, message] of Object.entries(tree.sectionErrors)) {
+    errors[`section.${key}`] = message;
+  }
 
   const scoringEnabled = body?.scoringEnabled !== false;
 
@@ -171,8 +167,7 @@ export function validateAssessmentProcessConfig(body) {
       passMarkPercent,
       totalMarks,
       scoringEnabled,
-      resultsReleased: body?.resultsReleased === true,
-      processes: split.rows,
+      processes: scoringTreeToRows(tree.sections),
     },
   };
 }
@@ -199,7 +194,7 @@ export async function upsertProjectAssessmentConfig(opts) {
   if (
     opts.body?.action === "enable_scoring" ||
     opts.body?.action === "disable_scoring" ||
-    (opts.body?.scoringEnabled !== undefined && !Array.isArray(opts.body?.processes))
+    (opts.body?.scoringEnabled !== undefined && !Array.isArray(opts.body?.sections))
   ) {
     const enable =
       opts.body?.action === "enable_scoring"
@@ -256,7 +251,6 @@ export async function upsertProjectAssessmentConfig(opts) {
             passMarkPercent: validated.data.passMarkPercent,
             totalMarks: validated.data.totalMarks,
             scoringEnabled: validated.data.scoringEnabled,
-            resultsReleased: validated.data.resultsReleased,
           },
         })
       : await tx.projectAssessment.create({
@@ -267,7 +261,6 @@ export async function upsertProjectAssessmentConfig(opts) {
             passMarkPercent: validated.data.passMarkPercent,
             totalMarks: validated.data.totalMarks,
             scoringEnabled: validated.data.scoringEnabled,
-            resultsReleased: validated.data.resultsReleased,
           },
         });
 
@@ -303,9 +296,10 @@ export async function upsertProjectAssessmentConfig(opts) {
       gradingMode: AssessmentGradingMode.AUTOMATIC,
       totalMarks: validated.data.totalMarks,
       scoringEnabled: validated.data.scoringEnabled,
-      allowedProcessCount: validated.data.processes.filter((p) => p.isAllowed).length,
+      allowedProcessCount: validated.data.processes.filter(
+        (p) => p.isAllowed && PROCESS_SECTION_CODES.has(p.processCode),
+      ).length,
       passMarkPercent: validated.data.passMarkPercent,
-      resultsReleased: validated.data.resultsReleased,
     },
   });
 
@@ -324,9 +318,9 @@ export async function resolveAllowedProcessCodes(db, academicProjectId) {
     where: { projectId: academicProjectId },
     include: { processes: true },
   });
-  if (!assessment?.processes?.length) return null;
-  const allowed = assessment.processes.filter((p) => p.isAllowed !== false).map((p) => p.processCode);
-  return allowed.length ? allowed : [];
+  const rows = (assessment?.processes || []).filter((p) => PROCESS_SECTION_CODES.has(p.processCode));
+  if (!rows.length) return null;
+  return rows.filter((p) => p.isAllowed !== false).map((p) => p.processCode);
 }
 
 /**
@@ -355,6 +349,7 @@ export async function resolveAllowedProcessCodesForOrgProject(db, orgProjectId) 
  *   projectId: string;
  *   actorUserId: string;
  *   resultsReleased: boolean;
+ *   resultsView?: string | null;
  *   db?: import("@prisma/client").PrismaClient;
  * }} opts
  */
@@ -371,9 +366,14 @@ export async function setAssessmentResultsReleased(opts) {
     throw err;
   }
 
+  const wasReleased = Boolean(assessment.resultsReleased);
+  const previousView = assessment.resultsView || RESULTS_VIEW.SUMMARY;
+  const resultsView = opts.resultsReleased
+    ? parseResultsView(opts.resultsView) || previousView
+    : previousView;
   assessment = await db.projectAssessment.update({
     where: { id: assessment.id },
-    data: { resultsReleased: Boolean(opts.resultsReleased) },
+    data: { resultsReleased: Boolean(opts.resultsReleased), resultsView },
     include: {
       checkpoints: { orderBy: { sortOrder: "asc" } },
       processes: { orderBy: { sortOrder: "asc" } },
@@ -384,11 +384,31 @@ export async function setAssessmentResultsReleased(opts) {
     await writeAuditLog({
       eventType: AuditEvent.PROJECT_ASSESSMENT_RESULTS_RELEASED,
       actorUserId: opts.actorUserId,
-      meta: { projectId: opts.projectId, assessmentId: assessment.id },
+      meta: { projectId: opts.projectId, assessmentId: assessment.id, resultsView },
+    });
+    const upgraded = wasReleased && previousView !== RESULTS_VIEW.DETAILS && resultsView === RESULTS_VIEW.DETAILS;
+    if (!wasReleased || upgraded) {
+      await notifyStudentsResultsReleased(opts.projectId, db, { detailed: resultsView === RESULTS_VIEW.DETAILS }).catch(
+        () => 0,
+      );
+    }
+  } else if (wasReleased) {
+    await writeAuditLog({
+      eventType: AuditEvent.PROJECT_ASSESSMENT_UPDATED,
+      actorUserId: opts.actorUserId,
+      meta: { projectId: opts.projectId, assessmentId: assessment.id, action: "HIDE_RESULTS" },
     });
   }
 
   return serializeAssessmentConfig(assessment);
+}
+
+export const RESULTS_VIEW = { SUMMARY: "SUMMARY", DETAILS: "DETAILS" };
+
+/** @param {unknown} value */
+export function parseResultsView(value) {
+  const v = String(value || "").trim().toUpperCase();
+  return v === RESULTS_VIEW.SUMMARY || v === RESULTS_VIEW.DETAILS ? v : null;
 }
 
 export { computeFinalScore, getOrCreateProjectAssessment };

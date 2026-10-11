@@ -9,6 +9,7 @@ import {
   serializeAssessmentConfig,
   upsertProjectAssessmentConfig,
   setAssessmentResultsReleased,
+  parseResultsView,
 } from "@/lib/academic/assessment-config";
 
 export const runtime = "nodejs";
@@ -68,11 +69,16 @@ export async function PUT(request, context) {
   const body = await request.json().catch(() => ({}));
 
   if (body?.action === "release" || body?.action === "unrelease") {
+    const resultsView = body.action === "release" ? parseResultsView(body.view) : null;
+    if (body.action === "release" && !resultsView) {
+      return NextResponse.json({ error: "Choose overview or full details." }, { status: 400 });
+    }
     try {
       const assessment = await setAssessmentResultsReleased({
         projectId: id,
         actorUserId: user.id,
         resultsReleased: body.action === "release",
+        resultsView,
       });
       return NextResponse.json({ assessment });
     } catch (e) {

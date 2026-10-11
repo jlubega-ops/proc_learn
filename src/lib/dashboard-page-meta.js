@@ -8,7 +8,7 @@ export function getDashboardPageMeta(pathname, activeRole) {
   if (pathname === "/" || pathname === "")
     return {
       title: NAV_LABELS.dashboard,
-      subtitle: activeRole === "STUDENT" ? "My Organisation" : "Overview",
+      subtitle: activeRole === "STUDENT" ? "My Organisation" : "Home",
     };
   if (pathname.startsWith("/academic/practice/"))
     return { title: "Practice project", subtitle: "My Academic Work" };

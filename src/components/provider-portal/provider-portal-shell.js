@@ -29,6 +29,7 @@ import NotificationsRounded from "@mui/icons-material/NotificationsRounded";
 import PaymentsRounded from "@mui/icons-material/PaymentsRounded";
 import ReceiptLongRounded from "@mui/icons-material/ReceiptLongRounded";
 import { useToast } from "@/components/providers/toast-provider";
+import { AttemptOrgMemberBanner } from "@/components/academic/active-org-context-banner";
 import {
   BRAND_NAV_ACTIVE_CLASS,
   BRAND_NAV_INACTIVE_CLASS,
@@ -427,6 +428,7 @@ export function ProviderPortalShell({ children }) {
             <PortalBell />
             <PortalUserMenu me={me} onSignOut={() => void signOut()} />
           </div>
+          <AttemptOrgMemberBanner />
         </header>
 
         <main id="main-content" className="flex-1 px-3 py-5 md:px-6">

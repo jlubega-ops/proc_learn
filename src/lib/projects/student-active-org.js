@@ -19,13 +19,41 @@ export function isAcademicProjectWindowOpen(project, now = new Date()) {
   return true;
 }
 
+/** Only unfinished attempts keep a student inside an assessment organisation. */
 const ATTEMPT_LOCK_STATUSES = new Set([
   ProjectAttemptStatus.IN_PROGRESS,
   ProjectAttemptStatus.RETURNED,
-  ProjectAttemptStatus.SUBMITTED,
-  ProjectAttemptStatus.UNDER_REVIEW,
-  ProjectAttemptStatus.COMPLETED,
 ]);
+
+/**
+ * Submit any of the student's unfinished attempts whose server timer has run out.
+ * @param {import("@prisma/client").PrismaClient} db
+ * @param {string} studentUserId
+ * @returns {Promise<number>} attempts auto-submitted
+ */
+export async function autoSubmitExpiredStudentAttempts(db, studentUserId) {
+  const open = await db.projectAttempt.findMany({
+    where: {
+      status: { in: [ProjectAttemptStatus.IN_PROGRESS, ProjectAttemptStatus.RETURNED] },
+      enrollment: { studentUserId },
+    },
+    select: { id: true },
+    take: 10,
+  });
+  if (!open.length) return 0;
+  const { autoSubmitIfAttemptExpired } = await import("@/lib/academic/project-attempts");
+  let submitted = 0;
+  for (const a of open) {
+    const result = await autoSubmitIfAttemptExpired({
+      attemptId: a.id,
+      studentUserId,
+      actorUserId: studentUserId,
+      db,
+    });
+    if (result) submitted += 1;
+  }
+  return submitted;
+}
 
 /**
  * @param {any} org
@@ -252,6 +280,8 @@ export async function resolveStudentActiveOrganisation(db = prisma, userId) {
   const personal = await ensureStudentPersonalOrg(db, userId);
   if (!personal?.id) return null;
 
+  const autoSubmitted = await autoSubmitExpiredStudentAttempts(db, userId).catch(() => 0);
+
   const lock = await findStudentAssessmentLock(db, userId);
   if (lock?.workspace?.id) {
     await persistStudentActiveOrg(db, userId, lock.workspace.id);
@@ -262,6 +292,7 @@ export async function resolveStudentActiveOrganisation(db = prisma, userId) {
       academicProject: lock.academicProject,
       attempt: lock.attempt || null,
       personal,
+      autoSubmitted,
     };
   }
 
@@ -319,14 +350,17 @@ export async function resolveStudentActiveOrganisation(db = prisma, userId) {
         });
         attempt = enrollment?.attempts?.[0] || null;
       }
-      return {
-        org,
-        kind: "PRACTICE",
-        locked: false,
-        academicProject: sourceAcademicProject,
-        attempt,
-        personal,
-      };
+      if (attempt) {
+        return {
+          org,
+          kind: "PRACTICE",
+          locked: false,
+          academicProject: sourceAcademicProject,
+          attempt,
+          personal,
+          autoSubmitted,
+        };
+      }
     }
   }
 
@@ -341,6 +375,7 @@ export async function resolveStudentActiveOrganisation(db = prisma, userId) {
     academicProject: null,
     attempt: null,
     personal,
+    autoSubmitted,
   };
 }
 
@@ -354,7 +389,7 @@ export async function switchStudentToPersonalOrg(db, userId) {
   const lock = await findStudentAssessmentLock(db, userId);
   if (lock?.workspace?.id) {
     const err = new Error(
-      "You cannot leave this assessment organisation until the assessment closes.",
+      "Submit this assessment before leaving.",
     );
     // @ts-ignore
     err.code = "ASSESSMENT_LOCKED";

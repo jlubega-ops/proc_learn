@@ -1,7 +1,8 @@
+import { Suspense } from "react";
 import { redirect } from "next/navigation";
 import { Role } from "@prisma/client";
 import { getSessionUser, sessionActiveRole } from "@/lib/api/get-session-user";
-import { ExaminerStudentObservePanel } from "@/components/examiner/examiner-student-observe-panel";
+import { ExaminerOrgExplorer } from "@/components/examiner/examiner-org-explorer";
 
 export const metadata = { title: "Student project report" };
 
@@ -17,11 +18,14 @@ export default async function AcademicProjectStudentReportPage({ params }) {
   }
   const { id, studentId } = await params;
   return (
-    <ExaminerStudentObservePanel
-      studentId={studentId}
-      academicProjectId={id}
-      backHref={`/projects/${id}/participants`}
-      backLabel="Back to participants"
-    />
+    <Suspense fallback={null}>
+      <ExaminerOrgExplorer
+        participant
+        studentId={studentId}
+        apiBase={`/api/projects/${encodeURIComponent(id)}/participants/${encodeURIComponent(studentId)}`}
+        backHref={`/projects/${id}/participants`}
+        backLabel="Back to participants"
+      />
+    </Suspense>
   );
 }

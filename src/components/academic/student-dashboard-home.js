@@ -84,13 +84,6 @@ export async function StudentDashboardHome({ user, personalOrgProjectId = null }
           >
             Assessments
           </Link>
-          <Link
-            href="/academic/results"
-            title="Open Results"
-            className="inline-flex cursor-pointer items-center rounded-lg border border-[color:var(--border-subtle)] bg-surface-card px-4 py-2 text-sm font-medium text-foreground"
-          >
-            Results
-          </Link>
         </div>
         {!enrolled && ayLabel ? (
           <p className={`mt-3 text-sm ${BRAND_PAGE_LEAD_CLASS}`}>Not enrolled in {ayLabel}.</p>

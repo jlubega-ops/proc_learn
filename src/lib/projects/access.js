@@ -8,14 +8,12 @@ export function actsAsExaminerRole(activeRole) {
 }
 
 /**
- * Create, edit, or delete examiner-owned projects (system admin: any; examiner: own only).
- * @param {{ activeRole: import("@prisma/client").Role; project: any; userId: string }} p
+ * Create, edit, or delete examiner projects (system admin and any examiner).
+ * @param {{ activeRole: import("@prisma/client").Role; project: any; userId?: string }} p
  */
-export function canManageExaminerProject({ activeRole, project, userId }) {
+export function canManageExaminerProject({ activeRole, project }) {
   if (!project || project.creatorRole !== Role.EXAMINER) return false;
-  if (activeRole === Role.SYSTEM_ADMIN) return true;
-  if (activeRole === Role.EXAMINER && project.ownerUserId === userId) return true;
-  return false;
+  return actsAsExaminerRole(activeRole);
 }
 
 /**
@@ -32,11 +30,7 @@ export function canViewProjectByRole({ userId, activeRole, project }) {
   ) {
     return true;
   }
-  if (
-    activeRole === Role.EXAMINER &&
-    project.ownerUserId === userId &&
-    project.creatorRole === Role.EXAMINER
-  ) {
+  if (activeRole === Role.EXAMINER && project.creatorRole === Role.EXAMINER) {
     return true;
   }
   if (

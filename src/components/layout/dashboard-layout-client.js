@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { Fragment, Suspense, useEffect, useMemo, useRef, useState } from "react";
-import { usePathname, useSearchParams } from "next/navigation";
+import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import Image from "next/image";
 import ExpandMoreRounded from "@mui/icons-material/ExpandMoreRounded";
 import DarkModeRounded from "@mui/icons-material/DarkModeRounded";
@@ -18,7 +18,10 @@ import { NavbarUserMenu } from "@/components/layout/navbar-user-menu";
 import { NotificationBellMenu } from "@/components/layout/notification-bell-menu";
 import { JoinAcademicYearPrompt } from "@/components/academic/join-academic-year-prompt";
 import { JoinPracticeProjectPrompt } from "@/components/academic/join-practice-project-prompt";
-import { ActiveOrgContextBanner, StudentExitOrgSidebarButton } from "@/components/academic/active-org-context-banner";
+import {
+  ActiveOrgContextBanner,
+  AttemptOrgMemberBanner,
+} from "@/components/academic/active-org-context-banner";
 import { ActiveCommitteeContextBanner } from "@/components/layout/active-committee-context-banner";
 import { StudentModeBanner } from "@/components/academic/student-mode-banner";
 import { getDashboardPageMeta } from "@/lib/dashboard-page-meta";
@@ -27,6 +30,7 @@ import { PROJECT_ORG_ENTRY_ROLE_NAME } from "@/lib/project-org-role";
 import { PROCUREMENT_STAGE_PAGES } from "@/lib/projects/procurement-stage-pages";
 import { ORG_PERMISSION } from "@/lib/projects/org-role-permissions";
 import { usePendingTaskCounts } from "@/hooks/use-pending-task-counts";
+import { useStudentAcademicCounts } from "@/hooks/use-student-academic-counts";
 import {
   BRAND_NAV_ACTIVE_CLASS,
   BRAND_NAV_INACTIVE_CLASS,
@@ -49,6 +53,14 @@ function projectIdFromPath(pathname) {
 
 function isOrganisationPath(pathname) {
   return String(pathname || "").startsWith("/organisation");
+}
+
+const ATTEMPT_WORLD_PATH_PREFIXES = ["/organisation", "/notifications", "/profile", "/settings"];
+
+/** Routes a student may open while inside a practice / assessment organisation. */
+function isAttemptWorldPath(pathname) {
+  const p = String(pathname || "");
+  return ATTEMPT_WORLD_PATH_PREFIXES.some((prefix) => p === prefix || p.startsWith(`${prefix}/`));
 }
 
 /**
@@ -93,10 +105,10 @@ function navItemIsActive(navPathname, searchParams, href) {
   return false;
 }
 
-/** @param {{ count?: number }} p */
-function NavCountBadge({ count }) {
+/** @param {{ count?: number; noun?: string }} p */
+function NavCountBadge({ count, noun = "pending task" }) {
   if (!count) return null;
-  const label = `${count} pending ${count === 1 ? "task" : "tasks"}`;
+  const label = `${count} ${noun}${count === 1 ? "" : "s"}`;
   return (
     <span
       title={label}
@@ -293,7 +305,10 @@ function NavLinks({
         >
           <Icon aria-hidden sx={primaryIconSx} />
           <span className="min-w-0 flex-1">{label}</span>
-          <NavCountBadge count={taskCounts[href]} />
+          <NavCountBadge
+            count={taskCounts[href]}
+            noun={href.startsWith("/academic/") ? "open project" : undefined}
+          />
         </Link>
       </li>
     );
@@ -368,6 +383,7 @@ function NavLinksWithSearch({
 
 export default function DashboardLayoutClient({ children }) {
   const pathname = usePathname();
+  const router = useRouter();
   const [drawerOpen, setDrawerOpen] = useState(false);
   // Layout shell: sidebar + header + main + footer (single root).
   const { mode, toggleMode } = useAppTheme();
@@ -383,6 +399,17 @@ export default function DashboardLayoutClient({ children }) {
   const orgContext = !isOrgSession
     ? String(session?.orgContext || "PERSONAL")
     : "PERSONAL";
+  const inAttemptWorld =
+    !isOrgSession &&
+    activeRole === "STUDENT" &&
+    !session?.isStudentMode &&
+    (orgContext === "PRACTICE" || orgContext === "ASSESSMENT");
+
+  useEffect(() => {
+    if (!inAttemptWorld || isAttemptWorldPath(pathname || "/")) return;
+    router.replace("/organisation");
+  }, [inAttemptWorld, pathname, router]);
+
   const pathProjectId = isOrgSession ? orgProjectId : projectIdFromPath(pathname || "/");
   const onOrganisation = !isOrgSession && activeRole === "STUDENT" && isOrganisationPath(pathname || "/");
   const projectId = onOrganisation ? personalOrgProjectId : pathProjectId;
@@ -390,11 +417,15 @@ export default function DashboardLayoutClient({ children }) {
   const [projectOrgLabel, setProjectOrgLabel] = useState("");
   const [canManageOrgAdmin, setCanManageOrgAdmin] = useState(false);
   const [projectOrgLoading, setProjectOrgLoading] = useState(false);
-  const taskCounts = usePendingTaskCounts(
+  const orgTaskCounts = usePendingTaskCounts(
     orgProjectId,
     isOrgSession && orgPermissions.includes(ORG_PERMISSION.VIEW_TASKS),
     `${session?.orgRoleName || ""}|${session?.activeCommittee?.id || ""}|${session?.activeCommittee?.committeeRole || ""}`,
   );
+  const academicCounts = useStudentAcademicCounts(
+    Boolean(session?.authenticated) && !isOrgSession && activeRole === "STUDENT",
+  );
+  const taskCounts = isOrgSession ? orgTaskCounts : academicCounts;
 
   const authed = Boolean(session?.authenticated);
   const showSidebarSignIn = !authed;
@@ -534,9 +565,7 @@ export default function DashboardLayoutClient({ children }) {
               Sign in
             </Link>
           </div>
-        ) : (
-          <StudentExitOrgSidebarButton onNavigate={() => setDrawerOpen(false)} />
-        )}
+        ) : null}
       </aside>
 
       <div className="flex min-w-0 flex-1 flex-col">
@@ -660,9 +689,10 @@ export default function DashboardLayoutClient({ children }) {
             </Link>
           )}
           </div>
+          <ActiveOrgContextBanner />
+          {isOrgSession ? <AttemptOrgMemberBanner /> : null}
         </header>
 
-        <ActiveOrgContextBanner />
         <ActiveCommitteeContextBanner />
 
         <main

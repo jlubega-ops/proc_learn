@@ -32,7 +32,7 @@ export async function GET() {
 
     /** @type {any} */
     let timer = null;
-    let autoExpired = false;
+    let autoExpired = Number(resolved.autoSubmitted || 0) > 0;
     let attemptId = resolved.attempt?.id || null;
 
     if (attemptId && resolved.academicProject) {

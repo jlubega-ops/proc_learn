@@ -52,12 +52,29 @@ import {
 import { adminCenteredLoadingBoxSx, adminLoadingSpinnerSx, themedTextFieldSx } from "@/lib/admin-mui-surfaces";
 import { useToast } from "@/components/providers/toast-provider";
 import {
+  EXPLORER_SCORING_SECTIONS,
   EXPLORER_SECTION_GROUPS,
   EXPLORER_SECTION_KEYS,
   explorerSectionLabel,
 } from "@/lib/academic/examiner-org-explorer-sections";
+import { formatMarks } from "@/lib/academic/assessment-sections";
 import { ExplorerItemCard, fmtDate, fmtDateTime } from "@/components/examiner/examiner-explorer-parts";
 import { ExaminerExplorerProcurement } from "@/components/examiner/examiner-explorer-procurement";
+import { PrintButton, PrintDocument } from "@/components/print/print-document";
+import {
+  ParticipantHeroChips,
+  ParticipantMarksView,
+  participantPrintMeta,
+  participantPrintSections,
+} from "@/components/examiner/participant-marks";
+import GradingRounded from "@mui/icons-material/GradingRounded";
+
+const MARKS_SECTION = "marks";
+const PARTICIPANT_NAV_GROUP = {
+  key: "assessment",
+  label: "Assessment",
+  items: [{ key: MARKS_SECTION, label: "Marks" }],
+};
 
 /** @type {Record<string, import("react").ComponentType<any>>} */
 const SECTION_ICONS = {
@@ -83,6 +100,7 @@ const SECTION_ICONS = {
   invoices: ReceiptRounded,
   payments: PaymentsRounded,
   closures: LockRounded,
+  [MARKS_SECTION]: GradingRounded,
 };
 
 const PAGE_SIZE = 10;
@@ -98,17 +116,30 @@ function initials(name) {
 }
 
 /**
- * Read-only explorer of a student's personal organisation for examiners / lecturers.
- * @param {{ studentId: string; backHref?: string }} props
+ * Read-only explorer of a student's organisation for examiners / lecturers.
+ * `participant` mode reads the attempt organisation of one academic project and adds marks + print.
+ * @param {{ studentId: string; backHref?: string; backLabel?: string; apiBase?: string; participant?: boolean }} props
  */
-export function ExaminerOrgExplorer({ studentId, backHref = "/academic/participation" }) {
+export function ExaminerOrgExplorer({
+  studentId,
+  backHref = "/academic/participation",
+  backLabel = "Back to participation",
+  apiBase,
+  participant = false,
+}) {
   const router = useRouter();
   const pathname = usePathname();
   const searchParams = useSearchParams();
   const { showToast } = useToast();
+  const base = apiBase || `/api/examiner/observation/students/${encodeURIComponent(studentId)}`;
 
-  const rawSection = searchParams.get("section") || "overview";
-  const section = EXPLORER_SECTION_KEYS.includes(rawSection) ? rawSection : "overview";
+  const rawSection = searchParams.get("section") || (participant ? MARKS_SECTION : "overview");
+  const section =
+    participant && rawSection === MARKS_SECTION
+      ? MARKS_SECTION
+      : EXPLORER_SECTION_KEYS.includes(rawSection)
+        ? rawSection
+        : "overview";
   const procurementId = searchParams.get("procurement") || "";
 
   const [overview, setOverview] = useState(/** @type {any} */ (null));
@@ -117,10 +148,7 @@ export function ExaminerOrgExplorer({ studentId, backHref = "/academic/participa
   const loadOverview = useCallback(async () => {
     setOverviewLoading(true);
     try {
-      const res = await fetch(
-        `/api/examiner/observation/students/${encodeURIComponent(studentId)}?view=explorer`,
-        { credentials: "include" },
-      );
+      const res = await fetch(`${base}?view=explorer`, { credentials: "include" });
       const json = await res.json().catch(() => ({}));
       if (!res.ok) {
         showToast({
@@ -134,23 +162,25 @@ export function ExaminerOrgExplorer({ studentId, backHref = "/academic/participa
     } finally {
       setOverviewLoading(false);
     }
-  }, [studentId, showToast]);
+  }, [base, showToast]);
 
   useEffect(() => {
     void loadOverview();
   }, [loadOverview]);
+
+  const defaultSection = participant ? MARKS_SECTION : "overview";
 
   /** @param {{ section?: string; procurement?: string | null }} next */
   const navigate = useCallback(
     (next) => {
       const qs = new URLSearchParams();
       const s = next.section ?? section;
-      if (s && s !== "overview") qs.set("section", s);
+      if (s && s !== defaultSection) qs.set("section", s);
       if (next.procurement) qs.set("procurement", next.procurement);
       const query = qs.toString();
       router.push(query ? `${pathname}?${query}` : pathname, { scroll: false });
     },
-    [router, pathname, section],
+    [router, pathname, section, defaultSection],
   );
 
   const [refreshKey, setRefreshKey] = useState(0);
@@ -168,7 +198,7 @@ export function ExaminerOrgExplorer({ studentId, backHref = "/academic/participa
     return (
       <div className={`${BRAND_CARD_CLASS} p-4 sm:p-5`}>
         <Button component={Link} href={backHref} startIcon={<ArrowBackRounded />} className="cursor-pointer">
-          Back to participation
+          {backLabel}
         </Button>
         <p className="mt-2 text-sm text-zinc-500">This student could not be loaded.</p>
       </div>
@@ -177,29 +207,46 @@ export function ExaminerOrgExplorer({ studentId, backHref = "/academic/participa
 
   const org = overview.organisation;
   const counts = overview.counts || {};
+  const navGroups = participant ? [PARTICIPANT_NAV_GROUP, ...EXPLORER_SECTION_GROUPS] : EXPLORER_SECTION_GROUPS;
+  const printMeta = participant ? participantPrintMeta(overview) : null;
 
   return (
     <div className={BRAND_PAGE_SHELL_CLASS}>
       <div className="flex flex-wrap items-center justify-between gap-2">
         <Button component={Link} href={backHref} startIcon={<ArrowBackRounded />} className="cursor-pointer">
-          Back to participation
+          {backLabel}
         </Button>
-        <Button
-          type="button"
-          variant="outlined"
-          onClick={() => {
-            setRefreshKey((k) => k + 1);
-            void loadOverview();
-          }}
-          disabled={overviewLoading}
-          startIcon={overviewLoading ? <CircularProgress size={14} color="inherit" /> : <RefreshRounded />}
-          className="cursor-pointer disabled:cursor-not-allowed"
-        >
-          Refresh
-        </Button>
+        <div className="flex flex-wrap gap-2">
+          {printMeta ? <PrintButton fileName={printMeta.fileName} /> : null}
+          <Button
+            type="button"
+            variant="outlined"
+            onClick={() => {
+              setRefreshKey((k) => k + 1);
+              void loadOverview();
+            }}
+            disabled={overviewLoading}
+            startIcon={overviewLoading ? <CircularProgress size={14} color="inherit" /> : <RefreshRounded />}
+            className="cursor-pointer disabled:cursor-not-allowed"
+          >
+            Refresh
+          </Button>
+        </div>
       </div>
 
-      <ExplorerHero data={overview} />
+      {printMeta ? (
+        <PrintDocument
+          documentTitle="Student assessment report"
+          reference={printMeta.reference}
+          status={printMeta.status}
+          organisation={printMeta.organisation}
+          sections={participantPrintSections(overview)}
+          signatures={printMeta.signatures}
+          printedBy={overview.printedBy || null}
+        />
+      ) : null}
+
+      <ExplorerHero data={overview} participant={participant} />
 
       {!org ? (
         <section className={`${BRAND_CARD_CLASS} p-4 sm:p-5`}>
@@ -207,22 +254,35 @@ export function ExaminerOrgExplorer({ studentId, backHref = "/academic/participa
         </section>
       ) : (
         <div className="grid gap-4 lg:grid-cols-[250px_minmax(0,1fr)]">
-          <ExplorerNav section={section} counts={counts} onSelect={(key) => navigate({ section: key, procurement: null })} />
+          <ExplorerNav
+            groups={navGroups}
+            section={procurementId ? "" : section}
+            counts={counts}
+            onSelect={(key) => navigate({ section: key, procurement: null })}
+          />
           <main className="min-w-0" aria-live="polite">
             {procurementId ? (
               <ExaminerExplorerProcurement
                 key={`${procurementId}-${refreshKey}`}
-                studentId={studentId}
+                apiBase={base}
                 procurementId={procurementId}
-                onBack={() => navigate({ section: section === "overview" ? "procurements" : section, procurement: null })}
+                onBack={() =>
+                  navigate({
+                    section: section === "overview" || section === MARKS_SECTION ? "procurements" : section,
+                    procurement: null,
+                  })
+                }
               />
+            ) : section === MARKS_SECTION ? (
+              <ParticipantMarksView data={overview} />
             ) : section === "overview" ? (
               <ExplorerOverview data={overview} counts={counts} onSelect={(key) => navigate({ section: key })} />
             ) : (
               <ExplorerSection
                 key={`${section}-${refreshKey}`}
-                studentId={studentId}
+                apiBase={base}
                 section={section}
+                marks={participant ? sectionMarks(overview, section) : []}
                 onOpenProcurement={(id) => navigate({ procurement: id })}
               />
             )}
@@ -235,9 +295,9 @@ export function ExaminerOrgExplorer({ studentId, backHref = "/academic/participa
 
 /**
  * Organisation + student summary card.
- * @param {{ data: any }} props
+ * @param {{ data: any; participant?: boolean }} props
  */
-function ExplorerHero({ data }) {
+function ExplorerHero({ data, participant = false }) {
   const s = data.student;
   const org = data.organisation;
   const summary = data.progress?.summary || null;
@@ -283,7 +343,11 @@ function ExplorerHero({ data }) {
               {summary?.currentStageLabel ? (
                 <Chip size="small" color="primary" label={`Now: ${summary.currentStageLabel}`} />
               ) : null}
+              {participant ? <ParticipantHeroChips data={data} /> : null}
             </div>
+            {participant && data.academicProject?.name ? (
+              <p className="mt-1 text-xs text-zinc-500">{data.academicProject.name}</p>
+            ) : null}
           </div>
         </div>
         {summary ? (
@@ -318,9 +382,9 @@ function ExplorerHero({ data }) {
 
 /**
  * Sidebar on large screens; a section picker on small screens.
- * @param {{ section: string; counts: Record<string, number>; onSelect: (key: string) => void }} props
+ * @param {{ groups: typeof EXPLORER_SECTION_GROUPS; section: string; counts: Record<string, number>; onSelect: (key: string) => void }} props
  */
-function ExplorerNav({ section, counts, onSelect }) {
+function ExplorerNav({ groups, section, counts, onSelect }) {
   return (
     <>
       <div className="lg:hidden">
@@ -332,7 +396,7 @@ function ExplorerNav({ section, counts, onSelect }) {
           onChange={(e) => onSelect(e.target.value)}
           sx={themedTextFieldSx}
         >
-          {EXPLORER_SECTION_GROUPS.flatMap((g) => [
+          {groups.flatMap((g) => [
             <ListSubheader key={`h-${g.key}`}>{g.label}</ListSubheader>,
             ...g.items.map((it) => (
               <MenuItem key={it.key} value={it.key}>
@@ -347,7 +411,7 @@ function ExplorerNav({ section, counts, onSelect }) {
         aria-label="Organisation sections"
         className={`${BRAND_CARD_CLASS} hidden self-start p-2 lg:sticky lg:top-20 lg:block lg:max-h-[calc(100dvh-6rem)] lg:overflow-y-auto`}
       >
-        {EXPLORER_SECTION_GROUPS.map((g) => (
+        {groups.map((g) => (
           <div key={g.key} className="mb-2 last:mb-0">
             <p className="px-3 pb-1 pt-2 text-[11px] font-bold uppercase tracking-wider text-zinc-500">{g.label}</p>
             <ul className="space-y-0.5">
@@ -484,10 +548,23 @@ function ExplorerOverview({ data, counts, onSelect }) {
 }
 
 /**
- * One section: searchable, paginated item cards with inline history.
- * @param {{ studentId: string; section: string; onOpenProcurement: (id: string) => void }} props
+ * Scored sections (marks awarded / available) behind one explorer section.
+ * @param {any} data
+ * @param {string} section
  */
-function ExplorerSection({ studentId, section, onOpenProcurement }) {
+function sectionMarks(data, section) {
+  const keys = EXPLORER_SCORING_SECTIONS[section] || [];
+  const scores = Array.isArray(data?.processScores) ? data.processScores : [];
+  return keys
+    .map((key) => scores.find((s) => (s.sectionKey || s.processCode) === key))
+    .filter(Boolean);
+}
+
+/**
+ * One section: searchable, paginated item cards with inline history.
+ * @param {{ apiBase: string; section: string; marks?: any[]; onOpenProcurement: (id: string) => void }} props
+ */
+function ExplorerSection({ apiBase, section, marks = [], onOpenProcurement }) {
   const { showToast } = useToast();
   const [page, setPage] = useState(1);
   const [q, setQ] = useState("");
@@ -518,10 +595,9 @@ function ExplorerSection({ studentId, section, onOpenProcurement }) {
       try {
         const qs = new URLSearchParams({ page: String(page), pageSize: String(PAGE_SIZE) });
         if (search) qs.set("q", search);
-        const res = await fetch(
-          `/api/examiner/observation/students/${encodeURIComponent(studentId)}/org/${encodeURIComponent(section)}?${qs}`,
-          { credentials: "include" },
-        );
+        const res = await fetch(`${apiBase}/org/${encodeURIComponent(section)}?${qs}`, {
+          credentials: "include",
+        });
         const json = await res.json().catch(() => ({}));
         if (cancelled) return;
         if (!res.ok) {
@@ -541,7 +617,7 @@ function ExplorerSection({ studentId, section, onOpenProcurement }) {
     return () => {
       cancelled = true;
     };
-  }, [studentId, section, page, search, showToast]);
+  }, [apiBase, section, page, search, showToast]);
 
   const label = explorerSectionLabel(section);
   const Icon = SECTION_ICONS[section] || DashboardRounded;
@@ -552,12 +628,28 @@ function ExplorerSection({ studentId, section, onOpenProcurement }) {
   return (
     <div className="space-y-3">
       <div className={`${BRAND_CARD_CLASS} flex flex-col gap-3 p-4 sm:flex-row sm:items-center sm:justify-between`}>
-        <h2 className="flex items-center gap-2 text-base font-semibold text-foreground">
-          <Icon sx={{ fontSize: 22, color: "var(--brand-blue)" }} aria-hidden />
-          {label}
-          {!isTree && data ? <span className="text-sm font-normal text-zinc-500">({total})</span> : null}
-          {loading && data ? <CircularProgress size={14} aria-label="Loading" /> : null}
-        </h2>
+        <div className="min-w-0">
+          <h2 className="flex items-center gap-2 text-base font-semibold text-foreground">
+            <Icon sx={{ fontSize: 22, color: "var(--brand-blue)" }} aria-hidden />
+            {label}
+            {!isTree && data ? <span className="text-sm font-normal text-zinc-500">({total})</span> : null}
+            {loading && data ? <CircularProgress size={14} aria-label="Loading" /> : null}
+          </h2>
+          {marks.length ? (
+            <p className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-0.5 text-xs text-zinc-500 dark:text-zinc-400">
+              <GradingRounded sx={{ fontSize: 14 }} aria-hidden />
+              {marks.map((m) => (
+                <span key={m.sectionKey || m.processCode} className="tabular-nums">
+                  {marks.length > 1 ? `${m.label} ` : "Marks "}
+                  <span className="font-medium text-foreground">
+                    {formatMarks(m.awarded)}/{formatMarks(m.marks)}
+                  </span>
+                  {m.totalItems ? ` · ${m.completedItems}/${m.totalItems} items` : ""}
+                </span>
+              ))}
+            </p>
+          ) : null}
+        </div>
         {!isTree ? (
           <TextField
             value={q}

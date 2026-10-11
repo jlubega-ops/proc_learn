@@ -18,6 +18,11 @@ import {
 } from "@/lib/projects/org-process-flow-adoptions";
 import { migrateLegacyProcessAdoptions } from "@/lib/projects/process-catalogue";
 import { resolveAllowedProcessCodesForOrgProject } from "@/lib/academic/assessment-config";
+import { loadProcessActivation } from "@/lib/projects/process-activation";
+import {
+  processActivationBlockers,
+  processCodeOfFlow,
+} from "@/lib/projects/process-dependencies";
 
 export const runtime = "nodejs";
 
@@ -135,7 +140,7 @@ export async function POST(request, context) {
 
   const processFlow = await prisma.projectOrgProcessFlow.findUnique({
     where: { id: processFlowId },
-    select: { id: true, name: true, code: true },
+    select: { id: true, name: true, code: true, triggerKey: true },
   });
   if (!processFlow) {
     return NextResponse.json(
@@ -167,6 +172,15 @@ export async function POST(request, context) {
       },
       { status: 400 },
     );
+  }
+
+  const code = processCodeOfFlow(processFlow);
+  if (code) {
+    const { active, names } = await loadProcessActivation(prisma, projectId);
+    const blockers = processActivationBlockers(code, active, names);
+    if (blockers.length) {
+      return NextResponse.json({ error: blockers[0], code: "PROCESS_DEPENDENCY" }, { status: 400 });
+    }
   }
 
   const row = await prisma.projectOrgProcessFlowAdoption.create({

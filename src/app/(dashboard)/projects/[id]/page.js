@@ -1,12 +1,14 @@
 import Chip from "@mui/material/Chip";
-import { format, isValid, parseISO } from "date-fns";
+import { format, isValid } from "date-fns";
 import { getProjectWorkspacePageContext } from "@/lib/projects/project-page-context";
 import { prisma } from "@/lib/prisma";
 import { formatUserDisplayName } from "@/lib/user-display";
 import { sanitizeRichHtml } from "@/lib/sanitize-rich-html";
 import { loadOrgProfile } from "@/lib/projects/org-profile";
 import { OrgProfileView } from "@/components/projects/org-profile-view";
-import { BRAND_CARD_CLASS } from "@/lib/brand-ui";
+import { BRAND_CARD_CLASS, BRAND_SECTION_TITLE_CLASS } from "@/lib/brand-ui";
+import { formatDurationHms } from "@/lib/academic/attempt-timer-format";
+import { projectCampusesLabel } from "@/lib/academic/project-campuses";
 
 export const metadata = {
   title: "Project details",
@@ -20,9 +22,11 @@ export default async function ProjectDetailsPage({ params }) {
   const project = await prisma.project.findUnique({
     where: { id },
     include: {
-      owner: {
-        select: { firstName: true, lastName: true, email: true },
-      },
+      owner: { select: { firstName: true, lastName: true, email: true } },
+      academicYear: { select: { label: true } },
+      programme: { select: { name: true, shortName: true } },
+      campuses: { select: { campus: true } },
+      _count: { select: { enrollments: true } },
     },
   });
   if (!project) {
@@ -34,7 +38,6 @@ export default async function ProjectDetailsPage({ params }) {
     const displayName = formatUserDisplayName(ctx.orgUser);
     const roleName = ctx.orgUser.projectOrgRole?.name || "Organisation role";
     const departmentName = ctx.orgUser.department?.name || null;
-    const showAssignmentBadges = Boolean(project.isAttemptOrg);
     const profile = await loadOrgProfile(prisma, id);
 
     return (
@@ -49,19 +52,9 @@ export default async function ProjectDetailsPage({ params }) {
             <span className="font-semibold text-primary">{roleName}</span>
             {departmentName ? ` · ${departmentName}` : ""}
           </p>
-          {showAssignmentBadges ? (
+          {project.isAttemptOrg ? (
             <div className="mt-3 flex flex-wrap items-center gap-2">
-              <Chip
-                size="small"
-                label={purposeLabel(project.purpose)}
-                color={purposeColor(project.purpose)}
-              />
-              <Chip size="small" label={project.status} color={statusColor(project.status)} />
-              <Chip
-                size="small"
-                label={project.isPublished ? "Published" : "Not published"}
-                color={project.isPublished ? "success" : "warning"}
-              />
+              <Chip size="small" color="primary" label={purposeLabel(project.purpose)} />
             </div>
           ) : null}
         </div>
@@ -71,148 +64,156 @@ export default async function ProjectDetailsPage({ params }) {
     );
   }
 
-  const isStudentOwnedProject =
-    project.creatorRole === "STUDENT" && project.ownerUserId === ctx.user.id;
-  const showStaffFields = !isStudentOwnedProject;
+  const isExaminerProject = project.creatorRole === "EXAMINER";
+  const windowInfo = windowState(project);
+
+  const overview = [
+    { label: "Organisation name", value: project.organizationName || "—" },
+    { label: "Purpose", value: purposeLabel(project.purpose) },
+    { label: "Academic year", value: project.academicYear?.label || "—" },
+    {
+      label: "Programme",
+      value: project.programme
+        ? project.programme.shortName
+          ? `${project.programme.shortName} — ${project.programme.name}`
+          : project.programme.name
+        : "—",
+    },
+    ...(isExaminerProject
+      ? [
+          { label: "Campuses", value: projectCampusesLabel(project.campuses) },
+          { label: "Enrolled students", value: String(project._count.enrollments) },
+          { label: "Enrolment key", value: project.enrollmentKey || "None" },
+        ]
+      : []),
+    {
+      label: "Created by",
+      value: `${project.owner?.firstName || ""} ${project.owner?.lastName || ""}`.trim() || "—",
+    },
+    { label: "Created on", value: fmtDate(project.createdAt, "MMM d, yyyy") },
+  ];
+
+  const schedule = [
+    { label: "Opens", value: project.openAt ? fmtDate(project.openAt) : "Immediately" },
+    { label: "Closes", value: project.closeAt ? fmtDate(project.closeAt) : "No close date" },
+    { label: "Time allowed", value: formatDurationHms(project.durationSeconds) },
+    {
+      label: "Attempts allowed",
+      value: project.maxAttempts == null || project.maxAttempts === 0 ? "Unlimited" : String(project.maxAttempts),
+    },
+    { label: "Edit after submit", value: project.allowEditAfterSubmit ? "Allowed" : "Not allowed" },
+  ];
 
   return (
     <div className="w-full space-y-4">
-      <div className="rounded-xl border border-zinc-200 bg-white p-4 dark:border-zinc-800 dark:bg-zinc-900">
-        <h1 className="text-xl font-semibold text-zinc-900 dark:text-white">{project.name}</h1>
-        <p className="mt-1 text-sm text-zinc-600 dark:text-zinc-400">
-          Owner: {project.owner?.firstName || ""} {project.owner?.lastName || ""} (
-          {project.owner?.email || "—"})
-        </p>
-        <div className="mt-3 flex flex-wrap items-center gap-2">
-          <Chip size="small" label={purposeLabel(project.purpose)} color={purposeColor(project.purpose)} />
-          <Chip size="small" label={project.status} color={statusColor(project.status)} />
-          <Chip size="small" label={project.visibility} color={visibilityColor(project.visibility)} />
-          {showStaffFields ? (
-            <Chip
-              size="small"
-              label={project.isPublished ? "Published" : "Not published"}
-              color={project.isPublished ? "success" : "warning"}
-            />
-          ) : null}
-        </div>
+      <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
+        <Section title="Overview">
+          <FactList items={overview} />
+        </Section>
+        <Section
+          title="Schedule"
+          action={<Chip size="small" color={windowInfo.color} label={windowInfo.label} />}
+        >
+          <FactList items={schedule} />
+        </Section>
       </div>
 
-      {showStaffFields ? (
-        <div className="rounded-xl border border-zinc-200 bg-white p-4 dark:border-zinc-800 dark:bg-zinc-900">
-          <h2 className="text-base font-semibold text-zinc-900 dark:text-white">Time &amp; schedule</h2>
-          <p className="mt-2 text-sm text-zinc-700 dark:text-zinc-300">Open: {fmtDate(project.openAt)}</p>
-          <p className="text-sm text-zinc-700 dark:text-zinc-300">Close: {fmtDate(project.closeAt)}</p>
-          <p className="text-sm text-zinc-700 dark:text-zinc-300">
-            Attempt duration: {fmtDuration(project.durationSeconds)}
-            {project.durationSeconds
-              ? " (counts down from start — does not pause on logout)"
-              : " (no timed attempt; students see time left until close)"}
-          </p>
-          <p className="mt-2 text-sm font-medium text-zinc-800 dark:text-zinc-200">
-            Window: {windowStatusLabel(project)}
-            {windowRemainingLabel(project) ? ` · ${windowRemainingLabel(project)}` : ""}
-          </p>
-        </div>
-      ) : null}
-
-      <div className="rounded-xl border border-zinc-200 bg-white p-4 dark:border-zinc-800 dark:bg-zinc-900">
-        <h2 className="text-base font-semibold text-zinc-900 dark:text-white">Description</h2>
-        <p className="mt-2 whitespace-pre-wrap text-sm text-zinc-700 dark:text-zinc-300">
+      <Section title="Description">
+        <p className="whitespace-pre-wrap text-sm text-zinc-700 dark:text-zinc-300">
           {project.description || "—"}
         </p>
-      </div>
+      </Section>
 
-      {showStaffFields ? (
-        <>
-          <div className="rounded-xl border border-zinc-200 bg-white p-4 dark:border-zinc-800 dark:bg-zinc-900">
-            <h2 className="text-base font-semibold text-zinc-900 dark:text-white">Instructions</h2>
-            {project.instructions ? (
-              <div
-                className="rich-html mt-2 max-w-none"
-                dangerouslySetInnerHTML={{ __html: sanitizeRichHtml(project.instructions) }}
-              />
-            ) : (
-              <p className="mt-2 text-sm text-zinc-600 dark:text-zinc-400">—</p>
-            )}
-          </div>
+      <Section title="Instructions">
+        {project.instructions ? (
+          <div
+            className="rich-html max-w-none"
+            dangerouslySetInnerHTML={{ __html: sanitizeRichHtml(project.instructions) }}
+          />
+        ) : (
+          <p className="text-sm text-zinc-600 dark:text-zinc-400">—</p>
+        )}
+      </Section>
 
-          <div className="rounded-xl border border-zinc-200 bg-white p-4 dark:border-zinc-800 dark:bg-zinc-900">
-            <h2 className="text-base font-semibold text-zinc-900 dark:text-white">Question</h2>
-            {project.questionText ? (
-              <div
-                className="rich-html mt-2 max-w-none"
-                dangerouslySetInnerHTML={{ __html: sanitizeRichHtml(project.questionText) }}
-              />
-            ) : (
-              <p className="mt-2 text-sm text-zinc-600 dark:text-zinc-400">—</p>
-            )}
-            {project.questionFileUrl ? (
-              <a
-                href={project.questionFileUrl}
-                target="_blank"
-                rel="noreferrer"
-                className="mt-3 inline-block text-sm text-primary underline"
-              >
-                Open question file
-              </a>
-            ) : null}
-          </div>
-        </>
-      ) : null}
+      <Section title="Question">
+        {project.questionText ? (
+          <div
+            className="rich-html max-w-none"
+            dangerouslySetInnerHTML={{ __html: sanitizeRichHtml(project.questionText) }}
+          />
+        ) : (
+          <p className="text-sm text-zinc-600 dark:text-zinc-400">—</p>
+        )}
+        {project.questionFileUrl ? (
+          <a
+            href={project.questionFileUrl}
+            target="_blank"
+            rel="noreferrer"
+            className="mt-3 inline-block cursor-pointer text-sm text-primary underline"
+          >
+            Open question file
+          </a>
+        ) : null}
+      </Section>
     </div>
   );
 }
 
-function fmtDate(value) {
+/**
+ * @param {{ title: string; action?: import("react").ReactNode; children: import("react").ReactNode }} p
+ */
+function Section({ title, action = null, children }) {
+  return (
+    <section className={`${BRAND_CARD_CLASS} p-4 sm:p-5`} aria-label={title}>
+      <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+        <h2 className={BRAND_SECTION_TITLE_CLASS}>{title}</h2>
+        {action}
+      </div>
+      {children}
+    </section>
+  );
+}
+
+/** @param {{ items: { label: string; value: string }[] }} p */
+function FactList({ items }) {
+  return (
+    <dl className="divide-y divide-[color:var(--border-subtle)] text-sm">
+      {items.map((item) => (
+        <div key={item.label} className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-0.5 py-2">
+          <dt className="text-zinc-500 dark:text-zinc-400">{item.label}</dt>
+          <dd className="min-w-0 break-words text-right font-medium text-foreground">{item.value}</dd>
+        </div>
+      ))}
+    </dl>
+  );
+}
+
+/**
+ * @param {Date | string | null} value
+ * @param {string} [pattern]
+ */
+function fmtDate(value, pattern = "MMM d, yyyy h:mm a") {
   if (!value) return "—";
-  const d = typeof value === "string" ? parseISO(value) : new Date(value);
+  const d = new Date(value);
   if (!isValid(d)) return "—";
-  return format(d, "MMM d, yyyy h:mm a");
+  return format(d, pattern);
 }
 
-function fmtDuration(seconds) {
-  if (!seconds || seconds <= 0) return "Not set";
-  const h = Math.floor(seconds / 3600);
-  const m = Math.floor((seconds % 3600) / 60);
-  return `${h}h ${m}m`;
-}
-
-function windowStatusLabel(project) {
+/**
+ * @param {{ openAt: Date | null; closeAt: Date | null }} project
+ * @returns {{ label: string; color: 'warning' | 'primary' | 'error' }}
+ */
+function windowState(project) {
   const now = Date.now();
-  const openAt = project.openAt ? new Date(project.openAt).getTime() : null;
-  const closeAt = project.closeAt ? new Date(project.closeAt).getTime() : null;
-  if (openAt && now < openAt) return "Not yet open";
-  if (closeAt && now > closeAt) return "Closed";
-  return "Open";
-}
-
-function windowRemainingLabel(project) {
-  const closeAt = project.closeAt ? new Date(project.closeAt).getTime() : null;
-  if (!closeAt) return null;
-  const now = Date.now();
-  if (now > closeAt) return "Ended";
-  const sec = Math.floor((closeAt - now) / 1000);
-  const h = Math.floor(sec / 3600);
-  const m = Math.floor((sec % 3600) / 60);
-  if (h > 0) return `${h}h ${m}m left until close`;
-  return `${m}m left until close`;
-}
-
-function statusColor(status) {
-  if (status === "COMPLETED" || status === "SUBMITTED") return "success";
-  if (status === "IN_PROGRESS") return "info";
-  if (status === "NOT_STARTED") return "warning";
-  return "primary";
-}
-
-function visibilityColor(visibility) {
-  return visibility === "PUBLIC" ? "secondary" : "warning";
+  if (project.openAt && now < new Date(project.openAt).getTime()) {
+    return { label: "Upcoming", color: "warning" };
+  }
+  if (project.closeAt && now > new Date(project.closeAt).getTime()) {
+    return { label: "Closed", color: "error" };
+  }
+  return { label: "Open", color: "primary" };
 }
 
 function purposeLabel(purpose) {
   return String(purpose || "").toUpperCase() === "ASSESSMENT" ? "Assessment" : "Practice";
-}
-
-function purposeColor(purpose) {
-  return String(purpose || "").toUpperCase() === "ASSESSMENT" ? "secondary" : "primary";
 }

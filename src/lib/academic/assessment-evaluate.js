@@ -15,14 +15,14 @@ import {
   deriveOrganisationProcurementProgress,
 } from "@/lib/projects/derive-org-progress";
 import { findStudentPersonalOrg } from "@/lib/projects/student-personal-org";
-import { orgOpsSlateListWhere } from "@/lib/academic/org-academic-slate";
 import { computeFinalScore } from "@/lib/academic/assessment-scoring";
+import { DEFAULT_ASSESSMENT_TOTAL_MARKS } from "@/lib/academic/assessment-process-catalogue";
 import {
-  ASSESSMENT_PROCESS_CATALOGUE,
-  DEFAULT_ASSESSMENT_TOTAL_MARKS,
-  evaluateAllowedProcesses,
-  redistributeProcessMarks,
-} from "@/lib/academic/assessment-process-catalogue";
+  buildScoringTree,
+  evaluateScoringSections,
+  scoringTreeToRows,
+} from "@/lib/academic/assessment-sections";
+import { loadScoringEvidence } from "@/lib/academic/assessment-evidence";
 
 /**
  * @param {any} checkpoint
@@ -182,17 +182,9 @@ export async function getOrCreateProjectAssessment(db, opts) {
  * @param {number} totalMarks
  */
 export async function seedAssessmentProcesses(db, assessmentId, totalMarks = DEFAULT_ASSESSMENT_TOTAL_MARKS) {
-  const split = redistributeProcessMarks(
-    ASSESSMENT_PROCESS_CATALOGUE.map((p) => ({
-      processCode: p.code,
-      isAllowed: true,
-      marksPinned: false,
-      marks: 0,
-    })),
-    totalMarks,
-  );
+  const tree = buildScoringTree([], totalMarks);
   await db.assessmentProcess.createMany({
-    data: split.rows.map((row, index) => ({
+    data: scoringTreeToRows(tree.sections).map((row, index) => ({
       assessmentId,
       processCode: row.processCode,
       sortOrder: index,
@@ -202,6 +194,30 @@ export async function seedAssessmentProcesses(db, assessmentId, totalMarks = DEF
     })),
     skipDuplicates: true,
   });
+}
+
+/**
+ * Section scores for one organisation against the project's scoring tree.
+ * @param {import("@prisma/client").PrismaClient} db
+ * @param {{ orgId: string; assessment: any; academicSlateId?: string | null }} opts
+ */
+export async function scoreOrganisationSections(db, opts) {
+  const totalMarks = Math.max(0, Number(opts.assessment.totalMarks) || DEFAULT_ASSESSMENT_TOTAL_MARKS);
+  const tree = buildScoringTree(opts.assessment.processes || [], totalMarks);
+  const evidence = await loadScoringEvidence(db, opts.orgId, {
+    academicSlateId: opts.academicSlateId || null,
+  });
+  const sections = evaluateScoringSections(tree.sections, evidence);
+  const autoScore =
+    Math.round(sections.reduce((s, r) => s + (Number(r.awarded) || 0), 0) * 100) / 100;
+  const items = sections.flatMap((s) => s.items);
+  return {
+    sections,
+    autoScore,
+    totalMarks,
+    completedCount: items.filter((i) => i.satisfied).length,
+    allowedCount: items.length,
+  };
 }
 
 /**
@@ -215,32 +231,20 @@ export async function seedAssessmentProcesses(db, assessmentId, totalMarks = DEF
  */
 export async function computeLiveProcessScore(db, opts) {
   if (!opts.orgId || !opts.assessment) return null;
-  const processRows = (opts.assessment.processes || []).filter((p) => p.isAllowed !== false);
-  if (!processRows.length) return null;
 
-  let slateWhere = {};
-  if (opts.academicSlateId) {
-    slateWhere = orgOpsSlateListWhere(opts.academicSlateId);
-  }
-  const [progress, procurements] = await Promise.all([
+  const [progress, scored] = await Promise.all([
     deriveOrganisationProcurementProgress(opts.orgId, { db }),
-    db.projectOrgProcurement.findMany({
-      where: { projectId: opts.orgId, ...slateWhere },
-      select: { procurementMethod: true, status: true },
-      take: 100,
+    scoreOrganisationSections(db, {
+      orgId: opts.orgId,
+      assessment: opts.assessment,
+      academicSlateId: opts.academicSlateId || null,
     }),
   ]);
-  const results = evaluateAllowedProcesses(processRows, { progress, procurements });
-  const autoScore = results.reduce((s, r) => s + (r.awarded || 0), 0);
-  const totalMarks = Math.max(
-    0,
-    opts.assessment.totalMarks || processRows.reduce((s, p) => s + Math.max(0, p.marks || 0), 0),
-  );
   const computed = computeFinalScore({
     gradingMode: AssessmentGradingMode.AUTOMATIC,
-    autoScore,
+    autoScore: scored.autoScore,
     manualScore: null,
-    autoMaxMarks: totalMarks,
+    autoMaxMarks: scored.totalMarks,
     manualMaxMarks: 0,
     passMarkPercent: opts.assessment.passMarkPercent,
     manualEntered: false,
@@ -249,11 +253,11 @@ export async function computeLiveProcessScore(db, opts) {
     autoScore: computed.autoScore,
     finalScore: computed.finalScore,
     finalPercent: computed.finalPercent,
-    totalMarks,
+    totalMarks: scored.totalMarks,
     passFail: computed.passFail,
-    completedCount: results.filter((r) => r.satisfied).length,
-    allowedCount: results.length,
-    processes: results,
+    completedCount: scored.completedCount,
+    allowedCount: scored.allowedCount,
+    processes: scored.sections,
     currentStageLabel: progress?.summary?.currentStageLabel || null,
     currentStageKey: progress?.summary?.currentStageKey || null,
     progressPercent: progress?.summary?.percent ?? null,
@@ -354,33 +358,32 @@ export async function autoEvaluateProjectAttempt(opts) {
     )?.id ||
     (await findStudentPersonalOrg(db, studentUserId))?.id ||
     null;
-  let progress = null;
-  /** @type {{ procurementMethod: string | null }[]} */
-  let procurements = [];
-  if (orgId) {
-    progress = await deriveOrganisationProcurementProgress(orgId, { db });
-    let slateWhere = {};
-    if (attempt.academicSlateId) {
-      slateWhere = orgOpsSlateListWhere(attempt.academicSlateId);
-    }
-    procurements = await db.projectOrgProcurement.findMany({
-      where: { projectId: orgId, ...slateWhere },
-      select: { procurementMethod: true, status: true },
-      take: 100,
-    });
-  }
-
-  const processRows = (assessment.processes || []).filter((p) => p.isAllowed !== false);
   /** @type {any[]} */
   let checkpointResults = [];
   let autoMaxMarks = 0;
   let autoScore = 0;
 
-  if (processRows.length) {
-    checkpointResults = evaluateAllowedProcesses(processRows, { progress, procurements });
-    autoMaxMarks = processRows.reduce((s, p) => s + Math.max(0, p.marks || 0), 0);
-    autoScore = checkpointResults.reduce((s, r) => s + (r.awarded || 0), 0);
+  if ((assessment.processes || []).length) {
+    if (orgId) {
+      const scored = await scoreOrganisationSections(db, {
+        orgId,
+        assessment,
+        academicSlateId: attempt.academicSlateId || null,
+      });
+      checkpointResults = scored.sections;
+      autoScore = scored.autoScore;
+    }
+    autoMaxMarks = Math.max(0, Number(assessment.totalMarks) || DEFAULT_ASSESSMENT_TOTAL_MARKS);
   } else {
+    const progress = orgId ? await deriveOrganisationProcurementProgress(orgId, { db }) : null;
+    /** @type {{ procurementMethod: string | null }[]} */
+    const procurements = orgId
+      ? await db.projectOrgProcurement.findMany({
+          where: { projectId: orgId },
+          select: { procurementMethod: true, status: true },
+          take: 100,
+        })
+      : [];
     const activeCheckpoints = (assessment.checkpoints || []).filter((c) => c.isActive);
     checkpointResults = activeCheckpoints.map((cp) =>
       evaluateCheckpointAgainstDomain(cp, {

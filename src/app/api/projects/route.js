@@ -5,6 +5,11 @@ import { getSessionUser, sessionActiveRole } from "@/lib/api/get-session-user";
 import { AuditEvent, writeAuditLog } from "@/lib/audit-log";
 import { validateProjectCreateInput } from "@/lib/validation/project";
 import { generateUniqueProjectCode } from "@/lib/projects/project-identity";
+import {
+  loadStudentEligibilityContext,
+  studentVisibleAcademicProjectWhere,
+} from "@/lib/academic/student-project-eligibility";
+import { notifyStudentsProjectAvailable } from "@/lib/academic/student-academic-notifications";
 
 export const runtime = "nodejs";
 
@@ -72,7 +77,6 @@ export async function GET(request) {
   const activeRole = sessionActiveRole(user) || Role.STUDENT;
   const { searchParams } = new URL(request.url);
   const filter = String(searchParams.get("filter") || "all").toLowerCase();
-  const scope = String(searchParams.get("scope") || "all").toLowerCase();
   const purpose = String(searchParams.get("purpose") || "all").toLowerCase();
   const status = String(searchParams.get("status") || "all").toLowerCase();
   const openStatus = String(searchParams.get("openStatus") || "all").toLowerCase();
@@ -97,6 +101,7 @@ export async function GET(request) {
 
   if (activeRole === Role.STUDENT) {
     const studentSpecific = studentFilterWhere(activeRole, filter);
+    const eligibility = await loadStudentEligibilityContext(prisma, user.id);
     where = {
       AND: [
         {
@@ -111,7 +116,10 @@ export async function GET(request) {
               visibility: "PUBLIC",
               isPublished: true,
               creatorRole: Role.EXAMINER,
-              OR: [{ closeAt: null }, { closeAt: { gte: new Date() } }],
+              AND: [
+                { OR: [{ closeAt: null }, { closeAt: { gte: new Date() } }] },
+                studentVisibleAcademicProjectWhere(eligibility),
+              ],
             },
           ],
         },
@@ -124,7 +132,6 @@ export async function GET(request) {
     where = {
       AND: [
         {
-          ownerUserId: user.id,
           creatorRole: Role.EXAMINER,
           isPersonalOrg: false,
           isAttemptOrg: false,
@@ -162,14 +169,7 @@ export async function GET(request) {
             : status === "completed"
               ? { status: "COMPLETED" }
               : {},
-        // Default: examiner Practice / Assessment projects. Student orgs → Participation.
-        scope === "student" || scope === "student_public"
-          ? {
-              creatorRole: Role.STUDENT,
-              isPersonalOrg: false,
-              isAttemptOrg: false,
-            }
-          : { creatorRole: Role.EXAMINER },
+        { creatorRole: Role.EXAMINER },
         openStatusWhere(openStatus),
         academicFilter,
       ],
@@ -187,6 +187,7 @@ export async function GET(request) {
             enrollments: true,
             academicYear: { select: { id: true, label: true, isCurrent: true } },
             programme: { select: { id: true, name: true, shortName: true } },
+            campuses: { select: { campus: true } },
           }
         : { owner: { select: { id: true, firstName: true, lastName: true, email: true } } };
 
@@ -240,7 +241,11 @@ export async function POST(request) {
     return NextResponse.json({ error: "Invalid request body." }, { status: 400 });
   }
 
-  const validated = validateProjectCreateInput({ body, activeRole });
+  const validated = validateProjectCreateInput({
+    body,
+    activeRole,
+    requireCampuses: [Role.EXAMINER, Role.SYSTEM_ADMIN].includes(activeRole),
+  });
   if (!validated.ok) {
     return NextResponse.json(
       { error: "Please fix the highlighted fields.", fieldErrors: validated.errors },
@@ -303,6 +308,9 @@ export async function POST(request) {
       programmeId: [Role.EXAMINER, Role.SYSTEM_ADMIN].includes(activeRole)
         ? data.programmeId
         : null,
+      ...(data.campuses.length
+        ? { campuses: { create: data.campuses.map((campus) => ({ campus })) } }
+        : {}),
     },
   });
 
@@ -317,6 +325,9 @@ export async function POST(request) {
     } catch {
       /* scoring seed is non-blocking */
     }
+    if (row.isPublished) {
+      await notifyStudentsProjectAvailable(row.id).catch(() => 0);
+    }
   }
 
   await writeAuditLog({
@@ -329,6 +340,7 @@ export async function POST(request) {
       purpose: row.purpose,
       visibility: row.visibility,
       isPublished: row.isPublished,
+      campuses: data.campuses,
     },
   });
 

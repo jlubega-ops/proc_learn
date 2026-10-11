@@ -1,10 +1,10 @@
 import { NextResponse } from "next/server";
-import { Role } from "@prisma/client";
-import { getSessionUser, sessionActiveRole } from "@/lib/api/get-session-user";
 import { prisma } from "@/lib/prisma";
-import { canManageExaminerProject } from "@/lib/projects/access";
 import { getExaminerAcademicProjectStudentReport } from "@/lib/academic/examiner-project-student-report";
+import { authorizeParticipantView } from "@/lib/academic/participant-workspace";
+import { countExplorerSections } from "@/lib/academic/examiner-org-explorer";
 import { AuditEvent, writeAuditLog } from "@/lib/audit-log";
+import { formatRoleLabel } from "@/lib/roles";
 
 export const runtime = "nodejs";
 
@@ -12,33 +12,33 @@ export const runtime = "nodejs";
  * Read-only report for one enrolled student on this academic project.
  */
 export async function GET(request, context) {
-  const actor = await getSessionUser();
-  if (!actor) return NextResponse.json({ error: "Unauthorized." }, { status: 401 });
-  const activeRole = sessionActiveRole(actor) || Role.STUDENT;
-
-  const params = await context.params;
-  const id = String(params?.id || "").trim();
-  const studentId = String(params?.studentId || "").trim();
-  if (!id || !studentId) {
-    return NextResponse.json({ error: "Invalid id." }, { status: 400 });
-  }
-
-  const project = await prisma.project.findUnique({ where: { id } });
-  if (!project || project.isPersonalOrg || project.isAttemptOrg) {
-    return NextResponse.json({ error: "Not found." }, { status: 404 });
-  }
-  if (!canManageExaminerProject({ activeRole, project, userId: actor.id })) {
-    return NextResponse.json({ error: "Forbidden." }, { status: 403 });
-  }
+  const gate = await authorizeParticipantView(context);
+  if (gate.error) return gate.error;
+  const { actor, activeRole, project, studentId } = gate;
 
   const academicYearId = request.nextUrl.searchParams.get("academicYearId") || null;
 
   try {
     const data = await getExaminerAcademicProjectStudentReport({
-      academicProjectId: id,
+      academicProjectId: project.id,
       studentUserId: studentId,
       academicYearId,
     });
+
+    const orgId = data.organisation?.projectId || null;
+    if (orgId) {
+      const [counts, org] = await Promise.all([
+        countExplorerSections(prisma, orgId),
+        prisma.project.findUnique({ where: { id: orgId }, select: { createdAt: true, projectCode: true } }),
+      ]);
+      data.counts = counts;
+      data.organisation.createdAt = org?.createdAt || null;
+      data.organisation.projectCode = data.organisation.projectCode || org?.projectCode || null;
+    }
+    data.printedBy = {
+      name: `${actor.firstName || ""} ${actor.lastName || ""}`.trim() || actor.email,
+      role: formatRoleLabel(activeRole),
+    };
 
     await writeAuditLog({
       eventType: AuditEvent.EXAMINER_STUDENT_OBSERVED,
@@ -47,8 +47,8 @@ export async function GET(request, context) {
       meta: {
         mode: "ACADEMIC_PROJECT_STUDENT_REPORT",
         readOnly: true,
-        projectId: id,
-        workspaceProjectId: data.organisation?.projectId || null,
+        projectId: project.id,
+        workspaceProjectId: orgId,
       },
     });
 

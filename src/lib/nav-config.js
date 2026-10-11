@@ -10,10 +10,8 @@ import BadgeRounded from "@mui/icons-material/BadgeRounded";
 import BusinessRounded from "@mui/icons-material/BusinessRounded";
 import CalendarMonthRounded from "@mui/icons-material/CalendarMonthRounded";
 import DateRangeRounded from "@mui/icons-material/DateRangeRounded";
-import SettingsRounded from "@mui/icons-material/SettingsRounded";
 import AssignmentRounded from "@mui/icons-material/AssignmentRounded";
 import TaskAltRounded from "@mui/icons-material/TaskAltRounded";
-import AssessmentRounded from "@mui/icons-material/AssessmentRounded";
 import VisibilityRounded from "@mui/icons-material/VisibilityRounded";
 import Groups2Rounded from "@mui/icons-material/Groups2Rounded";
 import ShoppingCartRounded from "@mui/icons-material/ShoppingCartRounded";
@@ -111,6 +109,7 @@ function procurementsNavItem(base, viewer) {
  * }} NavSection
  */
 
+/** Staff (system admin / examiner) sidebar: flat, always-visible sections. */
 /** @type {NavSection[]} */
 export const SIDEBAR_SECTIONS = [
   {
@@ -119,23 +118,29 @@ export const SIDEBAR_SECTIONS = [
     links: [
       {
         href: "/",
-        label: "Home",
-        title: "Dashboard home",
+        label: NAV_LABELS.dashboard,
+        title: "Your dashboard",
         Icon: HomeRounded,
+        anyOf: [ROLE.SYSTEM_ADMIN, ROLE.EXAMINER],
+      },
+    ],
+  },
+  {
+    id: "monitoring",
+    label: "Teaching & monitoring",
+    links: [
+      {
+        href: "/academic/participation",
+        label: "Participation",
+        title: "Student organisations and their procurement progress",
+        Icon: VisibilityRounded,
         anyOf: [ROLE.SYSTEM_ADMIN, ROLE.EXAMINER],
       },
       {
         href: "/projects",
         label: "Projects",
-        title: "Review and manage projects",
+        title: "Practice and assessment projects",
         Icon: WorkOutlineRounded,
-        anyOf: [ROLE.SYSTEM_ADMIN, ROLE.EXAMINER],
-      },
-      {
-        href: "/academic/participation",
-        label: "Participation",
-        title: "View student organisations and procurement progress",
-        Icon: VisibilityRounded,
         anyOf: [ROLE.SYSTEM_ADMIN, ROLE.EXAMINER],
       },
     ],
@@ -143,7 +148,6 @@ export const SIDEBAR_SECTIONS = [
   {
     id: "users",
     label: "Users",
-    collapsible: true,
     links: [
       {
         href: "/students/manage",
@@ -163,16 +167,8 @@ export const SIDEBAR_SECTIONS = [
   },
   {
     id: "project-settings",
-    label: "Project settings",
-    collapsible: true,
+    label: "Project setup",
     links: [
-      {
-        href: "/project-settings",
-        label: "Overview",
-        title: "Project configuration overview",
-        Icon: SettingsRounded,
-        anyOf: [ROLE.SYSTEM_ADMIN, ROLE.EXAMINER],
-      },
       {
         href: "/project-settings/roles",
         label: "Project roles",
@@ -190,17 +186,9 @@ export const SIDEBAR_SECTIONS = [
     ],
   },
   {
-    id: "administration",
-    label: "Administration",
-    collapsible: true,
+    id: "academic",
+    label: "Academic",
     links: [
-      {
-        href: "/admin/activity",
-        label: "Activity logs",
-        title: "Search and filter audit events",
-        Icon: HistoryRounded,
-        anyOf: [ROLE.SYSTEM_ADMIN],
-      },
       {
         href: "/admin/academic-setup",
         label: "Academic setup",
@@ -213,6 +201,19 @@ export const SIDEBAR_SECTIONS = [
         label: "Programmes",
         title: "Create and edit study programmes",
         Icon: CategoryRounded,
+        anyOf: [ROLE.SYSTEM_ADMIN],
+      },
+    ],
+  },
+  {
+    id: "system",
+    label: "System",
+    links: [
+      {
+        href: "/admin/activity",
+        label: "Activity logs",
+        title: "Search and filter audit events",
+        Icon: HistoryRounded,
         anyOf: [ROLE.SYSTEM_ADMIN],
       },
       {
@@ -478,7 +479,7 @@ function studentPlatformSections(options = {}) {
       id: "manage-organisation",
       label: "Manage Organisation",
       collapsible: true,
-      defaultOpen: true,
+      defaultOpen: inProjectOrg,
       links: studentManageOrganisationLinks(orgBase, [ROLE.STUDENT]),
     },
   ];
@@ -488,6 +489,7 @@ function studentPlatformSections(options = {}) {
       id: "my-academic-work",
       label: "My Academic Work",
       collapsible: true,
+      defaultOpen: true,
       links: [
         {
           href: "/academic/practice",
@@ -501,13 +503,6 @@ function studentPlatformSections(options = {}) {
           label: "Assessments",
           title: "Assessment projects assigned by your examiner",
           Icon: AssignmentRounded,
-          anyOf: [ROLE.STUDENT],
-        },
-        {
-          href: "/academic/results",
-          label: "Results",
-          title: "Your scores and feedback when released",
-          Icon: AssessmentRounded,
           anyOf: [ROLE.STUDENT],
         },
       ],
@@ -540,16 +535,8 @@ function studentOrganisationAdminSection() {
 export function sidebarNavForActiveRole(activeRole) {
   return SIDEBAR_SECTIONS.map((section) => ({
     id: section.id,
-    label:
-      section.id === "main" &&
-      [ROLE.EXAMINER, ROLE.SYSTEM_ADMIN].includes(activeRole)
-        ? "General"
-        : section.label,
-    collapsible:
-      section.id === "main" &&
-      [ROLE.EXAMINER, ROLE.SYSTEM_ADMIN].includes(activeRole)
-        ? true
-        : Boolean(section.collapsible),
+    label: section.label,
+    collapsible: Boolean(section.collapsible),
     links: section.links.filter((item) => {
       if (!item.anyOf) return true;
       return item.anyOf.includes(activeRole);

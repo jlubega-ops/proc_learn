@@ -37,14 +37,12 @@ export async function GET(request) {
     }
   }
 
-  const ownerUserId = activeRole === Role.SYSTEM_ADMIN ? null : user.id;
-
   const { buffer, filename } = await buildOfficialResultsWorkbook({
     projectId,
     academicYearId,
     campus,
     actorUserId: user.id,
-    ownerUserId,
+    ownerUserId: null,
   });
 
   return new NextResponse(buffer, {

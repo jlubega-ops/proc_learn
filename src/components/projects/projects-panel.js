@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Button from "@mui/material/Button";
 import Box from "@mui/material/Box";
+import Checkbox from "@mui/material/Checkbox";
 import Chip from "@mui/material/Chip";
 import CircularProgress from "@mui/material/CircularProgress";
 import Dialog from "@mui/material/Dialog";
@@ -39,7 +40,7 @@ import ContentCopyRounded from "@mui/icons-material/ContentCopyRounded";
 import AutorenewRounded from "@mui/icons-material/AutorenewRounded";
 import SettingsRounded from "@mui/icons-material/SettingsRounded";
 import dynamic from "next/dynamic";
-import { useRouter, usePathname, useSearchParams } from "next/navigation";
+import { useRouter, usePathname } from "next/navigation";
 import { format, isValid, parseISO } from "date-fns";
 import { useToast } from "@/components/providers/toast-provider";
 import { useAuthSession } from "@/components/providers/auth-session-provider";
@@ -59,6 +60,19 @@ import {
   validateDateTimeRange,
 } from "@/lib/validation/date-range";
 import { computeWindowOpenState, parseServerInstantMs } from "@/lib/server-clock";
+import { CAMPUS_VALUES, campusLabel, campusSelectOptions } from "@/lib/campuses";
+import { projectCampusValues, projectCampusesLabel } from "@/lib/academic/project-campuses";
+
+const CAMPUS_OPTIONS = campusSelectOptions();
+
+/**
+ * Saved campus rows for the form; none saved means all campuses.
+ * @param {any} row
+ */
+function formCampusesFromRow(row) {
+  const values = projectCampusValues(row?.campuses);
+  return values.length ? values : [...CAMPUS_VALUES];
+}
 
 const STUDENT_FILTERS = [
   { value: "all", label: "All" },
@@ -66,11 +80,6 @@ const STUDENT_FILTERS = [
   { value: "public", label: "Public" },
   { value: "assessments", label: "Assessments" },
   { value: "examiner", label: "Examiner projects" },
-];
-
-const STAFF_SCOPE_FILTERS = [
-  { value: "examiner", label: "Examiner projects" },
-  { value: "student", label: "Student projects" },
 ];
 
 const STAFF_PURPOSE_FILTERS = [
@@ -178,6 +187,7 @@ function defaultForm() {
     isPublished: false,
     academicYearId: "",
     programmeId: "",
+    campuses: /** @type {string[]} */ ([]),
   };
 }
 
@@ -193,8 +203,9 @@ function generateEnrollmentAccessKey() {
 /**
  * @param {string} activeRole
  * @param {any} form
+ * @param {boolean} [requireCampuses]
  */
-function validateClientForm(activeRole, form) {
+function validateClientForm(activeRole, form, requireCampuses = false) {
   /** @type {Record<string, string>} */
   const errors = {};
   if (!String(form.name || "").trim()) errors.name = "Project name is required.";
@@ -250,6 +261,9 @@ function validateClientForm(activeRole, form) {
       errors.programmeId = "Choose a programme.";
     }
   }
+  if (requireCampuses && (!Array.isArray(form.campuses) || form.campuses.length === 0)) {
+    errors.campuses = "Choose at least one campus.";
+  }
   return errors;
 }
 
@@ -265,7 +279,6 @@ export function ProjectsPanel() {
   const canCreate = isStudent || isExaminerLike;
   const filterOptions = STUDENT_FILTERS;
   const staffPurposeFilters = STAFF_PURPOSE_FILTERS;
-  const searchParams = useSearchParams();
   const router = useRouter();
   const pathname = usePathname();
 
@@ -277,7 +290,6 @@ export function ProjectsPanel() {
   const [rowsPerPage, setRowsPerPage] = useState(10);
   const [total, setTotal] = useState(0);
   const [filter, setFilter] = useState("all");
-  const [staffScope, setStaffScope] = useState("examiner");
   const [staffPurpose, setStaffPurpose] = useState("all");
   const [staffStatus, setStaffStatus] = useState("all");
   const [openStatus, setOpenStatus] = useState("open");
@@ -344,8 +356,6 @@ export function ProjectsPanel() {
         });
         qp.set("filter", filter);
         if (isExaminer || isSystemAdmin) {
-          if (isSystemAdmin) qp.set("scope", staffScope);
-          else qp.set("scope", "examiner");
           qp.set("purpose", staffPurpose);
           qp.set("status", staffStatus);
           if (filterAcademicYearId) qp.set("academicYearId", filterAcademicYearId);
@@ -379,7 +389,6 @@ export function ProjectsPanel() {
       filter,
       isExaminer,
       isSystemAdmin,
-      staffScope,
       staffPurpose,
       staffStatus,
       openStatus,
@@ -406,9 +415,7 @@ export function ProjectsPanel() {
         setAcademicYears(years);
         setProgrammes(progs);
         const currentYear = years.find((y) => y.isCurrent) || years[0] || null;
-        const defaultProgramme = progs.find((p) => p.shortName === "GEN") || progs[0] || null;
         if (!filterAcademicYearId && currentYear?.id) setFilterAcademicYearId(currentYear.id);
-        if (!filterProgrammeId && defaultProgramme?.id) setFilterProgrammeId(defaultProgramme.id);
         setMetaReady(true);
       } catch {
         if (!cancelled) setMetaReady(true);
@@ -428,20 +435,10 @@ export function ProjectsPanel() {
   useEffect(() => {
     setFilter("all");
     setPage(0);
-    setStaffScope("examiner");
     setStaffPurpose("all");
     setStaffStatus("all");
     setOpenStatus("open");
   }, [activeRole]);
-
-  useEffect(() => {
-    const scope = searchParams.get("scope");
-    // Student organisations are listed under Participation — only optional student-created projects here.
-    if (scope === "student" && isSystemAdmin) {
-      setStaffScope("student");
-      setPage(0);
-    }
-  }, [searchParams, isSystemAdmin]);
 
   const resetEditorState = useCallback(() => {
     setEditingId("");
@@ -499,6 +496,7 @@ export function ProjectsPanel() {
       isPublished: Boolean(row.isPublished),
       academicYearId: row.academicYearId || row.academicYear?.id || "",
       programmeId: row.programmeId || row.programme?.id || "",
+      campuses: formCampusesFromRow(row),
     });
     setFieldErrors({});
     setInstructionsEditorReady(false);
@@ -529,6 +527,7 @@ export function ProjectsPanel() {
       isPublished: false,
       academicYearId: row.academicYearId || row.academicYear?.id || filterAcademicYearId || "",
       programmeId: row.programmeId || row.programme?.id || filterProgrammeId || "",
+      campuses: formCampusesFromRow(row),
     });
     setFieldErrors({});
     setInstructionsEditorReady(false);
@@ -538,7 +537,8 @@ export function ProjectsPanel() {
 
   const saveProject = async () => {
     const formRole = editingManagedStudent ? "EXAMINER" : activeRole;
-    const nextErrors = validateClientForm(formRole, form);
+    const showCampuses = isExaminerLike && !editingManagedStudent;
+    const nextErrors = validateClientForm(formRole, form, showCampuses);
     setFieldErrors(nextErrors);
     if (Object.keys(nextErrors).length > 0) {
       showToast({ message: "Please fix the highlighted fields.", severity: "error" });
@@ -558,6 +558,7 @@ export function ProjectsPanel() {
         enrollmentAccessKey: String(form.enrollmentAccessKey || "").trim().toUpperCase(),
         academicYearId: String(form.academicYearId || "").trim(),
         programmeId: String(form.programmeId || "").trim(),
+        campuses: showCampuses ? form.campuses : undefined,
         duration:
           formRole !== "STUDENT" &&
           Number(form.durationHours || 0) * 60 + Number(form.durationMinutes || 0) > 0
@@ -864,13 +865,10 @@ export function ProjectsPanel() {
       if (isStudent) {
         return row.ownerUserId === session?.userId && row.creatorRole === "STUDENT";
       }
-      if (isSystemAdmin) return row.creatorRole === "EXAMINER";
-      if (isExaminer) {
-        return row.ownerUserId === session?.userId && row.creatorRole === "EXAMINER";
-      }
+      if (isExaminerLike) return row.creatorRole === "EXAMINER";
       return false;
     },
-    [isStudent, isExaminer, isSystemAdmin, session?.userId],
+    [isStudent, isExaminerLike, session?.userId],
   );
 
   if (sessionLoading || loading) {
@@ -928,27 +926,6 @@ export function ProjectsPanel() {
             </Select>
           </FormControl>
         ) : null}
-        {isSystemAdmin ? (
-          <FormControl size="small" className="w-full sm:w-52" sx={themedTextFieldSx}>
-            <InputLabel id="project-scope-filter-label">Source</InputLabel>
-            <Select
-              labelId="project-scope-filter-label"
-              label="Source"
-              value={staffScope}
-              onChange={(e) => {
-                setStaffScope(String(e.target.value || "examiner"));
-                setPage(0);
-              }}
-              title="Student organisations are under Participation"
-            >
-              {STAFF_SCOPE_FILTERS.map((f) => (
-                <MenuItem key={f.value} value={f.value}>
-                  {f.label}
-                </MenuItem>
-              ))}
-            </Select>
-          </FormControl>
-        ) : null}
         {isStaffViewer ? (
           <FormControl size="small" className="w-full sm:w-44" sx={themedTextFieldSx}>
             <InputLabel id="project-purpose-filter-label">Purpose</InputLabel>
@@ -972,16 +949,21 @@ export function ProjectsPanel() {
         {isExaminerLike ? (
           <>
             <FormControl size="small" className="w-full sm:w-44" sx={themedTextFieldSx}>
-              <InputLabel id="filter-ay-label">Academic year</InputLabel>
+              <InputLabel id="filter-ay-label" shrink>
+                Academic year
+              </InputLabel>
               <Select
                 labelId="filter-ay-label"
                 label="Academic year"
+                notched
+                displayEmpty
                 value={filterAcademicYearId}
                 onChange={(e) => {
                   setFilterAcademicYearId(String(e.target.value || ""));
                   setPage(0);
                 }}
               >
+                <MenuItem value="">All</MenuItem>
                 {academicYears.map((y) => (
                   <MenuItem key={y.id} value={y.id}>
                     {y.label}
@@ -991,16 +973,21 @@ export function ProjectsPanel() {
               </Select>
             </FormControl>
             <FormControl size="small" className="w-full sm:w-44" sx={themedTextFieldSx}>
-              <InputLabel id="filter-prog-label">Programme</InputLabel>
+              <InputLabel id="filter-prog-label" shrink>
+                Programme
+              </InputLabel>
               <Select
                 labelId="filter-prog-label"
                 label="Programme"
+                notched
+                displayEmpty
                 value={filterProgrammeId}
                 onChange={(e) => {
                   setFilterProgrammeId(String(e.target.value || ""));
                   setPage(0);
                 }}
               >
+                <MenuItem value="">All</MenuItem>
                 {programmes.map((p) => (
                   <MenuItem key={p.id} value={p.id}>
                     {p.shortName || p.name}
@@ -1038,7 +1025,7 @@ export function ProjectsPanel() {
                 <TableCell>Project</TableCell>
                 <TableCell>Purpose</TableCell>
                 {isStudent ? <TableCell>Status</TableCell> : <TableCell>Attempts</TableCell>}
-                <TableCell>Visibility</TableCell>
+                <TableCell>{isStudent ? "Visibility" : "Campuses"}</TableCell>
                 <TableCell>Published</TableCell>
                 <TableCell>Open status</TableCell>
                 <TableCell>Created</TableCell>
@@ -1093,7 +1080,13 @@ export function ProjectsPanel() {
                         />
                       )}
                     </TableCell>
-                    <TableCell>{row.visibility}</TableCell>
+                    <TableCell>
+                      {isStudent
+                        ? row.visibility
+                        : row.creatorRole === "EXAMINER"
+                          ? projectCampusesLabel(row.campuses)
+                          : "—"}
+                    </TableCell>
                     <TableCell>{row.isPublished ? "Yes" : "No"}</TableCell>
                     <TableCell>
                       <Chip size="small" label={openStateLabel(oState)} color={openStateColor(oState)} />
@@ -1356,16 +1349,46 @@ export function ProjectsPanel() {
                   <MenuItem value="PUBLIC">Public</MenuItem>
                 </Select>
               </FormControl>
-            ) : (
-              <TextField
-                margin="dense"
-                label="Visibility"
-                value="Public (auto for staff projects)"
-                disabled
+            ) : null}
+            {isExaminerLike && !editingManagedStudent ? (
+              <FormControl
                 fullWidth
+                margin="dense"
                 sx={themedTextFieldSx}
-              />
-            )}
+                error={Boolean(fieldErrors.campuses)}
+              >
+                <InputLabel id="form-campus-label">Campuses</InputLabel>
+                <Select
+                  labelId="form-campus-label"
+                  label="Campuses"
+                  multiple
+                  value={form.campuses}
+                  onChange={(e) => {
+                    const v = e.target.value;
+                    const picked = typeof v === "string" ? v.split(",") : v;
+                    setForm((prev) => ({
+                      ...prev,
+                      campuses: CAMPUS_VALUES.filter((c) => picked.includes(c)),
+                    }));
+                  }}
+                  renderValue={(selected) =>
+                    selected.length === CAMPUS_VALUES.length
+                      ? "All campuses"
+                      : selected.map((c) => campusLabel(c)).join(", ")
+                  }
+                >
+                  {CAMPUS_OPTIONS.map((o) => (
+                    <MenuItem key={o.value} value={o.value}>
+                      <Checkbox size="small" checked={form.campuses.includes(o.value)} />
+                      {o.label}
+                    </MenuItem>
+                  ))}
+                </Select>
+                {fieldErrors.campuses ? (
+                  <p className="mt-1 text-xs text-red-600">{fieldErrors.campuses}</p>
+                ) : null}
+              </FormControl>
+            ) : null}
           </div>
           {!isStudent ? (
             <>

@@ -91,6 +91,7 @@ export async function POST(request, context) {
             code === "NOT_PUBLISHED" ||
             code === "NOT_ACADEMIC" ||
             code === "NO_ORG" ||
+            code === "NOT_ELIGIBLE" ||
             code === "ASSESSMENT_LOCKED" || code === "PROJECT_IN_PROGRESS"
           ? 400
           : 500;

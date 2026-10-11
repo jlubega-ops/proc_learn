@@ -58,10 +58,13 @@ export function computeFinalScore(p) {
     if (manualScore > manualMax) manualScore = manualMax;
   }
 
+  autoScore = Math.round(autoScore * 100) / 100;
   const totalPossible = autoMax + manualMax;
   const manualForSum = manualScore == null ? 0 : manualScore;
   const finalScore =
-    totalPossible > 0 ? Math.min(autoScore + manualForSum, totalPossible) : 0;
+    totalPossible > 0
+      ? Math.round(Math.min(autoScore + manualForSum, totalPossible) * 100) / 100
+      : 0;
   const finalPercent =
     totalPossible > 0 ? Math.round((finalScore / totalPossible) * 100) : 0;
   const passMark = Math.min(100, Math.max(0, Number(p.passMarkPercent) || 50));

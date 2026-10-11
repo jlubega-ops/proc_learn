@@ -8,6 +8,13 @@ import {
   processFlowAdoptionSelect,
   serializeProjectOrgProcessFlowAdoption,
 } from "@/lib/projects/org-process-flow-adoptions";
+import { loadProcessActivation } from "@/lib/projects/process-activation";
+import {
+  processActivationBlockers,
+  processCodeOfFlow,
+  processDeactivationBlockers,
+} from "@/lib/projects/process-dependencies";
+import { resolveAllowedProcessCodesForOrgProject } from "@/lib/academic/assessment-config";
 
 export const runtime = "nodejs";
 
@@ -53,6 +60,26 @@ export async function PATCH(request, context) {
       { error: "Please provide isActive true or false." },
       { status: 400 },
     );
+  }
+
+  const code = processCodeOfFlow(existing.processFlow);
+  if (code && body.isActive !== existing.isActive) {
+    if (body.isActive) {
+      const allowedCodes = await resolveAllowedProcessCodesForOrgProject(prisma, projectId);
+      if (allowedCodes && !allowedCodes.includes(code)) {
+        return NextResponse.json(
+          { error: "This process is not available for this project." },
+          { status: 400 },
+        );
+      }
+    }
+    const { active, names } = await loadProcessActivation(prisma, projectId);
+    const blockers = body.isActive
+      ? processActivationBlockers(code, active, names)
+      : processDeactivationBlockers(code, active, names);
+    if (blockers.length) {
+      return NextResponse.json({ error: blockers[0], code: "PROCESS_DEPENDENCY" }, { status: 400 });
+    }
   }
 
   const now = new Date();
@@ -111,11 +138,21 @@ export async function DELETE(_request, context) {
     where: { id: adoptionId, projectId },
     select: {
       id: true,
+      isActive: true,
       processFlowId: true,
-      processFlow: { select: { name: true } },
+      processFlow: { select: { name: true, code: true, triggerKey: true } },
     },
   });
   if (!existing) return NextResponse.json({ error: "Not found." }, { status: 404 });
+
+  const code = processCodeOfFlow(existing.processFlow);
+  if (code && existing.isActive) {
+    const { active, names } = await loadProcessActivation(prisma, projectId);
+    const blockers = processDeactivationBlockers(code, active, names);
+    if (blockers.length) {
+      return NextResponse.json({ error: blockers[0], code: "PROCESS_DEPENDENCY" }, { status: 400 });
+    }
+  }
 
   await prisma.projectOrgProcessFlowAdoption.delete({ where: { id: adoptionId } });
 

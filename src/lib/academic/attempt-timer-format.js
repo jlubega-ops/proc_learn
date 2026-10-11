@@ -16,6 +16,19 @@ export function formatDurationClock(sec) {
 }
 
 /**
+ * Fixed hours:minutes:seconds (e.g. 02:00:00). Null / non-positive = "No limit".
+ * @param {number | null | undefined} sec
+ */
+export function formatDurationHms(sec) {
+  const s = Math.floor(Number(sec) || 0);
+  if (s <= 0) return "No limit";
+  const h = Math.floor(s / 3600);
+  const m = Math.floor((s % 3600) / 60);
+  const r = s % 60;
+  return [h, m, r].map((n) => String(n).padStart(2, "0")).join(":");
+}
+
+/**
  * @param {number | null | undefined} sec
  */
 export function formatDurationHuman(sec) {

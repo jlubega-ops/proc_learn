@@ -45,8 +45,6 @@ import {
 } from "@/lib/admin-mui-surfaces";
 import { useToast } from "@/components/providers/toast-provider";
 import { campusSelectOptions } from "@/lib/campuses";
-import { useAuthSession } from "@/components/providers/auth-session-provider";
-import { ROLE } from "@/lib/roles";
 
 function fmtDate(value) {
   if (!value) return "—";
@@ -55,123 +53,9 @@ function fmtDate(value) {
 }
 
 /**
- * Examiner Results / Student Results router panel.
+ * Staff results across projects (students see results on each project page).
  */
 export function AcademicResultsPanel() {
-  const { session, loading: sessionLoading } = useAuthSession();
-  const activeRole = session?.user?.activeRole || session?.activeRole;
-  const isStudent = activeRole === ROLE.STUDENT;
-
-  if (sessionLoading) {
-    return (
-      <Box sx={adminCenteredLoadingBoxSx} role="status" aria-busy="true">
-        <CircularProgress sx={adminLoadingSpinnerSx} />
-      </Box>
-    );
-  }
-
-  if (isStudent) return <StudentResultsView />;
-  return <ExaminerResultsView />;
-}
-
-function StudentResultsView() {
-  const { showToast } = useToast();
-  const [loading, setLoading] = useState(true);
-  const [results, setResults] = useState(/** @type {any[]} */ ([]));
-
-  useEffect(() => {
-    let cancelled = false;
-    (async () => {
-      setLoading(true);
-      try {
-        const res = await fetch("/api/student/results", { credentials: "include" });
-        const json = await res.json().catch(() => ({}));
-        if (!res.ok) {
-          showToast({
-            message: typeof json.error === "string" ? json.error : "Could not load results.",
-            severity: "error",
-          });
-          return;
-        }
-        if (!cancelled) setResults(json.results || []);
-      } finally {
-        if (!cancelled) setLoading(false);
-      }
-    })();
-    return () => {
-      cancelled = true;
-    };
-  }, [showToast]);
-
-  if (loading) {
-    return (
-      <Box sx={adminCenteredLoadingBoxSx} role="status" aria-busy="true">
-        <CircularProgress sx={adminLoadingSpinnerSx} />
-      </Box>
-    );
-  }
-
-  return (
-    <div className={BRAND_PAGE_SHELL_CLASS}>
-      <DashboardPageIntro
-        hero
-        title="Results"
-        description="Scores and feedback appear here after your examiner releases results."
-      />
-      {results.length === 0 ? (
-        <p className={BRAND_PAGE_LEAD_CLASS}>No scored projects yet.</p>
-      ) : (
-        <TableContainer sx={adminOutlinedTableContainerSx}>
-          <Table size="small" sx={adminTableSx}>
-            <TableHead>
-              <TableRow>
-                <TableCell>Project</TableCell>
-                <TableCell>Attempt</TableCell>
-                <TableCell>Score</TableCell>
-                <TableCell>Result</TableCell>
-                <TableCell>Feedback</TableCell>
-              </TableRow>
-            </TableHead>
-            <TableBody>
-              {results.map((row) => (
-                <TableRow key={row.attemptId}>
-                  <TableCell>
-                    <Link
-                      href={
-                        row.purpose === "ASSESSMENT"
-                          ? `/academic/assessments/${row.projectId}`
-                          : `/academic/practice/${row.projectId}`
-                      }
-                      className="cursor-pointer text-primary underline-offset-2 hover:underline"
-                    >
-                      {row.projectName}
-                    </Link>
-                  </TableCell>
-                  <TableCell>#{row.attemptNumber}</TableCell>
-                  <TableCell>
-                    {row.scoreVisible
-                      ? `${row.grade?.finalScore ?? "—"} (${row.grade?.finalPercent ?? "—"}%)`
-                      : row.resultsReleased
-                        ? "Pending"
-                        : "Not released"}
-                  </TableCell>
-                  <TableCell>
-                    {row.scoreVisible ? row.grade?.passFailLabel || "—" : "—"}
-                  </TableCell>
-                  <TableCell className="max-w-xs truncate">
-                    {row.scoreVisible ? row.grade?.feedback || "—" : "—"}
-                  </TableCell>
-                </TableRow>
-              ))}
-            </TableBody>
-          </Table>
-        </TableContainer>
-      )}
-    </div>
-  );
-}
-
-function ExaminerResultsView() {
   const { showToast } = useToast();
   const searchParams = useSearchParams();
   const initialProjectId = searchParams.get("projectId") || "";

@@ -1,5 +1,6 @@
 import { ProjectPurpose, ProjectVisibility, Role } from "@prisma/client";
 import { validateDateTimeRange } from "@/lib/validation/date-range";
+import { parseCampusList } from "@/lib/academic/project-campuses";
 
 const PURPOSE_VALUES = new Set(Object.values(ProjectPurpose));
 const VISIBILITY_VALUES = new Set(Object.values(ProjectVisibility));
@@ -76,9 +77,10 @@ function parseDate(value) {
  * @param {{
  *  body: any;
  *  activeRole: import("@prisma/client").Role;
+ *  requireCampuses?: boolean;
  * }} input
  */
-export function validateProjectCreateInput({ body, activeRole }) {
+export function validateProjectCreateInput({ body, activeRole, requireCampuses = false }) {
   /** @type {Record<string, string>} */
   const errors = {};
 
@@ -178,6 +180,9 @@ export function validateProjectCreateInput({ body, activeRole }) {
     if (!programmeId) errors.programmeId = "Choose a programme.";
   }
 
+  const campuses = requireCampuses ? parseCampusList(body?.campuses) : [];
+  if (requireCampuses && !campuses.length) errors.campuses = "Choose at least one campus.";
+
   return {
     ok: Object.keys(errors).length === 0,
     errors,
@@ -199,6 +204,7 @@ export function validateProjectCreateInput({ body, activeRole }) {
       isPublished: body?.isPublished === true,
       academicYearId,
       programmeId,
+      campuses,
     },
   };
 }

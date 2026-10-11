@@ -13,6 +13,7 @@ import { fetchAuthorizedProjectWorkspace } from "@/lib/projects/workspace-access
 import { authorizeProjectOrgMember } from "@/lib/projects/workspace-access";
 import { ORG_PERMISSION } from "@/lib/projects/org-role-permissions";
 import { deleteProjectFully } from "@/lib/projects/purge-project-data";
+import { notifyStudentsProjectAvailable } from "@/lib/academic/student-academic-notifications";
 
 export const runtime = "nodejs";
 
@@ -135,7 +136,12 @@ export async function PATCH(request, context) {
     return NextResponse.json({ error: "Invalid request body." }, { status: 400 });
   }
 
-  const validated = validateProjectCreateInput({ body: { ...existing, ...body }, activeRole });
+  const editsExaminerProject = managesExaminerProject && !staffManagesStudent;
+  const validated = validateProjectCreateInput({
+    body: { ...existing, ...body },
+    activeRole,
+    requireCampuses: editsExaminerProject,
+  });
   if (!validated.ok) {
     return NextResponse.json(
       { error: "Please fix the highlighted fields.", fieldErrors: validated.errors },
@@ -168,6 +174,7 @@ export async function PATCH(request, context) {
 
   const row = await prisma.project.update({
     where: { id },
+    include: { campuses: { select: { campus: true } } },
     data: staffManagesStudent
       ? {
           name: d.name,
@@ -187,7 +194,7 @@ export async function PATCH(request, context) {
           description: d.description,
           organizationName: d.organizationName,
           purpose: d.purpose,
-          visibility: d.visibility,
+          visibility: editsExaminerProject ? "PUBLIC" : d.visibility,
           instructions: d.instructions,
           questionText: d.questionText,
           questionFileUrl: d.questionFileUrl,
@@ -207,6 +214,14 @@ export async function PATCH(request, context) {
           programmeId: [Role.EXAMINER, Role.SYSTEM_ADMIN].includes(activeRole)
             ? d.programmeId
             : undefined,
+          ...(editsExaminerProject
+            ? {
+                campuses: {
+                  deleteMany: {},
+                  create: d.campuses.map((campus) => ({ campus })),
+                },
+              }
+            : {}),
         },
   });
 
@@ -221,10 +236,18 @@ export async function PATCH(request, context) {
     });
   }
 
+  if (editsExaminerProject && !existing.isPublished && row.isPublished) {
+    await notifyStudentsProjectAvailable(row.id).catch(() => 0);
+  }
+
   await writeAuditLog({
     eventType: AuditEvent.PROJECT_UPDATED,
     actorUserId: user.id,
-    meta: { projectId: row.id, managedStudentProject: staffManagesStudent },
+    meta: {
+      projectId: row.id,
+      managedStudentProject: staffManagesStudent,
+      ...(editsExaminerProject ? { campuses: d.campuses } : {}),
+    },
   });
 
   return NextResponse.json({ project: row });

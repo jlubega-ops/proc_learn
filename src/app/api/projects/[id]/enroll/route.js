@@ -3,6 +3,7 @@ import { Role } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { AuditEvent, writeAuditLog } from "@/lib/audit-log";
 import { getSessionUser, sessionActiveRole } from "@/lib/api/get-session-user";
+import { isProjectMeantForStudent } from "@/lib/academic/student-project-eligibility";
 
 export const runtime = "nodejs";
 
@@ -28,6 +29,16 @@ export async function POST(request, context) {
   }
   if (!project.isPublished) {
     return NextResponse.json({ error: "Project is not published." }, { status: 400 });
+  }
+  const alreadyJoined = await prisma.projectEnrollment.findUnique({
+    where: { projectId_studentUserId: { projectId: id, studentUserId: user.id } },
+    select: { id: true },
+  });
+  if (
+    !alreadyJoined &&
+    !(await isProjectMeantForStudent(prisma, { projectId: id, studentUserId: user.id }))
+  ) {
+    return NextResponse.json({ error: "This project is not for your class." }, { status: 403 });
   }
   if (project.openAt && new Date(project.openAt).getTime() > Date.now()) {
     return NextResponse.json(

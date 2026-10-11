@@ -39,15 +39,11 @@ export async function GET(request) {
     }
   }
 
-  // SYSTEM_ADMIN may see all; EXAMINER is limited to own Academic Projects.
-  const ownerUserId =
-    activeRole === Role.SYSTEM_ADMIN ? null : user.id;
-
   const data = await getExaminerAssessmentResults({
     projectId,
     academicYearId,
     campus,
-    ownerUserId,
+    ownerUserId: null,
     participation: /** @type {'all'|'students'|'demo'} */ (
       ["all", "students", "demo"].includes(participation) ? participation : "all"
     ),

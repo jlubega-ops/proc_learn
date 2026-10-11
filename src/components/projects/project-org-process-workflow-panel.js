@@ -21,8 +21,16 @@ import Tooltip from "@mui/material/Tooltip";
 import Typography from "@mui/material/Typography";
 import ExpandMoreRounded from "@mui/icons-material/ExpandMoreRounded";
 import RefreshRounded from "@mui/icons-material/RefreshRounded";
+import LockRounded from "@mui/icons-material/LockRounded";
 import { useToast } from "@/components/providers/toast-provider";
 import { notifyProcessActivationChanged } from "@/hooks/use-process-activation";
+import {
+  PROCESS_PATH_ORDER,
+  processActivationBlockers,
+  processCodeOfFlow,
+  processDeactivationBlockers,
+  processNeedsLabel,
+} from "@/lib/projects/process-dependencies";
 import {
   adminCenteredLoadingBoxSx,
   adminLoadingSpinnerSx,
@@ -201,8 +209,25 @@ export function ProjectOrgProcessWorkflowPanel({ projectId }) {
         adoption: a,
       });
     }
-    return list;
+    const orderOf = (row) => {
+      const i = PROCESS_PATH_ORDER.indexOf(processCodeOfFlow(row) || "");
+      return i === -1 ? PROCESS_PATH_ORDER.length : i;
+    };
+    return list.sort((a, b) => orderOf(a) - orderOf(b) || String(a.name).localeCompare(String(b.name)));
   }, [adopted, catalogue]);
+
+  const { activeCodes, processNames } = useMemo(() => {
+    const codes = [];
+    /** @type {Record<string, string>} */
+    const names = {};
+    for (const row of rows) {
+      const code = processCodeOfFlow(row);
+      if (!code) continue;
+      names[code] = row.name;
+      if (row.adoption && row.adoption.isActive !== false) codes.push(code);
+    }
+    return { activeCodes: codes, processNames: names };
+  }, [rows]);
 
   async function setEnabled(row, enable) {
     setBusyId(row.processFlowId);
@@ -286,14 +311,24 @@ export function ProjectOrgProcessWorkflowPanel({ projectId }) {
             const wired = Boolean(row.triggerKey);
             const items = itemsCache[row.processFlowId] || row.items || [];
             const stepsLoading = itemsLoadingId === row.processFlowId;
-            const switchDisabled = !canAdopt || busy || refetching || (!enabled && !wired);
+            const code = processCodeOfFlow(row);
+            const blockers = code
+              ? enabled
+                ? processDeactivationBlockers(code, activeCodes, processNames)
+                : processActivationBlockers(code, activeCodes, processNames)
+              : [];
+            const needs = code ? processNeedsLabel(code, processNames) : "";
+            const switchDisabled =
+              !canAdopt || busy || refetching || (!enabled && !wired) || blockers.length > 0;
             const switchTitle = !canAdopt
               ? "View only"
               : !enabled && !wired
                 ? "Not linked to a workflow event"
-                : enabled
-                  ? `Disable ${row.name}`
-                  : `Enable ${row.name}`;
+                : blockers.length
+                  ? blockers[0]
+                  : enabled
+                    ? `Disable ${row.name}`
+                    : `Enable ${row.name}`;
 
             return (
               <Accordion
@@ -326,9 +361,15 @@ export function ProjectOrgProcessWorkflowPanel({ projectId }) {
                     </Typography>
                     <Typography component="span" variant="caption" sx={adminMutedTextSx}>
                       {row.itemCount ?? items.length} steps
+                      {needs ? ` · Needs ${needs}` : ""}
                     </Typography>
                   </Box>
                   {!wired ? <Chip size="small" color="warning" label="Not wired" /> : null}
+                  {canAdopt && wired && blockers.length ? (
+                    <Tooltip title={blockers.join(" ")}>
+                      <LockRounded fontSize="small" color="warning" aria-label={blockers[0]} />
+                    </Tooltip>
+                  ) : null}
                   <Box
                     sx={{ display: "flex", alignItems: "center", flexShrink: 0 }}
                     onClick={(e) => e.stopPropagation()}
