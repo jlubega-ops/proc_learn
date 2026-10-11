@@ -1,0 +1,89 @@
+name: proc_learn
+
+services:
+  db:
+    image: mysql:8.4
+    restart: unless-stopped
+    command: --character-set-server=utf8mb4 --collation-server=utf8mb4_unicode_ci
+    environment:
+      MYSQL_DATABASE: ${MYSQL_DATABASE:-proc_learn}
+      MYSQL_USER: ${MYSQL_USER:-proclearn}
+      MYSQL_PASSWORD: ${MYSQL_PASSWORD}
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD}
+    volumes:
+      - proc_learn_mysql:/var/lib/mysql
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "127.0.0.1", "-uroot", "-p${MYSQL_ROOT_PASSWORD}"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+      start_period: 20s
+    networks:
+      - proc_learn
+
+  migrate:
+    build:
+      context: .
+      target: tools
+    env_file: .env
+    environment:
+      NODE_ENV: production
+      DATABASE_URL: mysql://${MYSQL_USER:-proclearn}:${MYSQL_PASSWORD}@db:3306/${MYSQL_DATABASE:-proc_learn}
+    command: ["npx", "prisma", "db", "push", "--skip-generate"]
+    depends_on:
+      db:
+        condition: service_healthy
+    networks:
+      - proc_learn
+
+  app:
+    build:
+      context: .
+      target: runner
+      args:
+        NEXT_PUBLIC_TINYMCE_API_KEY: ${NEXT_PUBLIC_TINYMCE_API_KEY:-}
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      NODE_ENV: production
+      HOSTNAME: 0.0.0.0
+      PORT: "3000"
+      DATABASE_URL: mysql://${MYSQL_USER:-proclearn}:${MYSQL_PASSWORD}@db:3306/${MYSQL_DATABASE:-proc_learn}
+      PROC_LEARN_UPLOAD_ROOT: /data/uploads
+    ports:
+      - "127.0.0.1:${PROC_LEARN_PORT:-3055}:3000"
+    volumes:
+      - proc_learn_uploads:/data/uploads
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      db:
+        condition: service_healthy
+    networks:
+      - proc_learn
+
+  # One-off: first system admin + catalogue data. Run with:
+  #   docker compose --profile setup run --rm seed
+  seed:
+    profiles: ["setup"]
+    build:
+      context: .
+      target: tools
+    env_file: .env
+    environment:
+      NODE_ENV: production
+      DATABASE_URL: mysql://${MYSQL_USER:-proclearn}:${MYSQL_PASSWORD}@db:3306/${MYSQL_DATABASE:-proc_learn}
+    command: ["npm", "run", "db:seed:deploy"]
+    depends_on:
+      db:
+        condition: service_healthy
+    networks:
+      - proc_learn
+
+volumes:
+  proc_learn_mysql:
+  proc_learn_uploads:
+
+networks:
+  proc_learn:
+    name: proc_learn
