@@ -14,6 +14,7 @@ import LockRounded from "@mui/icons-material/LockRounded";
 import { format, isValid } from "date-fns";
 import { useToast } from "@/components/providers/toast-provider";
 import { actionConfirmOptions, useConfirm } from "@/components/providers/confirm-provider";
+import { useDraftSync } from "@/hooks/use-draft-sync";
 import { adminDialogPaperSx, themedTextFieldSx } from "@/lib/admin-mui-surfaces";
 
 /** @param {unknown} value */
@@ -152,6 +153,21 @@ export function OrgReopenSubmissionsDialog({ open, onClose, projectId, taskId, s
     }
   }
 
+  const reopenDraft = useDraftSync(
+    `org:task:${taskId}:reopen-submissions`,
+    { closingDate },
+    (d) => {
+      if (typeof d.closingDate === "string") setClosingDate(d.closingDate);
+    },
+    { enabled: open },
+  );
+
+  function handleCancel() {
+    if (busy) return;
+    reopenDraft.clearDraft();
+    onClose();
+  }
+
   /** @param {import("react").FormEvent} e */
   async function submit(e) {
     e.preventDefault();
@@ -170,6 +186,7 @@ export function OrgReopenSubmissionsDialog({ open, onClose, projectId, taskId, s
         return;
       }
       showToast({ message: `${isTender ? "Bids" : "Quotations"} reopened.`, severity: "success" });
+      reopenDraft.clearDraft();
       onClose();
       await onChanged();
     } finally {
@@ -180,7 +197,7 @@ export function OrgReopenSubmissionsDialog({ open, onClose, projectId, taskId, s
   return (
     <Dialog
       open={open}
-      onClose={busy ? undefined : onClose}
+      onClose={handleCancel}
       maxWidth="xs"
       fullWidth
       slotProps={{ paper: { sx: adminDialogPaperSx } }}
@@ -204,7 +221,7 @@ export function OrgReopenSubmissionsDialog({ open, onClose, projectId, taskId, s
           />
         </DialogContent>
         <DialogActions className="flex-wrap gap-2">
-          <Button onClick={onClose} disabled={busy}>
+          <Button onClick={handleCancel} disabled={busy}>
             Cancel
           </Button>
           <Button

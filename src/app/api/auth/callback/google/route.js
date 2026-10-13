@@ -1,6 +1,7 @@
 import { cookies } from "next/headers";
 import { UserAccountStatus } from "@prisma/client";
 import { getAppSession, initSessionActivity } from "@/lib/auth/session";
+import { bumpSessionVersion } from "@/lib/auth/session-version";
 import { buildIronSessionOptions } from "@/lib/auth/session-options";
 import { safeNextPath } from "@/lib/auth/safe-next-path";
 import { DEFAULT_POST_AUTH_PATH } from "@/lib/appConfig";
@@ -81,7 +82,7 @@ export async function GET(request) {
     `https://oauth2.googleapis.com/tokeninfo?id_token=${encodeURIComponent(idToken)}`,
   );
   const info = await infoRes.json().catch(() => ({}));
-  if (!infoRes.ok || info.aud !== clientId) {
+  if (!infoRes.ok || info.aud !== clientId || String(info.email_verified) !== "true") {
     return redirectToLogin("error=oauth_userinfo");
   }
 
@@ -173,7 +174,10 @@ export async function GET(request) {
     return redirectToLogin("error=auth_config");
   }
 
+  delete session.orgUserId;
+  delete session.providerId;
   session.userId = user.id;
+  session.sv = await bumpSessionVersion(prisma, user.id);
   initSessionActivity(session);
   await session.save();
 

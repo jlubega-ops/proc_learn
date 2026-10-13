@@ -8,7 +8,8 @@ import { writeAuditLog, AuditEvent } from "@/lib/audit-log";
 import {
   METHOD_PROCESS_BY_ENUM,
 } from "@/lib/projects/process-catalogue";
-import { startWorkflowFromTrigger } from "@/lib/projects/workflow-engine";
+import { prepareWorkflowTriggers, startWorkflowFromTrigger } from "@/lib/projects/workflow-engine";
+import { TxAbort, isTxClient, runInTx, withTxAbort } from "@/lib/db-tx";
 import { assertMethodProcessesActive } from "@/lib/projects/process-activation";
 import { financialYearRefToken } from "@/lib/projects/org-reference";
 import { serializePurchaseInstruction } from "@/lib/projects/purchase-instructions";
@@ -554,8 +555,9 @@ export async function createProcurementFromApprovedRequisition(prisma, opts) {
   const orgAcademicSlateId =
     req.orgAcademicSlateId || (await resolveSlateIdForOrgCreate(prisma, opts.projectId));
 
+  if (!isTxClient(prisma)) await prepareWorkflowTriggers(prisma, opts.projectId);
   try {
-    const procurement = await prisma.$transaction(async (tx) => {
+    const outcome = await withTxAbort(() => runInTx(prisma, async (tx) => {
       const created = await tx.projectOrgProcurement.create({
         data: {
           projectId: opts.projectId,
@@ -581,37 +583,30 @@ export async function createProcurementFromApprovedRequisition(prisma, opts) {
         },
       });
 
-      return created;
-    });
-
-    const started = await startWorkflowFromTrigger(prisma, {
-      projectId: opts.projectId,
-      triggerKey: methodMeta.triggerKey,
-      entityType: "procurement",
-      entityId: procurement.id,
-      procurementId: procurement.id,
-      departmentId: req.departmentId,
-      entityTitle: `${procurement.procurementNumber}: ${procurement.title}`,
-      actorOrgUserId: opts.actorOrgUserId,
-      actorRoleName: opts.actorRoleName,
-      actorDepartmentId: opts.actorDepartmentId || null,
-    });
-
-    if (!started.ok) {
-      await prisma.projectOrgProcurement.delete({ where: { id: procurement.id } }).catch(() => {});
-      await prisma.projectOrgRequisition
-        .update({
-          where: { id: req.id },
-          data: { procurementMethod: null },
-        })
-        .catch(() => {});
-      return {
-        ok: false,
-        error: started.error || `Could not start the ${methodMeta.label} Process.`,
-        status: 400,
-        code: started.code || "WORKFLOW_START_FAILED",
-      };
-    }
+      const started = await startWorkflowFromTrigger(tx, {
+        projectId: opts.projectId,
+        triggerKey: methodMeta.triggerKey,
+        entityType: "procurement",
+        entityId: created.id,
+        procurementId: created.id,
+        departmentId: req.departmentId,
+        entityTitle: `${created.procurementNumber}: ${created.title}`,
+        actorOrgUserId: opts.actorOrgUserId,
+        actorRoleName: opts.actorRoleName,
+        actorDepartmentId: opts.actorDepartmentId || null,
+      });
+      if (!started.ok) {
+        throw new TxAbort({
+          ok: false,
+          error: started.error || `Could not start the ${methodMeta.label} Process.`,
+          status: 400,
+          code: started.code || "WORKFLOW_START_FAILED",
+        });
+      }
+      return { ok: true, procurement: created, started };
+    }));
+    if (!outcome.ok) return outcome;
+    const { procurement, started } = outcome;
 
     await writeAuditLog({
       eventType: AuditEvent.PROJECT_ORG_PROCUREMENT_CREATED,

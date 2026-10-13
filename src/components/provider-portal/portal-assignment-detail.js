@@ -22,6 +22,8 @@ import TaskAltRounded from "@mui/icons-material/TaskAltRounded";
 import { addDays, format } from "date-fns";
 import { useToast } from "@/components/providers/toast-provider";
 import { actionConfirmOptions, useConfirm } from "@/components/providers/confirm-provider";
+import { useDraftState } from "@/hooks/use-draft-state";
+import { useDraftSync } from "@/hooks/use-draft-sync";
 import { PrintButton } from "@/components/print/print-document";
 import { PurchaseInstructionView } from "@/components/procurement/purchase-instruction-document";
 import { PortalAssignmentPrint } from "@/components/provider-portal/portal-assignment-print";
@@ -161,9 +163,17 @@ function RespondDialog({ procurementId, decision, target, orderKind = null, onCl
           : "LPO"
         : "purchase instruction";
   const Subject = subject === "LPO" ? subject : subject[0].toUpperCase() + subject.slice(1);
-  const [value, setValue] = useState("");
+  const [value, setValue, valueDraft] = useDraftState(`respond:${procurementId}:${target}:${decision}`, "", {
+    scope: `provider-portal:${procurementId}`,
+  });
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
+
+  function cancel() {
+    if (busy) return;
+    valueDraft.clearDraft();
+    onClose();
+  }
 
   async function submit(e) {
     e.preventDefault();
@@ -196,6 +206,7 @@ function RespondDialog({ procurementId, decision, target, orderKind = null, onCl
         message: `${Subject} ${accept ? "accepted" : "declined"}.`,
         severity: "success",
       });
+      valueDraft.clearDraft();
       notifyBell();
       onDone();
     } finally {
@@ -204,7 +215,7 @@ function RespondDialog({ procurementId, decision, target, orderKind = null, onCl
   }
 
   return (
-    <Dialog open onClose={busy ? undefined : onClose} maxWidth="sm" fullWidth>
+    <Dialog open onClose={busy ? undefined : cancel} maxWidth="sm" fullWidth>
       <form noValidate onSubmit={submit}>
         <DialogTitle>{`${accept ? "Accept" : "Decline"} ${subject}`}</DialogTitle>
         <DialogContent dividers>
@@ -224,7 +235,7 @@ function RespondDialog({ procurementId, decision, target, orderKind = null, onCl
           />
         </DialogContent>
         <DialogActions className="flex-wrap gap-2">
-          <Button onClick={onClose} disabled={busy}>
+          <Button onClick={cancel} disabled={busy}>
             Cancel
           </Button>
           <Button
@@ -266,6 +277,25 @@ function MakeDeliveryCard({ procurementId, order, deliverTo, deliveryDays, outst
   /** @type {[Record<string, string>, Function]} */
   const [errors, setErrors] = useState({});
   const [busy, setBusy] = useState(false);
+  const deliveryDraft = useDraftSync(
+    `delivery:${procurementId}:${order.number || ""}`,
+    { qtys, dispatchedAt, deliveredBy, vehicleNumber, remarks },
+    (d) => {
+      if (d.qtys && typeof d.qtys === "object") {
+        const saved = /** @type {Record<string, unknown>} */ (d.qtys);
+        setQtys((p) =>
+          Object.fromEntries(
+            Object.entries(p).map(([k, v]) => [k, typeof saved[k] === "string" ? saved[k] : v]),
+          ),
+        );
+      }
+      if (typeof d.dispatchedAt === "string") setDispatchedAt(d.dispatchedAt);
+      if (typeof d.deliveredBy === "string") setDeliveredBy(d.deliveredBy);
+      if (typeof d.vehicleNumber === "string") setVehicleNumber(d.vehicleNumber);
+      if (typeof d.remarks === "string") setRemarks(d.remarks);
+    },
+    { scope: `provider-portal:${procurementId}` },
+  );
   const today = format(new Date(), "yyyy-MM-dd");
   const orderedFrom = order.acceptedAt || order.issuedAt;
   const deliverBy = deliveryDays && orderedFrom ? addDays(new Date(orderedFrom), deliveryDays) : null;
@@ -315,6 +345,7 @@ function MakeDeliveryCard({ procurementId, order, deliverTo, deliveryDays, outst
         return;
       }
       showToast({ message: "Delivery note sent. Waiting for receipt.", severity: "success" });
+      deliveryDraft.clearDraft();
       notifyBell();
       onDone();
     } finally {

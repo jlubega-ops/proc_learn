@@ -361,36 +361,17 @@ export function mergeProcurementTimeline(workflowEntries, domainEntries) {
  * }} opts
  */
 export async function loadProcurementDomainTimeline(prisma, opts) {
-  /** Prefer JSON-path filter when the driver supports it; fall back to bounded scan. */
-  let matched = [];
-  try {
-    matched = await prisma.auditLog.findMany({
-      where: {
-        eventType: { startsWith: "PROJECT_ORG_" },
-        AND: [
-          { meta: { path: "$.projectId", equals: opts.projectId } },
-          { meta: { path: "$.procurementId", equals: opts.procurementId } },
-        ],
-      },
-      orderBy: { createdAt: "asc" },
-      take: 400,
-    });
-  } catch {
-    const rows = await prisma.auditLog.findMany({
-      where: { eventType: { startsWith: "PROJECT_ORG_" } },
-      orderBy: { createdAt: "desc" },
-      take: 600,
-    });
-    matched = rows
-      .filter((row) => {
-        const meta = row.meta && typeof row.meta === "object" ? row.meta : {};
-        return (
-          String(meta.projectId || "") === opts.projectId &&
-          String(meta.procurementId || "") === opts.procurementId
-        );
-      })
-      .reverse();
-  }
+  const projectRows = await prisma.auditLog.findMany({
+    where: { projectId: opts.projectId, eventType: { startsWith: "PROJECT_ORG_" } },
+    orderBy: { createdAt: "asc" },
+    take: 5000,
+  });
+  const matched = projectRows
+    .filter((row) => {
+      const meta = row.meta && typeof row.meta === "object" ? row.meta : {};
+      return String(meta.procurementId || "") === opts.procurementId;
+    })
+    .slice(-400);
 
   const orgUserIds = [
     ...new Set(

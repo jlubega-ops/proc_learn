@@ -12,6 +12,7 @@ import TextField from "@mui/material/TextField";
 import Tooltip from "@mui/material/Tooltip";
 import HelpOutlineRounded from "@mui/icons-material/HelpOutlineRounded";
 import { useToast } from "@/components/providers/toast-provider";
+import { useDraftState } from "@/hooks/use-draft-state";
 import { adminDialogPaperSx, themedTextFieldSx } from "@/lib/admin-mui-surfaces";
 
 const LIVE = new Set(["SUBMITTED", "OPENED"]);
@@ -29,8 +30,17 @@ const LIVE = new Set(["SUBMITTED", "OPENED"]);
 export function OfferClarifyButton({ projectId, procurementId, offer, allowed, onChanged }) {
   const { showToast } = useToast();
   const [open, setOpen] = useState(false);
-  const [question, setQuestion] = useState("");
+  const [question, setQuestion, questionDraft] = useDraftState(
+    `org:procurement:${procurementId}:offer:${offer?.id}:clarify`,
+    "",
+    { enabled: open, resetKey: open },
+  );
   const [error, setError] = useState("");
+
+  function handleCancel() {
+    questionDraft.clearDraft();
+    setOpen(false);
+  }
   const [busy, setBusy] = useState(false);
   const name = offer?.supplier?.name || "provider";
   const openQuestion = (offer?.clarifications || []).some((c) => !c.respondedAt);
@@ -60,8 +70,8 @@ export function OfferClarifyButton({ projectId, procurementId, offer, allowed, o
         return;
       }
       showToast({ message: "Question sent.", severity: "success" });
+      questionDraft.resetForm("");
       setOpen(false);
-      setQuestion("");
       await onChanged();
     } finally {
       setBusy(false);
@@ -80,7 +90,6 @@ export function OfferClarifyButton({ projectId, procurementId, offer, allowed, o
             aria-label={`Ask ${name} for clarification`}
             disabled={!canAsk || busy}
             onClick={() => {
-              setQuestion("");
               setError("");
               setOpen(true);
             }}
@@ -91,7 +100,7 @@ export function OfferClarifyButton({ projectId, procurementId, offer, allowed, o
       </Tooltip>
       <Dialog
         open={open}
-        onClose={busy ? undefined : () => setOpen(false)}
+        onClose={busy ? undefined : handleCancel}
         maxWidth="sm"
         fullWidth
         slotProps={{ paper: { sx: adminDialogPaperSx } }}
@@ -116,7 +125,7 @@ export function OfferClarifyButton({ projectId, procurementId, offer, allowed, o
             />
           </DialogContent>
           <DialogActions className="flex-wrap gap-2">
-            <Button onClick={() => setOpen(false)} disabled={busy}>
+            <Button onClick={handleCancel} disabled={busy}>
               Cancel
             </Button>
             <Button

@@ -15,6 +15,7 @@ import SendRounded from "@mui/icons-material/SendRounded";
 import UndoRounded from "@mui/icons-material/UndoRounded";
 import { useToast } from "@/components/providers/toast-provider";
 import { actionConfirmOptions, useConfirm } from "@/components/providers/confirm-provider";
+import { useDraftState } from "@/hooks/use-draft-state";
 import { PrintButton } from "@/components/print/print-document";
 import { WorkflowHistoryPanel } from "@/components/projects/workflow-history-panel";
 import { PORTAL_NOTIFICATIONS_CHANGED } from "@/components/provider-portal/provider-portal-shell";
@@ -98,7 +99,10 @@ function OfferLinesTable({ lines, total }) {
 /** @param {{ clarification: any; canAnswer: boolean; onAnswered: () => void }} p */
 function ClarificationItem({ clarification: c, canAnswer, onAnswered }) {
   const { showToast } = useToast();
-  const [answer, setAnswer] = useState("");
+  const [answer, setAnswer, answerDraft] = useDraftState(`clarification:${c.id}`, "", {
+    enabled: canAnswer && !c.respondedAt,
+    scope: `provider-portal:${c.id}`,
+  });
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
 
@@ -123,7 +127,7 @@ function ClarificationItem({ clarification: c, canAnswer, onAnswered }) {
         return;
       }
       showToast({ message: "Answer sent.", severity: "success" });
-      setAnswer("");
+      answerDraft.resetForm("");
       notifyPortal();
       onAnswered();
     } finally {

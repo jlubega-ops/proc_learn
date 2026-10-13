@@ -6,6 +6,7 @@ import {
   requireProviderPortalSession,
 } from "@/lib/projects/provider-portal";
 import { offersLockedByDecision, receiveOffer } from "@/lib/projects/solicitations";
+import { okOrAbort, runInTx, withTxAbort } from "@/lib/db-tx";
 
 export const runtime = "nodejs";
 
@@ -36,19 +37,25 @@ export async function POST(request) {
     );
   }
 
-  const result = await receiveOffer(prisma, {
-    projectId: auth.project.id,
-    procurementId: solicitation.procurementId,
-    solicitationType: solicitation.solicitationType,
-    supplierId: auth.provider.id,
-    amount: body?.amount,
-    lineItems: body?.lineItems,
-    deliveryDays: body?.deliveryDays,
-    remarks: body?.remarks,
-    source: "PORTAL",
-    actorOrgUserId: null,
-    actorRoleName: "Provider (portal)",
-  });
+  const result = await withTxAbort(() =>
+    runInTx(prisma, async (tx) =>
+      okOrAbort(
+        await receiveOffer(tx, {
+          projectId: auth.project.id,
+          procurementId: solicitation.procurementId,
+          solicitationType: solicitation.solicitationType,
+          supplierId: auth.provider.id,
+          amount: body?.amount,
+          lineItems: body?.lineItems,
+          deliveryDays: body?.deliveryDays,
+          remarks: body?.remarks,
+          source: "PORTAL",
+          actorOrgUserId: null,
+          actorRoleName: "Provider (portal)",
+        }),
+      ),
+    ),
+  );
   if (!result.ok) {
     return NextResponse.json(
       { error: result.error, fieldErrors: result.fieldErrors, code: result.code },

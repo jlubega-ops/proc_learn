@@ -17,6 +17,7 @@ import GavelRounded from "@mui/icons-material/GavelRounded";
 import SaveRounded from "@mui/icons-material/SaveRounded";
 import WarningAmberRounded from "@mui/icons-material/WarningAmberRounded";
 import { useToast } from "@/components/providers/toast-provider";
+import { useDraftSync } from "@/hooks/use-draft-sync";
 import {
   adminDialogPaperSx,
   adminMutedTextSx,
@@ -114,6 +115,22 @@ export function OrgEvaluationPanel({
   const [errors, setErrors] = useState({});
   const [confirmSubmit, setConfirmSubmit] = useState(/** @type {string[] | null} */ (null));
   const refreshKey = `${procurement?.updatedAt || ""}-${(procurement?.offers || []).length}`;
+  const reportStatus = ctx?.evaluationReport?.status;
+  const reportDraft = useDraftSync(
+    `org:procurement:${procurement.id}:evaluation-report`,
+    { recommendedId, recommendation, comments },
+    (d) => {
+      if (typeof d.recommendedId === "string") setRecommendedId(d.recommendedId);
+      if (typeof d.recommendation === "string") setRecommendation(d.recommendation);
+      if (typeof d.comments === "string") setComments(d.comments);
+    },
+    {
+      enabled:
+        !loading &&
+        Boolean(ctx?.permissions?.canEvaluate) &&
+        (!reportStatus || ["DRAFT", "RETURNED"].includes(reportStatus)),
+    },
+  );
 
   const call = useCallback(
     async (action, body = {}) => {
@@ -166,6 +183,7 @@ export function OrgEvaluationPanel({
         return false;
       }
       showToast({ message: successMessage, severity: "success" });
+      if (action === "save_evaluation") reportDraft.clearDraft();
       await load();
       onChanged();
       return true;
@@ -213,6 +231,8 @@ export function OrgEvaluationPanel({
           message: typeof data.error === "string" ? data.error : "Could not submit the evaluation report.",
           severity: "error",
         });
+      } else {
+        reportDraft.clearDraft();
       }
       return ok;
     },

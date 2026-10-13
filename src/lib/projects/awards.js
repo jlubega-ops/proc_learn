@@ -7,6 +7,7 @@ import {
 } from "@prisma/client";
 import { validatePurchaseInstructionResponse } from "@/lib/validation/purchase-instruction";
 import { writeAuditLog, AuditEvent } from "@/lib/audit-log";
+import { runInTx } from "@/lib/db-tx";
 import { notifyOrgUsers, OrgNotificationType } from "@/lib/projects/org-notifications";
 import { notifyProvider } from "@/lib/projects/provider-notifications";
 import { formatMoneyUGX } from "@/lib/money";
@@ -114,7 +115,7 @@ export async function createAwardFromApprovedEvaluation(prisma, opts) {
     }
   }
 
-  const row = await prisma.$transaction(async (tx) => {
+  const row = await runInTx(prisma, async (tx) => {
     const award = await tx.projectOrgAward.create({
       data: {
         projectId: opts.projectId,

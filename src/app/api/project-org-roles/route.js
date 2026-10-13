@@ -3,6 +3,8 @@ import { Role } from "@prisma/client";
 import { getSessionUser, sessionActiveRole } from "@/lib/api/get-session-user";
 import { writeAuditLog, AuditEvent } from "@/lib/audit-log";
 import { prisma } from "@/lib/prisma";
+import { cachedRead } from "@/lib/server-cache";
+import { cachedJson } from "@/lib/api/cached-json";
 import { validateProjectOrgRoleInput } from "@/lib/validation/project-org-role";
 import {
   ensureProjectOrgAdminRole,
@@ -39,27 +41,33 @@ export async function GET(request) {
 
   const where = includeInactive ? {} : { isActive: true };
 
-  const [total, roles] = await Promise.all([
-    prisma.projectOrgRole.count({ where }),
-    prisma.projectOrgRole.findMany({
-      where,
-      orderBy: [{ sortOrder: "asc" }, { name: "asc" }],
-      skip,
-      take: pageSize,
-    }),
-  ]);
+  const payload = await cachedRead(
+    `project-org-roles:${includeInactive ? "all" : "active"}:${page}:${pageSize}`,
+    ["ProjectOrgRole"],
+    async () => {
+      const [total, roles] = await Promise.all([
+        prisma.projectOrgRole.count({ where }),
+        prisma.projectOrgRole.findMany({
+          where,
+          orderBy: [{ sortOrder: "asc" }, { name: "asc" }],
+          skip,
+          take: pageSize,
+        }),
+      ]);
+      return {
+        roles: roles.map((row) => ({
+          ...row,
+          isRequired: isProjectOrgAdminRole(row.name),
+        })),
+        page,
+        pageSize,
+        total,
+        pageCount: Math.max(1, Math.ceil(total / pageSize)),
+      };
+    },
+  );
 
-  return NextResponse.json({
-    roles: roles.map((row) => ({
-      ...row,
-      isRequired: isProjectOrgAdminRole(row.name),
-    })),
-    page,
-    pageSize,
-    total,
-    pageCount: Math.max(1, Math.ceil(total / pageSize)),
-    canManage: activeRole === Role.SYSTEM_ADMIN,
-  });
+  return cachedJson(request, { ...payload, canManage: activeRole === Role.SYSTEM_ADMIN }, { revalidate: true });
 }
 
 export async function POST(request) {
@@ -103,7 +111,10 @@ export async function POST(request) {
     );
   }
 
-  const row = await prisma.projectOrgRole.create({ data: validated.data });
+  const last = await prisma.projectOrgRole.aggregate({ _max: { sortOrder: true } });
+  const row = await prisma.projectOrgRole.create({
+    data: { ...validated.data, sortOrder: (last._max.sortOrder ?? 0) + 1 },
+  });
 
   await writeAuditLog({
     eventType: AuditEvent.PROJECT_ORG_ROLE_CREATED,

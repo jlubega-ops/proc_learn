@@ -9,6 +9,7 @@ import {
   submitRequisition,
   getRequesterRequisitionMutationFlags,
   loadProjectVoteCode,
+  requisitionViewScopeWhere,
 } from "@/lib/projects/requisitions";
 import {
   orgOpsSlateListWhere,
@@ -41,18 +42,7 @@ export async function GET(request, context) {
   const where = { projectId };
   if (status) where.status = status;
 
-  // UDO: own requisitions primarily; HOD same department.
-  if (auth.type === "org") {
-    const role = auth.orgUser.projectOrgRole?.name || "";
-    if (role === "User Department Officer" || role === "User Department") {
-      where.requesterOrgUserId = auth.orgUser.id;
-    } else if (
-      (role === "Head User Department" || role === "Head of User Department") &&
-      auth.orgUser.departmentId
-    ) {
-      where.departmentId = auth.orgUser.departmentId;
-    }
-  }
+  if (auth.type === "org") Object.assign(where, requisitionViewScopeWhere(auth.orgUser));
   Object.assign(where, orgOpsSlateListWhere(await resolveCurrentOrgSlateId(prisma, projectId)));
 
   const rows = await prisma.projectOrgRequisition.findMany({

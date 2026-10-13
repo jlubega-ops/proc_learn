@@ -11,7 +11,7 @@ import { formatUserDisplayName } from "@/lib/user-display";
 import { prisma } from "@/lib/prisma";
 import { ensureEnrollmentFromProfileLabel } from "@/lib/academic/student-enrollment";
 import { parseCampus } from "@/lib/campuses";
-import { deleteProjectsOwnedByUser } from "@/lib/projects/purge-project-data";
+import { PURGE_TX_OPTIONS, deleteProjectsOwnedByUser } from "@/lib/projects/purge-project-data";
 
 export const runtime = "nodejs";
 
@@ -258,7 +258,7 @@ export async function DELETE(request, ctx) {
   await prisma.$transaction(async (tx) => {
     await deleteProjectsOwnedByUser(tx, id);
     await tx.user.delete({ where: { id } });
-  });
+  }, PURGE_TX_OPTIONS);
 
   await writeAuditLog({
     eventType: AuditEvent.STUDENT_DELETED,

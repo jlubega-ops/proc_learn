@@ -9,6 +9,7 @@ import { sendAccountActivationEmail, sendStaffWelcomeEmail } from "@/lib/invite-
 import { formatUserDisplayName } from "@/lib/user-display";
 import { grantedRoles } from "@/lib/roles";
 import { prisma } from "@/lib/prisma";
+import { writeAuditLog, AuditEvent } from "@/lib/audit-log";
 
 export const runtime = "nodejs";
 
@@ -73,6 +74,12 @@ export async function POST(_request, ctx) {
       temporaryPassword: plainPassword,
       roles: grantedRoles(user.userRoles),
     });
+    await writeAuditLog({
+      eventType: AuditEvent.USER_INVITE_RESENT,
+      actorUserId: actor.id,
+      targetUserId: user.id,
+      meta: { email: user.email, kind: "welcome" },
+    });
 
     return NextResponse.json({ ok: true, message: "Welcome email sent." });
   }
@@ -94,6 +101,12 @@ export async function POST(_request, ctx) {
     email: user.email,
     rawToken,
     displayName: formatUserDisplayName(user),
+  });
+  await writeAuditLog({
+    eventType: AuditEvent.USER_INVITE_RESENT,
+    actorUserId: actor.id,
+    targetUserId: user.id,
+    meta: { email: user.email, kind: "activation" },
   });
 
   return NextResponse.json({ ok: true, message: "Activation email sent." });

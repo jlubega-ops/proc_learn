@@ -3,6 +3,9 @@
  * requester, supplier, invoice, etc.) do not block Project or User deletes.
  */
 
+/** Interactive-transaction options for purges (many workspaces can exceed Prisma's 5 s default). */
+export const PURGE_TX_OPTIONS = { maxWait: 10_000, timeout: 120_000 };
+
 /**
  * @param {import("@prisma/client").Prisma.TransactionClient | import("@prisma/client").PrismaClient} tx
  * @param {string} projectId

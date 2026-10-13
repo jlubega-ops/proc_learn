@@ -2,9 +2,15 @@
 
 import { useEffect, useState } from "react";
 import { usePathname } from "next/navigation";
+import { startVisibleInterval } from "@/lib/visible-interval";
 
 const TASKS_CHANGED_EVENT = "proc-learn:org-tasks-changed";
 const POLL_MS = 30_000;
+/** Navigating between pages reuses counts this fresh instead of refetching. */
+const FRESH_MS = 10_000;
+
+/** @type {Map<string, { at: number; byHref: Record<string, number> }>} */
+const cache = new Map();
 
 /** Ask the sidebar to refresh pending-task badges (call after a task decision). */
 export function notifyOrgTasksChanged() {
@@ -20,7 +26,8 @@ export function notifyOrgTasksChanged() {
  */
 export function usePendingTaskCounts(projectId, enabled, contextKey = "") {
   const pathname = usePathname();
-  const [byHref, setByHref] = useState(/** @type {Record<string, number>} */ ({}));
+  const key = `${projectId}|${contextKey}`;
+  const [state, setState] = useState(() => ({ key, byHref: cache.get(key)?.byHref || {} }));
   const active = Boolean(enabled && projectId);
 
   useEffect(() => {
@@ -28,8 +35,9 @@ export function usePendingTaskCounts(projectId, enabled, contextKey = "") {
     let cancelled = false;
     let inFlight = false;
 
-    const load = async () => {
+    const load = async (force = false) => {
       if (inFlight || document.visibilityState === "hidden") return;
+      if (!force && Date.now() - (cache.get(key)?.at || 0) < FRESH_MS) return;
       inFlight = true;
       try {
         const res = await fetch(`/api/projects/${projectId}/tasks/counts`, {
@@ -37,8 +45,9 @@ export function usePendingTaskCounts(projectId, enabled, contextKey = "") {
           cache: "no-store",
         });
         const data = await res.json().catch(() => ({}));
-        if (!cancelled && res.ok && data?.byHref && typeof data.byHref === "object") {
-          setByHref(data.byHref);
+        if (res.ok && data?.byHref && typeof data.byHref === "object") {
+          cache.set(key, { at: Date.now(), byHref: data.byHref });
+          if (!cancelled) setState({ key, byHref: data.byHref });
         }
       } catch {
         // Badges are best-effort; keep the last known counts offline.
@@ -46,18 +55,18 @@ export function usePendingTaskCounts(projectId, enabled, contextKey = "") {
         inFlight = false;
       }
     };
+    const onChanged = () => void load(true);
 
     void load();
-    const timer = window.setInterval(load, POLL_MS);
-    window.addEventListener(TASKS_CHANGED_EVENT, load);
-    window.addEventListener("focus", load);
+    const stop = startVisibleInterval(onChanged, POLL_MS);
+    window.addEventListener(TASKS_CHANGED_EVENT, onChanged);
     return () => {
       cancelled = true;
-      window.clearInterval(timer);
-      window.removeEventListener(TASKS_CHANGED_EVENT, load);
-      window.removeEventListener("focus", load);
+      stop();
+      window.removeEventListener(TASKS_CHANGED_EVENT, onChanged);
     };
-  }, [active, projectId, pathname, contextKey]);
+  }, [active, projectId, key, pathname]);
 
-  return active ? byHref : {};
+  if (!active) return {};
+  return state.key === key ? state.byHref : cache.get(key)?.byHref || {};
 }

@@ -4,6 +4,7 @@ import { getAppSession } from "@/lib/auth/session";
 import { expireSessionIfIdle } from "@/lib/auth/session-idle";
 import { buildIronSessionOptions } from "@/lib/auth/session-options";
 import { buildSessionPayloadForUserId } from "@/lib/auth/session-payload";
+import { isSessionVersionCurrent } from "@/lib/auth/session-version";
 import { buildSessionPayloadForOrgUserId } from "@/lib/auth/org-session-payload";
 import { SESSION_IDLE_MINUTES } from "@/lib/appConfig";
 import { prisma } from "@/lib/prisma";
@@ -62,12 +63,20 @@ export async function GET(request) {
 
   const statusRow = await prisma.user.findUnique({
     where: { id: userId },
-    select: { accountStatus: true },
+    select: { accountStatus: true, sessionVersion: true },
   });
-  if (statusRow?.accountStatus === UserAccountStatus.SUSPENDED) {
+  if (
+    statusRow?.accountStatus === UserAccountStatus.SUSPENDED ||
+    !isSessionVersionCurrent(session, statusRow)
+  ) {
     session.destroy();
     await session.save();
     return NextResponse.json({ authenticated: false });
+  }
+
+  // Background validity check (single-session / idle / suspension) without rebuilding the payload.
+  if (new URL(request.url).searchParams.get("check") === "1") {
+    return NextResponse.json({ authenticated: true, sessionIdleMinutes: SESSION_IDLE_MINUTES });
   }
 
   const payload = await buildSessionPayloadForUserId(userId);

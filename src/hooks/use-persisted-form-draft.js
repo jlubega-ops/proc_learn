@@ -3,9 +3,11 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
   clearFormDraft,
+  formDraftScope,
   loadFormDraft,
   saveFormDraft,
 } from "@/lib/form-draft";
+import { useAuthSession } from "@/components/providers/auth-session-provider";
 
 /**
  * Fast fingerprint to skip identical server PUTs.
@@ -38,7 +40,7 @@ export function usePersistedFormDraft(opts) {
     formKey,
     values,
     projectId = null,
-    enabled = true,
+    enabled: enabledOpt = true,
     localDebounceMs = 400,
     serverDebounceMs = 5000,
     onHydrated,
@@ -55,10 +57,15 @@ export function usePersistedFormDraft(opts) {
   const hydratedKey = useRef("");
   const onHydratedRef = useRef(onHydrated);
 
-  valuesRef.current = values;
-  onHydratedRef.current = onHydrated;
+  useEffect(() => {
+    valuesRef.current = values;
+    onHydratedRef.current = onHydrated;
+  });
 
-  const localKey = projectId ? `${projectId}:${formKey}` : formKey;
+  const { session } = useAuthSession();
+  const scope = formDraftScope(session);
+  const enabled = enabledOpt && Boolean(scope);
+  const localKey = projectId ? `${scope}:${projectId}:${formKey}` : `${scope}:${formKey}`;
 
   const clearRemote = useCallback(async () => {
     clearFormDraft(localKey);
@@ -108,6 +115,7 @@ export function usePersistedFormDraft(opts) {
     if (hydratedKey.current === formKey) return;
     let cancelled = false;
     hydratedKey.current = formKey;
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- hydrating from server/localStorage
     setReady(false);
 
     (async () => {

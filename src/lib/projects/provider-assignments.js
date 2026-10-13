@@ -200,8 +200,8 @@ function providerProgress(s) {
  * @param {string[]} ids
  * @param {string} providerId
  */
-function loadAssignmentRows(prisma, ids, providerId) {
-  return prisma.projectOrgProcurement.findMany({
+async function loadAssignmentRows(prisma, ids, providerId) {
+  const rows = await prisma.projectOrgProcurement.findMany({
     where: { id: { in: ids } },
     orderBy: { updatedAt: "desc" },
     select: {
@@ -234,11 +234,27 @@ function loadAssignmentRows(prisma, ids, providerId) {
       deliveryNotes: { where: { supplierId: providerId }, orderBy: { createdAt: "desc" } },
       deliveries: {
         orderBy: { createdAt: "asc" },
-        include: { lines: true, inspection: { select: { status: true, resultNotes: true, inspectedAt: true } } },
+        include: {
+          lines: true,
+          inspection: { select: { status: true, resultNotes: true, inspectedAt: true } },
+          deliveryNote: { select: { supplierId: true } },
+        },
       },
       invoices: { where: { supplierId: providerId }, orderBy: { createdAt: "asc" } },
       payments: { where: { invoice: { supplierId: providerId } }, orderBy: { createdAt: "asc" } },
     },
+  });
+  return rows.map((r) => {
+    const declined =
+      r.awards[0]?.status === "DECLINED" ||
+      r.purchaseInstructions[0]?.status === "DECLINED" ||
+      (r.lpos[0] || r.contracts[0])?.status === "DECLINED";
+    return {
+      ...r,
+      deliveries: r.deliveries.filter((d) =>
+        d.deliveryNote ? d.deliveryNote.supplierId === providerId : !declined,
+      ),
+    };
   });
 }
 

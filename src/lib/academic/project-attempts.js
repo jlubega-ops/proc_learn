@@ -6,6 +6,7 @@
  *   - When both apply after start → earlier deadline wins
  * Each student works in an isolated organisation shell for this academic project.
  */
+import { createHash, timingSafeEqual } from "crypto";
 import {
   ProjectAttemptStatus,
   ProjectEnrollmentStatus,
@@ -14,6 +15,8 @@ import {
 } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { AuditEvent, writeAuditLog } from "@/lib/audit-log";
+import { runInTx } from "@/lib/db-tx";
+import { clearRateLimit, hitRateLimit, RATE_LIMIT_MESSAGE } from "@/lib/rate-limit";
 import { findStudentPersonalOrg } from "@/lib/projects/student-personal-org";
 import { ensureStudentAttemptOrganisation } from "@/lib/projects/student-attempt-org";
 import {
@@ -23,7 +26,10 @@ import {
 } from "@/lib/projects/student-active-org";
 import { ensureCurrentOrgSlateForProject } from "@/lib/academic/org-academic-slate";
 import { getActiveEnrollment } from "@/lib/academic/student-enrollment";
-import { campusLabel } from "@/lib/campuses";
+import {
+  participantProgrammeCampus,
+  STUDENT_VIEW_SETTINGS_SELECT,
+} from "@/lib/academic/student-view";
 import {
   isProjectMeantForStudent,
   loadStudentEligibilityContext,
@@ -165,6 +171,43 @@ export function serializeAttempt(attempt) {
  * @param {import("@prisma/client").PrismaClient} db
  * @param {{ projectId: string; studentUserId: string }} p
  */
+/**
+ * Question content of an examiner project for a student: hidden until they are enrolled and
+ * the project has opened.
+ * @param {{ instructions?: string | null; questionText?: string | null; questionFileUrl?: string | null; openAt?: Date | string | null }} project
+ * @param {boolean} enrolled
+ */
+export function academicQuestionFields(project, enrolled) {
+  const opened = !project.openAt || new Date(project.openAt).getTime() <= Date.now();
+  const visible = enrolled && opened;
+  return {
+    instructions: visible ? project.instructions || null : null,
+    questionText: visible ? project.questionText || null : null,
+    questionFileUrl: visible ? project.questionFileUrl || null : null,
+  };
+}
+
+/**
+ * Constant-time enrollment key check, rate-limited per student + project.
+ * @param {string} studentUserId
+ * @param {{ id: string; enrollmentKey?: string | null }} project
+ * @param {unknown} provided
+ * @returns {{ ok: true } | { ok: false; error: string }}
+ */
+export function checkEnrollmentKey(studentUserId, project, provided) {
+  if (!project.enrollmentKey) return { ok: true };
+  const key = String(provided || "").trim().toUpperCase();
+  if (!key) return { ok: false, error: "Enrollment key is required for this project." };
+  const limiterKey = `enroll-key:${studentUserId}:${project.id}`;
+  const limit = hitRateLimit(limiterKey, { limit: 10, windowMs: 15 * 60 * 1000 });
+  if (!limit.ok) return { ok: false, error: RATE_LIMIT_MESSAGE };
+  const a = createHash("sha256").update(key).digest();
+  const b = createHash("sha256").update(String(project.enrollmentKey).toUpperCase()).digest();
+  if (!timingSafeEqual(a, b)) return { ok: false, error: "Invalid enrollment key." };
+  clearRateLimit(limiterKey);
+  return { ok: true };
+}
+
 export async function ensureProjectEnrollment(db, { projectId, studentUserId }) {
   return db.projectEnrollment.upsert({
     where: { projectId_studentUserId: { projectId, studentUserId } },
@@ -180,6 +223,7 @@ export async function ensureProjectEnrollment(db, { projectId, studentUserId }) 
  *   projectId: string;
  *   studentUserId: string;
  *   actorUserId?: string;
+ *   enrollmentAccessKey?: string;
  *   db?: import("@prisma/client").PrismaClient;
  * }} opts
  */
@@ -227,6 +271,15 @@ export async function startProjectAttempt(opts) {
     // @ts-ignore
     err.code = "NOT_ELIGIBLE";
     throw err;
+  }
+  if (!alreadyJoined && project.enrollmentKey) {
+    const keyCheck = checkEnrollmentKey(opts.studentUserId, project, opts.enrollmentAccessKey);
+    if (!keyCheck.ok) {
+      const err = new Error(keyCheck.error);
+      // @ts-ignore
+      err.code = "ENROLLMENT_KEY";
+      throw err;
+    }
   }
 
   const otherInProgress = await findStudentInProgressAttempt(db, opts.studentUserId, {
@@ -342,40 +395,41 @@ export async function startProjectAttempt(opts) {
   }
 
   const now = new Date();
-  let attempt;
-  if (active && active.status === ProjectAttemptStatus.NOT_STARTED) {
-    attempt = await db.projectAttempt.update({
-      where: { id: active.id },
+  const attempt = await runInTx(db, async (tx) => {
+    const row =
+      active && active.status === ProjectAttemptStatus.NOT_STARTED
+        ? await tx.projectAttempt.update({
+            where: { id: active.id },
+            data: {
+              status: ProjectAttemptStatus.IN_PROGRESS,
+              startedAt: now,
+              academicSlateId: slateResult?.slate?.id || null,
+              studentAcademicEnrollmentId: academicEnrollment?.id || null,
+              workspaceProjectId: workspace.id,
+            },
+          })
+        : await tx.projectAttempt.create({
+            data: {
+              enrollmentId: enrollment.id,
+              attemptNumber: nextNumber,
+              status: ProjectAttemptStatus.IN_PROGRESS,
+              startedAt: now,
+              academicSlateId: slateResult?.slate?.id || null,
+              studentAcademicEnrollmentId: academicEnrollment?.id || null,
+              workspaceProjectId: workspace.id,
+            },
+          });
+
+    await persistStudentActiveOrg(tx, opts.studentUserId, workspace.id);
+
+    await tx.projectEnrollment.update({
+      where: { id: enrollment.id },
       data: {
-        status: ProjectAttemptStatus.IN_PROGRESS,
-        startedAt: now,
-        academicSlateId: slateResult?.slate?.id || null,
-        studentAcademicEnrollmentId: academicEnrollment?.id || null,
-        workspaceProjectId: workspace.id,
+        status: ProjectEnrollmentStatus.IN_PROGRESS,
+        startedAt: enrollment.startedAt || now,
       },
     });
-  } else {
-    attempt = await db.projectAttempt.create({
-      data: {
-        enrollmentId: enrollment.id,
-        attemptNumber: nextNumber,
-        status: ProjectAttemptStatus.IN_PROGRESS,
-        startedAt: now,
-        academicSlateId: slateResult?.slate?.id || null,
-        studentAcademicEnrollmentId: academicEnrollment?.id || null,
-        workspaceProjectId: workspace.id,
-      },
-    });
-  }
-
-  await persistStudentActiveOrg(db, opts.studentUserId, workspace.id);
-
-  await db.projectEnrollment.update({
-    where: { id: enrollment.id },
-    data: {
-      status: ProjectEnrollmentStatus.IN_PROGRESS,
-      startedAt: enrollment.startedAt || now,
-    },
+    return row;
   });
 
   await writeAuditLog({
@@ -498,22 +552,24 @@ export async function submitProjectAttempt(opts) {
 
   await refreshAttemptProgressCache(db, attempt, studentUserId);
 
-  const updated = await db.projectAttempt.update({
-    where: { id: attempt.id },
-    data: {
-      status: ProjectAttemptStatus.SUBMITTED,
-      submittedAt: now,
-      durationSecondsUsed: used,
-    },
-  });
-
-  await db.projectEnrollment.update({
-    where: { id: attempt.enrollmentId },
-    data: {
-      status: ProjectEnrollmentStatus.SUBMITTED,
-      submittedAt: now,
-      startedAt: attempt.enrollment.startedAt || attempt.startedAt || now,
-    },
+  const updated = await runInTx(db, async (tx) => {
+    const row = await tx.projectAttempt.update({
+      where: { id: attempt.id },
+      data: {
+        status: ProjectAttemptStatus.SUBMITTED,
+        submittedAt: now,
+        durationSecondsUsed: used,
+      },
+    });
+    await tx.projectEnrollment.update({
+      where: { id: attempt.enrollmentId },
+      data: {
+        status: ProjectEnrollmentStatus.SUBMITTED,
+        submittedAt: now,
+        startedAt: attempt.enrollment.startedAt || attempt.startedAt || now,
+      },
+    });
+    return row;
   });
 
   await writeAuditLog({
@@ -551,6 +607,29 @@ export async function submitProjectAttempt(opts) {
     autoExpired: Boolean(opts.autoExpired),
     forceByStaff,
   };
+}
+
+/**
+ * Recompute cached progress for in-progress attempts on one programme × year (after its
+ * process list changes). Sequential and capped so it stays light.
+ * @param {import("@prisma/client").PrismaClient} db
+ * @param {{ programmeId: string; academicYearId: string; limit?: number }} opts
+ */
+export async function refreshProgressForProgrammeYear(db, opts) {
+  const attempts = await db.projectAttempt.findMany({
+    where: {
+      status: ProjectAttemptStatus.IN_PROGRESS,
+      enrollment: {
+        project: { programmeId: opts.programmeId, academicYearId: opts.academicYearId },
+      },
+    },
+    include: { enrollment: { select: { projectId: true, studentUserId: true } } },
+    take: opts.limit ?? 500,
+  });
+  for (const attempt of attempts) {
+    await refreshAttemptProgressCache(db, attempt, attempt.enrollment.studentUserId);
+  }
+  return attempts.length;
 }
 
 /**
@@ -712,9 +791,7 @@ export async function listStudentAcademicProjects(opts) {
       name: project.name,
       organizationName: project.organizationName,
       description: project.description,
-      instructions: project.instructions || null,
-      questionText: project.questionText || null,
-      questionFileUrl: project.questionFileUrl || null,
+      ...academicQuestionFields(project, Boolean(enrollment)),
       purpose: project.purpose,
       openAt: project.openAt,
       closeAt: project.closeAt,
@@ -757,6 +834,7 @@ export async function listAcademicProjectParticipants(opts) {
       student: {
         include: {
           studentProfile: { include: { programme: true } },
+          settings: STUDENT_VIEW_SETTINGS_SELECT,
           academicEnrollments: {
             where: { status: "ACTIVE" },
             take: 1,
@@ -811,15 +889,16 @@ export async function listAcademicProjectParticipants(opts) {
     const submitted = Boolean(latest?.submittedAt);
     const livePercent = live?.finalPercent ?? null;
     const storedPercent = grade?.finalPercent ?? null;
+    const pc = participantProgrammeCampus(e.student);
     return {
       enrollmentId: e.id,
       studentUserId: e.studentUserId,
       displayName: [e.student.firstName, e.student.lastName].filter(Boolean).join(" "),
       email: e.student.email,
       studentNumber: e.student.studentProfile?.studentNumber || null,
-      programme: e.student.studentProfile?.programme?.shortName || null,
-      campus: e.student.studentProfile?.campus || null,
-      campusLabel: campusLabel(e.student.studentProfile?.campus) || null,
+      programme: pc.programmeShortName,
+      campus: pc.campus,
+      campusLabel: pc.campusLabel,
       academicYearLabel: e.student.academicEnrollments?.[0]?.academicYear?.label || null,
       participationType,
       enrolledAt: e.enrolledAt,

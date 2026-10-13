@@ -8,6 +8,11 @@ import {
   isProjectOrgAdminRole,
   projectOrgAdminRoleGuardError,
 } from "@/lib/project-org-role";
+import {
+  IN_USE_MESSAGE,
+  isForeignKeyViolation,
+  orgRoleDeleteBlocker,
+} from "@/lib/projects/delete-guards";
 
 export const runtime = "nodejs";
 
@@ -31,14 +36,17 @@ export async function PATCH(request, context) {
     return NextResponse.json({ error: "Invalid request body." }, { status: 400 });
   }
 
+  if (body?.name !== undefined && String(body.name ?? "").trim() !== existing.name) {
+    return NextResponse.json(
+      {
+        error: "Role names cannot be changed. Workflows identify roles by name.",
+        fieldErrors: { name: "Role names are fixed." },
+      },
+      { status: 400 },
+    );
+  }
+
   if (isProjectOrgAdminRole(existing.name)) {
-    if (body?.name !== undefined && !isProjectOrgAdminRole(body.name)) {
-      const blocked = projectOrgAdminRoleGuardError({ name: existing.name });
-      return NextResponse.json(
-        { error: blocked.error, fieldErrors: { name: "Admin cannot be renamed." } },
-        { status: 400 },
-      );
-    }
     if (body?.isActive === false) {
       const blocked = projectOrgAdminRoleGuardError({
         name: existing.name,
@@ -59,30 +67,15 @@ export async function PATCH(request, context) {
     );
   }
 
-  if (validated.data.name && validated.data.name !== existing.name) {
-    if (isProjectOrgAdminRole(String(validated.data.name))) {
-      return NextResponse.json(
-        {
-          error: "The Admin role already exists and is managed by the system.",
-          fieldErrors: { name: "Admin is a required role name." },
-        },
-        { status: 409 },
-      );
-    }
-    const clash = await prisma.projectOrgRole.findUnique({
-      where: { name: String(validated.data.name) },
-    });
-    if (clash) {
-      return NextResponse.json(
-        { error: "A project role with this name already exists.", fieldErrors: { name: "Name is already in use." } },
-        { status: 409 },
-      );
-    }
+  const data = { ...validated.data };
+  delete data.name;
+  if (Object.keys(data).length === 0) {
+    return NextResponse.json({ error: "No changes were provided." }, { status: 400 });
   }
 
   const row = await prisma.projectOrgRole.update({
     where: { id },
-    data: validated.data,
+    data,
   });
 
   await writeAuditLog({
@@ -112,7 +105,15 @@ export async function DELETE(_request, context) {
     return NextResponse.json({ error: blocked.error }, { status: 400 });
   }
 
-  await prisma.projectOrgRole.delete({ where: { id } });
+  const blocker = await orgRoleDeleteBlocker(prisma, id);
+  if (blocker) return NextResponse.json({ error: blocker }, { status: 409 });
+
+  try {
+    await prisma.projectOrgRole.delete({ where: { id } });
+  } catch (e) {
+    if (isForeignKeyViolation(e)) return NextResponse.json({ error: IN_USE_MESSAGE }, { status: 409 });
+    throw e;
+  }
 
   await writeAuditLog({
     eventType: AuditEvent.PROJECT_ORG_ROLE_DELETED,

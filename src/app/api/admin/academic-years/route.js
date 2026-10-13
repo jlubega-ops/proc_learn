@@ -3,15 +3,17 @@ import { Role } from "@prisma/client";
 import { getSessionUser, sessionActiveRole } from "@/lib/api/get-session-user";
 import { writeAuditLog, AuditEvent } from "@/lib/audit-log";
 import { prisma } from "@/lib/prisma";
+import { cachedRead } from "@/lib/server-cache";
+import { cachedJson } from "@/lib/api/cached-json";
 import {
+  listConfiguredAcademicYears,
   serializeAcademicYear,
-  setCurrentAcademicYear,
   validateAcademicYearInput,
 } from "@/lib/academic/academic-context";
 
 export const runtime = "nodejs";
 
-export async function GET() {
+export async function GET(request) {
   const user = await getSessionUser();
   if (!user) return NextResponse.json({ error: "Unauthorized." }, { status: 401 });
   const active = sessionActiveRole(user);
@@ -19,10 +21,10 @@ export async function GET() {
     return NextResponse.json({ error: "Forbidden." }, { status: 403 });
   }
 
-  const rows = await prisma.academicYear.findMany({
-    orderBy: { label: "desc" },
-  });
-  return NextResponse.json({ academicYears: rows.map(serializeAcademicYear) });
+  const academicYears = await cachedRead("academic-years:all", ["AcademicYear"], () =>
+    listConfiguredAcademicYears(),
+  );
+  return cachedJson(request, { academicYears }, { revalidate: true });
 }
 
 export async function POST(request) {

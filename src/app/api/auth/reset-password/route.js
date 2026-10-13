@@ -44,6 +44,12 @@ export async function POST(request) {
     where: { id: row.userId },
     select: { activatedAt: true, accountStatus: true },
   });
+  if (!userBefore || userBefore.accountStatus === UserAccountStatus.SUSPENDED) {
+    return NextResponse.json(
+      { error: "This reset link is invalid or has expired." },
+      { status: 400 },
+    );
+  }
   const activateViaReset =
     Boolean(userBefore) &&
     (!userBefore.activatedAt || userBefore.accountStatus === UserAccountStatus.PENDING_ACTIVATION);
@@ -67,6 +73,7 @@ export async function POST(request) {
         data: {
           passwordHash,
           mustChangePassword: false,
+          sessionVersion: { increment: 1 },
           ...(activateViaReset
             ? {
                 accountStatus: UserAccountStatus.ACTIVE,

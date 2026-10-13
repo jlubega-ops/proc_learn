@@ -109,6 +109,73 @@ export function processDeactivationBlockers(code, activeCodes, names) {
 }
 
 /**
+ * @param {Set<string>} set
+ * @param {{ code: string; dependsOn?: string[]; dependsOnAny?: string[] }} item
+ */
+function depsSatisfied(set, item) {
+  if ((item.dependsOn || []).some((c) => !set.has(c))) return false;
+  const any = item.dependsOnAny || [];
+  if (any.length && !any.some((c) => set.has(c))) return false;
+  if (item.code === PROCESS_FLOW_CODES.PROCUREMENT_REQUISITION && !METHOD_CODES.some((c) => set.has(c))) {
+    return false;
+  }
+  return true;
+}
+
+/**
+ * Turning `code` off: it plus every process left without what it needs.
+ * @param {string} code
+ * @param {Iterable<string>} enabledCodes
+ * @returns {string[]} codes to disable, in path order
+ */
+export function disableCascadeCodes(code, enabledCodes) {
+  const set = new Set(enabledCodes);
+  if (!set.has(code)) return [];
+  set.delete(code);
+  const removed = new Set([code]);
+  let changed = true;
+  while (changed) {
+    changed = false;
+    for (const item of ASSESSMENT_PROCESS_CATALOGUE) {
+      if (set.has(item.code) && !depsSatisfied(set, item)) {
+        set.delete(item.code);
+        removed.add(item.code);
+        changed = true;
+      }
+    }
+  }
+  return PROCESS_PATH_ORDER.filter((c) => removed.has(c));
+}
+
+/**
+ * Turning `code` on: it plus the prerequisites it needs (first option for "any of").
+ * @param {string} code
+ * @param {Iterable<string>} enabledCodes
+ * @returns {string[]} codes to enable, in path order
+ */
+export function enableCascadeCodes(code, enabledCodes) {
+  const set = new Set(enabledCodes);
+  if (set.has(code) || !assessmentProcessMeta(code)) return [];
+  const added = new Set();
+  /** @param {string} c */
+  const add = (c) => {
+    if (set.has(c)) return;
+    const meta = assessmentProcessMeta(c);
+    if (!meta) return;
+    set.add(c);
+    added.add(c);
+    for (const dep of meta.dependsOn || []) add(dep);
+    const any = meta.dependsOnAny || [];
+    if (any.length && !any.some((x) => set.has(x))) add(any[0]);
+    if (c === PROCESS_FLOW_CODES.PROCUREMENT_REQUISITION && !METHOD_CODES.some((x) => set.has(x))) {
+      add(METHOD_CODES[0]);
+    }
+  };
+  add(code);
+  return PROCESS_PATH_ORDER.filter((c) => added.has(c));
+}
+
+/**
  * Names of the processes `code` needs (for a short "Needs …" hint).
  * @param {string} code
  * @param {Record<string, string>} [names]

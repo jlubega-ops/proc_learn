@@ -1,9 +1,9 @@
-import Image from "next/image";
 import { redirect } from "next/navigation";
 import { BrandedPublicShell } from "@/components/auth/branded-public-shell";
 import { MaintenanceStatusWatcher } from "@/components/site/maintenance-status-watcher";
 import { APP_NAME } from "@/lib/appConfig";
 import { readSiteSettings } from "@/lib/site-settings";
+import { BrandLogoImage } from "@/components/providers/site-branding-provider";
 
 export const dynamic = "force-dynamic";
 
@@ -29,7 +29,7 @@ export default async function MaintenancePage() {
 
           <div className="px-6 py-7 text-center sm:px-8 sm:py-8">
             <div className="mx-auto flex items-center justify-center gap-3">
-              <Image src="/assets/mubs.png" alt="MUBS" width={48} height={48} className="object-contain" priority />
+              <BrandLogoImage  alt="MUBS" width={48} height={48} className="object-contain" priority />
               <div className="text-left">
                 <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-zinc-500">
                   Makerere University Business School

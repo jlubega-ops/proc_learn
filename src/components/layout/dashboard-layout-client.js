@@ -3,7 +3,6 @@
 import Link from "next/link";
 import { Fragment, Suspense, useEffect, useMemo, useRef, useState } from "react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
-import Image from "next/image";
 import ExpandMoreRounded from "@mui/icons-material/ExpandMoreRounded";
 import DarkModeRounded from "@mui/icons-material/DarkModeRounded";
 import LightModeRounded from "@mui/icons-material/LightModeRounded";
@@ -31,6 +30,7 @@ import { PROCUREMENT_STAGE_PAGES } from "@/lib/projects/procurement-stage-pages"
 import { ORG_PERMISSION } from "@/lib/projects/org-role-permissions";
 import { usePendingTaskCounts } from "@/hooks/use-pending-task-counts";
 import { useStudentAcademicCounts } from "@/hooks/use-student-academic-counts";
+import { BrandLogoImage } from "@/components/providers/site-branding-provider";
 import {
   BRAND_NAV_ACTIVE_CLASS,
   BRAND_NAV_INACTIVE_CLASS,
@@ -509,8 +509,7 @@ export default function DashboardLayoutClient({ children }) {
         <div className={BRAND_TRICOLOR_STRIPE_CLASS} aria-hidden />
         <div className="flex shrink-0 items-center gap-3 border-b border-[color:var(--border-subtle)] bg-gradient-to-r from-[color-mix(in_oklab,var(--brand-blue)_6%,var(--surface-sidebar))] to-[color:var(--surface-sidebar)] px-4 py-4">
           <div className="relative h-10 w-10 shrink-0 overflow-hidden rounded-md bg-white">
-            <Image
-              src="/assets/mubs.png"
+            <BrandLogoImage
               alt={`${ORG_NAME} logo`}
               fill
               sizes="40px"

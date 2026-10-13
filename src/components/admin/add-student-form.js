@@ -1,7 +1,8 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useState } from "react";
 import Button from "@mui/material/Button";
+import CloseRounded from "@mui/icons-material/CloseRounded";
 import TextField from "@mui/material/TextField";
 import MenuItem from "@mui/material/MenuItem";
 import Typography from "@mui/material/Typography";
@@ -11,6 +12,10 @@ import { studentNumberFromStudentEmail } from "@/lib/mubs-email";
 import { validateStudentAccountForm } from "@/lib/validation/student-form";
 import { themedTextFieldSx } from "@/lib/admin-mui-surfaces";
 import { useToast } from "@/components/providers/toast-provider";
+import { discardConfirmOptions, useConfirm } from "@/components/providers/confirm-provider";
+import { useDraftSync } from "@/hooks/use-draft-sync";
+import { useApi } from "@/hooks/use-api";
+import { revalidateApi } from "@/lib/api-client-cache";
 import { useRouter } from "next/navigation";
 import { campusSelectOptions } from "@/lib/campuses";
 
@@ -29,12 +34,19 @@ export function AddStudentForm({ afterCreatePath = "/students/manage" }) {
   const { showToast } = useToast();
   const router = useRouter();
   const [busy, setBusy] = useState(false);
-  const [programmes, setProgrammes] = useState(
-    /** @type {{ id: string; name: string; defaultYearOfStudy?: number }[]} */ ([]),
+  const { data: programmesData } = useApi("/api/programmes", { silentErrors: true });
+  const { data: yearsData } = useApi("/api/meta/academic-years", { silentErrors: true });
+  const programmes = /** @type {{ id: string; name: string; defaultYearOfStudy?: number }[]} */ (
+    Array.isArray(programmesData?.programmes) ? programmesData.programmes : []
   );
-  const [academicYears, setAcademicYears] = useState(
-    /** @type {string[]} */ ([]),
+  const academicYears = /** @type {string[]} */ (
+    Array.isArray(yearsData?.labels) && yearsData.labels.length
+      ? yearsData.labels
+      : Array.isArray(yearsData?.extended)
+        ? yearsData.extended
+        : []
   );
+  const defaultAcademicYear = yearsData?.currentLabel || academicYears[0] || "";
 
   const [email, setEmail] = useState("");
   const [snSynced, setSnSynced] = useState(true);
@@ -48,11 +60,55 @@ export function AddStudentForm({ afterCreatePath = "/students/manage" }) {
   const [registrationNumber, setRegistrationNumber] = useState("");
   const [programmeId, setProgrammeId] = useState("");
   const [yearOfStudy, setYearOfStudy] = useState("3");
-  const [academicYearLabel, setAcademicYearLabel] = useState("");
+  const [academicYearChoice, setAcademicYearLabel] = useState("");
+  const academicYearLabel = academicYearChoice || defaultAcademicYear;
   const [campus, setCampus] = useState("");
+  const confirm = useConfirm();
 
   /** @type {[Record<string, string>, import("react").Dispatch<import("react").SetStateAction<Record<string, string>>>]} */
   const [errors, setErrors] = useState({});
+
+  const { isDirty, clearDraft } = useDraftSync(
+    "admin:student:new",
+    {
+      email,
+      snSynced,
+      studentNumber,
+      firstName,
+      middleName,
+      lastName,
+      sex,
+      profilePhotoUrl,
+      registrationNumber,
+      programmeId,
+      yearOfStudy,
+      academicYearLabel: academicYearLabel === defaultAcademicYear ? "" : academicYearLabel,
+      campus,
+    },
+    (d) => {
+      if (typeof d.email === "string") setEmail(d.email);
+      if (typeof d.snSynced === "boolean") setSnSynced(d.snSynced);
+      if (typeof d.studentNumber === "string") setStudentNumber(d.studentNumber);
+      if (typeof d.firstName === "string") setFirstName(d.firstName);
+      if (typeof d.middleName === "string") setMiddleName(d.middleName);
+      if (typeof d.lastName === "string") setLastName(d.lastName);
+      if (typeof d.sex === "string") setSex(d.sex);
+      if (typeof d.profilePhotoUrl === "string") setProfilePhotoUrl(d.profilePhotoUrl);
+      if (typeof d.registrationNumber === "string") setRegistrationNumber(d.registrationNumber);
+      if (typeof d.programmeId === "string") setProgrammeId(d.programmeId);
+      if (typeof d.yearOfStudy === "string") setYearOfStudy(d.yearOfStudy);
+      if (typeof d.academicYearLabel === "string" && d.academicYearLabel) {
+        setAcademicYearLabel(d.academicYearLabel);
+      }
+      if (typeof d.campus === "string") setCampus(d.campus);
+    },
+  );
+
+  async function cancel() {
+    if (isDirty && !(await confirm(discardConfirmOptions()))) return;
+    clearDraft();
+    router.push(afterCreatePath);
+  }
 
   const onEmailChange = useCallback(
     (raw) => {
@@ -74,38 +130,9 @@ export function AddStudentForm({ afterCreatePath = "/students/manage" }) {
     [email],
   );
 
-  useEffect(() => {
-    let cancelled = false;
-    (async () => {
-      const [pRes, yRes] = await Promise.all([
-        fetch("/api/programmes", { credentials: "include" }),
-        fetch("/api/meta/academic-years"),
-      ]);
-      const pData = await pRes.json().catch(() => ({}));
-      const yData = await yRes.json().catch(() => ({}));
-      if (cancelled) return;
-      if (pRes.ok && Array.isArray(pData.programmes))
-        setProgrammes(pData.programmes);
-      if (yRes.ok && Array.isArray(yData.labels) && yData.labels.length) {
-        setAcademicYears(yData.labels);
-        setAcademicYearLabel(
-          (prev) => prev || yData.currentLabel || yData.labels[0] || "",
-        );
-      } else if (yRes.ok && Array.isArray(yData.extended)) {
-        setAcademicYears(yData.extended);
-        setAcademicYearLabel(
-          (prev) => prev || yData.currentLabel || yData.extended[0] || "",
-        );
-      }
-    })();
-    return () => {
-      cancelled = true;
-    };
-  }, []);
-
-  useEffect(() => {
-    if (!programmeId) return;
-    const p = programmes.find((x) => x.id === programmeId);
+  function onProgrammeChange(id) {
+    setProgrammeId(id);
+    const p = programmes.find((x) => x.id === id);
     if (
       p &&
       typeof p.defaultYearOfStudy === "number" &&
@@ -113,7 +140,7 @@ export function AddStudentForm({ afterCreatePath = "/students/manage" }) {
     ) {
       setYearOfStudy(String(p.defaultYearOfStudy));
     }
-  }, [programmeId, programmes]);
+  }
 
   async function submit(e) {
     e.preventDefault();
@@ -177,6 +204,8 @@ export function AddStudentForm({ afterCreatePath = "/students/manage" }) {
         message: "Student created. Activation email sent.",
         severity: "success",
       });
+      clearDraft();
+      void revalidateApi("/api/admin/students");
       router.push(afterCreatePath);
     } finally {
       setBusy(false);
@@ -327,7 +356,7 @@ export function AddStudentForm({ afterCreatePath = "/students/manage" }) {
           label="Programme"
           value={programmeId}
           onChange={(e) => {
-            setProgrammeId(e.target.value);
+            onProgrammeChange(e.target.value);
             setErrors((p) => {
               const { programmeId: _p, ...r } = p;
               return r;
@@ -443,7 +472,18 @@ export function AddStudentForm({ afterCreatePath = "/students/manage" }) {
         />
       </div>
 
-      <div className="flex flex-col gap-2 pt-1 sm:flex-row sm:justify-end">
+      <div className="flex flex-col-reverse gap-2 pt-1 sm:flex-row sm:justify-end">
+        <Button
+          type="button"
+          onClick={() => void cancel()}
+          variant="outlined"
+          startIcon={<CloseRounded />}
+          disabled={busy}
+          title="Discard and return to the student list"
+          className="w-full sm:w-auto"
+        >
+          Cancel
+        </Button>
         <Button
           type="submit"
           variant="contained"

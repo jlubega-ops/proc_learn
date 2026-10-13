@@ -4,6 +4,7 @@ import { requireProviderPortalSession } from "@/lib/projects/provider-portal";
 import { respondToPurchaseInstruction } from "@/lib/projects/purchase-instructions";
 import { respondToAward } from "@/lib/projects/awards";
 import { respondToOrder } from "@/lib/projects/contracts-lpo";
+import { okOrAbort, runInTx, withTxAbort } from "@/lib/db-tx";
 
 export const runtime = "nodejs";
 
@@ -21,12 +22,18 @@ export async function POST(request, context) {
   const target = String(body?.target || "").trim().toLowerCase();
   const respond =
     target === "award" ? respondToAward : target === "order" ? respondToOrder : respondToPurchaseInstruction;
-  const result = await respond(prisma, {
-    projectId: auth.project.id,
-    providerId: auth.provider.id,
-    procurementId,
-    body,
-  });
+  const result = await withTxAbort(() =>
+    runInTx(prisma, async (tx) =>
+      okOrAbort(
+        await respond(tx, {
+          projectId: auth.project.id,
+          providerId: auth.provider.id,
+          procurementId,
+          body,
+        }),
+      ),
+    ),
+  );
   if (!result.ok) {
     return NextResponse.json({ error: result.error, fieldErrors: result.fieldErrors }, { status: result.status || 400 });
   }

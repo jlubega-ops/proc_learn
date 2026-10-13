@@ -11,8 +11,10 @@ import { resolveSelectableFinancialYear } from "@/lib/projects/org-financial-yea
 import {
   computeBudgetAvailability,
   completeWorkflowTask,
+  prepareWorkflowTriggers,
   startWorkflowFromTrigger,
 } from "@/lib/projects/workflow-engine";
+import { TxAbort, runInTx, withTxAbort } from "@/lib/db-tx";
 import { ORG_REF_DOC, nextOrgDocumentReference } from "@/lib/projects/org-reference";
 import { validateLineText } from "@/lib/projects/line-item-options";
 import {
@@ -532,7 +534,7 @@ export async function updateDraftBudget(prisma, opts) {
     include: { lines: true },
   });
   if (!existing) return { ok: false, error: "Budget not found.", status: 404 };
-  if (existing.createdByOrgUserId && existing.createdByOrgUserId !== opts.actorOrgUserId) {
+  if (!actsAsBudgetCreator(existing, opts)) {
     return { ok: false, error: "Only the budget creator can edit this draft.", status: 403 };
   }
   if (![OrgBudgetStatus.DRAFT, OrgBudgetStatus.RETURNED].includes(existing.status)) {
@@ -637,7 +639,7 @@ export async function updateDraftBudget(prisma, opts) {
     }
   }
 
-  const updated = await prisma.$transaction(async (tx) => {
+  const updated = await runInTx(prisma, async (tx) => {
     await tx.projectOrgBudgetLine.deleteMany({ where: { budgetId: existing.id } });
     return tx.projectOrgBudget.update({
       where: { id: existing.id },
@@ -682,10 +684,11 @@ export async function deleteDraftBudget(prisma, opts) {
       status: true,
       title: true,
       createdByOrgUserId: true,
+      departmentId: true,
     },
   });
   if (!existing) return { ok: false, error: "Budget not found.", status: 404 };
-  if (existing.createdByOrgUserId && existing.createdByOrgUserId !== opts.actorOrgUserId) {
+  if (!actsAsBudgetCreator(existing, opts)) {
     return { ok: false, error: "Only the budget creator can delete this draft.", status: 403 };
   }
   if (existing.status !== OrgBudgetStatus.DRAFT) {
@@ -696,7 +699,12 @@ export async function deleteDraftBudget(prisma, opts) {
     };
   }
 
-  await prisma.projectOrgBudget.delete({ where: { id: existing.id } });
+  await prisma.$transaction([
+    prisma.projectOrgWorkflowInstance.deleteMany({
+      where: { projectId: opts.projectId, budgetId: existing.id },
+    }),
+    prisma.projectOrgBudget.delete({ where: { id: existing.id } }),
+  ]);
 
   await writeAuditLog({
     eventType: AuditEvent.PROJECT_ORG_BUDGET_DELETED,
@@ -794,24 +802,36 @@ export async function setBudgetStatus(prisma, opts) {
  *   lines: any[];
  * }} opts
  */
+/**
+ * Creator check for draft mutations. Drafts without a recorded creator (seeded / legacy)
+ * fall back to a preparer from the same department.
+ * @param {{ createdByOrgUserId?: string | null; departmentId?: string | null }} row
+ * @param {{ actorOrgUserId?: string | null; actorDepartmentId?: string | null }} opts
+ */
+function actsAsBudgetCreator(row, opts) {
+  if (!opts.actorOrgUserId) return false;
+  if (row.createdByOrgUserId) return row.createdByOrgUserId === opts.actorOrgUserId;
+  return Boolean(opts.actorDepartmentId && row.departmentId === opts.actorDepartmentId);
+}
+
 export async function addBudgetLines(prisma, opts) {
   const row = await prisma.projectOrgBudget.findFirst({
     where: { id: opts.budgetId, projectId: opts.projectId },
   });
   if (!row) return { ok: false, error: "Budget not found.", status: 404 };
-  if (
-    ![OrgBudgetStatus.DRAFT, OrgBudgetStatus.RETURNED, OrgBudgetStatus.SUBMITTED].includes(
-      row.status,
-    )
-  ) {
+  if (!actsAsBudgetCreator(row, opts)) {
+    return { ok: false, error: "Only the budget creator can add lines.", status: 403 };
+  }
+  if (![OrgBudgetStatus.DRAFT, OrgBudgetStatus.RETURNED].includes(row.status)) {
     return {
       ok: false,
-      error: "Only draft, returned, or submitted budgets can gain new lines.",
+      error: "Only draft or returned budgets can gain new lines.",
       status: 400,
     };
   }
 
-  const created = [];
+  const rows = [];
+  const seenCodes = new Set();
   for (const raw of opts.lines || []) {
     const code = typeof raw?.code === "string" ? raw.code.trim() : "";
     const name = typeof raw?.name === "string" ? raw.name.trim() : "";
@@ -823,6 +843,10 @@ export async function addBudgetLines(prisma, opts) {
         status: 400,
       };
     }
+    if (seenCodes.has(code)) {
+      return { ok: false, error: `Code "${code}" is used twice.`, status: 400 };
+    }
+    seenCodes.add(code);
     const clash = await prisma.projectOrgBudgetLine.findFirst({
       where: {
         projectId: opts.projectId,
@@ -837,26 +861,27 @@ export async function addBudgetLines(prisma, opts) {
         status: 400,
       };
     }
-    const line = await prisma.projectOrgBudgetLine.create({
-      data: {
-        projectId: opts.projectId,
-        budgetId: row.id,
-        financialYearId: row.financialYearId,
-        departmentId: row.departmentId,
-        code,
-        name,
-        description:
-          typeof raw?.description === "string" ? raw.description.trim() || null : null,
-        category: typeof raw?.category === "string" ? raw.category.trim() || null : null,
-        quantity: amounts.quantity,
-        unitOfMeasure: amounts.unitOfMeasure,
-        unitCost: amounts.unitCost,
-        fundingSource: amounts.fundingSource,
-        approvedAmount: amounts.approvedAmount,
-      },
+    rows.push({
+      projectId: opts.projectId,
+      budgetId: row.id,
+      financialYearId: row.financialYearId,
+      departmentId: row.departmentId,
+      code,
+      name,
+      description:
+        typeof raw?.description === "string" ? raw.description.trim() || null : null,
+      category: typeof raw?.category === "string" ? raw.category.trim() || null : null,
+      quantity: amounts.quantity,
+      unitOfMeasure: amounts.unitOfMeasure,
+      unitCost: amounts.unitCost,
+      fundingSource: amounts.fundingSource,
+      approvedAmount: amounts.approvedAmount,
     });
-    created.push(serializeBudgetLine(line));
   }
+  const lines = await prisma.$transaction(
+    rows.map((data) => prisma.projectOrgBudgetLine.create({ data })),
+  );
+  const created = lines.map(serializeBudgetLine);
 
   await writeAuditLog({
     eventType: AuditEvent.PROJECT_ORG_BUDGET_LINES_ADDED,
@@ -892,7 +917,7 @@ export async function submitBudget(prisma, opts) {
     include: { lines: true },
   });
   if (!row) return { ok: false, error: "Budget not found.", status: 404 };
-  if (row.createdByOrgUserId && row.createdByOrgUserId !== opts.actorOrgUserId) {
+  if (!actsAsBudgetCreator(row, opts)) {
     return { ok: false, error: "Only the budget creator can submit this draft.", status: 403 };
   }
   if (![OrgBudgetStatus.DRAFT, OrgBudgetStatus.RETURNED].includes(row.status)) {
@@ -904,57 +929,64 @@ export async function submitBudget(prisma, opts) {
   const inactive = await assertProcessActive(prisma, opts.projectId, PROCESS_FLOW_CODES.BUDGETING);
   if (inactive) return inactive;
 
-  await prisma.projectOrgWorkflowInstance.updateMany({
-    where: {
-      budgetId: row.id,
-      status: {
-        in: [OrgWorkflowInstanceStatus.SUSPENDED, OrgWorkflowInstanceStatus.IN_PROGRESS],
-      },
-    },
-    data: {
-      status: OrgWorkflowInstanceStatus.CANCELLED,
-      completedAt: new Date(),
-    },
-  });
-  await prisma.projectOrgWorkflowTask.updateMany({
-    where: {
-      projectId: opts.projectId,
-      status: OrgWorkflowTaskStatus.PENDING,
-      instance: { budgetId: row.id },
-    },
-    data: { status: OrgWorkflowTaskStatus.CANCELLED },
-  });
+  await prepareWorkflowTriggers(prisma, opts.projectId);
+  const outcome = await withTxAbort(() =>
+    runInTx(prisma, async (db) => {
+      await db.projectOrgWorkflowInstance.updateMany({
+        where: {
+          budgetId: row.id,
+          status: {
+            in: [OrgWorkflowInstanceStatus.SUSPENDED, OrgWorkflowInstanceStatus.IN_PROGRESS],
+          },
+        },
+        data: {
+          status: OrgWorkflowInstanceStatus.CANCELLED,
+          completedAt: new Date(),
+        },
+      });
+      await db.projectOrgWorkflowTask.updateMany({
+        where: {
+          projectId: opts.projectId,
+          status: OrgWorkflowTaskStatus.PENDING,
+          instance: { budgetId: row.id },
+        },
+        data: { status: OrgWorkflowTaskStatus.CANCELLED },
+      });
 
-  const started = await startWorkflowFromTrigger(prisma, {
-    projectId: opts.projectId,
-    triggerKey: WORKFLOW_TRIGGERS.BUDGET_SUBMITTED,
-    entityType: "budget",
-    entityId: row.id,
-    budgetId: row.id,
-    departmentId: row.departmentId,
-    entityTitle: row.title,
-    actorOrgUserId: opts.actorOrgUserId,
-    actorRoleName: opts.actorRoleName,
-    actorDepartmentId: opts.actorDepartmentId || row.departmentId,
-  });
+      const started = await startWorkflowFromTrigger(db, {
+        projectId: opts.projectId,
+        triggerKey: WORKFLOW_TRIGGERS.BUDGET_SUBMITTED,
+        entityType: "budget",
+        entityId: row.id,
+        budgetId: row.id,
+        departmentId: row.departmentId,
+        entityTitle: row.title,
+        actorOrgUserId: opts.actorOrgUserId,
+        actorRoleName: opts.actorRoleName,
+        actorDepartmentId: opts.actorDepartmentId || row.departmentId,
+      });
+      if (!started.ok) {
+        throw new TxAbort({
+          ok: false,
+          error: started.error,
+          code: started.code,
+          status: started.code === "NO_ELIGIBLE_ASSIGNEES" ? 400 : 409,
+        });
+      }
 
-  if (!started.ok) {
-    return {
-      ok: false,
-      error: started.error,
-      code: started.code,
-      status: started.code === "NO_ELIGIBLE_ASSIGNEES" ? 400 : 409,
-    };
-  }
-
-  const updated = await prisma.projectOrgBudget.update({
-    where: { id: row.id },
-    data: {
-      status: OrgBudgetStatus.SUBMITTED,
-      submittedAt: new Date(),
-    },
-    include: budgetInclude,
-  });
+      const updated = await db.projectOrgBudget.update({
+        where: { id: row.id },
+        data: {
+          status: OrgBudgetStatus.SUBMITTED,
+          submittedAt: new Date(),
+        },
+        include: budgetInclude,
+      });
+      return { ok: true, started, updated };
+    }),
+  );
+  if (!outcome.ok) return outcome;
+  const { started, updated } = outcome;
 
   await writeAuditLog({
     eventType: AuditEvent.PROJECT_ORG_BUDGET_SUBMITTED,

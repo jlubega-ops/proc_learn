@@ -1,6 +1,6 @@
 /**
  * @param {unknown} body
- * @returns {{ ok: true; data: { name: string; description: string | null; sortOrder: number; isActive: boolean } } | { ok: false; errors: Record<string, string> }}
+ * @returns {{ ok: true; data: { name: string; description: string | null; isActive: boolean } } | { ok: false; errors: Record<string, string> }}
  */
 export function validateProjectOrgRoleInput(body) {
   /** @type {Record<string, string>} */
@@ -17,16 +17,6 @@ export function validateProjectOrgRoleInput(body) {
     else description = d || null;
   }
 
-  let sortOrder = 0;
-  if (body?.sortOrder !== undefined && body?.sortOrder !== null) {
-    const n = Number(body.sortOrder);
-    if (!Number.isInteger(n) || n < 0 || n > 9999) {
-      errors.sortOrder = "Sort order must be a whole number from 0 to 9999.";
-    } else {
-      sortOrder = n;
-    }
-  }
-
   const isActive = body?.isActive === false ? false : true;
 
   if (Object.keys(errors).length > 0) return { ok: false, errors };
@@ -35,7 +25,6 @@ export function validateProjectOrgRoleInput(body) {
     data: {
       name,
       description,
-      sortOrder,
       isActive,
     },
   };
@@ -66,15 +55,6 @@ export function validateProjectOrgRolePatch(body) {
       const d = typeof body.description === "string" ? body.description.trim() : "";
       if (d.length > 512) errors.description = "Description must be 512 characters or fewer.";
       else data.description = d || null;
-    }
-  }
-
-  if (body?.sortOrder !== undefined && body?.sortOrder !== null) {
-    const n = Number(body.sortOrder);
-    if (!Number.isInteger(n) || n < 0 || n > 9999) {
-      errors.sortOrder = "Sort order must be a whole number from 0 to 9999.";
-    } else {
-      data.sortOrder = n;
     }
   }
 

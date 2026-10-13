@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { createInvoice } from "@/lib/projects/invoices";
+import { okOrAbort, runInTx, withTxAbort } from "@/lib/db-tx";
 import { parseDateInputValue, toDateInputValue } from "@/lib/financial-year-dates";
 import { listProviderAssignmentsToInvoice } from "@/lib/projects/provider-assignments";
 import {
@@ -66,18 +67,24 @@ export async function POST(request) {
     );
   }
 
-  const result = await createInvoice(prisma, {
-    projectId: auth.project.id,
-    procurementId,
-    actorOrgUserId: null,
-    actorRoleName: "Provider (portal)",
-    amount: body?.amount,
-    invoiceDate,
-    supplierReference: supplierReference || null,
-    source: "PORTAL",
-    notes: typeof body?.notes === "string" ? body.notes : null,
-    portalProviderId: auth.provider.id,
-  });
+  const result = await withTxAbort(() =>
+    runInTx(prisma, async (tx) =>
+      okOrAbort(
+        await createInvoice(tx, {
+          projectId: auth.project.id,
+          procurementId,
+          actorOrgUserId: null,
+          actorRoleName: "Provider (portal)",
+          amount: body?.amount,
+          invoiceDate,
+          supplierReference: supplierReference || null,
+          source: "PORTAL",
+          notes: typeof body?.notes === "string" ? body.notes : null,
+          portalProviderId: auth.provider.id,
+        }),
+      ),
+    ),
+  );
   if (!result.ok) {
     return NextResponse.json(
       { error: result.error, fieldErrors: result.fieldErrors, code: result.code },

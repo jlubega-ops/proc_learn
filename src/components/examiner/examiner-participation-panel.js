@@ -51,6 +51,7 @@ export function ExaminerParticipationPanel() {
   const [search, setSearch] = useState("");
   const [yearId, setYearId] = useState("");
   const [campus, setCampus] = useState("");
+  const [programmeId, setProgrammeId] = useState("");
   const [participation, setParticipation] = useState("all");
   const [page, setPage] = useState(0);
   const [pageSize, setPageSize] = useState(20);
@@ -62,6 +63,7 @@ export function ExaminerParticipationPanel() {
       if (search.trim()) qs.set("q", search.trim());
       if (yearId) qs.set("academicYearId", yearId);
       if (campus) qs.set("campus", campus);
+      if (programmeId) qs.set("programmeId", programmeId);
       qs.set("participation", participation);
       qs.set("page", String(page + 1));
       qs.set("pageSize", String(pageSize));
@@ -82,7 +84,7 @@ export function ExaminerParticipationPanel() {
     } finally {
       setLoading(false);
     }
-  }, [search, yearId, campus, participation, page, pageSize, showToast]);
+  }, [search, yearId, campus, programmeId, participation, page, pageSize, showToast]);
 
   useEffect(() => {
     void load();
@@ -98,7 +100,7 @@ export function ExaminerParticipationPanel() {
         title="Student participation"
         description="Students and their organisations."
       >
-        <div className="mt-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+        <div className="mt-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-5">
           <TextField
             select
             size="small"
@@ -132,6 +134,24 @@ export function ExaminerParticipationPanel() {
             {campusSelectOptions().map((c) => (
               <MenuItem key={c.value} value={c.value}>
                 {c.label}
+              </MenuItem>
+            ))}
+          </TextField>
+          <TextField
+            select
+            label="Programme"
+            value={programmeId}
+            onChange={(e) => {
+              setProgrammeId(e.target.value);
+              setPage(0);
+            }}
+            sx={themedTextFieldSx}
+          >
+            <MenuItem value="">All programmes</MenuItem>
+            {(data?.availableProgrammes || []).map((p) => (
+              <MenuItem key={p.id} value={p.id}>
+                {p.shortName || p.name}
+                {p.isActive ? "" : " (inactive)"}
               </MenuItem>
             ))}
           </TextField>

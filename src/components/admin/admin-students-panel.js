@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState, useDeferredValue } from "react";
+import { useCallback, useState, useDeferredValue } from "react";
 import Link from "next/link";
 import Box from "@mui/material/Box";
 import Button from "@mui/material/Button";
@@ -46,6 +46,10 @@ import { validateStudentAccountForm } from "@/lib/validation/student-form";
 import { BRAND_BTN_PRIMARY_CLASS } from "@/lib/brand-ui";
 import { AdminStudentsBulkImportDialog } from "@/components/admin/admin-students-bulk-import-dialog";
 import { useToast } from "@/components/providers/toast-provider";
+import { discardConfirmOptions, useConfirm } from "@/components/providers/confirm-provider";
+import { useDraftSync } from "@/hooks/use-draft-sync";
+import { useApi } from "@/hooks/use-api";
+import { deleteSucceeded, revalidateApi } from "@/lib/api-client-cache";
 import { campusSelectOptions, campusLabel } from "@/lib/campuses";
 
 /**
@@ -91,13 +95,6 @@ function studentStatusLabel(row) {
 
 export function AdminStudentsPanel() {
   const { showToast } = useToast();
-  const [rows, setRows] = useState(/** @type {StudentRow[]} */ ([]));
-  const [programmes, setProgrammes] = useState(
-    /** @type {{ id: string; name: string; defaultYearOfStudy?: number }[]} */ ([]),
-  );
-  const [academicYears, setAcademicYears] = useState(/** @type {string[]} */ ([]));
-  const [loading, setLoading] = useState(true);
-  const [refetching, setRefetching] = useState(false);
   const [q, setQ] = useState("");
   const [programmeId, setProgrammeId] = useState("");
   const [academicYear, setAcademicYear] = useState("");
@@ -110,6 +107,7 @@ export function AdminStudentsPanel() {
   );
   const [suspendTarget, setSuspendTarget] = useState(/** @type {StudentRow | null} */ (null));
   const [suspendReason, setSuspendReason] = useState("");
+  const [suspendReasonError, setSuspendReasonError] = useState("");
   const [suspendBusy, setSuspendBusy] = useState(false);
   const [unsuspendTarget, setUnsuspendTarget] = useState(/** @type {StudentRow | null} */ (null));
   const [unsuspendBusy, setUnsuspendBusy] = useState(false);
@@ -131,65 +129,100 @@ export function AdminStudentsPanel() {
   const [snSynced, setSnSynced] = useState(true);
   /** @type {[Record<string, string>, import("react").Dispatch<import("react").SetStateAction<Record<string, string>>>]} */
   const [fieldErrors, setFieldErrors] = useState({});
+  const confirm = useConfirm();
+
+  const editDraft = useDraftSync(
+    editRow ? `admin:student:edit:${editRow.id}` : "",
+    {
+      email,
+      studentNumber,
+      snSynced,
+      firstName,
+      lastName,
+      middleName,
+      sex,
+      registrationNumber,
+      progId,
+      yearOfStudy,
+      acadLabel,
+      campus,
+    },
+    (d) => {
+      if (typeof d.email === "string") setEmail(d.email);
+      if (typeof d.studentNumber === "string") setStudentNumber(d.studentNumber);
+      if (typeof d.snSynced === "boolean") setSnSynced(d.snSynced);
+      if (typeof d.firstName === "string") setFirstName(d.firstName);
+      if (typeof d.lastName === "string") setLastName(d.lastName);
+      if (typeof d.middleName === "string") setMiddleName(d.middleName);
+      if (typeof d.sex === "string") setSex(d.sex);
+      if (typeof d.registrationNumber === "string") setRegistrationNumber(d.registrationNumber);
+      if (typeof d.progId === "string") setProgId(d.progId);
+      if (typeof d.yearOfStudy === "string") setYearOfStudy(d.yearOfStudy);
+      if (typeof d.acadLabel === "string") setAcadLabel(d.acadLabel);
+      if (typeof d.campus === "string") setCampus(d.campus);
+    },
+    { enabled: Boolean(editRow), resetKey: editRow?.id },
+  );
+
+  const suspendDraft = useDraftSync(
+    suspendTarget ? `admin:student:suspend:${suspendTarget.id}` : "",
+    { suspendReason },
+    (d) => {
+      if (typeof d.suspendReason === "string") setSuspendReason(d.suspendReason);
+    },
+    { enabled: Boolean(suspendTarget), resetKey: suspendTarget?.id },
+  );
+
+  async function cancelEdit() {
+    if (saving) return;
+    if (editDraft.isDirty && !(await confirm(discardConfirmOptions()))) return;
+    editDraft.clearDraft();
+    setEditRow(null);
+    setFieldErrors({});
+  }
+
+  function cancelSuspend() {
+    if (suspendBusy) return;
+    suspendDraft.clearDraft();
+    setSuspendTarget(null);
+  }
 
   const deferredSearch = useDeferredValue(q.trim());
 
-  const loadMeta = useCallback(async () => {
-    const [pRes, yRes] = await Promise.all([
-      fetch("/api/programmes", { credentials: "include" }),
-      fetch("/api/meta/academic-years"),
-    ]);
-    const pData = await pRes.json().catch(() => ({}));
-    const yData = await yRes.json().catch(() => ({}));
-    if (pRes.ok && Array.isArray(pData.programmes)) setProgrammes(pData.programmes);
-    if (yRes.ok && Array.isArray(yData.labels) && yData.labels.length) {
-      setAcademicYears(yData.labels);
-      setAcadLabel((prev) => prev || yData.currentLabel || yData.labels[0] || "");
-    } else if (yRes.ok && Array.isArray(yData.extended)) {
-      setAcademicYears(yData.extended);
-      setAcadLabel((prev) => prev || yData.currentLabel || yData.extended[0] || "");
-    }
-  }, []);
-
-  const loadStudents = useCallback(
-    async (opts = /** @type {{ silent?: boolean }} */ ({})) => {
-      const silent = Boolean(opts.silent);
-      if (silent) setRefetching(true);
-      else setLoading(true);
-      try {
-        const params = new URLSearchParams();
-        if (deferredSearch) params.set("q", deferredSearch);
-        if (programmeId) params.set("programmeId", programmeId);
-        if (academicYear) params.set("academicYear", academicYear);
-        if (campusFilter) params.set("campus", campusFilter);
-        const res = await fetch(`/api/admin/students?${params.toString()}`, {
-          credentials: "include",
-        });
-        const data = await res.json().catch(() => ({}));
-        if (!res.ok) {
-          showToast({
-            message: typeof data.error === "string" ? data.error : "Could not load students.",
-            severity: "error",
-          });
-          setRows([]);
-          return;
-        }
-        setRows(Array.isArray(data.students) ? data.students : []);
-      } finally {
-        if (silent) setRefetching(false);
-        else setLoading(false);
-      }
-    },
-    [deferredSearch, programmeId, academicYear, campusFilter, showToast],
+  const { data: programmesData } = useApi("/api/programmes", { silentErrors: true });
+  const { data: yearsData } = useApi("/api/meta/academic-years", { silentErrors: true });
+  const programmes = /** @type {{ id: string; name: string; defaultYearOfStudy?: number }[]} */ (
+    Array.isArray(programmesData?.programmes) ? programmesData.programmes : []
+  );
+  const academicYears = /** @type {string[]} */ (
+    Array.isArray(yearsData?.labels) && yearsData.labels.length
+      ? yearsData.labels
+      : Array.isArray(yearsData?.extended)
+        ? yearsData.extended
+        : []
   );
 
-  useEffect(() => {
-    void loadMeta();
-  }, [loadMeta]);
-
-  useEffect(() => {
-    void loadStudents();
-  }, [loadStudents]);
+  const listParams = new URLSearchParams();
+  if (deferredSearch) listParams.set("q", deferredSearch);
+  if (programmeId) listParams.set("programmeId", programmeId);
+  if (academicYear) listParams.set("academicYear", academicYear);
+  if (campusFilter) listParams.set("campus", campusFilter);
+  const {
+    data: listData,
+    error: listError,
+    loading,
+    refreshing: refetching,
+    reload,
+  } = useApi(`/api/admin/students?${listParams.toString()}`, {
+    errorMessage: "Could not load students.",
+  });
+  const rows = /** @type {StudentRow[]} */ (
+    !listError && Array.isArray(listData?.students) ? listData.students : []
+  );
+  const loadStudents = useCallback(async () => {
+    await reload();
+    void revalidateApi("/api/admin/students");
+  }, [reload]);
 
   function openEdit(row) {
     setFieldErrors({});
@@ -265,6 +298,7 @@ export function AdminStudentsPanel() {
         return;
       }
       showToast({ message: "Student updated.", severity: "success" });
+      editDraft.clearDraft();
       setEditRow(null);
       setFieldErrors({});
       await loadStudents({ silent: true });
@@ -275,6 +309,11 @@ export function AdminStudentsPanel() {
 
   async function confirmSuspend() {
     if (!suspendTarget) return;
+    if (!suspendReason.trim()) {
+      setSuspendReasonError("Enter a reason.");
+      return;
+    }
+    setSuspendReasonError("");
     setSuspendBusy(true);
     try {
       const res = await fetch(`/api/users/${suspendTarget.id}`, {
@@ -283,7 +322,7 @@ export function AdminStudentsPanel() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           suspended: true,
-          reason: suspendReason.trim() || "No reason provided.",
+          reason: suspendReason.trim(),
         }),
       });
       const data = await res.json().catch(() => ({}));
@@ -295,6 +334,7 @@ export function AdminStudentsPanel() {
         return;
       }
       showToast({ message: "Student account suspended.", severity: "success" });
+      suspendDraft.clearDraft();
       setSuspendTarget(null);
       setSuspendReason("");
       await loadStudents({ silent: true });
@@ -368,7 +408,7 @@ export function AdminStudentsPanel() {
         body: JSON.stringify({ confirmText: deleteConfirmText.trim() }),
       });
       const data = await res.json().catch(() => ({}));
-      if (!res.ok) {
+      if (!deleteSucceeded(res)) {
         showToast({
           message: typeof data.error === "string" ? data.error : "Could not delete.",
           severity: "error",
@@ -609,6 +649,7 @@ export function AdminStudentsPanel() {
                             onClick={() => {
                               setSuspendTarget(row);
                               setSuspendReason("");
+                              setSuspendReasonError("");
                             }}
                           >
                             <BlockRounded fontSize="small" />
@@ -636,12 +677,7 @@ export function AdminStudentsPanel() {
 
       <Dialog
         open={Boolean(editRow)}
-        onClose={() => {
-          if (!saving) {
-            setEditRow(null);
-            setFieldErrors({});
-          }
-        }}
+        onClose={() => void cancelEdit()}
         fullWidth
         maxWidth="md"
         slotProps={{ paper: { sx: adminDialogPaperSx } }}
@@ -862,7 +898,7 @@ export function AdminStudentsPanel() {
           </TextField>
         </DialogContent>
         <DialogActions>
-          <Button onClick={() => !saving && setEditRow(null)} disabled={saving}>
+          <Button onClick={() => void cancelEdit()} disabled={saving}>
             Cancel
           </Button>
           <Button variant="contained" onClick={() => void saveEdit()} disabled={saving}>
@@ -923,7 +959,7 @@ export function AdminStudentsPanel() {
 
       <Dialog
         open={Boolean(suspendTarget)}
-        onClose={() => !suspendBusy && setSuspendTarget(null)}
+        onClose={cancelSuspend}
         fullWidth
         maxWidth="sm"
         slotProps={{ paper: { sx: adminDialogPaperSx } }}
@@ -938,12 +974,17 @@ export function AdminStudentsPanel() {
             multiline
             minRows={2}
             value={suspendReason}
-            onChange={(e) => setSuspendReason(e.target.value)}
+            onChange={(e) => {
+              setSuspendReason(e.target.value);
+              if (e.target.value.trim()) setSuspendReasonError("");
+            }}
+            error={Boolean(suspendReasonError)}
+            helperText={suspendReasonError || " "}
             sx={themedTextFieldSx}
           />
         </DialogContent>
         <DialogActions>
-          <Button onClick={() => setSuspendTarget(null)} disabled={suspendBusy}>
+          <Button onClick={cancelSuspend} disabled={suspendBusy}>
             Cancel
           </Button>
           <Button

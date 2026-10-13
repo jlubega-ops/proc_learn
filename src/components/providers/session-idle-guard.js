@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useRef } from "react";
 import { usePathname } from "next/navigation";
 import { useAuthSession } from "@/components/providers/auth-session-provider";
+import { startVisibleInterval } from "@/lib/visible-interval";
 
 const ACTIVITY_EVENTS = ["mousedown", "keydown", "scroll", "touchstart", "pointerdown"];
 const PING_DEBOUNCE_MS = 45_000;
@@ -23,7 +24,7 @@ async function leaveIfMaintenance(res) {
 export function SessionIdleGuard() {
   const pathname = usePathname();
   const { session, signOut, isSigningOut } = useAuthSession();
-  const lastInteractionRef = useRef(Date.now());
+  const lastInteractionRef = useRef(0);
   const lastPingRef = useRef(0);
   const signingOutRef = useRef(false);
 
@@ -65,6 +66,7 @@ export function SessionIdleGuard() {
 
   useEffect(() => {
     if (!session?.authenticated || isSigningOut) return undefined;
+    if (!lastInteractionRef.current) lastInteractionRef.current = Date.now();
 
     const onActivity = () => {
       lastInteractionRef.current = Date.now();
@@ -75,14 +77,14 @@ export function SessionIdleGuard() {
       window.addEventListener(evt, onActivity, { passive: true });
     }
 
-    const poll = window.setInterval(() => {
+    const stopPoll = startVisibleInterval(() => {
       void (async () => {
         if (Date.now() - lastInteractionRef.current > idleMs) {
           await signOutIdle();
           return;
         }
         try {
-          const res = await fetch("/api/auth/session", {
+          const res = await fetch("/api/auth/session?check=1", {
             credentials: "include",
             cache: "no-store",
           });
@@ -101,7 +103,7 @@ export function SessionIdleGuard() {
       for (const evt of ACTIVITY_EVENTS) {
         window.removeEventListener(evt, onActivity);
       }
-      window.clearInterval(poll);
+      stopPoll();
     };
   }, [idleMs, isSigningOut, pingIfActive, session?.authenticated, signOutIdle]);
 

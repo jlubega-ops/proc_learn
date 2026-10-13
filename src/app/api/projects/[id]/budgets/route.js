@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { authorizeProjectApiAccess } from "@/lib/projects/project-api-auth";
 import { ORG_PERMISSION } from "@/lib/projects/org-role-permissions";
+import { isDepartmentScopedRole } from "@/lib/projects/workflow-engine";
 import {
   budgetInclude,
   createBudgetWithLines,
@@ -58,13 +59,15 @@ export async function GET(request, context) {
       );
     }
 
+    const orgUser = planAuth.type === "org" ? planAuth.orgUser : null;
+    const ownDepartmentOnly =
+      orgUser?.departmentId && isDepartmentScopedRole(orgUser.projectOrgRole?.name);
     const lines = await listSelectableBudgetLines(prisma, {
       projectId,
       financialYearId: financialYearId || null,
-      departmentId:
-        departmentId ||
-        (planAuth.type === "org" ? planAuth.orgUser?.departmentId : null) ||
-        null,
+      departmentId: ownDepartmentOnly
+        ? orgUser.departmentId
+        : departmentId || orgUser?.departmentId || null,
     });
     return NextResponse.json({ budgetLines: lines });
   }

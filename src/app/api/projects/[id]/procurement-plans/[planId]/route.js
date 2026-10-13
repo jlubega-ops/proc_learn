@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { OrgWorkflowDecision } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { authorizeProjectApiAccess } from "@/lib/projects/project-api-auth";
 import { ORG_PERMISSION } from "@/lib/projects/org-role-permissions";
@@ -18,6 +19,12 @@ import {
 } from "@/lib/projects/print-context";
 
 export const runtime = "nodejs";
+
+const PLAN_DECISIONS = new Set([
+  OrgWorkflowDecision.APPROVE,
+  OrgWorkflowDecision.RETURN,
+  OrgWorkflowDecision.REJECT,
+]);
 
 export async function GET(_request, context) {
   const params = await context.params;
@@ -82,7 +89,9 @@ export async function GET(_request, context) {
       where: {
         projectId,
         procurementPlanId: planId,
-        status: { in: ["ACTIVE", "IN_PROGRESS", "SUSPENDED", "COMPLETED", "CANCELLED"] },
+        status: {
+          in: ["ACTIVE", "IN_PROGRESS", "SUSPENDED", "COMPLETED", "CANCELLED"],
+        },
       },
       orderBy: { createdAt: "desc" },
       select: {
@@ -110,8 +119,13 @@ export async function GET(_request, context) {
     }),
   ]);
 
-  workflowHistory = await attachCommitteeNames(prisma, mapWorkflowHistoryActions(instance?.actions));
-  const latestAction = workflowHistory.length ? workflowHistory[workflowHistory.length - 1] : null;
+  workflowHistory = await attachCommitteeNames(
+    prisma,
+    mapWorkflowHistoryActions(instance?.actions),
+  );
+  const latestAction = workflowHistory.length
+    ? workflowHistory[workflowHistory.length - 1]
+    : null;
   if (latestAction) {
     lastDecision = {
       decision: latestAction.decision,
@@ -120,7 +134,6 @@ export async function GET(_request, context) {
   }
   if (openTask) {
     workflowStage = {
-      taskId: openTask.id,
       title: openTask.title,
       requiredRoleName: openTask.requiredRoleName || null,
       stepNumber: openTask.stepNumber,
@@ -188,7 +201,10 @@ export async function PATCH(request, context) {
   try {
     body = await request.json();
   } catch {
-    return NextResponse.json({ error: "Invalid request body." }, { status: 400 });
+    return NextResponse.json(
+      { error: "Invalid request body." },
+      { status: 400 },
+    );
   }
 
   if (body?.action === "submit") {
@@ -197,7 +213,10 @@ export async function PATCH(request, context) {
       orgPermission: ORG_PERMISSION.VIEW_PROCUREMENT_PLANS,
     });
     if (!auth.ok || auth.type !== "org") {
-      return NextResponse.json({ error: "Forbidden." }, { status: 403 });
+      return NextResponse.json(
+        { error: auth.ok ? "Forbidden." : "Not found." },
+        { status: auth.ok ? 403 : auth.status || 404 },
+      );
     }
     const result = await submitProcurementPlan(prisma, {
       projectId,
@@ -215,16 +234,38 @@ export async function PATCH(request, context) {
     return NextResponse.json(result);
   }
 
-  if (body?.action === "decide" && body?.taskId) {
+  if (body?.action === "decide") {
     const auth = await authorizeProjectApiAccess(prisma, {
       projectId,
       orgPermission: ORG_PERMISSION.VIEW_TASKS,
     });
     if (!auth.ok || auth.type !== "org") {
-      return NextResponse.json({ error: "Forbidden." }, { status: 403 });
+      return NextResponse.json(
+        { error: auth.ok ? "Forbidden." : "Not found." },
+        { status: auth.ok ? 403 : auth.status || 404 },
+      );
     }
+    const taskId = typeof body.taskId === "string" ? body.taskId.trim() : "";
+    if (!taskId)
+      return NextResponse.json(
+        { error: "Task id is required." },
+        { status: 400 },
+      );
+    if (!PLAN_DECISIONS.has(body.decision)) {
+      return NextResponse.json(
+        { error: "Choose approve, return or reject." },
+        { status: 400 },
+      );
+    }
+    const task = await prisma.projectOrgWorkflowTask.findFirst({
+      where: { id: taskId, projectId, instance: { procurementPlanId: planId } },
+      select: { id: true },
+    });
+    if (!task)
+      return NextResponse.json({ error: "Not found." }, { status: 404 });
     const result = await actOnProcurementPlanTask(prisma, {
-      taskId: String(body.taskId),
+      projectId,
+      taskId,
       actorOrgUserId: auth.orgUser.id,
       actorRoleName: auth.orgUser.projectOrgRole?.name || "",
       actorDepartmentId: auth.orgUser.departmentId || null,

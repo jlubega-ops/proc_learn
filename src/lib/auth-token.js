@@ -20,22 +20,23 @@ export async function createAuthTokenRecord(userId, type, ttlMs) {
   const tokenHash = hashAuthToken(rawToken);
   const expiresAt = new Date(Date.now() + ttlMs);
 
-  await prisma.authToken.deleteMany({
-    where: {
-      userId,
-      type,
-      usedAt: null,
-    },
-  });
-
-  await prisma.authToken.create({
-    data: {
-      userId,
-      tokenHash,
-      type,
-      expiresAt,
-    },
-  });
+  await prisma.$transaction([
+    prisma.authToken.deleteMany({
+      where: {
+        userId,
+        type,
+        usedAt: null,
+      },
+    }),
+    prisma.authToken.create({
+      data: {
+        userId,
+        tokenHash,
+        type,
+        expiresAt,
+      },
+    }),
+  ]);
 
   return { rawToken, expiresAt };
 }

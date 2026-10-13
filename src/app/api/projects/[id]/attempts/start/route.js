@@ -1,10 +1,7 @@
 import { NextResponse } from "next/server";
 import { Role } from "@prisma/client";
 import { getSessionUser, sessionActiveRole } from "@/lib/api/get-session-user";
-import {
-  ensureProjectEnrollment,
-  startProjectAttempt,
-} from "@/lib/academic/project-attempts";
+import { startProjectAttempt } from "@/lib/academic/project-attempts";
 import { prisma } from "@/lib/prisma";
 import { AuditEvent, writeAuditLog } from "@/lib/audit-log";
 
@@ -37,29 +34,17 @@ export async function POST(request, context) {
     body = {};
   }
 
-  if (project.enrollmentKey) {
-    const providedKey = String(body?.enrollmentAccessKey || "").trim().toUpperCase();
-    const existing = await prisma.projectEnrollment.findUnique({
-      where: { projectId_studentUserId: { projectId: id, studentUserId: user.id } },
-    });
-    if (!existing) {
-      if (!providedKey) {
-        return NextResponse.json(
-          { error: "Enrollment key is required for this project." },
-          { status: 400 },
-        );
-      }
-      if (providedKey !== String(project.enrollmentKey).toUpperCase()) {
-        return NextResponse.json({ error: "Invalid enrollment key." }, { status: 400 });
-      }
-    }
-  }
-
   try {
     const before = await prisma.projectEnrollment.findUnique({
       where: { projectId_studentUserId: { projectId: id, studentUserId: user.id } },
     });
-    await ensureProjectEnrollment(prisma, { projectId: id, studentUserId: user.id });
+
+    const result = await startProjectAttempt({
+      projectId: id,
+      studentUserId: user.id,
+      actorUserId: user.id,
+      enrollmentAccessKey: body?.enrollmentAccessKey,
+    });
     if (!before) {
       await writeAuditLog({
         eventType: AuditEvent.PROJECT_ENROLLED,
@@ -67,12 +52,6 @@ export async function POST(request, context) {
         meta: { projectId: id, mode: "auto_on_start" },
       });
     }
-
-    const result = await startProjectAttempt({
-      projectId: id,
-      studentUserId: user.id,
-      actorUserId: user.id,
-    });
 
     return NextResponse.json({
       ok: true,
@@ -92,6 +71,7 @@ export async function POST(request, context) {
             code === "NOT_ACADEMIC" ||
             code === "NO_ORG" ||
             code === "NOT_ELIGIBLE" ||
+            code === "ENROLLMENT_KEY" ||
             code === "ASSESSMENT_LOCKED" || code === "PROJECT_IN_PROGRESS"
           ? 400
           : 500;

@@ -16,7 +16,7 @@ function isProjectOpenNow(project) {
   return true;
 }
 
-export async function POST(_request, context) {
+export async function POST(request, context) {
   const user = await getSessionUser();
   if (!user) return NextResponse.json({ error: "Unauthorized." }, { status: 401 });
   const activeRole = sessionActiveRole(user) || Role.STUDENT;
@@ -58,11 +58,13 @@ export async function POST(_request, context) {
 
   // Academic Project → ProjectAttempt
   if (project.creatorRole === Role.EXAMINER && project.requiresEnrollment) {
+    const body = await request.json().catch(() => ({}));
     try {
       const result = await startProjectAttempt({
         projectId: id,
         studentUserId: user.id,
         actorUserId: user.id,
+        enrollmentAccessKey: body?.enrollmentAccessKey,
       });
       await writeAuditLog({
         eventType: AuditEvent.PROJECT_STARTED,

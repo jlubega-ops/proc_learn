@@ -1,5 +1,6 @@
 import { OrgDeliveryStatus, OrgInspectionStatus, OrgProcurementStatus, Prisma } from "@prisma/client";
 import { writeAuditLog, AuditEvent } from "@/lib/audit-log";
+import { runInTx } from "@/lib/db-tx";
 import { notifyOrgUsers, OrgNotificationType } from "@/lib/projects/org-notifications";
 import { getActiveOrderValue } from "@/lib/projects/contracts-lpo";
 import { notifyProvider } from "@/lib/projects/provider-notifications";
@@ -212,7 +213,7 @@ export async function recordDelivery(prisma, opts) {
     if (total + 0.009 < Number(item.quantity)) fullyDelivered = false;
   }
 
-  const row = await prisma.$transaction(async (tx) => {
+  const row = await runInTx(prisma, async (tx) => {
     const created = await tx.projectOrgDelivery.create({
       data: {
         projectId: opts.projectId,
@@ -347,7 +348,7 @@ export async function recordInspection(prisma, opts) {
       ? OrgInspectionStatus.PARTIAL
       : OrgInspectionStatus.REJECTED;
 
-  const updated = await prisma.$transaction(async (tx) => {
+  const updated = await runInTx(prisma, async (tx) => {
     for (const u of updates) {
       await tx.projectOrgDeliveryLine.update({
         where: { id: u.id },

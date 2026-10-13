@@ -211,6 +211,29 @@ export function scoringItemRowKey(sectionKey, itemKey) {
 /** Process codes the engine knows — used to tell process sections from org sections. */
 export const PROCESS_SECTION_CODES = new Set(ASSESSMENT_PROCESS_CATALOGUE.map((p) => p.code));
 
+/**
+ * Unavailable processes cannot be scored: force their section rows off.
+ * @template {{ processCode: string; isAllowed?: boolean }} T
+ * @param {T[]} rows
+ * @param {Iterable<string>} enabledCodes
+ * @returns {T[]}
+ */
+export function applyProcessAvailability(rows, enabledCodes) {
+  const enabled = new Set(enabledCodes);
+  const known = new Set((rows || []).map((r) => r.processCode));
+  const out = (rows || []).map((r) =>
+    PROCESS_SECTION_CODES.has(r.processCode) && !enabled.has(r.processCode)
+      ? { ...r, isAllowed: false, marksPinned: false }
+      : r,
+  );
+  for (const code of PROCESS_SECTION_CODES) {
+    if (!enabled.has(code) && !known.has(code)) {
+      out.push(/** @type {T} */ ({ processCode: code, isAllowed: false, marks: 0, marksPinned: false }));
+    }
+  }
+  return out;
+}
+
 /** @param {string} key */
 function sectionDefaultEnabled(key) {
   const meta = ASSESSMENT_PROCESS_CATALOGUE.find((p) => p.code === key);

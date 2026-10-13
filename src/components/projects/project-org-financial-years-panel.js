@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useState } from "react";
 import Box from "@mui/material/Box";
 import Button from "@mui/material/Button";
 import Chip from "@mui/material/Chip";
@@ -27,8 +27,12 @@ import AddRounded from "@mui/icons-material/AddRounded";
 import DeleteOutlineRounded from "@mui/icons-material/DeleteOutlineRounded";
 import EditRounded from "@mui/icons-material/EditRounded";
 import RefreshRounded from "@mui/icons-material/RefreshRounded";
-import { format, parseISO } from "date-fns";
+import { addDays, format, parseISO } from "date-fns";
+import { discardConfirmOptions, useConfirm } from "@/components/providers/confirm-provider";
 import { useToast } from "@/components/providers/toast-provider";
+import { useDraftState } from "@/hooks/use-draft-state";
+import { useApi } from "@/hooks/use-api";
+import { deleteSucceeded, revalidateApi } from "@/lib/api-client-cache";
 import {
   adminCenteredLoadingBoxSx,
   adminDialogPaperSx,
@@ -57,6 +61,17 @@ function emptyForm() {
     startDate: "",
     endDate: "",
     isActive: true,
+  };
+}
+
+/** @param {any} row */
+function formFromRow(row) {
+  return {
+    label: row.label || "",
+    description: row.description || "",
+    startDate: row.startDate || "",
+    endDate: row.endDate || "",
+    isActive: row.isActive !== false,
   };
 }
 
@@ -94,20 +109,25 @@ function applyStartDateDefaults(form, patch) {
  */
 export function ProjectOrgFinancialYearsPanel({ projectId, readOnly = false }) {
   const { showToast } = useToast();
-  const [rows, setRows] = useState(/** @type {any[]} */ ([]));
-  const [loading, setLoading] = useState(true);
-  const [refetching, setRefetching] = useState(false);
   const [page, setPage] = useState(0);
   const [rowsPerPage, setRowsPerPage] = useState(10);
-  const [total, setTotal] = useState(0);
 
   const [openCreate, setOpenCreate] = useState(false);
   const [createBusy, setCreateBusy] = useState(false);
-  const [createForm, setCreateForm] = useState(emptyForm());
+  const confirm = useConfirm();
+  const [createForm, setCreateForm, createDraft] = useDraftState(
+    `org:financial-year:${projectId}:new`,
+    emptyForm(),
+    { enabled: openCreate },
+  );
   const [createErrors, setCreateErrors] = useState(/** @type {Record<string, string>} */ ({}));
 
   const [editRow, setEditRow] = useState(/** @type {any} */ (null));
-  const [editForm, setEditForm] = useState(emptyForm());
+  const [editForm, setEditForm, editDraft] = useDraftState(
+    `org:financial-year:${projectId}:edit:${editRow?.id || ""}`,
+    editRow ? formFromRow(editRow) : emptyForm(),
+    { enabled: Boolean(editRow), resetKey: editRow?.id ?? null },
+  );
   const [editErrors, setEditErrors] = useState(/** @type {Record<string, string>} */ ({}));
   const [editBusy, setEditBusy] = useState(false);
 
@@ -115,42 +135,21 @@ export function ProjectOrgFinancialYearsPanel({ projectId, readOnly = false }) {
   const [deleteBusy, setDeleteBusy] = useState(false);
   const [patchingId, setPatchingId] = useState("");
 
-  const load = useCallback(
-    async (opts = /** @type {{ silent?: boolean }} */ ({})) => {
-      const silent = Boolean(opts.silent);
-      if (silent) setRefetching(true);
-      else setLoading(true);
-      try {
-        const qp = new URLSearchParams({
-          page: String(page + 1),
-          pageSize: String(rowsPerPage),
-        });
-        const res = await fetch(
-          `/api/projects/${projectId}/org-financial-years?${qp.toString()}`,
-          { credentials: "include" },
-        );
-        const data = await res.json().catch(() => ({}));
-        if (!res.ok) {
-          showToast({
-            message:
-              typeof data.error === "string" ? data.error : "Could not load financial years.",
-            severity: "error",
-          });
-          return;
-        }
-        setRows(Array.isArray(data.financialYears) ? data.financialYears : []);
-        setTotal(Number(data.total) || 0);
-      } finally {
-        if (silent) setRefetching(false);
-        else setLoading(false);
-      }
-    },
-    [page, projectId, rowsPerPage, showToast],
-  );
-
-  useEffect(() => {
-    void load();
-  }, [load]);
+  const listQuery = new URLSearchParams({ page: String(page + 1), pageSize: String(rowsPerPage) });
+  const {
+    data: listData,
+    loading,
+    refreshing: refetching,
+    reload,
+  } = useApi(`/api/projects/${projectId}/org-financial-years?${listQuery.toString()}`, {
+    errorMessage: "Could not load financial years.",
+  });
+  const rows = Array.isArray(listData?.financialYears) ? listData.financialYears : [];
+  const total = Number(listData?.total) || 0;
+  const load = useCallback(async () => {
+    await reload();
+    void revalidateApi(`/api/projects/${projectId}/org-`);
+  }, [projectId, reload]);
 
   async function toggleActive(row) {
     setPatchingId(row.id);
@@ -206,7 +205,7 @@ export function ProjectOrgFinancialYearsPanel({ projectId, readOnly = false }) {
       }
       showToast({ message: "Financial year created.", severity: "success" });
       setOpenCreate(false);
-      setCreateForm(emptyForm());
+      createDraft.resetForm(emptyForm());
       setCreateErrors({});
       await load({ silent: true });
     } finally {
@@ -216,13 +215,22 @@ export function ProjectOrgFinancialYearsPanel({ projectId, readOnly = false }) {
 
   function openEdit(row) {
     setEditRow(row);
-    setEditForm({
-      label: row.label || "",
-      description: row.description || "",
-      startDate: row.startDate || "",
-      endDate: row.endDate || "",
-      isActive: row.isActive !== false,
-    });
+    setEditErrors({});
+  }
+
+  async function closeCreate() {
+    if (createBusy) return;
+    if (createDraft.isDirty && !(await confirm(discardConfirmOptions()))) return;
+    createDraft.resetForm(emptyForm());
+    setOpenCreate(false);
+    setCreateErrors({});
+  }
+
+  async function closeEdit() {
+    if (editBusy) return;
+    if (editDraft.isDirty && !(await confirm(discardConfirmOptions()))) return;
+    editDraft.clearDraft();
+    setEditRow(null);
     setEditErrors({});
   }
 
@@ -264,6 +272,7 @@ export function ProjectOrgFinancialYearsPanel({ projectId, readOnly = false }) {
         return;
       }
       showToast({ message: "Financial year updated.", severity: "success" });
+      editDraft.clearDraft();
       setEditRow(null);
       await load({ silent: true });
     } finally {
@@ -280,7 +289,7 @@ export function ProjectOrgFinancialYearsPanel({ projectId, readOnly = false }) {
         { method: "DELETE", credentials: "include" },
       );
       const data = await res.json().catch(() => ({}));
-      if (!res.ok) {
+      if (!deleteSucceeded(res)) {
         showToast({
           message: typeof data.error === "string" ? data.error : "Could not delete.",
           severity: "error",
@@ -317,7 +326,12 @@ export function ProjectOrgFinancialYearsPanel({ projectId, readOnly = false }) {
             disabled={refetching}
             onClick={() => {
               setCreateErrors({});
-              setCreateForm(emptyForm());
+              const latestEnd = parseDateInputValue(listData?.latestEndDate);
+              if (latestEnd && !createForm.startDate) {
+                setCreateForm((prev) =>
+                  applyStartDateDefaults(prev, { startDate: toDateInputValue(addDays(latestEnd, 1)) }),
+                );
+              }
               setOpenCreate(true);
             }}
             className="w-full sm:w-auto"
@@ -339,9 +353,8 @@ export function ProjectOrgFinancialYearsPanel({ projectId, readOnly = false }) {
       </div>
 
       <Typography variant="body2" sx={{ ...adminMutedTextSx, mb: 2 }}>
-        Each financial year spans exactly one year. Pick a start date and the end date is set
-        automatically (e.g. start Oct 1, 2023 → end Sep 30, 2024). Only one year can be active at
-        a time.
+        One year each (e.g. Jul 1, 2026 – Jun 30, 2027 or Jan 1 – Dec 31, 2026). Years cannot
+        overlap. Only one is active.
       </Typography>
 
       <Box sx={{ position: "relative" }}>
@@ -466,11 +479,7 @@ export function ProjectOrgFinancialYearsPanel({ projectId, readOnly = false }) {
         busy={createBusy}
         form={createForm}
         errors={createErrors}
-        onClose={() => {
-          if (createBusy) return;
-          setOpenCreate(false);
-          setCreateErrors({});
-        }}
+        onClose={() => void closeCreate()}
         onChange={(patch) => setCreateForm((prev) => applyStartDateDefaults(prev, patch))}
         onClearError={(key) =>
           setCreateErrors((prev) => {
@@ -488,11 +497,7 @@ export function ProjectOrgFinancialYearsPanel({ projectId, readOnly = false }) {
         busy={editBusy}
         form={editForm}
         errors={editErrors}
-        onClose={() => {
-          if (editBusy) return;
-          setEditRow(null);
-          setEditErrors({});
-        }}
+        onClose={() => void closeEdit()}
         onChange={(patch) => setEditForm((prev) => applyStartDateDefaults(prev, patch))}
         onClearError={(key) =>
           setEditErrors((prev) => {
@@ -582,14 +587,14 @@ function FinancialYearFormDialog({
         >
           <TextField
             label="Financial year"
-            placeholder="2023-2024"
+            placeholder="2026-2027"
             value={form.label}
             onChange={(e) => {
               onChange({ label: e.target.value });
               onClearError("label");
             }}
             error={Boolean(errors.label)}
-            helperText={errors.label || 'Format YYYY-YYYY (e.g. "2023-2024").'}
+            helperText={errors.label || "YYYY-YYYY, or YYYY for Jan–Dec."}
             fullWidth
             sx={themedTextFieldSx}
           />

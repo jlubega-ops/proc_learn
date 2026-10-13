@@ -5,7 +5,7 @@ import { NextResponse } from "next/server";
 import { Role } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { getSessionUser, sessionActiveRole } from "@/lib/api/get-session-user";
-import { canManageExaminerProject } from "@/lib/projects/access";
+import { canViewExaminerProject } from "@/lib/projects/access";
 import { findStudentAttemptOrg } from "@/lib/projects/student-attempt-org";
 
 /**
@@ -48,7 +48,7 @@ export async function authorizeParticipantView(context) {
   if (!project || project.isPersonalOrg || project.isAttemptOrg) {
     return { error: NextResponse.json({ error: "Not found." }, { status: 404 }) };
   }
-  if (activeRole !== Role.SYSTEM_ADMIN && !canManageExaminerProject({ activeRole, project })) {
+  if (!canViewExaminerProject({ activeRole, project })) {
     return { error: NextResponse.json({ error: "Not found." }, { status: 404 }) };
   }
   const enrolled = await prisma.projectEnrollment.findUnique({

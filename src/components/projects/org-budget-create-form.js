@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Box from "@mui/material/Box";
 import Button from "@mui/material/Button";
 import CircularProgress from "@mui/material/CircularProgress";
@@ -12,6 +12,7 @@ import ArrowBackRounded from "@mui/icons-material/ArrowBackRounded";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useToast } from "@/components/providers/toast-provider";
+import { discardConfirmOptions, useConfirm } from "@/components/providers/confirm-provider";
 import { OrgBudgetLinesEditor, budgetLineTotal } from "@/components/projects/org-budget-lines-editor";
 import {
   DEFAULT_FUNDING_SOURCE,
@@ -35,6 +36,7 @@ import {
 } from "@/lib/money";
 import { ORG_REF_DOC, nextOrgDocumentReference } from "@/lib/projects/org-reference";
 import { usePersistedFormDraft } from "@/hooks/use-persisted-form-draft";
+import { useApi } from "@/hooks/use-api";
 import { useProcessActivation } from "@/hooks/use-process-activation";
 import { ProcessGateTooltip } from "@/components/projects/process-gate";
 import { PROCESS_FLOW_CODES } from "@/lib/projects/process-catalogue";
@@ -65,6 +67,7 @@ function withLineDefaults(line) {
  */
 export function OrgBudgetCreateForm({ projectId, budgetId = "" }) {
   const { showToast } = useToast();
+  const confirm = useConfirm();
   const router = useRouter();
   const listHref = `/projects/${projectId}/budgets`;
   const isEdit = Boolean(String(budgetId || "").trim());
@@ -75,8 +78,23 @@ export function OrgBudgetCreateForm({ projectId, budgetId = "" }) {
     /** @type {{ id?: string; name?: string; code?: string | null } | null} */ (null),
   );
   const [existingRefs, setExistingRefs] = useState(/** @type {string[]} */ ([]));
-  const [years, setYears] = useState(/** @type {any[]} */ ([]));
-  const [fyEmptyMessage, setFyEmptyMessage] = useState(/** @type {string | null} */ (null));
+  const { data: fyData, reload: reloadYears } = useApi(
+    `/api/projects/${projectId}/org-financial-years?selectable=1`,
+    { silentErrors: true },
+  );
+  const fyDataRef = useRef(fyData);
+  useEffect(() => {
+    fyDataRef.current = fyData;
+  }, [fyData]);
+  const [editFinancialYear, setEditFinancialYear] = useState(/** @type {any} */ (null));
+  const years = useMemo(() => {
+    const list = Array.isArray(fyData?.financialYears) ? fyData.financialYears : [];
+    if (editFinancialYear?.id && !list.some((y) => y.id === editFinancialYear.id)) {
+      return [editFinancialYear, ...list];
+    }
+    return list;
+  }, [fyData, editFinancialYear]);
+  const fyEmptyMessage = typeof fyData?.message === "string" ? fyData.message : null;
   /** @type {[Record<string, string>, Function]} */
   const [fieldErrors, setFieldErrors] = useState({});
   const [form, setForm] = useState({
@@ -116,22 +134,16 @@ export function OrgBudgetCreateForm({ projectId, budgetId = "" }) {
   const load = useCallback(async () => {
     setLoading(true);
     try {
-      const requests = [
+      const [bRes, yData, detailRes] = await Promise.all([
         fetch(`/api/projects/${projectId}/budgets`, { credentials: "include" }),
-        fetch(`/api/projects/${projectId}/org-financial-years?selectable=1`, {
-          credentials: "include",
-        }),
-      ];
-      if (isEdit) {
-        requests.push(
-          fetch(`/api/projects/${projectId}/budgets/${budgetId}`, {
-            credentials: "include",
-          }),
-        );
-      }
-      const [bRes, yRes, detailRes] = await Promise.all(requests);
+        fyDataRef.current ? Promise.resolve(fyDataRef.current) : reloadYears(),
+        isEdit
+          ? fetch(`/api/projects/${projectId}/budgets/${budgetId}`, {
+              credentials: "include",
+            })
+          : Promise.resolve(null),
+      ]);
       const bData = await bRes.json().catch(() => ({}));
-      const yData = await yRes.json().catch(() => ({}));
       if (!bRes.ok) {
         showToast({
           message: typeof bData.error === "string" ? bData.error : "Could not load budget form.",
@@ -145,9 +157,7 @@ export function OrgBudgetCreateForm({ projectId, budgetId = "" }) {
       const budgets = Array.isArray(bData.budgets) ? bData.budgets : [];
       const refs = budgets.map((b) => b.budgetReference).filter(Boolean);
       setExistingRefs(refs);
-      const nextYears = Array.isArray(yData.financialYears) ? yData.financialYears : [];
-      setYears(nextYears);
-      setFyEmptyMessage(typeof yData.message === "string" ? yData.message : null);
+      const nextYears = Array.isArray(yData?.financialYears) ? yData.financialYears : [];
 
       if (isEdit && detailRes) {
         const dData = await detailRes.json().catch(() => ({}));
@@ -168,14 +178,7 @@ export function OrgBudgetCreateForm({ projectId, budgetId = "" }) {
           return;
         }
         const budget = dData.budget || {};
-        let editYears = nextYears;
-        if (
-          budget.financialYear?.id &&
-          !editYears.some((y) => y.id === budget.financialYear.id)
-        ) {
-          editYears = [budget.financialYear, ...editYears];
-        }
-        setYears(editYears);
+        setEditFinancialYear(budget.financialYear?.id ? budget.financialYear : null);
         setForm({
           title: budget.title || "",
           budgetReference: budget.budgetReference || "",
@@ -227,7 +230,7 @@ export function OrgBudgetCreateForm({ projectId, budgetId = "" }) {
     } finally {
       setLoading(false);
     }
-  }, [projectId, budgetId, isEdit, showToast]);
+  }, [projectId, budgetId, isEdit, reloadYears, showToast]);
 
   useEffect(() => {
     void load();
@@ -380,6 +383,27 @@ export function OrgBudgetCreateForm({ projectId, budgetId = "" }) {
     );
   }
 
+  const hasEntry =
+    !isEdit &&
+    (Boolean(String(form.title || "").trim() || String(form.description || "").trim()) ||
+      form.lines.some(
+        (l) =>
+          String(l.category || "").trim() ||
+          String(l.description || "").trim() ||
+          String(l.unitCost || "").trim() ||
+          String(l.approvedAmount || "").trim() ||
+          String(l.quantity || "1").trim() !== "1",
+      ));
+
+  /** @param {import("react").MouseEvent} e */
+  const leaveForm = async (e) => {
+    if (!hasEntry) return;
+    e.preventDefault();
+    if (!(await confirm(discardConfirmOptions()))) return;
+    await clearDraft();
+    router.push(listHref);
+  };
+
   if (!canCreate) {
     return (
       <Paper variant="outlined" sx={{ p: 2, ...adminOutlinedTableContainerSx }}>
@@ -401,6 +425,7 @@ export function OrgBudgetCreateForm({ projectId, budgetId = "" }) {
         <Button
           component={Link}
           href={listHref}
+          onClick={(e) => void leaveForm(e)}
           startIcon={<ArrowBackRounded />}
           variant="outlined"
           size="small"

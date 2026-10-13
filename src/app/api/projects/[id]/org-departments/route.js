@@ -3,6 +3,8 @@ import { Role } from "@prisma/client";
 import { getSessionUser, sessionActiveRole } from "@/lib/api/get-session-user";
 import { writeAuditLog, AuditEvent } from "@/lib/audit-log";
 import { prisma } from "@/lib/prisma";
+import { cachedRead } from "@/lib/server-cache";
+import { cachedJson } from "@/lib/api/cached-json";
 import { authorizeProjectOrgAdmin } from "@/lib/projects/workspace-access";
 import { authorizeProjectOrgRead } from "@/lib/projects/project-api-auth";
 import { ORG_PERMISSION } from "@/lib/projects/org-role-permissions";
@@ -52,11 +54,11 @@ export async function GET(request, context) {
   }
 
   if (isStructureView) {
-    const units = await listProjectOrgDepartmentUnits(prisma, projectId);
-    return NextResponse.json({
-      units,
-      tree: buildDepartmentTree(units),
+    const payload = await cachedRead(`org-departments:${projectId}:structure`, DEPT_MODELS, async () => {
+      const units = await listProjectOrgDepartmentUnits(prisma, projectId);
+      return { units, tree: buildDepartmentTree(units) };
     });
+    return cachedJson(request, payload, { revalidate: true });
   }
 
   const page = Math.max(1, Number(searchParams.get("page") || 1));
@@ -66,31 +68,39 @@ export async function GET(request, context) {
 
   const where = { projectId, parentId: null };
 
-  const [total, rows] = await Promise.all([
-    prisma.projectOrgDepartment.count({ where }),
-    prisma.projectOrgDepartment.findMany({
-      where,
-      orderBy: [{ sortOrder: "asc" }, { name: "asc" }],
-      skip,
-      take: pageSize,
-      select: {
-        ...deptSelect,
-        subunits: {
+  const payload = await cachedRead(
+    `org-departments:${projectId}:list:${page}:${pageSize}`,
+    DEPT_MODELS,
+    async () => {
+      const [total, rows] = await Promise.all([
+        prisma.projectOrgDepartment.count({ where }),
+        prisma.projectOrgDepartment.findMany({
+          where,
           orderBy: [{ sortOrder: "asc" }, { name: "asc" }],
-          select: deptSelect,
-        },
-      },
-    }),
-  ]);
-
-  return NextResponse.json({
-    departments: rows.map((row) => serializeProjectOrgDepartment(row)),
-    page,
-    pageSize,
-    total,
-    pageCount: Math.max(1, Math.ceil(total / pageSize)),
-  });
+          skip,
+          take: pageSize,
+          select: {
+            ...deptSelect,
+            subunits: {
+              orderBy: [{ sortOrder: "asc" }, { name: "asc" }],
+              select: deptSelect,
+            },
+          },
+        }),
+      ]);
+      return {
+        departments: rows.map((row) => serializeProjectOrgDepartment(row)),
+        page,
+        pageSize,
+        total,
+        pageCount: Math.max(1, Math.ceil(total / pageSize)),
+      };
+    },
+  );
+  return cachedJson(request, payload, { revalidate: true });
 }
+
+const DEPT_MODELS = ["ProjectOrgDepartment", "Project:delete"];
 
 export async function POST(request, context) {
   const user = await getSessionUser();

@@ -12,6 +12,7 @@ import { projectCampusWhere } from "@/lib/academic/project-campuses";
  *   studentUserId: string;
  *   programmeId: string | null;
  *   campus: string | null;
+ *   anyCampus?: boolean;
  *   academicYearIds: string[];
  * }} StudentEligibilityContext
  */
@@ -22,7 +23,7 @@ import { projectCampusWhere } from "@/lib/academic/project-campuses";
  * @returns {Promise<StudentEligibilityContext>}
  */
 export async function loadStudentEligibilityContext(db, studentUserId) {
-  const [profile, enrollments] = await Promise.all([
+  const [profile, enrollments, settings] = await Promise.all([
     db.studentProfile.findUnique({
       where: { userId: studentUserId },
       select: { programmeId: true, campus: true },
@@ -31,12 +32,28 @@ export async function loadStudentEligibilityContext(db, studentUserId) {
       where: { userId: studentUserId, status: AcademicEnrollmentStatus.ACTIVE },
       select: { academicYearId: true },
     }),
+    db.userSettings.findUnique({
+      where: { userId: studentUserId },
+      select: { studentViewProgrammeId: true, studentViewCampus: true },
+    }),
   ]);
+  const academicYearIds = enrollments.map((e) => e.academicYearId);
+  if (!profile) {
+    // Staff in Student Mode: programme/campus chosen on switch (campus null = all campuses).
+    const campus = parseCampus(settings?.studentViewCampus);
+    return {
+      studentUserId,
+      programmeId: settings?.studentViewProgrammeId || null,
+      campus,
+      anyCampus: !campus,
+      academicYearIds,
+    };
+  }
   return {
     studentUserId,
-    programmeId: profile?.programmeId || null,
-    campus: parseCampus(profile?.campus),
-    academicYearIds: enrollments.map((e) => e.academicYearId),
+    programmeId: profile.programmeId || null,
+    campus: parseCampus(profile.campus),
+    academicYearIds,
   };
 }
 
@@ -57,7 +74,7 @@ export function studentEligibleProjectWhere(ctx) {
       {
         OR: [{ programmeId: null }, ...(ctx.programmeId ? [{ programmeId: ctx.programmeId }] : [])],
       },
-      projectCampusWhere(ctx.campus),
+      ...(ctx.anyCampus ? [] : [projectCampusWhere(ctx.campus)]),
     ],
   };
 }
@@ -137,7 +154,7 @@ export async function countOpenAcademicProjectsForStudent(db, studentUserId) {
 }
 
 /**
- * Active student accounts a project is meant for.
+ * Active student accounts (and staff following its programme in Student Mode) a project is meant for.
  * @param {import("@prisma/client").PrismaClient | import("@prisma/client").Prisma.TransactionClient} db
  * @param {string} projectId
  * @returns {Promise<string[]>}
@@ -146,6 +163,7 @@ export async function eligibleStudentIdsForProject(db, projectId) {
   const project = await db.project.findUnique({
     where: { id: projectId },
     select: {
+      ownerUserId: true,
       academicYearId: true,
       programmeId: true,
       campuses: { select: { campus: true } },
@@ -153,26 +171,46 @@ export async function eligibleStudentIdsForProject(db, projectId) {
   });
   if (!project) return [];
   const campuses = project.campuses.map((c) => c.campus);
+  const yearWhere = project.academicYearId
+    ? {
+        academicEnrollments: {
+          some: {
+            academicYearId: project.academicYearId,
+            status: AcademicEnrollmentStatus.ACTIVE,
+          },
+        },
+      }
+    : {};
   const users = await db.user.findMany({
     where: {
       accountStatus: { not: "SUSPENDED" },
-      userRoles: { some: { role: Role.STUDENT } },
-      studentProfile: {
-        is: {
-          ...(project.programmeId ? { programmeId: project.programmeId } : {}),
-          ...(campuses.length ? { campus: { in: campuses } } : {}),
-        },
-      },
-      ...(project.academicYearId
-        ? {
-            academicEnrollments: {
-              some: {
-                academicYearId: project.academicYearId,
-                status: AcademicEnrollmentStatus.ACTIVE,
-              },
+      ...yearWhere,
+      OR: [
+        {
+          userRoles: { some: { role: Role.STUDENT } },
+          studentProfile: {
+            is: {
+              ...(project.programmeId ? { programmeId: project.programmeId } : {}),
+              ...(campuses.length ? { campus: { in: campuses } } : {}),
             },
-          }
-        : {}),
+          },
+        },
+        {
+          // Staff following a programme in Student Mode (campus null = all campuses).
+          id: { not: project.ownerUserId },
+          studentProfile: { is: null },
+          settings: {
+            is: {
+              studentViewProgrammeId: project.programmeId
+                ? project.programmeId
+                : { not: null },
+              ...(campuses.length
+                ? { OR: [{ studentViewCampus: null }, { studentViewCampus: { in: campuses } }] }
+                : {}),
+            },
+          },
+        },
+      ],
     },
     select: { id: true },
   });

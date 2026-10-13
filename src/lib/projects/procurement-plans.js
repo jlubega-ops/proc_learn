@@ -20,8 +20,10 @@ import {
 } from "@/lib/projects/org-planning-periods";
 import {
   completeWorkflowTask,
+  prepareWorkflowTriggers,
   startWorkflowFromTrigger,
 } from "@/lib/projects/workflow-engine";
+import { TxAbort, runInTx, withTxAbort } from "@/lib/db-tx";
 import { ORG_REF_DOC, nextOrgDocumentReference } from "@/lib/projects/org-reference";
 import {
   resolveCurrentOrgSlate,
@@ -463,9 +465,6 @@ export async function createOrUpdateProcurementPlanDraft(prisma, opts) {
     if (!existing) {
       return { ok: false, error: "Plan not found or cannot be edited.", status: 404 };
     }
-    await prisma.projectOrgProcurementPlanItem.deleteMany({
-      where: { procurementPlanId: existing.id },
-    });
     row = await prisma.projectOrgProcurementPlan.update({
       where: { id: existing.id },
       data: {
@@ -478,7 +477,7 @@ export async function createOrUpdateProcurementPlanDraft(prisma, opts) {
         planningPeriodId: planningPeriod?.id || null,
         departmentId: opts.departmentId,
         status: OrgProcurementPlanStatus.DRAFT,
-        items: { create: built.itemRows },
+        items: { deleteMany: {}, create: built.itemRows },
       },
       include: procurementPlanInclude,
     });
@@ -574,59 +573,66 @@ export async function submitProcurementPlan(prisma, opts) {
   const inactive = await assertProcessActive(prisma, opts.projectId, planProcessCode(isEmergency));
   if (inactive) return inactive;
 
-  await prisma.projectOrgWorkflowInstance.updateMany({
-    where: {
-      procurementPlanId: row.id,
-      status: {
-        in: [OrgWorkflowInstanceStatus.SUSPENDED, OrgWorkflowInstanceStatus.IN_PROGRESS],
-      },
-    },
-    data: {
-      status: OrgWorkflowInstanceStatus.CANCELLED,
-      completedAt: new Date(),
-    },
-  });
-  await prisma.projectOrgWorkflowTask.updateMany({
-    where: {
-      projectId: opts.projectId,
-      status: OrgWorkflowTaskStatus.PENDING,
-      instance: { procurementPlanId: row.id },
-    },
-    data: { status: OrgWorkflowTaskStatus.CANCELLED },
-  });
+  await prepareWorkflowTriggers(prisma, opts.projectId);
+  const outcome = await withTxAbort(() =>
+    runInTx(prisma, async (db) => {
+      await db.projectOrgWorkflowInstance.updateMany({
+        where: {
+          procurementPlanId: row.id,
+          status: {
+            in: [OrgWorkflowInstanceStatus.SUSPENDED, OrgWorkflowInstanceStatus.IN_PROGRESS],
+          },
+        },
+        data: {
+          status: OrgWorkflowInstanceStatus.CANCELLED,
+          completedAt: new Date(),
+        },
+      });
+      await db.projectOrgWorkflowTask.updateMany({
+        where: {
+          projectId: opts.projectId,
+          status: OrgWorkflowTaskStatus.PENDING,
+          instance: { procurementPlanId: row.id },
+        },
+        data: { status: OrgWorkflowTaskStatus.CANCELLED },
+      });
 
-  const started = await startWorkflowFromTrigger(prisma, {
-    projectId: opts.projectId,
-    triggerKey: isEmergency
-      ? WORKFLOW_TRIGGERS.EMERGENCY_PLANNING_SUBMITTED
-      : WORKFLOW_TRIGGERS.PLANNING_SUBMITTED,
-    entityType: "procurement_plan",
-    entityId: row.id,
-    procurementPlanId: row.id,
-    departmentId: row.departmentId,
-    entityTitle: row.title,
-    actorOrgUserId: opts.actorOrgUserId,
-    actorRoleName: opts.actorRoleName,
-    actorDepartmentId: opts.actorDepartmentId || row.departmentId,
-  });
+      const started = await startWorkflowFromTrigger(db, {
+        projectId: opts.projectId,
+        triggerKey: isEmergency
+          ? WORKFLOW_TRIGGERS.EMERGENCY_PLANNING_SUBMITTED
+          : WORKFLOW_TRIGGERS.PLANNING_SUBMITTED,
+        entityType: "procurement_plan",
+        entityId: row.id,
+        procurementPlanId: row.id,
+        departmentId: row.departmentId,
+        entityTitle: row.title,
+        actorOrgUserId: opts.actorOrgUserId,
+        actorRoleName: opts.actorRoleName,
+        actorDepartmentId: opts.actorDepartmentId || row.departmentId,
+      });
+      if (!started.ok) {
+        throw new TxAbort({
+          ok: false,
+          error: started.error,
+          code: started.code,
+          status: started.code === "NO_ELIGIBLE_ASSIGNEES" ? 400 : 409,
+        });
+      }
 
-  if (!started.ok) {
-    return {
-      ok: false,
-      error: started.error,
-      code: started.code,
-      status: started.code === "NO_ELIGIBLE_ASSIGNEES" ? 400 : 409,
-    };
-  }
-
-  const updated = await prisma.projectOrgProcurementPlan.update({
-    where: { id: row.id },
-    data: {
-      status: OrgProcurementPlanStatus.SUBMITTED,
-      submittedAt: new Date(),
-    },
-    include: procurementPlanInclude,
-  });
+      const updated = await db.projectOrgProcurementPlan.update({
+        where: { id: row.id },
+        data: {
+          status: OrgProcurementPlanStatus.SUBMITTED,
+          submittedAt: new Date(),
+        },
+        include: procurementPlanInclude,
+      });
+      return { ok: true, started, updated };
+    }),
+  );
+  if (!outcome.ok) return outcome;
+  const { started, updated } = outcome;
 
   await writeAuditLog({
     eventType: AuditEvent.PROJECT_ORG_PROCUREMENT_PLAN_SUBMITTED,
@@ -668,6 +674,7 @@ export async function submitProcurementPlan(prisma, opts) {
  */
 export async function actOnProcurementPlanTask(prisma, opts) {
   return completeWorkflowTask(prisma, {
+    projectId: opts.projectId,
     taskId: opts.taskId,
     actorOrgUserId: opts.actorOrgUserId,
     actorRoleName: opts.actorRoleName,
@@ -751,7 +758,7 @@ export async function consolidateDepartmentPlans(prisma, opts) {
     `Consolidated Procurement Plan ${fy.label}`;
   const planReference = `ORG-CPP-${Date.now().toString().slice(-6)}`;
 
-  const consolidated = await prisma.$transaction(async (tx) => {
+  const consolidated = await runInTx(prisma, async (tx) => {
     const shell = await tx.projectOrgProcurementPlan.create({
       data: {
         projectId: opts.projectId,

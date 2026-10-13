@@ -23,7 +23,7 @@ export function validateProjectOrgFinancialYearInput(body) {
 
   const labelParsed = parseFinancialYearLabel(body?.label);
   if (!labelParsed) {
-    errors.label = 'Use the format YYYY-YYYY (e.g. "2023-2024").';
+    errors.label = 'Use YYYY-YYYY (e.g. "2026-2027") or YYYY for a calendar year.';
   }
 
   const descriptionRaw = body?.description;
@@ -129,7 +129,7 @@ export function validateProjectOrgFinancialYearPatch(body, opts = {}) {
 
     const labelParsed = parseFinancialYearLabel(label);
     if (!labelParsed) {
-      errors.label = 'Use the format YYYY-YYYY (e.g. "2023-2024").';
+      errors.label = 'Use YYYY-YYYY (e.g. "2026-2027") or YYYY for a calendar year.';
     }
     if (startProvided && !startDate) errors.startDate = "Start date is required.";
     if (endProvided && !endDate) errors.endDate = "End date is required.";

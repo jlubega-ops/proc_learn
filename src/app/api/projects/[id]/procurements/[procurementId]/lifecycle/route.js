@@ -73,10 +73,13 @@ export async function POST(request, context) {
     actorRoleName: auth.orgUser.projectOrgRole?.name || "",
     actorDepartmentId: auth.orgUser.departmentId || null,
     actingCommitteeType: activeCommittee?.committeeType || null,
-    body:
-      activeCommittee && action === "record_inspection"
-        ? { ...body, committeeId: activeCommittee.id }
-        : body,
+    body: {
+      ...body,
+      committeeId:
+        activeCommittee && action === "record_inspection" ? activeCommittee.id : null,
+      committeeRole:
+        activeCommittee && action === "record_inspection" ? activeCommittee.committeeRole : null,
+    },
   });
 
   if (!result.ok) {

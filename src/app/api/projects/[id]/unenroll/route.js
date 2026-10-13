@@ -44,6 +44,13 @@ export async function POST(request, context) {
   if (!enrollment) {
     return NextResponse.json({ error: "You are not enrolled in this project." }, { status: 400 });
   }
+  const attemptCount = await prisma.projectAttempt.count({ where: { enrollmentId: enrollment.id } });
+  if (attemptCount > 0) {
+    return NextResponse.json(
+      { error: "You cannot unenroll after starting this project." },
+      { status: 400 },
+    );
+  }
 
   await prisma.projectEnrollment.delete({ where: { id: enrollment.id } });
 

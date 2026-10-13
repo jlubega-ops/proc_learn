@@ -107,14 +107,20 @@ export function formatCalendarDateLabel(value) {
 export function suggestFinancialYearLabel(startDate) {
   const parts = utcCalendarParts(startDate);
   const y = parts?.y ?? startDate.getUTCFullYear();
+  if (parts && parts.m === 0 && parts.d === 1) return String(y);
   return `${y}-${y + 1}`;
 }
 
 /**
+ * "YYYY-YYYY" (spanning years) or "YYYY" (1 Jan – 31 Dec).
  * @param {unknown} label
  */
 export function parseFinancialYearLabel(label) {
   const raw = String(label || "").trim();
+  if (/^\d{4}$/.test(raw)) {
+    const year = Number(raw);
+    return { startYear: year, endYear: year, label: raw };
+  }
   const match = /^(\d{4})-(\d{4})$/.exec(raw);
   if (!match) return null;
   const startYear = Number(match[1]);

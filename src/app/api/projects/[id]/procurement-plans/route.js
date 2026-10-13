@@ -3,6 +3,7 @@ import { OrgProcurementPlanStatus } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { authorizeProjectApiAccess } from "@/lib/projects/project-api-auth";
 import { ORG_PERMISSION } from "@/lib/projects/org-role-permissions";
+import { isDepartmentScopedRole } from "@/lib/projects/workflow-engine";
 import {
   createOrUpdateProcurementPlanDraft,
   procurementPlanInclude,
@@ -20,7 +21,8 @@ export const runtime = "nodejs";
 export async function GET(request, context) {
   const params = await context.params;
   const projectId = String(params?.id || "").trim();
-  if (!projectId) return NextResponse.json({ error: "Invalid project id." }, { status: 400 });
+  if (!projectId)
+    return NextResponse.json({ error: "Invalid project id." }, { status: 400 });
 
   const auth = await authorizeProjectApiAccess(prisma, {
     projectId,
@@ -43,16 +45,19 @@ export async function GET(request, context) {
   if (auth.type === "org" && mine) {
     where.createdByOrgUserId = auth.orgUser.id;
   }
-  if (auth.type === "org" && auth.orgUser.departmentId && !approvedOnly) {
-    // Department officers primarily see own dept drafts + org-wide approved list when approved=1
-    if (mine) {
-      where.departmentId = auth.orgUser.departmentId;
-    }
-  }
-  if (approvedOnly && auth.type === "org" && auth.orgUser.departmentId) {
+  if (
+    auth.type === "org" &&
+    auth.orgUser.departmentId &&
+    (mine ||
+      approvedOnly ||
+      isDepartmentScopedRole(auth.orgUser.projectOrgRole?.name))
+  ) {
     where.departmentId = auth.orgUser.departmentId;
   }
-  Object.assign(where, orgOpsSlateListWhere(await resolveCurrentOrgSlateId(prisma, projectId)));
+  Object.assign(
+    where,
+    orgOpsSlateListWhere(await resolveCurrentOrgSlateId(prisma, projectId)),
+  );
 
   const plans = await prisma.projectOrgProcurementPlan.findMany({
     where,
@@ -95,17 +100,75 @@ export async function GET(request, context) {
 export async function POST(request, context) {
   const params = await context.params;
   const projectId = String(params?.id || "").trim();
-  if (!projectId) return NextResponse.json({ error: "Invalid project id." }, { status: 400 });
+  if (!projectId)
+    return NextResponse.json({ error: "Invalid project id." }, { status: 400 });
 
   const auth = await authorizeProjectApiAccess(prisma, {
     projectId,
     orgPermission: ORG_PERMISSION.VIEW_PROCUREMENT_PLANS,
   });
   if (!auth.ok || auth.type !== "org") {
-    return NextResponse.json({ error: "Forbidden." }, { status: 403 });
+    return NextResponse.json(
+      { error: auth.ok ? "Forbidden." : "Not found." },
+      { status: auth.ok ? 403 : auth.status || 404 },
+    );
   }
 
   const roleName = auth.orgUser.projectOrgRole?.name || "";
+
+  let body;
+  try {
+    body = await request.json();
+  } catch {
+    return NextResponse.json(
+      { error: "Invalid request body." },
+      { status: 400 },
+    );
+  }
+  if (!body || typeof body !== "object" || Array.isArray(body)) {
+    return NextResponse.json(
+      { error: "Invalid request body." },
+      { status: 400 },
+    );
+  }
+
+  if (body.action === "consolidate") {
+    const { consolidateDepartmentPlans } =
+      await import("@/lib/projects/procurement-plans");
+    if (roleName !== "Head PDU") {
+      return NextResponse.json(
+        { error: "Only the Head PDU can consolidate departmental plans." },
+        { status: 403 },
+      );
+    }
+    const result = await consolidateDepartmentPlans(prisma, {
+      projectId,
+      actorOrgUserId: auth.orgUser.id,
+      actorRoleName: roleName,
+      financialYearId:
+        typeof body.financialYearId === "string"
+          ? body.financialYearId.trim()
+          : "",
+      planningPeriodId:
+        typeof body.planningPeriodId === "string"
+          ? body.planningPeriodId.trim() || null
+          : null,
+      title: typeof body.title === "string" ? body.title : undefined,
+      sourcePlanIds: Array.isArray(body.sourcePlanIds)
+        ? body.sourcePlanIds
+            .filter((x) => typeof x === "string" && x.trim())
+            .map((x) => x.trim())
+        : [],
+    });
+    if (!result.ok) {
+      return NextResponse.json(
+        { error: result.error },
+        { status: result.status || 400 },
+      );
+    }
+    return NextResponse.json(result, { status: 201 });
+  }
+
   const canPrepare =
     roleName === "User Department Officer" || roleName === "User Department";
   if (!canPrepare) {
@@ -121,16 +184,13 @@ export async function POST(request, context) {
     );
   }
 
-  let body;
-  try {
-    body = await request.json();
-  } catch {
-    return NextResponse.json({ error: "Invalid request body." }, { status: 400 });
-  }
-
-  if (body?.action === "submit") {
+  if (body.action === "submit") {
     const planId = typeof body.planId === "string" ? body.planId.trim() : "";
-    if (!planId) return NextResponse.json({ error: "Plan id is required." }, { status: 400 });
+    if (!planId)
+      return NextResponse.json(
+        { error: "Plan id is required." },
+        { status: 400 },
+      );
     const submitted = await submitProcurementPlan(prisma, {
       projectId,
       planId,
@@ -145,30 +205,6 @@ export async function POST(request, context) {
       );
     }
     return NextResponse.json(submitted);
-  }
-
-  if (body?.action === "consolidate") {
-    const { consolidateDepartmentPlans } = await import("@/lib/projects/procurement-plans");
-    if (roleName !== "Head PDU") {
-      return NextResponse.json(
-        { error: "Only the Head PDU can consolidate departmental plans." },
-        { status: 403 },
-      );
-    }
-    const result = await consolidateDepartmentPlans(prisma, {
-      projectId,
-      actorOrgUserId: auth.orgUser.id,
-      actorRoleName: roleName,
-      financialYearId: typeof body.financialYearId === "string" ? body.financialYearId.trim() : "",
-      planningPeriodId:
-        typeof body.planningPeriodId === "string" ? body.planningPeriodId.trim() || null : null,
-      title: typeof body.title === "string" ? body.title : undefined,
-      sourcePlanIds: Array.isArray(body.sourcePlanIds) ? body.sourcePlanIds : [],
-    });
-    if (!result.ok) {
-      return NextResponse.json({ error: result.error }, { status: result.status || 400 });
-    }
-    return NextResponse.json(result, { status: 201 });
   }
 
   const result = await createOrUpdateProcurementPlanDraft(prisma, {

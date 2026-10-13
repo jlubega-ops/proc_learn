@@ -14,10 +14,17 @@ import {
   procurementPlanInclude,
   serializeProcurementPlan,
 } from "@/lib/projects/procurement-plans";
-import { actOnBudgetTask, budgetInclude, serializeBudget } from "@/lib/projects/budgets";
+import {
+  actOnBudgetTask,
+  budgetInclude,
+  serializeBudget,
+} from "@/lib/projects/budgets";
 import { actOnProcurementTask } from "@/lib/projects/procurement-tasks";
 import { healMissingStepTasks } from "@/lib/projects/workflow-engine";
-import { procurementStageHref, procurementTaskStage } from "@/lib/projects/procurement-task-stage";
+import {
+  procurementStageHref,
+  procurementTaskStage,
+} from "@/lib/projects/procurement-task-stage";
 import {
   getActiveCommittee,
   checkActingModeForTask,
@@ -30,7 +37,8 @@ export const runtime = "nodejs";
 export async function GET(_request, context) {
   const params = await context.params;
   const projectId = String(params?.id || "").trim();
-  if (!projectId) return NextResponse.json({ error: "Invalid project id." }, { status: 400 });
+  if (!projectId)
+    return NextResponse.json({ error: "Invalid project id." }, { status: 400 });
 
   const auth = await authorizeProjectApiAccess(prisma, {
     projectId,
@@ -104,8 +112,11 @@ export async function GET(_request, context) {
     const plan = t.instance?.procurementPlan || null;
     const budget = t.instance?.budget || null;
     const procurement = t.instance?.procurement || null;
-    const evidence = req ? await buildRequisitionVerificationEvidence(prisma, req) : null;
-    const actionKey = String(t.processFlowItem?.actionKey || "").toUpperCase() || null;
+    const evidence = req
+      ? await buildRequisitionVerificationEvidence(prisma, req)
+      : null;
+    const actionKey =
+      String(t.processFlowItem?.actionKey || "").toUpperCase() || null;
     out.push({
       id: t.id,
       title: t.title,
@@ -161,27 +172,37 @@ export async function GET(_request, context) {
 export async function POST(request, context) {
   const params = await context.params;
   const projectId = String(params?.id || "").trim();
-  if (!projectId) return NextResponse.json({ error: "Invalid project id." }, { status: 400 });
+  if (!projectId)
+    return NextResponse.json({ error: "Invalid project id." }, { status: 400 });
 
   const auth = await authorizeProjectApiAccess(prisma, {
     projectId,
     orgPermission: ORG_PERMISSION.VIEW_TASKS,
   });
   if (!auth.ok || auth.type !== "org") {
-    return NextResponse.json({ error: "Forbidden." }, { status: 403 });
+    return NextResponse.json(
+      { error: auth.ok ? "Forbidden." : "Not found." },
+      { status: auth.ok ? 403 : auth.status || 404 },
+    );
   }
 
   let body;
   try {
     body = await request.json();
   } catch {
-    return NextResponse.json({ error: "Invalid request body." }, { status: 400 });
+    return NextResponse.json(
+      { error: "Invalid request body." },
+      { status: 400 },
+    );
   }
 
   const taskId = typeof body?.taskId === "string" ? body.taskId.trim() : "";
   const decision = String(body?.decision || "").trim();
   if (!taskId || !Object.values(OrgWorkflowDecision).includes(decision)) {
-    return NextResponse.json({ error: "Task and decision are required." }, { status: 400 });
+    return NextResponse.json(
+      { error: "Task and decision are required." },
+      { status: 400 },
+    );
   }
 
   const taskMeta = await prisma.projectOrgWorkflowTask.findUnique({
@@ -192,13 +213,21 @@ export async function POST(request, context) {
       title: true,
       processFlowItem: { select: { actionKey: true } },
       instance: {
-        select: { procurementPlanId: true, requisitionId: true, budgetId: true, procurementId: true },
+        select: {
+          procurementPlanId: true,
+          requisitionId: true,
+          budgetId: true,
+          procurementId: true,
+        },
       },
     },
   });
 
   if (!taskMeta || taskMeta.projectId !== projectId) {
-    return NextResponse.json({ error: "Task is not available." }, { status: 404 });
+    return NextResponse.json(
+      { error: "Task is not available." },
+      { status: 404 },
+    );
   }
 
   const actingMode = checkActingModeForTask(
@@ -219,7 +248,9 @@ export async function POST(request, context) {
   // Procurement Request", "Prepare RFQ Documents") is actioned right here.
   const isProcurementSubmitStep =
     Boolean(taskMeta?.instance?.procurementId) &&
-    String(taskMeta?.processFlowItem?.actionKey || "").trim().toUpperCase() === "SUBMIT";
+    String(taskMeta?.processFlowItem?.actionKey || "")
+      .trim()
+      .toUpperCase() === "SUBMIT";
 
   if (decision === "SUBMIT" && !isProcurementSubmitStep) {
     return NextResponse.json(
@@ -236,7 +267,9 @@ export async function POST(request, context) {
     actorOrgUserId: auth.orgUser.id,
     actorRoleName: auth.orgUser.projectOrgRole?.name || "",
     actorDepartmentId: auth.orgUser.departmentId || null,
-    decision: /** @type {import("@prisma/client").OrgWorkflowDecision} */ (decision),
+    decision: /** @type {import("@prisma/client").OrgWorkflowDecision} */ (
+      decision
+    ),
     comment: typeof body?.comment === "string" ? body.comment : "",
     committeeId: auth.orgUser.activeCommitteeId || null,
     committeeRole: null,
@@ -269,7 +302,9 @@ export async function POST(request, context) {
     result = await actOnRequisitionTask(prisma, {
       ...common,
       procurementMethod:
-        typeof body?.procurementMethod === "string" ? body.procurementMethod : null,
+        typeof body?.procurementMethod === "string"
+          ? body.procurementMethod
+          : null,
       form5: body?.form5 && typeof body.form5 === "object" ? body.form5 : null,
     });
   }

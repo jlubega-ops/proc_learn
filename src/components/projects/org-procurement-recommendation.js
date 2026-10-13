@@ -25,7 +25,9 @@ import CheckCircleRounded from "@mui/icons-material/CheckCircleRounded";
 import DoNotDisturbOnRounded from "@mui/icons-material/DoNotDisturbOnRounded";
 import GavelRounded from "@mui/icons-material/GavelRounded";
 import { useToast } from "@/components/providers/toast-provider";
-import { actionConfirmOptions, useConfirm } from "@/components/providers/confirm-provider";
+import { actionConfirmOptions, discardConfirmOptions, useConfirm } from "@/components/providers/confirm-provider";
+import { useDraftState } from "@/hooks/use-draft-state";
+import { useDraftSync } from "@/hooks/use-draft-sync";
 import { RecordDetailsGrid } from "@/components/projects/record-details-grid";
 import {
   adminDialogPaperSx,
@@ -104,6 +106,26 @@ export function OrgRecommendationDialog({
   /** @type {[Record<string, string>, Function]} */
   const [errors, setErrors] = useState({});
   const [busy, setBusy] = useState(false);
+  const recDraft = useDraftSync(
+    `org:procurement:${procurementId}:recommendation`,
+    { kind, reason, proposedProviderId, proposedIds, details, alternative },
+    (d) => {
+      if (typeof d.kind === "string" && kinds.includes(d.kind)) setKind(d.kind);
+      if (typeof d.reason === "string") setReason(d.reason);
+      if (typeof d.proposedProviderId === "string") setProposedProviderId(d.proposedProviderId);
+      if (Array.isArray(d.proposedIds)) setProposedIds(d.proposedIds);
+      if (typeof d.details === "string") setDetails(d.details);
+      if (typeof d.alternative === "string") setAlternative(d.alternative);
+    },
+    { enabled: open },
+  );
+
+  async function handleCancel() {
+    if (busy) return;
+    if (recDraft.isDirty && !(await confirm(discardConfirmOptions()))) return;
+    recDraft.clearDraft();
+    onClose();
+  }
 
   const isChange = kind === RECOMMENDATION_KIND.CHANGE_PROVIDER;
   const isShortlist = kind === RECOMMENDATION_KIND.CHANGE_SHORTLIST;
@@ -156,6 +178,7 @@ export function OrgRecommendationDialog({
         return;
       }
       showToast({ message: "Recommendation sent to the Contracts Committee.", severity: "success" });
+      recDraft.clearDraft();
       await onSubmitted();
       onClose();
     } finally {
@@ -168,7 +191,7 @@ export function OrgRecommendationDialog({
       open={open}
       onClose={(_e, r) => {
         if (busy || r === "backdropClick") return;
-        onClose();
+        void handleCancel();
       }}
       maxWidth="sm"
       fullWidth
@@ -322,7 +345,7 @@ export function OrgRecommendationDialog({
           </div>
         </DialogContent>
         <DialogActions className="flex-wrap gap-2">
-          <Button onClick={onClose} disabled={busy}>
+          <Button onClick={handleCancel} disabled={busy}>
             Cancel
           </Button>
           <Button
@@ -398,14 +421,18 @@ export function OrgRecommendationsCard({
   onDecided,
 }) {
   const { showToast } = useToast();
-  const [comment, setComment] = useState("");
+  const rows = Array.isArray(recommendations) ? recommendations : [];
+  const pending = rows.find((r) => r.status === "PENDING") || null;
+  const [comment, setComment, commentDraft] = useDraftState(
+    `org:procurement:${procurementId}:recommendation:${pending?.id}:decision`,
+    "",
+    { enabled: Boolean(pending && canDecide), resetKey: pending?.id ?? null },
+  );
   const [commentError, setCommentError] = useState("");
   const [confirm, setConfirm] = useState(/** @type {"APPROVE" | "DECLINE" | null} */ (null));
   const [busy, setBusy] = useState(false);
 
-  const rows = Array.isArray(recommendations) ? recommendations : [];
   if (!rows.length) return null;
-  const pending = rows.find((r) => r.status === "PENDING") || null;
 
   /** @param {"APPROVE" | "DECLINE"} decision */
   function ask(decision) {
@@ -440,7 +467,7 @@ export function OrgRecommendationsCard({
         message: confirm === "APPROVE" ? "Recommendation approved." : "Recommendation declined.",
         severity: "success",
       });
-      setComment("");
+      commentDraft.resetForm("");
       setConfirm(null);
       await onDecided();
     } finally {

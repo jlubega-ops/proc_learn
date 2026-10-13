@@ -2,7 +2,6 @@ import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { getReadableAppSession } from "@/lib/auth/session";
 import { getSessionOrgUser } from "@/lib/api/get-session-org-user";
-import { requireProviderPortalSession } from "@/lib/projects/provider-portal";
 import { formatUserDisplayName } from "@/lib/user-display";
 import {
   attemptLockedMessage,
@@ -16,8 +15,8 @@ import {
 export const runtime = "nodejs";
 
 /**
- * Org users and providers signed in to a student's attempt organisation.
- * @returns {Promise<null | { workspaceId: string; actor: { type: "org_user" | "provider"; id: string; name: string | null } }>}
+ * Org users signed in to a student's attempt organisation.
+ * @returns {Promise<null | { workspaceId: string; actor: { type: "org_user"; id: string; name: string | null } }>}
  */
 async function resolveAttemptMember() {
   const session = await getReadableAppSession();
@@ -27,14 +26,6 @@ async function resolveAttemptMember() {
     return {
       workspaceId: orgUser.projectId,
       actor: { type: "org_user", id: orgUser.id, name: formatUserDisplayName(orgUser) || orgUser.email },
-    };
-  }
-  if (session?.providerId) {
-    const auth = await requireProviderPortalSession(prisma);
-    if (!auth.ok) return null;
-    return {
-      workspaceId: auth.provider.projectId,
-      actor: { type: "provider", id: auth.provider.id, name: auth.provider.name || null },
     };
   }
   return null;

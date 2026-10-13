@@ -11,6 +11,7 @@ import {
   serializeProjectOrgPlanningPeriod,
 } from "@/lib/projects/org-planning-periods";
 import { validateProjectOrgPlanningPeriodPatch } from "@/lib/validation/project-org-planning-period";
+import { planningPeriodDeleteBlocker } from "@/lib/projects/delete-guards";
 
 export const runtime = "nodejs";
 
@@ -149,6 +150,9 @@ export async function DELETE(_request, context) {
     select: { id: true, financialYearId: true },
   });
   if (!existing) return NextResponse.json({ error: "Not found." }, { status: 404 });
+
+  const blocker = await planningPeriodDeleteBlocker(prisma, projectId, planningPeriodId);
+  if (blocker) return NextResponse.json({ error: blocker }, { status: 409 });
 
   await prisma.projectOrgPlanningPeriod.delete({ where: { id: planningPeriodId } });
 

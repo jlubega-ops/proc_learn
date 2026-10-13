@@ -13,9 +13,12 @@ export { AuditEvent } from "@/lib/audit-events";
  * }} p
  */
 export async function writeAuditLog(p) {
+  const metaProjectId =
+    p.meta && typeof p.meta === "object" && !Array.isArray(p.meta) ? /** @type {any} */ (p.meta).projectId : null;
   await prisma.auditLog.create({
     data: {
       eventType: p.eventType,
+      projectId: typeof metaProjectId === "string" && metaProjectId ? metaProjectId.slice(0, 36) : null,
       actorUserId: p.actorUserId ?? null,
       targetUserId: p.targetUserId ?? null,
       ip: p.ip ?? null,

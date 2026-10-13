@@ -2,6 +2,8 @@ import { NextResponse } from "next/server";
 import { Role } from "@prisma/client";
 import { getSessionUser, sessionActiveRole } from "@/lib/api/get-session-user";
 import { prisma } from "@/lib/prisma";
+import { cachedRead } from "@/lib/server-cache";
+import { cachedJson } from "@/lib/api/cached-json";
 import {
   canManageProjectProcessFlows,
   canViewProjectProcessFlows,
@@ -29,25 +31,34 @@ export async function GET(request) {
   const pageSize = Math.min(50, Math.max(1, Number.isFinite(pageSizeRaw) ? pageSizeRaw : 10));
   const skip = (page - 1) * pageSize;
 
-  const [total, rows] = await Promise.all([
-    prisma.projectOrgProcessFlow.count(),
-    prisma.projectOrgProcessFlow.findMany({
-      orderBy: [{ name: "asc" }, { createdAt: "asc" }],
-      skip,
-      take: pageSize,
-      select: processFlowSelect,
-    }),
-  ]);
+  const payload = await cachedRead(
+    `project-process-flows:list:${page}:${pageSize}`,
+    ["ProjectOrgProcessFlow", "ProjectOrgProcessFlowItem"],
+    async () => {
+      const [total, rows] = await Promise.all([
+        prisma.projectOrgProcessFlow.count(),
+        prisma.projectOrgProcessFlow.findMany({
+          orderBy: [{ name: "asc" }, { createdAt: "asc" }],
+          skip,
+          take: pageSize,
+          select: processFlowSelect,
+        }),
+      ]);
+      return {
+        processFlows: rows.map((row) => serializeProjectOrgProcessFlow(row)),
+        page,
+        pageSize,
+        total,
+        pageCount: Math.max(1, Math.ceil(total / pageSize)),
+      };
+    },
+  );
 
-  return NextResponse.json({
-    processFlows: rows.map((row) => serializeProjectOrgProcessFlow(row)),
-    page,
-    pageSize,
-    total,
-    pageCount: Math.max(1, Math.ceil(total / pageSize)),
+  return cachedJson(request, {
+    ...payload,
     canManage: canManageProjectProcessFlows(activeRole),
     engineBindings: ENGINE_PROCESS_BINDINGS,
-  });
+  }, { revalidate: true });
 }
 
 /** Processes are predefined (see BASELINE_PROCESS_TEMPLATES); only renaming is allowed. */

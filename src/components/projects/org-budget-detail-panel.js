@@ -19,7 +19,6 @@ import Typography from "@mui/material/Typography";
 import ArrowBackRounded from "@mui/icons-material/ArrowBackRounded";
 import DeleteOutlineRounded from "@mui/icons-material/DeleteOutlineRounded";
 import EditRounded from "@mui/icons-material/EditRounded";
-import LockRounded from "@mui/icons-material/LockRounded";
 import RefreshRounded from "@mui/icons-material/RefreshRounded";
 import SendRounded from "@mui/icons-material/SendRounded";
 import { OrgLineItemsTable } from "@/components/projects/org-line-items-table";
@@ -27,6 +26,7 @@ import { OrgBudgetUtilisation } from "@/components/projects/org-budget-utilisati
 import { WorkflowHistoryPanel } from "@/components/projects/workflow-history-panel";
 import { useToast } from "@/components/providers/toast-provider";
 import { decisionConfirmOptions, useConfirm } from "@/components/providers/confirm-provider";
+import { useDraftSync } from "@/hooks/use-draft-sync";
 import { notifyOrgTasksChanged } from "@/hooks/use-pending-task-counts";
 import { useProcessActivation } from "@/hooks/use-process-activation";
 import { ProcessGateTooltip } from "@/components/projects/process-gate";
@@ -180,16 +180,14 @@ function budgetPrintSections(budget) {
  * Preview / review a single department budget. Reviewers with a pending task
  * can Approve / Return / Reject here (same engine as My Tasks).
  *
- * `readOnly` (Organization Administrator) hides draft and review actions; `allowClose` keeps the
- * housekeeping close on approved budgets.
- * @param {{ projectId: string; budgetId: string; listHref?: string; readOnly?: boolean; allowClose?: boolean }} p
+ * `readOnly` (Organization Administrator) hides draft and review actions.
+ * @param {{ projectId: string; budgetId: string; listHref?: string; readOnly?: boolean }} p
  */
-export function OrgBudgetDetailPanel({ projectId, budgetId, listHref, readOnly = false, allowClose = false }) {
+export function OrgBudgetDetailPanel({ projectId, budgetId, listHref, readOnly = false }) {
   const { showToast } = useToast();
   const confirm = useConfirm();
   const router = useRouter();
   const backHref = listHref || `/projects/${projectId}/budgets`;
-  const [closeOpen, setCloseOpen] = useState(false);
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
   const [budget, setBudget] = useState(/** @type {any} */ (null));
@@ -205,6 +203,15 @@ export function OrgBudgetDetailPanel({ projectId, budgetId, listHref, readOnly =
   const [deleteOpen, setDeleteOpen] = useState(false);
   const [decision, setDecision] = useState("APPROVE");
   const [comment, setComment] = useState("");
+  const decisionDraft = useDraftSync(
+    `org:budget:${budgetId}:task:${pendingTask?.id || ""}:decision`,
+    { decision, comment },
+    (d) => {
+      if (typeof d.decision === "string") setDecision(d.decision);
+      if (typeof d.comment === "string") setComment(d.comment);
+    },
+    { enabled: Boolean(pendingTask?.id) && !loading },
+  );
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -239,31 +246,6 @@ export function OrgBudgetDetailPanel({ projectId, budgetId, listHref, readOnly =
   useEffect(() => {
     void load();
   }, [load]);
-
-  async function closeBudget() {
-    setBusy(true);
-    try {
-      const res = await fetch(`/api/projects/${projectId}/budgets/${budgetId}`, {
-        method: "PATCH",
-        credentials: "include",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ action: "setStatus", status: "CLOSED" }),
-      });
-      const data = await res.json().catch(() => ({}));
-      if (!res.ok) {
-        showToast({
-          message: typeof data.error === "string" ? data.error : "Could not close budget.",
-          severity: "error",
-        });
-        return;
-      }
-      showToast({ message: "Budget closed.", severity: "success" });
-      setCloseOpen(false);
-      await load();
-    } finally {
-      setBusy(false);
-    }
-  }
 
   async function submitBudget() {
     if (!(await confirm(decisionConfirmOptions("SUBMIT", "this budget for review")))) return;
@@ -337,6 +319,7 @@ export function OrgBudgetDetailPanel({ projectId, budgetId, listHref, readOnly =
         return;
       }
       showToast({ message: "Decision recorded.", severity: "success" });
+      decisionDraft.clearDraft();
       notifyOrgTasksChanged();
       await load();
     } finally {
@@ -489,17 +472,6 @@ export function OrgBudgetDetailPanel({ projectId, budgetId, listHref, readOnly =
               </Button>
             </ProcessGateTooltip>
           ) : null}
-          {allowClose && budget.status === "APPROVED" ? (
-            <Button
-              variant="outlined"
-              color="error"
-              startIcon={<LockRounded />}
-              disabled={busy}
-              onClick={() => setCloseOpen(true)}
-            >
-              Close budget
-            </Button>
-          ) : null}
         </div>
       </Paper>
 
@@ -586,26 +558,6 @@ export function OrgBudgetDetailPanel({ projectId, budgetId, listHref, readOnly =
         </DialogActions>
       </Dialog>
 
-      <Dialog
-        open={closeOpen}
-        onClose={() => !busy && setCloseOpen(false)}
-        slotProps={{ paper: { sx: adminDialogPaperSx } }}
-      >
-        <DialogTitle>Close budget?</DialogTitle>
-        <DialogContent>
-          <DialogContentText>
-            &ldquo;{budget.title}&rdquo; can no longer fund new plans or requisitions.
-          </DialogContentText>
-        </DialogContent>
-        <DialogActions>
-          <Button onClick={() => setCloseOpen(false)} disabled={busy}>
-            Cancel
-          </Button>
-          <Button color="error" variant="contained" onClick={() => void closeBudget()} disabled={busy}>
-            {busy ? <CircularProgress size={22} color="inherit" /> : "Close budget"}
-          </Button>
-        </DialogActions>
-      </Dialog>
     </div>
   );
 }

@@ -13,9 +13,12 @@ import {
 } from "@/lib/projects/process-activation";
 import {
   startWorkflowFromTrigger,
+  checkWorkflowTaskActor,
   completeWorkflowTask,
   computeBudgetAvailability,
+  prepareWorkflowTriggers,
 } from "@/lib/projects/workflow-engine";
+import { TxAbort, okOrAbort, runInTx, withTxAbort } from "@/lib/db-tx";
 import { ORG_REF_DOC, nextOrgDocumentReference } from "@/lib/projects/org-reference";
 import { resolveSlateIdForOrgCreate } from "@/lib/academic/org-academic-slate";
 import { presentOrgWorkflowStatus } from "@/lib/projects/workflow-status-presentation";
@@ -650,9 +653,6 @@ export async function createOrUpdateRequisitionDraft(prisma, opts) {
         ? OrgRequisitionStatus.SUBMITTED
         : OrgRequisitionStatus.DRAFT;
 
-    await prisma.projectOrgRequisitionItem.deleteMany({
-      where: { requisitionId: existing.id },
-    });
     row = await prisma.projectOrgRequisition.update({
       where: { id: existing.id },
       data: {
@@ -660,7 +660,7 @@ export async function createOrUpdateRequisitionDraft(prisma, opts) {
         status: nextStatus,
         form5PartI: form5Snap,
         form5PartIAt: new Date(),
-        items: { create: itemRows },
+        items: { deleteMany: {}, create: itemRows },
       },
       include: requisitionInclude,
     });
@@ -744,7 +744,7 @@ export async function deleteRequisitionByRequester(prisma, opts) {
     };
   }
 
-  await prisma.$transaction(async (tx) => {
+  await runInTx(prisma, async (tx) => {
     await tx.projectOrgWorkflowTask.updateMany({
       where: {
         projectId: opts.projectId,
@@ -857,58 +857,65 @@ export async function submitRequisition(prisma, opts) {
   );
   if (inactive) return inactive;
 
-  // Close prior suspended instances / correction tasks on resubmit
-  await prisma.projectOrgWorkflowInstance.updateMany({
-    where: {
-      requisitionId: row.id,
-      status: {
-        in: [OrgWorkflowInstanceStatus.SUSPENDED, OrgWorkflowInstanceStatus.IN_PROGRESS],
-      },
-    },
-    data: {
-      status: OrgWorkflowInstanceStatus.CANCELLED,
-      completedAt: new Date(),
-    },
-  });
-  await prisma.projectOrgWorkflowTask.updateMany({
-    where: {
-      projectId: opts.projectId,
-      status: OrgWorkflowTaskStatus.PENDING,
-      instance: { requisitionId: row.id },
-    },
-    data: { status: OrgWorkflowTaskStatus.CANCELLED },
-  });
+  await prepareWorkflowTriggers(prisma, opts.projectId);
+  const outcome = await withTxAbort(() =>
+    runInTx(prisma, async (db) => {
+      // Close prior suspended instances / correction tasks on resubmit
+      await db.projectOrgWorkflowInstance.updateMany({
+        where: {
+          requisitionId: row.id,
+          status: {
+            in: [OrgWorkflowInstanceStatus.SUSPENDED, OrgWorkflowInstanceStatus.IN_PROGRESS],
+          },
+        },
+        data: {
+          status: OrgWorkflowInstanceStatus.CANCELLED,
+          completedAt: new Date(),
+        },
+      });
+      await db.projectOrgWorkflowTask.updateMany({
+        where: {
+          projectId: opts.projectId,
+          status: OrgWorkflowTaskStatus.PENDING,
+          instance: { requisitionId: row.id },
+        },
+        data: { status: OrgWorkflowTaskStatus.CANCELLED },
+      });
 
-  const started = await startWorkflowFromTrigger(prisma, {
-    projectId: opts.projectId,
-    triggerKey: WORKFLOW_TRIGGERS.REQUISITION_SUBMITTED,
-    entityType: "requisition",
-    entityId: row.id,
-    requisitionId: row.id,
-    departmentId: row.departmentId,
-    entityTitle: row.title,
-    actorOrgUserId: opts.actorOrgUserId,
-    actorRoleName: opts.actorRoleName,
-    actorDepartmentId: opts.actorDepartmentId || row.departmentId,
-  });
+      const started = await startWorkflowFromTrigger(db, {
+        projectId: opts.projectId,
+        triggerKey: WORKFLOW_TRIGGERS.REQUISITION_SUBMITTED,
+        entityType: "requisition",
+        entityId: row.id,
+        requisitionId: row.id,
+        departmentId: row.departmentId,
+        entityTitle: row.title,
+        actorOrgUserId: opts.actorOrgUserId,
+        actorRoleName: opts.actorRoleName,
+        actorDepartmentId: opts.actorDepartmentId || row.departmentId,
+      });
+      if (!started.ok) {
+        throw new TxAbort({
+          ok: false,
+          error: started.error,
+          code: started.code,
+          status: started.code === "NO_ELIGIBLE_ASSIGNEES" ? 400 : 409,
+        });
+      }
 
-  if (!started.ok) {
-    return {
-      ok: false,
-      error: started.error,
-      code: started.code,
-      status: started.code === "NO_ELIGIBLE_ASSIGNEES" ? 400 : 409,
-    };
-  }
-
-  const updated = await prisma.projectOrgRequisition.update({
-    where: { id: row.id },
-    data: {
-      status: OrgRequisitionStatus.SUBMITTED,
-      submittedAt: new Date(),
-    },
-    include: requisitionInclude,
-  });
+      const updated = await db.projectOrgRequisition.update({
+        where: { id: row.id },
+        data: {
+          status: OrgRequisitionStatus.SUBMITTED,
+          submittedAt: new Date(),
+        },
+        include: requisitionInclude,
+      });
+      return { ok: true, started, updated };
+    }),
+  );
+  if (!outcome.ok) return outcome;
+  const { started, updated } = outcome;
 
   await writeAuditLog({
     eventType: AuditEvent.PROJECT_ORG_REQUISITION_SUBMITTED,
@@ -934,6 +941,23 @@ export async function submitRequisition(prisma, opts) {
       tasksCreated: started.tasks?.length || 0,
     },
   };
+}
+
+/**
+ * Which requisitions an org user may see: User Department Officers their own, Heads of User
+ * Department their department; other roles (PDU, AO, committees…) the whole organisation.
+ * @param {{ id: string; departmentId?: string | null; projectOrgRole?: { name?: string | null } | null }} orgUser
+ * @returns {Record<string, unknown>}
+ */
+export function requisitionViewScopeWhere(orgUser) {
+  const role = orgUser?.projectOrgRole?.name || "";
+  if (role === "User Department Officer" || role === "User Department") {
+    return { requesterOrgUserId: orgUser.id };
+  }
+  if ((role === "Head User Department" || role === "Head of User Department") && orgUser.departmentId) {
+    return { departmentId: orgUser.departmentId };
+  }
+  return {};
 }
 
 /**
@@ -976,6 +1000,8 @@ export async function actOnRequisitionTask(prisma, opts) {
   if (taskPreview.status !== "PENDING") {
     return { ok: false, error: "This task is no longer pending.", status: 400 };
   }
+  const actorCheck = await checkWorkflowTaskActor(prisma, opts);
+  if (!actorCheck.ok) return actorCheck;
 
   const actionKey = String(taskPreview.processFlowItem?.actionKey || "").trim().toUpperCase();
   const isCcMethodApprove =
@@ -1122,32 +1148,37 @@ export async function actOnRequisitionTask(prisma, opts) {
         fieldErrors: { methodJustification: "Enter the justification for the method." },
       };
     }
-    await prisma.projectOrgRequisition.update({
-      where: { id: taskPreview.instance.requisitionId },
-      data: {
-        procurementMethod: /** @type {import("@prisma/client").OrgProcurementMethod} */ (
-          opts.procurementMethod
-        ),
-        form5PartII: snapshot,
-        form5PartIIAt: new Date(),
-      },
-    });
-
-    const result = await completeWorkflowTask(prisma, {
-      taskId: opts.taskId,
-      actorOrgUserId: opts.actorOrgUserId,
-      actorRoleName: opts.actorRoleName,
-      actorDepartmentId: opts.actorDepartmentId || null,
-      decision: "SELECT_METHOD",
-      comment: opts.comment,
-      metadata: {
-        procurementMethod: opts.procurementMethod,
-        form5PartIISaved: true,
-        awaitingContractsCommittee: true,
-        shortlistedProviderIds: picked.map((p) => p.id),
-        ...(assessed.warnings.length ? { eligibilityWarnings: assessed.warnings } : {}),
-      },
-    });
+    const result = await withTxAbort(() =>
+      runInTx(prisma, async (tx) => {
+        await tx.projectOrgRequisition.update({
+          where: { id: taskPreview.instance.requisitionId },
+          data: {
+            procurementMethod: /** @type {import("@prisma/client").OrgProcurementMethod} */ (
+              opts.procurementMethod
+            ),
+            form5PartII: snapshot,
+            form5PartIIAt: new Date(),
+          },
+        });
+        return okOrAbort(
+          await completeWorkflowTask(tx, {
+            taskId: opts.taskId,
+            actorOrgUserId: opts.actorOrgUserId,
+            actorRoleName: opts.actorRoleName,
+            actorDepartmentId: opts.actorDepartmentId || null,
+            decision: "SELECT_METHOD",
+            comment: opts.comment,
+            metadata: {
+              procurementMethod: opts.procurementMethod,
+              form5PartIISaved: true,
+              awaitingContractsCommittee: true,
+              shortlistedProviderIds: picked.map((p) => p.id),
+              ...(assessed.warnings.length ? { eligibilityWarnings: assessed.warnings } : {}),
+            },
+          }),
+        );
+      }),
+    );
 
     return {
       ...result,
@@ -1197,70 +1228,68 @@ export async function actOnRequisitionTask(prisma, opts) {
       };
     }
 
-    // Stamp CC decision onto Form 5 Part II snapshot when provided.
-    if (opts.form5 && typeof opts.form5 === "object") {
-      const prev =
-        req.form5PartII && typeof req.form5PartII === "object" ? { ...req.form5PartII } : {};
-      await prisma.projectOrgRequisition.update({
-        where: { id: req.id },
-        data: {
-          form5PartII: {
-            ...prev,
-            ccChairName: opts.form5.ccChairName || prev.ccChairName || "",
-            ccSecretaryName: opts.form5.ccSecretaryName || prev.ccSecretaryName || "",
-            ccDecisionAt: new Date().toISOString(),
-            ccDecision: "APPROVE",
-            ccDecisionByRole: opts.actorRoleName,
-          },
-          form5PartIIAt: new Date(),
-        },
-      });
-    }
-
     const { createProcurementFromApprovedRequisition } = await import(
       "@/lib/projects/procurements"
     );
-    const created = await createProcurementFromApprovedRequisition(prisma, {
-      projectId: taskPreview.instance.projectId,
-      requisitionId: req.id,
-      procurementMethod: method,
-      actorOrgUserId: opts.actorOrgUserId,
-      actorRoleName: opts.actorRoleName,
-      actorDepartmentId: opts.actorDepartmentId || null,
-    });
-    if (!created.ok) return created;
+    await prepareWorkflowTriggers(prisma, taskPreview.instance.projectId);
+    const outcome = await withTxAbort(() =>
+      runInTx(prisma, async (tx) => {
+        // Stamp CC decision onto Form 5 Part II snapshot when provided.
+        if (opts.form5 && typeof opts.form5 === "object") {
+          const prev =
+            req.form5PartII && typeof req.form5PartII === "object" ? { ...req.form5PartII } : {};
+          await tx.projectOrgRequisition.update({
+            where: { id: req.id },
+            data: {
+              form5PartII: {
+                ...prev,
+                ccChairName: opts.form5.ccChairName || prev.ccChairName || "",
+                ccSecretaryName: opts.form5.ccSecretaryName || prev.ccSecretaryName || "",
+                ccDecisionAt: new Date().toISOString(),
+                ccDecision: "APPROVE",
+                ccDecisionByRole: opts.actorRoleName,
+              },
+              form5PartIIAt: new Date(),
+            },
+          });
+        }
 
-    const metadata = {
-      procurementMethod: method,
-      nextProcessQueued: created.nextProcessQueued,
-      nextProcessStarted: true,
-      procurementId: created.procurement?.id || null,
-      procurementNumber: created.procurement?.procurementNumber || null,
-      contractsCommitteeApproved: true,
-    };
+        const created = okOrAbort(
+          await createProcurementFromApprovedRequisition(tx, {
+            projectId: taskPreview.instance.projectId,
+            requisitionId: req.id,
+            procurementMethod: method,
+            actorOrgUserId: opts.actorOrgUserId,
+            actorRoleName: opts.actorRoleName,
+            actorDepartmentId: opts.actorDepartmentId || null,
+          }),
+        );
 
-    const result = await completeWorkflowTask(prisma, {
-      taskId: opts.taskId,
-      actorOrgUserId: opts.actorOrgUserId,
-      actorRoleName: opts.actorRoleName,
-      actorDepartmentId: opts.actorDepartmentId || null,
-      committeeId: opts.committeeId || null,
-      committeeRole: opts.committeeRole || null,
-      decision: "APPROVE",
-      comment: opts.comment,
-      metadata,
-    });
-
-    if (!result.ok) {
-      return {
-        ...result,
-        procurement: created.procurement,
-        nextProcessQueued: created.nextProcessQueued,
-        nextProcessStarted: true,
-        warning:
-          "Procurement was created and the method workflow started, but the Contracts Committee task could not be closed.",
-      };
-    }
+        const result = okOrAbort(
+          await completeWorkflowTask(tx, {
+            taskId: opts.taskId,
+            actorOrgUserId: opts.actorOrgUserId,
+            actorRoleName: opts.actorRoleName,
+            actorDepartmentId: opts.actorDepartmentId || null,
+            committeeId: opts.committeeId || null,
+            committeeRole: opts.committeeRole || null,
+            decision: "APPROVE",
+            comment: opts.comment,
+            metadata: {
+              procurementMethod: method,
+              nextProcessQueued: created.nextProcessQueued,
+              nextProcessStarted: true,
+              procurementId: created.procurement?.id || null,
+              procurementNumber: created.procurement?.procurementNumber || null,
+              contractsCommitteeApproved: true,
+            },
+          }),
+        );
+        return { ok: true, created, result };
+      }),
+    );
+    if (!outcome.ok) return outcome;
+    const { created, result } = outcome;
 
     return {
       ...result,
@@ -1271,55 +1300,60 @@ export async function actOnRequisitionTask(prisma, opts) {
     };
   }
 
-  const result = await completeWorkflowTask(prisma, {
-    taskId: opts.taskId,
-    actorOrgUserId: opts.actorOrgUserId,
-    actorRoleName: opts.actorRoleName,
-    actorDepartmentId: opts.actorDepartmentId || null,
-    committeeId: opts.committeeId || null,
-    committeeRole: opts.committeeRole || null,
-    decision: opts.decision,
-    comment: opts.comment,
-    metadata: null,
-  });
+  return withTxAbort(() =>
+    runInTx(prisma, async (tx) => {
+      const result = okOrAbort(
+        await completeWorkflowTask(tx, {
+          taskId: opts.taskId,
+          actorOrgUserId: opts.actorOrgUserId,
+          actorRoleName: opts.actorRoleName,
+          actorDepartmentId: opts.actorDepartmentId || null,
+          committeeId: opts.committeeId || null,
+          committeeRole: opts.committeeRole || null,
+          decision: opts.decision,
+          comment: opts.comment,
+          metadata: null,
+        }),
+      );
 
-  // Stamp Form 5 Part I confirmation names when HOD / AO approve.
-  if (
-    result.ok &&
-    (opts.decision === "APPROVE" || opts.decision === "VERIFY") &&
-    taskPreview.instance.requisitionId
-  ) {
-    const req = await prisma.projectOrgRequisition.findUnique({
-      where: { id: taskPreview.instance.requisitionId },
-      select: { form5PartI: true },
-    });
-    if (req?.form5PartI && typeof req.form5PartI === "object") {
-      const actor = await prisma.projectOrgUser.findUnique({
-        where: { id: opts.actorOrgUserId },
-        select: { firstName: true, lastName: true },
-      });
-      const name = `${actor?.firstName || ""} ${actor?.lastName || ""}`.trim();
-      const snap = { ...req.form5PartI };
-      if (opts.actorRoleName === "Head User Department" || opts.actorRoleName === "Head of User Department") {
-        if (name) {
-          snap.hodName = name;
-          snap.hodTitle = "Head User Department";
+      // Stamp Form 5 Part I confirmation names when HOD / AO approve.
+      if (
+        (opts.decision === "APPROVE" || opts.decision === "VERIFY") &&
+        taskPreview.instance.requisitionId
+      ) {
+        const req = await tx.projectOrgRequisition.findUnique({
+          where: { id: taskPreview.instance.requisitionId },
+          select: { form5PartI: true },
+        });
+        if (req?.form5PartI && typeof req.form5PartI === "object") {
+          const actor = await tx.projectOrgUser.findUnique({
+            where: { id: opts.actorOrgUserId },
+            select: { firstName: true, lastName: true },
+          });
+          const name = `${actor?.firstName || ""} ${actor?.lastName || ""}`.trim();
+          const snap = { ...req.form5PartI };
+          if (opts.actorRoleName === "Head User Department" || opts.actorRoleName === "Head of User Department") {
+            if (name) {
+              snap.hodName = name;
+              snap.hodTitle = "Head User Department";
+            }
+          }
+          if (opts.actorRoleName === "Accounting Officer" && opts.decision === "APPROVE") {
+            if (name) {
+              snap.aoName = name;
+              snap.aoTitle = "Accounting Officer";
+            }
+          }
+          await tx.projectOrgRequisition.update({
+            where: { id: taskPreview.instance.requisitionId },
+            data: { form5PartI: snap, form5PartIAt: new Date() },
+          });
         }
       }
-      if (opts.actorRoleName === "Accounting Officer" && opts.decision === "APPROVE") {
-        if (name) {
-          snap.aoName = name;
-          snap.aoTitle = "Accounting Officer";
-        }
-      }
-      await prisma.projectOrgRequisition.update({
-        where: { id: taskPreview.instance.requisitionId },
-        data: { form5PartI: snap, form5PartIAt: new Date() },
-      });
-    }
-  }
 
-  return result;
+      return result;
+    }),
+  );
 }
 
 /**

@@ -2,10 +2,14 @@
 
 import { useImperativeHandle, useState } from "react";
 import Chip from "@mui/material/Chip";
+import IconButton from "@mui/material/IconButton";
 import TextField from "@mui/material/TextField";
+import Tooltip from "@mui/material/Tooltip";
 import Typography from "@mui/material/Typography";
 import DescriptionRounded from "@mui/icons-material/DescriptionRounded";
+import RestartAltRounded from "@mui/icons-material/RestartAltRounded";
 import { useToast } from "@/components/providers/toast-provider";
+import { discardConfirmOptions, useConfirm } from "@/components/providers/confirm-provider";
 import { formatPrintDate } from "@/components/print/print-document";
 import { adminMutedTextSx, themedTextFieldSx } from "@/lib/admin-mui-surfaces";
 import { formatMoneyAmount, formatMoneyUGX } from "@/lib/money";
@@ -109,6 +113,7 @@ function RequirementsList({ items }) {
  */
 export function OrgBidDocumentSection({ projectId, procurement, organisation, issuer, editable = false, ref }) {
   const { showToast } = useToast();
+  const confirm = useConfirm();
   const isTender = procurement?.procurementMethod === "TENDER";
   const heading = isTender ? "Tender document" : "Request for Quotations (RFQ) document";
   const saved = savedBidDocument(procurement);
@@ -194,6 +199,15 @@ export function OrgBidDocumentSection({ projectId, procurement, organisation, is
 
   useImperativeHandle(ref, () => ({ validate, save }));
 
+  const hasEntry = editable && JSON.stringify(form) !== JSON.stringify(initialForm(procurement));
+
+  async function discardChanges() {
+    if (!(await confirm(discardConfirmOptions()))) return;
+    await clearDraft();
+    setForm(initialForm(procurement));
+    setFieldErrors({});
+  }
+
   const header = (
     <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
       <div className="flex flex-wrap items-center gap-2">
@@ -219,6 +233,13 @@ export function OrgBidDocumentSection({ projectId, procurement, organisation, is
           />
         )}
       </div>
+      {hasEntry ? (
+        <Tooltip title="Discard changes">
+          <IconButton size="small" color="error" aria-label="Discard changes" onClick={() => void discardChanges()}>
+            <RestartAltRounded fontSize="small" />
+          </IconButton>
+        </Tooltip>
+      ) : null}
     </div>
   );
 

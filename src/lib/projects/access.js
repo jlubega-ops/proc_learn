@@ -7,13 +7,34 @@ export function actsAsExaminerRole(activeRole) {
   return activeRole === Role.EXAMINER || activeRole === Role.SYSTEM_ADMIN;
 }
 
+/** Read-only teaching surfaces (projects, participation, results): examiner or system admin. */
+export const canViewTeaching = actsAsExaminerRole;
+
 /**
- * Create, edit, or delete examiner projects (system admin and any examiner).
+ * Teaching actions (create/edit/publish projects, grade, release results): examiner only.
+ * System admin views teaching data read-only.
+ * @param {import("@prisma/client").Role} activeRole
+ */
+export function canTeach(activeRole) {
+  return activeRole === Role.EXAMINER;
+}
+
+/**
+ * View an examiner project's teaching data (participants, submissions, results).
+ * @param {{ activeRole: import("@prisma/client").Role; project: any }} p
+ */
+export function canViewExaminerProject({ activeRole, project }) {
+  if (!project || project.creatorRole !== Role.EXAMINER) return false;
+  return canViewTeaching(activeRole);
+}
+
+/**
+ * Create, edit, grade or delete examiner projects (examiner only).
  * @param {{ activeRole: import("@prisma/client").Role; project: any; userId?: string }} p
  */
 export function canManageExaminerProject({ activeRole, project }) {
   if (!project || project.creatorRole !== Role.EXAMINER) return false;
-  return actsAsExaminerRole(activeRole);
+  return canTeach(activeRole);
 }
 
 /**
@@ -53,14 +74,19 @@ export function canViewProjectByRole({ userId, activeRole, project }) {
 }
 
 /**
- * System admin or examiner may configure settings on student-owned projects.
+ * Examiner may configure settings on public student-owned projects
+ * (never personal or attempt organisations).
  * @param {{ activeRole: import("@prisma/client").Role; project: any }} p
  */
 export function canManageStudentProjectSettings({ activeRole, project }) {
   if (!project || project.creatorRole !== Role.STUDENT) return false;
-  if (activeRole === Role.SYSTEM_ADMIN) return true;
-  if (activeRole === Role.EXAMINER && project.visibility === "PUBLIC") return true;
-  return false;
+  if (project.isPersonalOrg || project.isAttemptOrg) return false;
+  return activeRole === Role.EXAMINER && project.visibility === "PUBLIC";
+}
+
+/** Personal and attempt organisations are system-managed: no owner edit, delete or settings. */
+export function isSystemManagedOrg(project) {
+  return Boolean(project?.isPersonalOrg || project?.isAttemptOrg);
 }
 
 /**

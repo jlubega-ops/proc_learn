@@ -10,6 +10,7 @@ import {
 } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { AuditEvent, writeAuditLog } from "@/lib/audit-log";
+import { runInTx } from "@/lib/db-tx";
 import {
   OBSERVATION_STAGE_KEYS,
   deriveOrganisationProcurementProgress,
@@ -18,10 +19,12 @@ import { findStudentPersonalOrg } from "@/lib/projects/student-personal-org";
 import { computeFinalScore } from "@/lib/academic/assessment-scoring";
 import { DEFAULT_ASSESSMENT_TOTAL_MARKS } from "@/lib/academic/assessment-process-catalogue";
 import {
+  applyProcessAvailability,
   buildScoringTree,
   evaluateScoringSections,
   scoringTreeToRows,
 } from "@/lib/academic/assessment-sections";
+import { resolveEffectiveProcessCodes } from "@/lib/academic/programme-processes";
 import { loadScoringEvidence } from "@/lib/academic/assessment-evidence";
 
 /**
@@ -203,7 +206,9 @@ export async function seedAssessmentProcesses(db, assessmentId, totalMarks = DEF
  */
 export async function scoreOrganisationSections(db, opts) {
   const totalMarks = Math.max(0, Number(opts.assessment.totalMarks) || DEFAULT_ASSESSMENT_TOTAL_MARKS);
-  const tree = buildScoringTree(opts.assessment.processes || [], totalMarks);
+  const allowed = await resolveEffectiveProcessCodes(db, opts.orgId);
+  const rows = opts.assessment.processes || [];
+  const tree = buildScoringTree(allowed ? applyProcessAvailability(rows, allowed) : rows, totalMarks);
   const evidence = await loadScoringEvidence(db, opts.orgId, {
     academicSlateId: opts.academicSlateId || null,
   });
@@ -406,64 +411,67 @@ export async function autoEvaluateProjectAttempt(opts) {
     manualEntered: false,
   });
 
-  const grade = await db.projectAttemptGrade.upsert({
-    where: { attemptId: attempt.id },
-    create: {
-      attemptId: attempt.id,
-      assessmentId: assessment.id,
-      autoScore: computed.autoScore,
-      manualScore: attempt.grade?.manualScore ?? null,
-      finalScore: computed.finalScore,
-      finalPercent: computed.finalPercent,
-      passFail: computed.passFail,
-      status: computed.status,
-      feedback: attempt.grade?.feedback ?? null,
-      checkpointResults,
-      autoEvaluatedAt: new Date(),
-      gradedByUserId:
-        computed.status === AttemptGradeStatus.GRADED &&
-        assessment.gradingMode === AssessmentGradingMode.AUTOMATIC
-          ? opts.actorUserId || null
-          : attempt.grade?.gradedByUserId ?? null,
-      gradedAt:
-        computed.status === AttemptGradeStatus.GRADED &&
-        assessment.gradingMode === AssessmentGradingMode.AUTOMATIC
-          ? new Date()
-          : attempt.grade?.gradedAt ?? null,
-    },
-    update: {
-      autoScore: computed.autoScore,
-      finalScore: computed.finalScore,
-      finalPercent: computed.finalPercent,
-      passFail: computed.passFail,
-      status: computed.status,
-      checkpointResults,
-      autoEvaluatedAt: new Date(),
-      ...(computed.status === AttemptGradeStatus.GRADED &&
-      assessment.gradingMode === AssessmentGradingMode.AUTOMATIC &&
-      !attempt.grade?.gradedAt
-        ? {
-            gradedAt: new Date(),
-            gradedByUserId: opts.actorUserId || null,
-          }
-        : {}),
-    },
-  });
+  const grade = await runInTx(db, async (tx) => {
+    const row = await tx.projectAttemptGrade.upsert({
+      where: { attemptId: attempt.id },
+      create: {
+        attemptId: attempt.id,
+        assessmentId: assessment.id,
+        autoScore: computed.autoScore,
+        manualScore: attempt.grade?.manualScore ?? null,
+        finalScore: computed.finalScore,
+        finalPercent: computed.finalPercent,
+        passFail: computed.passFail,
+        status: computed.status,
+        feedback: attempt.grade?.feedback ?? null,
+        checkpointResults,
+        autoEvaluatedAt: new Date(),
+        gradedByUserId:
+          computed.status === AttemptGradeStatus.GRADED &&
+          assessment.gradingMode === AssessmentGradingMode.AUTOMATIC
+            ? opts.actorUserId || null
+            : attempt.grade?.gradedByUserId ?? null,
+        gradedAt:
+          computed.status === AttemptGradeStatus.GRADED &&
+          assessment.gradingMode === AssessmentGradingMode.AUTOMATIC
+            ? new Date()
+            : attempt.grade?.gradedAt ?? null,
+      },
+      update: {
+        autoScore: computed.autoScore,
+        finalScore: computed.finalScore,
+        finalPercent: computed.finalPercent,
+        passFail: computed.passFail,
+        status: computed.status,
+        checkpointResults,
+        autoEvaluatedAt: new Date(),
+        ...(computed.status === AttemptGradeStatus.GRADED &&
+        assessment.gradingMode === AssessmentGradingMode.AUTOMATIC &&
+        !attempt.grade?.gradedAt
+          ? {
+              gradedAt: new Date(),
+              gradedByUserId: opts.actorUserId || null,
+            }
+          : {}),
+      },
+    });
 
-  if (
-    computed.status === AttemptGradeStatus.GRADED &&
-    assessment.gradingMode === AssessmentGradingMode.AUTOMATIC
-  ) {
-    await db.projectAttempt.update({
-      where: { id: attempt.id },
-      data: { status: ProjectAttemptStatus.COMPLETED },
-    });
-  } else if (attempt.status === ProjectAttemptStatus.SUBMITTED) {
-    await db.projectAttempt.update({
-      where: { id: attempt.id },
-      data: { status: ProjectAttemptStatus.UNDER_REVIEW },
-    });
-  }
+    if (
+      computed.status === AttemptGradeStatus.GRADED &&
+      assessment.gradingMode === AssessmentGradingMode.AUTOMATIC
+    ) {
+      await tx.projectAttempt.update({
+        where: { id: attempt.id },
+        data: { status: ProjectAttemptStatus.COMPLETED },
+      });
+    } else if (attempt.status === ProjectAttemptStatus.SUBMITTED) {
+      await tx.projectAttempt.update({
+        where: { id: attempt.id },
+        data: { status: ProjectAttemptStatus.UNDER_REVIEW },
+      });
+    }
+    return row;
+  });
 
   await writeAuditLog({
     eventType: AuditEvent.PROJECT_ATTEMPT_AUTO_SCORED,
@@ -569,39 +577,42 @@ export async function manualGradeProjectAttempt(opts) {
       ? attempt.grade?.feedback ?? null
       : String(opts.feedback || "").trim() || null;
 
-  const grade = await db.projectAttemptGrade.upsert({
-    where: { attemptId: attempt.id },
-    create: {
-      attemptId: attempt.id,
-      assessmentId: assessment.id,
-      autoScore: computed.autoScore,
-      manualScore: computed.manualScore,
-      finalScore: computed.finalScore,
-      finalPercent: computed.finalPercent,
-      passFail: computed.passFail,
-      status: AttemptGradeStatus.GRADED,
-      feedback,
-      checkpointResults,
-      gradedByUserId: opts.actorUserId,
-      gradedAt: new Date(),
-      autoEvaluatedAt: attempt.grade?.autoEvaluatedAt ?? null,
-    },
-    update: {
-      autoScore: computed.autoScore,
-      manualScore: computed.manualScore,
-      finalScore: computed.finalScore,
-      finalPercent: computed.finalPercent,
-      passFail: computed.passFail,
-      status: AttemptGradeStatus.GRADED,
-      feedback,
-      gradedByUserId: opts.actorUserId,
-      gradedAt: new Date(),
-    },
-  });
+  const grade = await runInTx(db, async (tx) => {
+    const row = await tx.projectAttemptGrade.upsert({
+      where: { attemptId: attempt.id },
+      create: {
+        attemptId: attempt.id,
+        assessmentId: assessment.id,
+        autoScore: computed.autoScore,
+        manualScore: computed.manualScore,
+        finalScore: computed.finalScore,
+        finalPercent: computed.finalPercent,
+        passFail: computed.passFail,
+        status: AttemptGradeStatus.GRADED,
+        feedback,
+        checkpointResults,
+        gradedByUserId: opts.actorUserId,
+        gradedAt: new Date(),
+        autoEvaluatedAt: attempt.grade?.autoEvaluatedAt ?? null,
+      },
+      update: {
+        autoScore: computed.autoScore,
+        manualScore: computed.manualScore,
+        finalScore: computed.finalScore,
+        finalPercent: computed.finalPercent,
+        passFail: computed.passFail,
+        status: AttemptGradeStatus.GRADED,
+        feedback,
+        gradedByUserId: opts.actorUserId,
+        gradedAt: new Date(),
+      },
+    });
 
-  await db.projectAttempt.update({
-    where: { id: attempt.id },
-    data: { status: ProjectAttemptStatus.COMPLETED },
+    await tx.projectAttempt.update({
+      where: { id: attempt.id },
+      data: { status: ProjectAttemptStatus.COMPLETED },
+    });
+    return row;
   });
 
   await writeAuditLog({

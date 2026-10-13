@@ -3,6 +3,8 @@ import { Role } from "@prisma/client";
 import { getSessionUser, sessionActiveRole } from "@/lib/api/get-session-user";
 import { writeAuditLog, AuditEvent } from "@/lib/audit-log";
 import { prisma } from "@/lib/prisma";
+import { cachedRead } from "@/lib/server-cache";
+import { cachedJson } from "@/lib/api/cached-json";
 import { authorizeProjectOrgAdmin } from "@/lib/projects/workspace-access";
 import { authorizeProjectOrgRead } from "@/lib/projects/project-api-auth";
 import { ORG_PERMISSION } from "@/lib/projects/org-role-permissions";
@@ -51,22 +53,28 @@ export async function GET(request, context) {
   const canAdopt = auth.type === "platform" && !auth.readOnly;
 
   const [adoptedRows, catalogueRows, allItems] = await Promise.all([
-    prisma.projectOrgProcessFlowAdoption.findMany({
-      where: { projectId },
-      orderBy: [{ createdAt: "desc" }],
-      select: processFlowAdoptionSelect,
-    }),
-    prisma.projectOrgProcessFlow.findMany({
-      orderBy: [{ name: "asc" }, { createdAt: "asc" }],
-      select: processFlowSelect,
-    }),
-    prisma.projectOrgProcessFlowItem.findMany({
-      orderBy: [{ processFlowId: "asc" }, { stepNumber: "asc" }, { createdAt: "asc" }],
-      select: {
-        ...processFlowItemSelect,
-        processFlowId: true,
-      },
-    }),
+    cachedRead(`org-process-flow-adoptions:${projectId}:list`, ADOPTION_MODELS, () =>
+      prisma.projectOrgProcessFlowAdoption.findMany({
+        where: { projectId },
+        orderBy: [{ createdAt: "desc" }],
+        select: processFlowAdoptionSelect,
+      }),
+    ),
+    cachedRead("org-process-flows:catalogue:all", CATALOGUE_MODELS, () =>
+      prisma.projectOrgProcessFlow.findMany({
+        orderBy: [{ name: "asc" }, { createdAt: "asc" }],
+        select: processFlowSelect,
+      }),
+    ),
+    cachedRead("org-process-flows:items:all", CATALOGUE_ITEM_MODELS, () =>
+      prisma.projectOrgProcessFlowItem.findMany({
+        orderBy: [{ processFlowId: "asc" }, { stepNumber: "asc" }, { createdAt: "asc" }],
+        select: {
+          ...processFlowItemSelect,
+          processFlowId: true,
+        },
+      }),
+    ),
   ]);
 
   /** @type {Map<string, any[]>} */
@@ -85,11 +93,15 @@ export async function GET(request, context) {
       ? catalogueRows
       : catalogueRows.filter((row) => !row.code || allowedCodes.includes(row.code));
 
-  return NextResponse.json({
-    adopted: adoptedRows.map((row) => ({
-      ...serializeProjectOrgProcessFlowAdoption(row),
-      items: itemsByFlowId.get(row.processFlowId) || [],
-    })),
+  return cachedJson(request, {
+    adopted: adoptedRows.map((row) => {
+      const code = processCodeOfFlow(row.processFlow);
+      return {
+        ...serializeProjectOrgProcessFlowAdoption(row),
+        frozen: Boolean(allowedCodes && code && !allowedCodes.includes(code)),
+        items: itemsByFlowId.get(row.processFlowId) || [],
+      };
+    }),
     adoptedTotal: adoptedRows.length,
     catalogue: catalogueFiltered.map((row) => ({
       ...serializeCatalogueProcessFlow(row, adoptionByFlowId),
@@ -99,8 +111,17 @@ export async function GET(request, context) {
     canAdopt,
     restrictedByExaminer: allowedCodes != null,
     allowedProcessCodes: allowedCodes,
-  });
+  }, { revalidate: true });
 }
+
+const ADOPTION_MODELS = [
+  "ProjectOrgProcessFlowAdoption",
+  "ProjectOrgProcessFlow",
+  "ProjectOrgProcessFlowItem",
+  "Project:delete",
+];
+const CATALOGUE_MODELS = ["ProjectOrgProcessFlow", "ProjectOrgProcessFlowItem"];
+const CATALOGUE_ITEM_MODELS = ["ProjectOrgProcessFlow", "ProjectOrgProcessFlowItem", "ProjectOrgRole"];
 
 export async function POST(request, context) {
   const user = await getSessionUser();
@@ -153,8 +174,8 @@ export async function POST(request, context) {
   if (allowedCodes && processFlow.code && !allowedCodes.includes(processFlow.code)) {
     return NextResponse.json(
       {
-        error: "This process is not available for this project.",
-        fieldErrors: { processFlowId: "The examiner did not allow this process." },
+        error: "This process is not enabled for your programme or project.",
+        fieldErrors: { processFlowId: "Not enabled for your programme or project." },
       },
       { status: 400 },
     );

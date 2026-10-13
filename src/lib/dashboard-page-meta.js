@@ -36,6 +36,8 @@ export function getDashboardPageMeta(pathname, activeRole) {
     };
   if (pathname.includes("/assessment"))
     return { title: "Assessment scoring", subtitle: "Academic project" };
+  if (/^\/projects\/[^/]+\/processes\/?$/.test(pathname))
+    return { title: "Processes", subtitle: "Academic project" };
   if (pathname.includes("/participants"))
     return { title: "Participants", subtitle: "Academic project" };
   if (pathname.startsWith("/projects/") && pathname.includes("/results"))
@@ -114,6 +116,8 @@ export function getDashboardPageMeta(pathname, activeRole) {
     return { title: "Profile", subtitle: "Your account" };
   if (pathname.startsWith("/project-settings/process-flow"))
     return { title: "Process flow", subtitle: "Organisation process flows for student workspaces" };
+  if (pathname.startsWith("/project-settings/programme-processes"))
+    return { title: "Programme processes", subtitle: "Processes per programme and academic year" };
   if (pathname.startsWith("/project-settings/roles"))
     return { title: "Project roles", subtitle: "Organisation roles for student workspaces" };
   if (pathname.startsWith("/project-settings"))

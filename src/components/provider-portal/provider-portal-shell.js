@@ -1,7 +1,6 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
-import Image from "next/image";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import Avatar from "@mui/material/Avatar";
@@ -38,6 +37,7 @@ import {
 } from "@/lib/brand-ui";
 import { DASHBOARD_MAIN_INNER_CLASS } from "@/lib/dashboard-content-width";
 import { formatPortalDateTime, portalFetch } from "@/components/provider-portal/portal-fetch";
+import { BrandLogoImage } from "@/components/providers/site-branding-provider";
 
 export const PORTAL_NAV = [
   { href: "/provider-portal", label: "Assignments", subtitle: "Orders and work assigned to you", Icon: AssignmentRounded },
@@ -373,7 +373,7 @@ export function ProviderPortalShell({ children }) {
         <div className={BRAND_TRICOLOR_STRIPE_CLASS} aria-hidden />
         <div className="flex shrink-0 items-center gap-3 border-b border-(--border-subtle) bg-linear-to-r from-[color-mix(in_oklab,var(--brand-blue)_6%,var(--surface-sidebar))] to-(--surface-sidebar) px-4 py-4">
           <div className="relative h-10 w-10 shrink-0 overflow-hidden rounded-md bg-white">
-            <Image src="/assets/mubs.png" alt="MUBS logo" fill sizes="40px" className="object-contain" priority />
+            <BrandLogoImage  alt="MUBS logo" fill sizes="40px" className="object-contain" priority />
           </div>
           <div className="min-w-0">
             <p className="truncate text-base font-extrabold tracking-tight text-primary">Proc Learn</p>

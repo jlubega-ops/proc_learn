@@ -20,7 +20,7 @@ export default async function ProjectOrgAdminBudgetDetailPage({ params }) {
   const pathname = safeNextPath(
     h.get("x-pl-pathname") || `/projects/${id}/org-admin/budgets/${budgetId}`
   );
-  const ctx = await getProjectWorkspacePageContext(id, { pathname, requirePlatformOrgAdmin: true });
+  await getProjectWorkspacePageContext(id, { pathname, requirePlatformOrgAdmin: true });
 
   return (
     <div className={BRAND_PAGE_SHELL_CLASS}>
@@ -30,7 +30,6 @@ export default async function ProjectOrgAdminBudgetDetailPage({ params }) {
         budgetId={budgetId}
         listHref={`/projects/${id}/org-admin/budgets`}
         readOnly
-        allowClose={!ctx.readOnly}
       />
     </div>
   );

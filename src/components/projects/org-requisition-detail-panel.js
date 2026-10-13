@@ -31,6 +31,7 @@ import {
 } from "@/components/print/print-document";
 import { useToast } from "@/components/providers/toast-provider";
 import { decisionConfirmOptions, useConfirm } from "@/components/providers/confirm-provider";
+import { useDraftSync } from "@/hooks/use-draft-sync";
 import { notifyOrgTasksChanged } from "@/hooks/use-pending-task-counts";
 import {
   adminCenteredLoadingBoxSx,
@@ -600,6 +601,26 @@ export function OrgRequisitionDetailPanel({ projectId, requisitionId }) {
   const [shortlistIds, setShortlistIds] = useState(/** @type {string[]} */ ([]));
   const [shortlistConfirmed, setShortlistConfirmed] = useState(false);
   const [fieldErrors, setFieldErrors] = useState(/** @type {Record<string, string>} */ ({}));
+  const decisionDraft = useDraftSync(
+    `org:requisition:${requisitionId}:task:${pendingTask?.id || ""}:decision`,
+    { decision, comment, procurementMethod, form5PartII, shortlistIds },
+    (d) => {
+      if (typeof d.decision === "string") setDecision(d.decision);
+      if (typeof d.comment === "string") setComment(d.comment);
+      if (typeof d.procurementMethod === "string") setProcurementMethod(d.procurementMethod);
+      if (d.form5PartII && typeof d.form5PartII === "object") {
+        setForm5PartII((p) => ({ ...p, .../** @type {Record<string, string>} */ (d.form5PartII) }));
+      }
+      if (Array.isArray(d.shortlistIds)) {
+        const ids = /** @type {string[]} */ (d.shortlistIds);
+        if (ids.length !== shortlistIds.length || ids.some((id) => !shortlistIds.includes(id))) {
+          setShortlistIds(ids);
+          setShortlistConfirmed(false);
+        }
+      }
+    },
+    { enabled: Boolean(pendingTask?.id) && !loading },
+  );
   const providerWord = providerTerm(row?.category);
   const providerWordPlural = providerTerm(row?.category, { plural: true });
   const minShortlist = minRfqProviders(row?.isEmergency);
@@ -800,6 +821,7 @@ export function OrgRequisitionDetailPanel({ projectId, requisitionId }) {
             ? "Requisition approved. Pending method selection by Procurement Officer."
             : "Decision recorded.";
       showToast({ message: msg, severity: "success" });
+      decisionDraft.clearDraft();
       notifyOrgTasksChanged();
       await load();
     } finally {

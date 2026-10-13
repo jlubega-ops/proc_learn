@@ -1,7 +1,6 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
-import Link from "next/link";
 import Button from "@mui/material/Button";
 import Chip from "@mui/material/Chip";
 import CircularProgress from "@mui/material/CircularProgress";
@@ -13,17 +12,14 @@ import Tooltip from "@mui/material/Tooltip";
 import Box from "@mui/material/Box";
 import Alert from "@mui/material/Alert";
 import SaveRounded from "@mui/icons-material/SaveRounded";
-import LockRounded from "@mui/icons-material/LockRounded";
 import PushPinRounded from "@mui/icons-material/PushPinRounded";
-import LeaderboardRounded from "@mui/icons-material/LeaderboardRounded";
 import ToggleOnRounded from "@mui/icons-material/ToggleOnRounded";
 import ExpandMoreRounded from "@mui/icons-material/ExpandMoreRounded";
 import UnfoldMoreRounded from "@mui/icons-material/UnfoldMoreRounded";
 import UnfoldLessRounded from "@mui/icons-material/UnfoldLessRounded";
-import {
-  DashboardPageIntro,
-  BRAND_PAGE_SHELL_CLASS,
-} from "@/components/layout/dashboard-page-intro";
+import RuleRounded from "@mui/icons-material/RuleRounded";
+import { ProjectSectionBar } from "@/components/projects/project-section-bar";
+import { BRAND_PAGE_SHELL_CLASS } from "@/components/layout/dashboard-page-intro";
 import { BRAND_BTN_PRIMARY_CLASS, BRAND_CARD_CLASS, BRAND_SECTION_TITLE_CLASS } from "@/lib/brand-ui";
 import {
   adminCenteredLoadingBoxSx,
@@ -31,11 +27,10 @@ import {
   themedTextFieldSx,
 } from "@/lib/admin-mui-surfaces";
 import { useToast } from "@/components/providers/toast-provider";
+import { useAuthSession } from "@/components/providers/auth-session-provider";
 import { actionConfirmOptions, useConfirm } from "@/components/providers/confirm-provider";
-import {
-  processDisableBlockers,
-  requiredPrerequisiteCodes,
-} from "@/lib/academic/assessment-process-catalogue";
+import { useDraftSync } from "@/hooks/use-draft-sync";
+import { ROLE } from "@/lib/roles";
 import {
   SCORING_GROUP_LABELS,
   buildScoringTree,
@@ -43,8 +38,6 @@ import {
   scoringItemRowKey,
   scoringTreeToRows,
 } from "@/lib/academic/assessment-sections";
-import { processNeedsLabel } from "@/lib/projects/process-dependencies";
-const MUTED_CLASS = "text-xs text-zinc-500 dark:text-zinc-400";
 
 /**
  * Marks input that keeps the typed text while focused (so "2." survives) and commits on change.
@@ -93,6 +86,8 @@ function PinButton({ pinned, name, onUnpin }) {
 export function ExaminerAssessmentConfigPanel({ projectId }) {
   const { showToast } = useToast();
   const confirm = useConfirm();
+  const { session } = useAuthSession();
+  const canTeach = session?.activeRole === ROLE.EXAMINER;
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [project, setProject] = useState(/** @type {any} */ (null));
@@ -104,8 +99,22 @@ export function ExaminerAssessmentConfigPanel({ projectId }) {
     /** @type {Array<{ processCode: string; isAllowed: boolean; marks: number; marksPinned: boolean }>} */ ([]),
   );
   const [expanded, setExpanded] = useState(/** @type {Record<string, boolean>} */ ({}));
+  const [enabledProcessCodes, setEnabledProcessCodes] = useState(/** @type {string[]} */ ([]));
+  const [programmeCodes, setProgrammeCodes] = useState(/** @type {string[] | null} */ (null));
   /** @type {[Record<string, string>, Function]} */
   const [fieldErrors, setFieldErrors] = useState({});
+  const [loadedOnce, setLoadedOnce] = useState(false);
+
+  const scoringDraft = useDraftSync(
+    `assessment:config:${projectId}`,
+    { totalMarks, passMarkPercent, rows },
+    (d) => {
+      if (typeof d.totalMarks === "string") setTotalMarks(d.totalMarks);
+      if (typeof d.passMarkPercent === "string") setPassMarkPercent(d.passMarkPercent);
+      if (Array.isArray(d.rows)) setRows(/** @type {any} */ (d.rows));
+    },
+    { enabled: canTeach && loadedOnce },
+  );
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -128,7 +137,16 @@ export function ExaminerAssessmentConfigPanel({ projectId }) {
         setPassMarkPercent(String(a.passMarkPercent ?? 50));
         setScoringEnabled(a.scoringEnabled !== false);
         if (Array.isArray(a.sections)) setRows(scoringTreeToRows(a.sections));
+        setEnabledProcessCodes(
+          Array.isArray(a.effectiveProcessCodes)
+            ? a.effectiveProcessCodes
+            : Array.isArray(a.enabledProcessCodes)
+              ? a.enabledProcessCodes
+              : [],
+        );
+        setProgrammeCodes(Array.isArray(a.programmeProcessCodes) ? a.programmeProcessCodes : null);
       }
+      setLoadedOnce(true);
     } finally {
       setLoading(false);
     }
@@ -143,7 +161,7 @@ export function ExaminerAssessmentConfigPanel({ projectId }) {
     () => buildScoringTree(rows, Number.isFinite(total) && total > 0 ? total : 100),
     [rows, total],
   );
-  const allowedCodes = tree.sections.filter((s) => s.processCode && s.isAllowed).map((s) => s.key);
+  const availableCodes = new Set(enabledProcessCodes);
   const enabledSum =
     Math.round(tree.sections.filter((s) => s.isAllowed).reduce((s, x) => s + x.marks, 0) * 100) / 100;
 
@@ -154,12 +172,7 @@ export function ExaminerAssessmentConfigPanel({ projectId }) {
   function patchRow(code, patch) {
     setRows((prev) => {
       const base = scoringTreeToRows(buildScoringTree(prev, Number.isFinite(total) && total > 0 ? total : 100).sections);
-      let next = base.map((r) => (r.processCode === code ? { ...r, ...patch } : r));
-      if (patch.isAllowed === true && !code.includes(":")) {
-        const required = requiredPrerequisiteCodes(code);
-        next = next.map((r) => (required.includes(r.processCode) ? { ...r, isAllowed: true } : r));
-      }
-      return next;
+      return base.map((r) => (r.processCode === code ? { ...r, ...patch } : r));
     });
   }
 
@@ -200,6 +213,7 @@ export function ExaminerAssessmentConfigPanel({ projectId }) {
       }
       showToast({ message: "Scoring saved.", severity: "success" });
       await load();
+      scoringDraft.clearDraft();
     } finally {
       setSaving(false);
     }
@@ -257,60 +271,73 @@ export function ExaminerAssessmentConfigPanel({ projectId }) {
 
   return (
     <div className={BRAND_PAGE_SHELL_CLASS}>
-      <DashboardPageIntro hero title="Scoring" description="Marks for every piece of work in the organisation.">
-        <div className="mt-3 flex flex-wrap gap-2">
-          <Chip size="small" variant="outlined" color="primary" label={isPractice ? "Practice" : "Assessment"} />
-          <Chip
-            size="small"
-            color={scoringEnabled ? "success" : "warning"}
-            label={scoringEnabled ? "Scoring on" : "Scoring off"}
-          />
-          {showSetup ? (
-            <>
-              <Chip size="small" color="primary" label={`Out of ${formatMarks(shownTotal)}`} />
-              <Chip size="small" color="warning" label={`Pass at ${passMarkPercent}%`} />
-            </>
-          ) : null}
-        </div>
-        <div className="mt-4 flex flex-wrap gap-2">
-          {isPractice ? (
-            <Button
-              type="button"
-              variant={scoringEnabled ? "outlined" : "contained"}
-              color={scoringEnabled ? "warning" : "primary"}
-              disabled={saving}
-              className={`${scoringEnabled ? "" : BRAND_BTN_PRIMARY_CLASS} w-full cursor-pointer disabled:cursor-not-allowed sm:w-auto`}
-              onClick={() => void toggleScoring(!scoringEnabled)}
-              startIcon={<ToggleOnRounded />}
-            >
-              {scoringEnabled ? "Disable scoring" : "Enable scoring"}
-            </Button>
-          ) : null}
-          {showSetup ? (
-            <>
+      <ProjectSectionBar
+        icon={RuleRounded}
+        title="Scoring"
+        stats={
+          <>
+            <Chip
+              size="small"
+              color={scoringEnabled ? "success" : "warning"}
+              label={scoringEnabled ? "Scoring on" : "Scoring off"}
+            />
+            {!canTeach ? <Chip size="small" color="info" label="View only" /> : null}
+          </>
+        }
+        actions={
+          <>
+            {showSetup ? (
+              <>
+                <TextField
+                  label="Total marks"
+                  value={totalMarks}
+                  onChange={(e) => setTotalMarks(e.target.value.replace(/[^0-9]/g, ""))}
+                  error={Boolean(fieldErrors.totalMarks)}
+                  helperText={fieldErrors.totalMarks || undefined}
+                  disabled={!canTeach}
+                  sx={{ ...themedTextFieldSx, width: { xs: "calc(50% - 4px)", sm: 120 } }}
+                  inputProps={{ inputMode: "numeric", "aria-label": "Total marks" }}
+                />
+                <TextField
+                  label="Pass mark (%)"
+                  value={passMarkPercent}
+                  onChange={(e) => setPassMarkPercent(e.target.value.replace(/[^0-9]/g, ""))}
+                  error={Boolean(fieldErrors.passMarkPercent)}
+                  helperText={fieldErrors.passMarkPercent || undefined}
+                  disabled={!canTeach}
+                  sx={{ ...themedTextFieldSx, width: { xs: "calc(50% - 4px)", sm: 120 } }}
+                  inputProps={{ inputMode: "numeric", "aria-label": "Pass mark percent" }}
+                />
+              </>
+            ) : null}
+            {isPractice && canTeach ? (
+              <Button
+                type="button"
+                variant={scoringEnabled ? "outlined" : "contained"}
+                color={scoringEnabled ? "warning" : "primary"}
+                disabled={saving}
+                className={`${scoringEnabled ? "" : BRAND_BTN_PRIMARY_CLASS} cursor-pointer disabled:cursor-not-allowed`}
+                onClick={() => void toggleScoring(!scoringEnabled)}
+                startIcon={<ToggleOnRounded />}
+              >
+                {scoringEnabled ? "Disable" : "Enable scoring"}
+              </Button>
+            ) : null}
+            {showSetup && canTeach ? (
               <Button
                 type="button"
                 variant="contained"
                 disabled={saving}
-                className={`${BRAND_BTN_PRIMARY_CLASS} w-full cursor-pointer disabled:cursor-not-allowed sm:w-auto`}
+                className={`${BRAND_BTN_PRIMARY_CLASS} cursor-pointer disabled:cursor-not-allowed`}
                 onClick={() => void save()}
                 startIcon={saving ? <CircularProgress size={16} color="inherit" /> : <SaveRounded />}
               >
-                Save scoring
+                Save
               </Button>
-            </>
-          ) : null}
-          <Button
-            component={Link}
-            href={`/projects/${projectId}/results`}
-            variant="outlined"
-            className="w-full cursor-pointer sm:w-auto"
-            startIcon={<LeaderboardRounded />}
-          >
-            Results
-          </Button>
-        </div>
-      </DashboardPageIntro>
+            ) : null}
+          </>
+        }
+      />
 
       {!showSetup ? (
         <section className={`${BRAND_CARD_CLASS} p-4 sm:p-5`} role="status">
@@ -318,38 +345,6 @@ export function ExaminerAssessmentConfigPanel({ projectId }) {
         </section>
       ) : (
         <>
-          <section className={`${BRAND_CARD_CLASS} p-4 sm:p-5`} aria-labelledby="grading-scale">
-            <h2 id="grading-scale" className={BRAND_SECTION_TITLE_CLASS}>
-              Grading scale
-            </h2>
-            <div className="mt-4 flex flex-col gap-3 md:flex-row md:items-start">
-              <div className="w-full md:w-40">
-                <TextField
-                  label="Total marks"
-                  value={totalMarks}
-                  onChange={(e) => setTotalMarks(e.target.value.replace(/[^0-9]/g, ""))}
-                  error={Boolean(fieldErrors.totalMarks)}
-                  helperText={fieldErrors.totalMarks || " "}
-                  fullWidth
-                  sx={themedTextFieldSx}
-                  inputProps={{ inputMode: "numeric" }}
-                />
-              </div>
-              <div className="w-full md:w-40">
-                <TextField
-                  label="Pass mark (%)"
-                  value={passMarkPercent}
-                  onChange={(e) => setPassMarkPercent(e.target.value.replace(/[^0-9]/g, ""))}
-                  error={Boolean(fieldErrors.passMarkPercent)}
-                  helperText={fieldErrors.passMarkPercent || " "}
-                  fullWidth
-                  sx={themedTextFieldSx}
-                  inputProps={{ inputMode: "numeric" }}
-                />
-              </div>
-            </div>
-          </section>
-
           <section className={`${BRAND_CARD_CLASS} p-4 sm:p-5`} aria-labelledby="scoring-sections">
             <div className="flex flex-wrap items-center justify-between gap-2">
               <h2 id="scoring-sections" className={BRAND_SECTION_TITLE_CLASS}>
@@ -392,12 +387,13 @@ export function ExaminerAssessmentConfigPanel({ projectId }) {
                     </h3>
                     <ul className="divide-y divide-[color:var(--border-subtle)] rounded-lg border border-[color:var(--border-subtle)]">
                       {sections.map((section) => {
-                        const blockers =
-                          section.processCode && section.isAllowed
-                            ? processDisableBlockers(section.key, allowedCodes)
-                            : [];
-                        const locked = blockers.length > 0;
-                        const needs = section.processCode ? processNeedsLabel(section.key) : "";
+                        const available = !section.processCode || availableCodes.has(section.key);
+                        const programmeOff = Boolean(
+                          section.processCode && programmeCodes && !programmeCodes.includes(section.key),
+                        );
+                        const unavailableHint = programmeOff
+                          ? "Disabled for this programme and year"
+                          : "Enable it on the Processes tab to score it";
                         const open = Boolean(expanded[section.key]);
                         const enabledItems = section.items.filter((i) => i.isAllowed).length;
                         const sectionError = fieldErrors[`section.${section.key}`] || section.error;
@@ -420,22 +416,31 @@ export function ExaminerAssessmentConfigPanel({ projectId }) {
                               <div className="min-w-0">
                                 <div className="flex flex-wrap items-center gap-1.5">
                                   <span className="font-medium text-foreground">{section.name}</span>
-                                  <Chip
-                                    size="small"
-                                    variant="outlined"
-                                    color={section.isAllowed ? "primary" : "warning"}
-                                    label={section.isAllowed ? `${enabledItems}/${section.items.length} items` : "Off"}
-                                  />
+                                  {available ? (
+                                    <Chip
+                                      size="small"
+                                      variant="outlined"
+                                      color={section.isAllowed ? "primary" : "warning"}
+                                      label={
+                                        section.isAllowed
+                                          ? `${enabledItems}/${section.items.length} items`
+                                          : "Not scored"
+                                      }
+                                    />
+                                  ) : (
+                                    <Tooltip title={unavailableHint}>
+                                      <Chip
+                                        size="small"
+                                        color="error"
+                                        variant="outlined"
+                                        label={programmeOff ? "Off for programme" : "Not available"}
+                                      />
+                                    </Tooltip>
+                                  )}
                                   {section.isAllowed && section.marks === 0 ? (
                                     <Chip size="small" color="warning" label="No marks" />
                                   ) : null}
-                                  {locked ? (
-                                    <Tooltip title={blockers.join(" ")}>
-                                      <LockRounded fontSize="small" color="warning" aria-label={blockers[0]} />
-                                    </Tooltip>
-                                  ) : null}
                                 </div>
-                                {needs ? <p className={MUTED_CLASS}>Needs {needs}</p> : null}
                                 {sectionError ? <p className="text-xs text-brand-red">{sectionError}</p> : null}
                               </div>
                               <div className="col-span-3 row-start-2 sm:col-span-1 sm:row-start-auto">
@@ -456,19 +461,17 @@ export function ExaminerAssessmentConfigPanel({ projectId }) {
                                 />
                                 <Tooltip
                                   title={
-                                    locked
-                                      ? blockers[0]
+                                    !available
+                                      ? unavailableHint
                                       : section.isAllowed
-                                        ? section.processCode
-                                          ? `Turn off ${section.name} for this project`
-                                          : `Stop scoring ${section.name}`
-                                        : `Turn on ${section.name}`
+                                        ? `Stop scoring ${section.name} (stays available to students)`
+                                        : `Score ${section.name}`
                                   }
                                 >
                                   <span>
                                     <Switch
                                       checked={section.isAllowed}
-                                      disabled={locked}
+                                      disabled={!available || !canTeach}
                                       color="success"
                                       onChange={(e) =>
                                         patchRow(section.key, {
@@ -476,7 +479,7 @@ export function ExaminerAssessmentConfigPanel({ projectId }) {
                                           marksPinned: e.target.checked ? section.marksPinned : false,
                                         })
                                       }
-                                      inputProps={{ "aria-label": `Turn on ${section.name}` }}
+                                      inputProps={{ "aria-label": `Score ${section.name}` }}
                                     />
                                   </span>
                                 </Tooltip>

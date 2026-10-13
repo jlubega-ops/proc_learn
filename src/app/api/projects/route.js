@@ -3,6 +3,7 @@ import { Role } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { getSessionUser, sessionActiveRole } from "@/lib/api/get-session-user";
 import { AuditEvent, writeAuditLog } from "@/lib/audit-log";
+import { runInTx } from "@/lib/db-tx";
 import { validateProjectCreateInput } from "@/lib/validation/project";
 import { generateUniqueProjectCode } from "@/lib/projects/project-identity";
 import {
@@ -10,6 +11,7 @@ import {
   studentVisibleAcademicProjectWhere,
 } from "@/lib/academic/student-project-eligibility";
 import { notifyStudentsProjectAvailable } from "@/lib/academic/student-academic-notifications";
+import { academicQuestionFields } from "@/lib/academic/project-attempts";
 
 export const runtime = "nodejs";
 
@@ -206,6 +208,9 @@ export async function GET(request) {
     activeRole === Role.STUDENT
       ? rows.map((row) => ({
           ...row,
+          ...(row.creatorRole === Role.EXAMINER
+            ? academicQuestionFields(row, Boolean(row.enrollments?.length))
+            : {}),
           hasEnrollmentKey: Boolean(row.enrollmentKey),
           enrollmentKey: null,
         }))
@@ -228,11 +233,14 @@ export async function POST(request) {
   }
 
   const activeRole = sessionActiveRole(user) || Role.STUDENT;
-  if (![Role.STUDENT, Role.EXAMINER, Role.SYSTEM_ADMIN].includes(activeRole)) {
-    return NextResponse.json({ error: "Forbidden." }, { status: 403 });
+  if (![Role.STUDENT, Role.EXAMINER].includes(activeRole)) {
+    return NextResponse.json(
+      { error: "Only examiners and students can create projects." },
+      { status: 403 },
+    );
   }
 
-  const creatorRole = activeRole === Role.SYSTEM_ADMIN ? Role.EXAMINER : activeRole;
+  const creatorRole = activeRole;
 
   let body;
   try {
@@ -276,58 +284,58 @@ export async function POST(request) {
 
   const projectCode = await generateUniqueProjectCode(prisma);
 
-  const row = await prisma.project.create({
-    data: {
-      ownerUserId: user.id,
-      creatorRole,
-      projectCode,
-      name: data.name,
-      description: data.description,
-      organizationName: data.organizationName,
-      purpose: data.purpose,
-      status: "NOT_STARTED",
-      visibility: activeRole === Role.STUDENT ? data.visibility : "PUBLIC",
-      instructions: data.instructions,
-      questionText: data.questionText,
-      questionFileUrl: data.questionFileUrl,
-      enrollmentKey: [Role.EXAMINER, Role.SYSTEM_ADMIN].includes(activeRole)
-        ? data.enrollmentAccessKey
-        : null,
-      isPublished: activeRole === Role.STUDENT ? true : data.isPublished,
-      openAt: data.openAt,
-      closeAt: data.closeAt,
-      durationSeconds: data.durationSeconds,
-      maxAttempts: data.maxAttempts,
-      allowEditAfterSubmit: Boolean(data.allowEditAfterSubmit),
-      requiresEnrollment: [Role.EXAMINER, Role.SYSTEM_ADMIN].includes(activeRole),
-      isPersonalOrg: false,
-      isAttemptOrg: false,
-      academicYearId: [Role.EXAMINER, Role.SYSTEM_ADMIN].includes(activeRole)
-        ? data.academicYearId
-        : null,
-      programmeId: [Role.EXAMINER, Role.SYSTEM_ADMIN].includes(activeRole)
-        ? data.programmeId
-        : null,
-      ...(data.campuses.length
-        ? { campuses: { create: data.campuses.map((campus) => ({ campus })) } }
-        : {}),
-    },
+  const isStaffProject = [Role.EXAMINER, Role.SYSTEM_ADMIN].includes(activeRole);
+  const { getOrCreateProjectAssessment } = await import("@/lib/academic/assessment-evaluate");
+  const row = await runInTx(prisma, async (tx) => {
+    const created = await tx.project.create({
+      data: {
+        ownerUserId: user.id,
+        creatorRole,
+        projectCode,
+        name: data.name,
+        description: data.description,
+        organizationName: data.organizationName,
+        purpose: data.purpose,
+        status: "NOT_STARTED",
+        visibility: activeRole === Role.STUDENT ? data.visibility : "PUBLIC",
+        instructions: data.instructions,
+        questionText: data.questionText,
+        questionFileUrl: data.questionFileUrl,
+        enrollmentKey: [Role.EXAMINER, Role.SYSTEM_ADMIN].includes(activeRole)
+          ? data.enrollmentAccessKey
+          : null,
+        isPublished: activeRole === Role.STUDENT ? true : data.isPublished,
+        openAt: data.openAt,
+        closeAt: data.closeAt,
+        durationSeconds: data.durationSeconds,
+        maxAttempts: data.maxAttempts,
+        allowEditAfterSubmit: Boolean(data.allowEditAfterSubmit),
+        requiresEnrollment: [Role.EXAMINER, Role.SYSTEM_ADMIN].includes(activeRole),
+        isPersonalOrg: false,
+        isAttemptOrg: false,
+        academicYearId: [Role.EXAMINER, Role.SYSTEM_ADMIN].includes(activeRole)
+          ? data.academicYearId
+          : null,
+        programmeId: [Role.EXAMINER, Role.SYSTEM_ADMIN].includes(activeRole)
+          ? data.programmeId
+          : null,
+        ...(data.campuses.length
+          ? { campuses: { create: data.campuses.map((campus) => ({ campus })) } }
+          : {}),
+      },
+    });
+    if (isStaffProject) {
+      await getOrCreateProjectAssessment(tx, {
+        projectId: created.id,
+        createIfMissing: true,
+        scoringEnabled: created.purpose === "ASSESSMENT",
+      });
+    }
+    return created;
   });
 
-  if ([Role.EXAMINER, Role.SYSTEM_ADMIN].includes(activeRole)) {
-    try {
-      const { getOrCreateProjectAssessment } = await import("@/lib/academic/assessment-evaluate");
-      await getOrCreateProjectAssessment(prisma, {
-        projectId: row.id,
-        createIfMissing: true,
-        scoringEnabled: row.purpose === "ASSESSMENT",
-      });
-    } catch {
-      /* scoring seed is non-blocking */
-    }
-    if (row.isPublished) {
-      await notifyStudentsProjectAvailable(row.id).catch(() => 0);
-    }
+  if (isStaffProject && row.isPublished) {
+    await notifyStudentsProjectAvailable(row.id).catch(() => 0);
   }
 
   await writeAuditLog({

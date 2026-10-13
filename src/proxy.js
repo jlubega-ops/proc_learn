@@ -16,6 +16,15 @@ import {
   attemptLockedMessage,
   loadAttemptWorkspaceState,
 } from "@/lib/academic/attempt-workspace";
+import {
+  apiPrefixAllowed,
+  orgUserPageAllowed,
+  platformPageAccess,
+  providerPageAllowed,
+} from "@/lib/auth/route-policy";
+import { UserAccountStatus } from "@prisma/client";
+import { isSessionVersionCurrent } from "@/lib/auth/session-version";
+import { sanitizeActiveRole } from "@/lib/roles";
 
 const READ_METHODS = new Set(["GET", "HEAD", "OPTIONS"]);
 const PROJECT_API_RE = /^\/api\/projects\/([0-9a-f-]{36})(?:\/(.*))?$/i;
@@ -42,6 +51,7 @@ function isMaintenanceOpenPath(pathname) {
   return (
     matchesPath(pathname, "/maintenance") ||
     pathname === "/api/site/status" ||
+    pathname.startsWith("/api/site/branding/") ||
     pathname === "/api/auth/logout" ||
     pathname === "/api/provider-portal/logout"
   );
@@ -139,8 +149,122 @@ async function blockLockedAttemptWrite(request, pathname) {
       { status: 403, headers: { "Cache-Control": "no-store" } },
     );
   } catch {
-    return null;
+    return NextResponse.json(
+      { error: "Could not verify this workspace. Please try again." },
+      { status: 503, headers: { "Cache-Control": "no-store" } },
+    );
   }
+}
+
+/**
+ * Who is calling: session kind plus ACTIVE role (platform) or project (org user).
+ * `revoked` = platform session of a suspended / deleted user or one replaced by a newer sign-in.
+ * @param {any} session unsealed session data
+ * @returns {Promise<{ kind: 'user' | 'org' | 'provider' | 'revoked' | 'none'; activeRole?: string | null; projectId?: string | null }>}
+ */
+async function resolveCaller(session) {
+  if (!session || typeof session !== "object") return { kind: "none" };
+  if (session.orgUserId) {
+    const orgUser = await prisma.projectOrgUser.findUnique({
+      where: { id: String(session.orgUserId) },
+      select: { projectId: true },
+    });
+    return { kind: "org", projectId: orgUser?.projectId || null };
+  }
+  if (session.userId) {
+    const user = await prisma.user.findUnique({
+      where: { id: String(session.userId) },
+      select: {
+        accountStatus: true,
+        sessionVersion: true,
+        settings: { select: { activeRole: true } },
+        userRoles: { select: { role: true } },
+      },
+    });
+    if (
+      !user ||
+      user.accountStatus === UserAccountStatus.SUSPENDED ||
+      !isSessionVersionCurrent(session, user)
+    ) {
+      return { kind: "revoked" };
+    }
+    const granted = user.userRoles.map((r) => r.role);
+    return {
+      kind: "user",
+      activeRole: sanitizeActiveRole(granted, String(user.settings?.activeRole || "")),
+    };
+  }
+  if (session.providerId) return { kind: "provider" };
+  return { kind: "none" };
+}
+
+/**
+ * @param {import("next/server").NextRequest} request
+ * @param {string} pathname
+ */
+function redirectTo(request, pathname) {
+  const url = request.nextUrl.clone();
+  url.pathname = pathname;
+  url.search = "";
+  return NextResponse.redirect(url);
+}
+
+/** @param {NextResponse} response */
+function clearSessionCookie(response) {
+  response.cookies.delete(SESSION_COOKIE_NAME);
+  response.headers.set("Clear-Site-Data", '"cache"');
+  return response;
+}
+
+/**
+ * Page URL gate by session kind + ACTIVE role (see `src/lib/auth/route-policy.js`).
+ * @param {import("next/server").NextRequest} request
+ * @param {string} pathname
+ */
+async function blockDisallowedPage(request, pathname) {
+  const caller = await resolveCaller(await readSessionData(request));
+  if (caller.kind === "revoked") {
+    const url = request.nextUrl.clone();
+    url.pathname = "/login";
+    url.search = "";
+    url.searchParams.set("reason", "session_ended");
+    return clearSessionCookie(NextResponse.redirect(url));
+  }
+  if (caller.kind === "provider") {
+    return providerPageAllowed(pathname) ? null : redirectTo(request, "/provider-portal");
+  }
+  if (caller.kind === "org") {
+    if (orgUserPageAllowed(pathname, caller.projectId)) return null;
+    return caller.projectId ? redirectTo(request, `/projects/${caller.projectId}`) : null;
+  }
+  if (caller.kind === "user") {
+    if (providerPageAllowed(pathname)) return redirectTo(request, "/");
+    return platformPageAccess(pathname, caller.activeRole).allowed ? null : redirectTo(request, "/");
+  }
+  return null;
+}
+
+/**
+ * API gate by session kind only — handlers still authorize roles / org permissions.
+ * @param {import("next/server").NextRequest} request
+ * @param {string} pathname
+ */
+async function blockDisallowedApi(request, pathname) {
+  const caller = await resolveCaller(await readSessionData(request));
+  if (caller.kind === "revoked") {
+    if (pathname.startsWith("/api/auth/") || pathname === "/api/provider-portal/login") return null;
+    return clearSessionCookie(
+      NextResponse.json(
+        { error: "Your session has ended. Sign in again.", code: "SESSION_ENDED" },
+        { status: 401, headers: { "Cache-Control": "no-store" } },
+      ),
+    );
+  }
+  if (apiPrefixAllowed(pathname, caller)) return null;
+  return NextResponse.json(
+    { error: "Not found." },
+    { status: 404, headers: { "Cache-Control": "no-store" } },
+  );
 }
 
 /** Next.js 16+ request interception (replaces deprecated `middleware`). */
@@ -154,6 +278,8 @@ export async function proxy(request) {
   }
 
   if (isApi) {
+    const denied = await blockDisallowedApi(request, pathname);
+    if (denied) return denied;
     const locked = await blockLockedAttemptWrite(request, pathname);
     return locked || NextResponse.next();
   }
@@ -173,6 +299,9 @@ export async function proxy(request) {
     url.searchParams.set("next", next);
     return NextResponse.redirect(url);
   }
+
+  const pageDenied = await blockDisallowedPage(request, pathname);
+  if (pageDenied) return pageDenied;
 
   return NextResponse.next({
     request: { headers: requestHeaders },

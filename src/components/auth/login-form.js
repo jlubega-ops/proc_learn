@@ -1,6 +1,5 @@
 "use client";
 
-import Image from "next/image";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
@@ -28,6 +27,7 @@ import {
 } from "@/lib/auth/client-sign-out";
 import { useToast } from "@/components/providers/toast-provider";
 import { validateLoginFields } from "@/lib/validation/login";
+import { BrandLogoImage } from "@/components/providers/site-branding-provider";
 
 /** Turn API / lowercased strings into readable toast sentences. */
 function copyForToast(raw) {
@@ -83,13 +83,18 @@ const OAUTH_ERROR_HINTS = {
     "That account is suspended. Contact support if you think this is a mistake.",
 };
 
+const SIGNED_OUT_MESSAGES = {
+  idle: "You were signed out after a period of inactivity. Please sign in again.",
+  session_ended: "You were signed out because your account was used on another device or suspended.",
+};
+
 /**
- * @param {{ initialNext?: string; oauthError?: string }} props
+ * @param {{ initialNext?: string; oauthError?: string; signedOutReason?: string }} props
  */
 export function LoginForm({
   initialNext = DEFAULT_POST_AUTH_PATH,
   oauthError = "",
-  idleLogout = false,
+  signedOutReason = "",
 }) {
   const router = useRouter();
   const { refresh } = useAuthSession();
@@ -128,18 +133,14 @@ export function LoginForm({
   }, [showToast]);
 
   useEffect(() => {
-    if (!idleLogout) return;
+    const message = SIGNED_OUT_MESSAGES[signedOutReason];
+    if (!message) return;
     if (typeof window === "undefined") return;
-    const dedupeKey = "pl_idle_logout_toast";
+    const dedupeKey = `pl_signed_out_toast_${signedOutReason}`;
     if (window.sessionStorage.getItem(dedupeKey)) return;
     window.sessionStorage.setItem(dedupeKey, "1");
-    showToast({
-      message:
-        "You were signed out after a period of inactivity. Please sign in again.",
-      severity: "error",
-      duration: 8000,
-    });
-  }, [idleLogout, showToast]);
+    showToast({ message, severity: "error", duration: 8000 });
+  }, [signedOutReason, showToast]);
 
   useEffect(() => {
     if (!oauthError) return;
@@ -248,8 +249,7 @@ export function LoginForm({
           <div className="px-4 py-3 sm:px-5 sm:py-4">
             <div className="mb-3 flex flex-col items-center text-center">
               <div className="relative mb-2 h-14 w-14 shrink-0 sm:h-16 sm:w-16">
-                <Image
-                  src="/assets/mubs.png"
+                <BrandLogoImage
                   alt={`${ORG_NAME} logo`}
                   fill
                   sizes="64px"

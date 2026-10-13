@@ -68,7 +68,7 @@ export async function PATCH(request, context) {
       const allowedCodes = await resolveAllowedProcessCodesForOrgProject(prisma, projectId);
       if (allowedCodes && !allowedCodes.includes(code)) {
         return NextResponse.json(
-          { error: "This process is not available for this project." },
+          { error: "This process is not enabled for your programme or project." },
           { status: 400 },
         );
       }

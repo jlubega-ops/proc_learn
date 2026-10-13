@@ -391,6 +391,8 @@ model User {
   lastLoginAt        DateTime?         @map("last_login_at")
   /// Students must set a personal password after first sign-in (default password is student number).
   mustChangePassword Boolean           @default(false) @map("must_change_password")
+  /// Bumped on every sign-in / suspension / password change; sessions carrying an older value are signed out.
+  sessionVersion     Int               @default(0) @map("session_version")
 
   createdAt DateTime @default(now()) @map("created_at")
   updatedAt DateTime @updatedAt @map("updated_at")
@@ -421,18 +423,24 @@ model UserRole {
 }
 
 model UserSettings {
-  id                 String   @id @default(uuid())
-  userId             String   @unique @map("user_id") @db.VarChar(36)
-  user               User     @relation(fields: [userId], references: [id], onDelete: Cascade)
-  theme              String   @default("light") @db.VarChar(16)
-  activeRole         Role     @default(STUDENT) @map("active_role")
+  id                     String     @id @default(uuid())
+  userId                 String     @unique @map("user_id") @db.VarChar(36)
+  user                   User       @relation(fields: [userId], references: [id], onDelete: Cascade)
+  theme                  String     @default("light") @db.VarChar(16)
+  activeRole             Role       @default(STUDENT) @map("active_role")
   /// Student's current organisation shell: personal org or a per-attempt workspace.
-  activeOrgProjectId String?  @map("active_org_project_id") @db.VarChar(36)
-  activeOrgProject   Project? @relation("UserActiveOrg", fields: [activeOrgProjectId], references: [id], onDelete: SetNull)
-  createdAt          DateTime @default(now()) @map("created_at")
-  updatedAt          DateTime @updatedAt @map("updated_at")
+  activeOrgProjectId     String?    @map("active_org_project_id") @db.VarChar(36)
+  activeOrgProject       Project?   @relation("UserActiveOrg", fields: [activeOrgProjectId], references: [id], onDelete: SetNull)
+  /// Staff Student Mode only (no StudentProfile): programme whose projects they follow.
+  studentViewProgrammeId String?    @map("student_view_programme_id")
+  studentViewProgramme   Programme? @relation("StudentViewProgramme", fields: [studentViewProgrammeId], references: [id], onDelete: SetNull)
+  /// Staff Student Mode campus. Null = all campuses.
+  studentViewCampus      Campus?    @map("student_view_campus")
+  createdAt              DateTime   @default(now()) @map("created_at")
+  updatedAt              DateTime   @updatedAt @map("updated_at")
 
   @@index([activeOrgProjectId])
+  @@index([studentViewProgrammeId])
   @@map("user_settings")
 }
 
@@ -446,11 +454,32 @@ model Programme {
   createdAt          DateTime @default(now()) @map("created_at")
   updatedAt          DateTime @updatedAt @map("updated_at")
 
-  students StudentProfile[]
-  courses  Course[]
-  projects Project[]
+  students            StudentProfile[]
+  courses             Course[]
+  projects            Project[]
+  studentViewSettings UserSettings[]         @relation("StudentViewProgramme")
+  processSettings     ProgrammeYearProcess[]
 
   @@map("programme")
+}
+
+/// Process switches per programme × academic year. No row = enabled (all processes are on by default).
+model ProgrammeYearProcess {
+  id              String       @id @default(uuid())
+  programmeId     String       @map("programme_id")
+  programme       Programme    @relation(fields: [programmeId], references: [id], onDelete: Cascade)
+  academicYearId  String       @map("academic_year_id")
+  academicYear    AcademicYear @relation(fields: [academicYearId], references: [id], onDelete: Cascade)
+  /// Engine process code (e.g. BUDGETING).
+  processCode     String       @map("process_code") @db.VarChar(64)
+  isEnabled       Boolean      @default(true) @map("is_enabled")
+  updatedByUserId String?      @map("updated_by_user_id")
+  createdAt       DateTime     @default(now()) @map("created_at")
+  updatedAt       DateTime     @updatedAt @map("updated_at")
+
+  @@unique([programmeId, academicYearId, processCode])
+  @@index([academicYearId, programmeId])
+  @@map("programme_year_process")
 }
 
 /// University academic year (e.g. 2025/2026). Distinct from org simulation financial years.
@@ -466,9 +495,10 @@ model AcademicYear {
   createdAt   DateTime @default(now()) @map("created_at")
   updatedAt   DateTime @updatedAt @map("updated_at")
 
-  enrollments StudentAcademicEnrollment[]
-  orgSlates   OrgAcademicSlate[]
-  projects    Project[]
+  enrollments      StudentAcademicEnrollment[]
+  orgSlates        OrgAcademicSlate[]
+  projects         Project[]
+  programmeProcess ProgrammeYearProcess[]
 
   @@index([isCurrent])
   @@map("academic_year")
@@ -588,12 +618,19 @@ model AuditLog {
   actorUserId  String?  @map("actor_user_id") @db.VarChar(36)
   targetUserId String?  @map("target_user_id") @db.VarChar(36)
   eventType    String   @map("event_type") @db.VarChar(64)
+  /// Copy of `meta.projectId` for organisation events, so per-organisation history is an index lookup.
+  projectId    String?  @map("project_id") @db.VarChar(36)
   ip           String?  @db.VarChar(64)
   userAgent    String?  @map("user_agent") @db.VarChar(512)
   meta         Json?
   createdAt    DateTime @default(now()) @map("created_at")
 
   @@index([eventType, createdAt])
+  @@index([projectId, createdAt])
+  @@index([projectId, eventType, createdAt])
+  @@index([actorUserId, createdAt])
+  @@index([targetUserId, createdAt])
+  @@index([createdAt])
   @@map("audit_log")
 }
 
@@ -605,6 +642,12 @@ model SiteSetting {
   maintenanceStartedAt   DateTime? @map("maintenance_started_at")
   /// Secret path segment for the admin sign-in link while maintenance is on.
   maintenanceBypassToken String?   @map("maintenance_bypass_token") @db.VarChar(128)
+  /// Uploaded site logo (also the favicon) under PROC_LEARN_UPLOAD_ROOT; null = bundled default.
+  logoStorageKey         String?   @map("logo_storage_key") @db.VarChar(255)
+  logoMimeType           String?   @map("logo_mime_type") @db.VarChar(64)
+  /// Uploaded sign-in background image; null = bundled default.
+  backgroundStorageKey   String?   @map("background_storage_key") @db.VarChar(255)
+  backgroundMimeType     String?   @map("background_mime_type") @db.VarChar(64)
   updatedByUserId        String?   @map("updated_by_user_id") @db.VarChar(36)
   createdAt              DateTime  @default(now()) @map("created_at")
   updatedAt              DateTime  @updatedAt @map("updated_at")
@@ -816,24 +859,27 @@ model ProjectAttempt {
 /// Assessment configuration for an Academic Project (Practice or Assessment purpose).
 /// Observes the real procurement domain — does not duplicate workflow rules.
 model ProjectAssessment {
-  id              String                @id @default(uuid())
-  projectId       String                @unique @map("project_id")
-  project         Project               @relation(fields: [projectId], references: [id], onDelete: Cascade)
-  gradingMode     AssessmentGradingMode @default(AUTOMATIC) @map("grading_mode")
+  id                  String                @id @default(uuid())
+  projectId           String                @unique @map("project_id")
+  project             Project               @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  gradingMode         AssessmentGradingMode @default(AUTOMATIC) @map("grading_mode")
   /// Examiner-entered marks cap (0 for AUTOMATIC). Auto cap = sum of active checkpoint marks.
-  manualMaxMarks  Int                   @default(0) @map("manual_max_marks")
+  manualMaxMarks      Int                   @default(0) @map("manual_max_marks")
   /// Pass when finalPercent >= this value (default 50).
-  passMarkPercent Int                   @default(50) @map("pass_mark_percent")
+  passMarkPercent     Int                   @default(50) @map("pass_mark_percent")
   /// Total grade this project is scored out of. Allowed processes share this total.
-  totalMarks      Int                   @default(100) @map("total_marks")
+  totalMarks          Int                   @default(100) @map("total_marks")
   /// When false, Practice projects skip scoring UI/eval (Assessment defaults to true).
-  scoringEnabled  Boolean               @default(true) @map("scoring_enabled")
+  scoringEnabled      Boolean               @default(true) @map("scoring_enabled")
   /// When true, students may see their final score and feedback.
-  resultsReleased Boolean               @default(false) @map("results_released")
+  resultsReleased     Boolean               @default(false) @map("results_released")
   /// What released results show students: score only, or the full section/item breakdown.
-  resultsView     AssessmentResultsView @default(SUMMARY) @map("results_view")
-  createdAt       DateTime              @default(now()) @map("created_at")
-  updatedAt       DateTime              @updatedAt @map("updated_at")
+  resultsView         AssessmentResultsView @default(SUMMARY) @map("results_view")
+  /// Engine process codes students may run in this project (Processes tab). Null = legacy:
+  /// derived from the process sections switched on in scoring.
+  enabledProcessCodes Json?                 @map("enabled_process_codes")
+  createdAt           DateTime              @default(now()) @map("created_at")
+  updatedAt           DateTime              @updatedAt @map("updated_at")
 
   checkpoints AssessmentCheckpoint[]
   processes   AssessmentProcess[]
@@ -1616,24 +1662,24 @@ model ProjectOrgProcurementRecommendation {
 }
 
 model ProjectOrgSolicitation {
-  id               String                @id @default(uuid())
-  projectId        String                @map("project_id")
-  procurementId    String                @map("procurement_id")
-  procurement      ProjectOrgProcurement @relation(fields: [procurementId], references: [id], onDelete: Cascade)
-  solicitationType OrgSolicitationType   @map("solicitation_type")
-  title            String                @db.VarChar(255)
-  status           OrgSolicitationStatus @default(DRAFT)
+  id                  String                @id @default(uuid())
+  projectId           String                @map("project_id")
+  procurementId       String                @map("procurement_id")
+  procurement         ProjectOrgProcurement @relation(fields: [procurementId], references: [id], onDelete: Cascade)
+  solicitationType    OrgSolicitationType   @map("solicitation_type")
+  title               String                @db.VarChar(255)
+  status              OrgSolicitationStatus @default(DRAFT)
   /// Educational bid / RFQ document filled in-app.
-  bidDocument      Json?                 @map("bid_document")
-  bidDocumentAt    DateTime?             @map("bid_document_at")
-  issueDate        DateTime?             @map("issue_date")
-  closingDate      DateTime?             @map("closing_date")
+  bidDocument         Json?                 @map("bid_document")
+  bidDocumentAt       DateTime?             @map("bid_document_at")
+  issueDate           DateTime?             @map("issue_date")
+  closingDate         DateTime?             @map("closing_date")
   /// Advertised deadline before submissions were closed early; default for a reopen.
-  originalClosingDate DateTime?          @map("original_closing_date")
-  openedAt         DateTime?             @map("opened_at")
-  closedAt         DateTime?             @map("closed_at")
-  createdAt        DateTime              @default(now()) @map("created_at")
-  updatedAt        DateTime              @updatedAt @map("updated_at")
+  originalClosingDate DateTime?             @map("original_closing_date")
+  openedAt            DateTime?             @map("opened_at")
+  closedAt            DateTime?             @map("closed_at")
+  createdAt           DateTime              @default(now()) @map("created_at")
+  updatedAt           DateTime              @updatedAt @map("updated_at")
 
   invites ProjectOrgSolicitationInvite[]
   offers  ProjectOrgOffer[]

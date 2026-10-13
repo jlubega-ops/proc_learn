@@ -6,10 +6,17 @@ import { prisma } from "@/lib/prisma";
 import { authorizeProjectOrgAdmin } from "@/lib/projects/workspace-access";
 import {
   deactivateOtherProjectFinancialYears,
+  financialYearOverlapResponse,
   financialYearSelect,
+  findOverlappingFinancialYear,
   serializeProjectOrgFinancialYear,
 } from "@/lib/projects/org-financial-years";
 import { validateProjectOrgFinancialYearPatch } from "@/lib/validation/project-org-financial-year";
+import {
+  IN_USE_MESSAGE,
+  financialYearDeleteBlocker,
+  isForeignKeyViolation,
+} from "@/lib/projects/delete-guards";
 
 export const runtime = "nodejs";
 
@@ -88,6 +95,17 @@ export async function PATCH(request, context) {
     }
   }
 
+  if (validated.data.startDate instanceof Date && validated.data.endDate instanceof Date) {
+    const overlap = await findOverlappingFinancialYear(prisma, projectId, {
+      startDate: validated.data.startDate,
+      endDate: validated.data.endDate,
+      excludeId: financialYearId,
+    });
+    if (overlap) {
+      return NextResponse.json(financialYearOverlapResponse(overlap), { status: 400 });
+    }
+  }
+
   const row = await prisma.$transaction(async (tx) => {
     if (validated.data.isActive === true) {
       await deactivateOtherProjectFinancialYears(tx, projectId, financialYearId);
@@ -138,17 +156,15 @@ export async function DELETE(_request, context) {
   });
   if (!existing) return NextResponse.json({ error: "Not found." }, { status: 404 });
 
-  const linkedPeriods = await prisma.projectOrgPlanningPeriod.count({
-    where: { projectId, financialYearId },
-  });
-  if (linkedPeriods > 0) {
-    return NextResponse.json(
-      { error: "Remove or reassign planning periods linked to this financial year before deleting it." },
-      { status: 400 },
-    );
-  }
+  const blocker = await financialYearDeleteBlocker(prisma, projectId, financialYearId);
+  if (blocker) return NextResponse.json({ error: blocker }, { status: 409 });
 
-  await prisma.projectOrgFinancialYear.delete({ where: { id: financialYearId } });
+  try {
+    await prisma.projectOrgFinancialYear.delete({ where: { id: financialYearId } });
+  } catch (e) {
+    if (isForeignKeyViolation(e)) return NextResponse.json({ error: IN_USE_MESSAGE }, { status: 409 });
+    throw e;
+  }
 
   await writeAuditLog({
     eventType: AuditEvent.PROJECT_ORG_FINANCIAL_YEAR_DELETED,

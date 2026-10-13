@@ -1,4 +1,5 @@
 import { SiteSettingsPanel } from "@/components/admin/site-settings-panel";
+import { SiteBrandingPanel } from "@/components/admin/site-branding-panel";
 import { DashboardPageIntro, BRAND_PAGE_SHELL_CLASS } from "@/components/layout/dashboard-page-intro";
 
 export const metadata = {
@@ -8,8 +9,9 @@ export const metadata = {
 export default function AdminSiteSettingsPage() {
   return (
     <div className={BRAND_PAGE_SHELL_CLASS}>
-      <DashboardPageIntro title="Site settings" description="Platform-wide switches." />
+      <DashboardPageIntro title="Site settings" description="Platform-wide switches and branding." />
       <SiteSettingsPanel />
+      <SiteBrandingPanel />
     </div>
   );
 }

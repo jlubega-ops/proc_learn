@@ -1,5 +1,7 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
+import { cachedRead } from "@/lib/server-cache";
+import { cachedJson } from "@/lib/api/cached-json";
 import { AuditEvent, writeAuditLog } from "@/lib/audit-log";
 import { authorizeProjectApiAccess } from "@/lib/projects/project-api-auth";
 import {
@@ -28,12 +30,15 @@ async function authorize(context) {
   return { projectId, auth };
 }
 
-export async function GET(_request, context) {
+export async function GET(request, context) {
   const a = await authorize(context);
   if (a.error) return a.error;
-  const row = await prisma.project.findUnique({ where: { id: a.projectId }, select: SETTINGS_SELECT });
-  if (!row) return NextResponse.json({ error: "Not found." }, { status: 404 });
-  return NextResponse.json({ settings: serializeSettings(row) });
+  const settings = await cachedRead(`org-settings:${a.projectId}`, ["Project", "User"], async () => {
+    const row = await prisma.project.findUnique({ where: { id: a.projectId }, select: SETTINGS_SELECT });
+    return row ? serializeSettings(row) : null;
+  });
+  if (!settings) return NextResponse.json({ error: "Not found." }, { status: 404 });
+  return cachedJson(request, { settings });
 }
 
 /**

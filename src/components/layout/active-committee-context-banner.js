@@ -6,7 +6,7 @@ import CircularProgress from "@mui/material/CircularProgress";
 import SwapHorizRounded from "@mui/icons-material/SwapHorizRounded";
 import { useAuthSession } from "@/components/providers/auth-session-provider";
 import { useToast } from "@/components/providers/toast-provider";
-import { formatCommitteeSeatLabel } from "@/lib/projects/committee-context";
+import { formatCommitteeSeatLabel } from "@/lib/projects/committee-context-shared";
 
 export const OPEN_COMMITTEE_CONTEXT_EVENT = "proc-learn:open-committee-context";
 

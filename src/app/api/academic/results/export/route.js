@@ -1,7 +1,6 @@
 import { NextResponse } from "next/server";
-import { Role } from "@prisma/client";
 import { getSessionUser, sessionActiveRole } from "@/lib/api/get-session-user";
-import { actsAsExaminerRole, canManageExaminerProject } from "@/lib/projects/access";
+import { canViewExaminerProject, canViewTeaching } from "@/lib/projects/access";
 import { buildOfficialResultsWorkbook } from "@/lib/academic/assessment-results";
 import { prisma } from "@/lib/prisma";
 
@@ -14,8 +13,8 @@ export const runtime = "nodejs";
 export async function GET(request) {
   const user = await getSessionUser();
   if (!user) return NextResponse.json({ error: "Unauthorized." }, { status: 401 });
-  const activeRole = sessionActiveRole(user) || Role.STUDENT;
-  if (!actsAsExaminerRole(activeRole) && activeRole !== Role.SYSTEM_ADMIN) {
+  const activeRole = sessionActiveRole(user);
+  if (!canViewTeaching(activeRole)) {
     return NextResponse.json({ error: "Not found." }, { status: 404 });
   }
 
@@ -29,10 +28,7 @@ export async function GET(request) {
     if (!project || project.isPersonalOrg || project.isAttemptOrg) {
       return NextResponse.json({ error: "Not found." }, { status: 404 });
     }
-    if (
-      !canManageExaminerProject({ activeRole, project, userId: user.id }) &&
-      activeRole !== Role.SYSTEM_ADMIN
-    ) {
+    if (!canViewExaminerProject({ activeRole, project })) {
       return NextResponse.json({ error: "Not found." }, { status: 404 });
     }
   }

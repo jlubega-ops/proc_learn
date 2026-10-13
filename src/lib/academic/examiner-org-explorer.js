@@ -176,27 +176,12 @@ function matchesQuery(rows, q) {
  */
 async function loadProjectAudits(db, projectId) {
   const select = { id: true, eventType: true, actorUserId: true, meta: true, createdAt: true };
-  try {
-    return await db.auditLog.findMany({
-      where: {
-        eventType: { startsWith: "PROJECT_ORG_" },
-        meta: { path: "$.projectId", equals: projectId },
-      },
-      orderBy: { createdAt: "asc" },
-      take: 8000,
-      select,
-    });
-  } catch {
-    const rows = await db.auditLog.findMany({
-      where: { eventType: { startsWith: "PROJECT_ORG_" } },
-      orderBy: { createdAt: "desc" },
-      take: 20000,
-      select,
-    });
-    return rows
-      .filter((r) => r.meta && typeof r.meta === "object" && /** @type {any} */ (r.meta).projectId === projectId)
-      .reverse();
-  }
+  return db.auditLog.findMany({
+    where: { projectId, eventType: { startsWith: "PROJECT_ORG_" } },
+    orderBy: { createdAt: "asc" },
+    take: 8000,
+    select,
+  });
 }
 
 /**

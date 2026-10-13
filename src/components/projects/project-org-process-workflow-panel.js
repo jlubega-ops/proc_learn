@@ -24,6 +24,7 @@ import RefreshRounded from "@mui/icons-material/RefreshRounded";
 import LockRounded from "@mui/icons-material/LockRounded";
 import { useToast } from "@/components/providers/toast-provider";
 import { notifyProcessActivationChanged } from "@/hooks/use-process-activation";
+import { useApi } from "@/hooks/use-api";
 import {
   PROCESS_PATH_ORDER,
   processActivationBlockers,
@@ -92,60 +93,39 @@ function ProcessStepsTable({ items, loading = false }) {
 export function ProjectOrgProcessWorkflowPanel({ projectId }) {
   const { showToast } = useToast();
 
-  const [loading, setLoading] = useState(true);
-  const [refetching, setRefetching] = useState(false);
-  const [canAdopt, setCanAdopt] = useState(false);
-
-  const [adopted, setAdopted] = useState(/** @type {any[]} */ ([]));
-  const [catalogue, setCatalogue] = useState(/** @type {any[]} */ ([]));
-  const [restrictedByExaminer, setRestrictedByExaminer] = useState(false);
+  const {
+    data,
+    loading,
+    refreshing: refetching,
+    reload,
+  } = useApi(`/api/projects/${projectId}/org-process-flow-adoptions`, {
+    errorMessage: "Could not load process workflows.",
+  });
+  const canAdopt = data?.canAdopt === true;
+  const restrictedByExaminer = Boolean(data?.restrictedByExaminer);
+  const adopted = useMemo(() => (Array.isArray(data?.adopted) ? data.adopted : []), [data]);
+  const catalogue = useMemo(() => (Array.isArray(data?.catalogue) ? data.catalogue : []), [data]);
 
   const [expandedId, setExpandedId] = useState(/** @type {string | false} */ (false));
-  const [itemsCache, setItemsCache] = useState(/** @type {Record<string, any[]>} */ ({}));
+  const [loadedItems, setLoadedItems] = useState(/** @type {Record<string, any[]>} */ ({}));
   const [itemsLoadingId, setItemsLoadingId] = useState(/** @type {string | null} */ (null));
   const [busyId, setBusyId] = useState(/** @type {string | null} */ (null));
 
-  const load = useCallback(
-    async (opts = /** @type {{ silent?: boolean }} */ ({})) => {
-      const silent = Boolean(opts.silent);
-      if (silent) setRefetching(true);
-      else setLoading(true);
-      try {
-        const res = await fetch(`/api/projects/${projectId}/org-process-flow-adoptions`, {
-          credentials: "include",
-        });
-        const data = await res.json().catch(() => ({}));
-        if (!res.ok) {
-          showToast({
-            message: typeof data.error === "string" ? data.error : "Could not load process workflows.",
-            severity: "error",
-          });
-          return;
-        }
-        const nextAdopted = Array.isArray(data.adopted) ? data.adopted : [];
-        const nextCatalogue = Array.isArray(data.catalogue) ? data.catalogue : [];
-        setAdopted(nextAdopted);
-        setCatalogue(nextCatalogue);
-        setRestrictedByExaminer(Boolean(data.restrictedByExaminer));
-        if (typeof data.canAdopt === "boolean") setCanAdopt(data.canAdopt);
+  const itemsCache = useMemo(() => {
+    /** @type {Record<string, any[]>} */
+    const next = { ...loadedItems };
+    for (const row of catalogue) {
+      if (row?.id && Array.isArray(row.items)) next[row.id] = row.items;
+    }
+    for (const row of adopted) {
+      if (row?.processFlowId && Array.isArray(row.items)) next[row.processFlowId] = row.items;
+    }
+    return next;
+  }, [adopted, catalogue, loadedItems]);
 
-        const nextCache = {};
-        for (const row of nextCatalogue) {
-          if (row?.id && Array.isArray(row.items)) nextCache[row.id] = row.items;
-        }
-        for (const row of nextAdopted) {
-          if (row?.processFlowId && Array.isArray(row.items)) nextCache[row.processFlowId] = row.items;
-        }
-        if (Object.keys(nextCache).length > 0) {
-          setItemsCache((prev) => ({ ...prev, ...nextCache }));
-        }
-      } finally {
-        if (silent) setRefetching(false);
-        else setLoading(false);
-      }
-    },
-    [projectId, showToast],
-  );
+  const load = useCallback(async () => {
+    await reload();
+  }, [reload]);
 
   const loadItems = useCallback(
     async (processFlowId) => {
@@ -165,17 +145,13 @@ export function ProjectOrgProcessWorkflowPanel({ projectId }) {
           });
           return;
         }
-        setItemsCache((prev) => ({ ...prev, [processFlowId]: Array.isArray(data.items) ? data.items : [] }));
+        setLoadedItems((prev) => ({ ...prev, [processFlowId]: Array.isArray(data.items) ? data.items : [] }));
       } finally {
         setItemsLoadingId((current) => (current === processFlowId ? null : current));
       }
     },
     [projectId, showToast],
   );
-
-  useEffect(() => {
-    void load();
-  }, [load]);
 
   useEffect(() => {
     if (typeof expandedId === "string" && !itemsCache[expandedId]) {
@@ -295,7 +271,7 @@ export function ProjectOrgProcessWorkflowPanel({ projectId }) {
 
       {restrictedByExaminer ? (
         <Alert severity="info" className="mb-3">
-          Limited to processes allowed for this project.
+          Limited to processes allowed for your programme or project.
         </Alert>
       ) : null}
 
@@ -318,11 +294,14 @@ export function ProjectOrgProcessWorkflowPanel({ projectId }) {
                 : processActivationBlockers(code, activeCodes, processNames)
               : [];
             const needs = code ? processNeedsLabel(code, processNames) : "";
+            const frozen = Boolean(row.adoption?.frozen);
             const switchDisabled =
-              !canAdopt || busy || refetching || (!enabled && !wired) || blockers.length > 0;
+              !canAdopt || busy || refetching || frozen || (!enabled && !wired) || blockers.length > 0;
             const switchTitle = !canAdopt
               ? "View only"
-              : !enabled && !wired
+              : frozen
+                ? "Disabled for your programme this academic year"
+                : !enabled && !wired
                 ? "Not linked to a workflow event"
                 : blockers.length
                   ? blockers[0]
@@ -365,6 +344,11 @@ export function ProjectOrgProcessWorkflowPanel({ projectId }) {
                     </Typography>
                   </Box>
                   {!wired ? <Chip size="small" color="warning" label="Not wired" /> : null}
+                  {row.adoption?.frozen ? (
+                    <Tooltip title="Paused — disabled for your programme this academic year">
+                      <Chip size="small" color="error" label="Off for programme" />
+                    </Tooltip>
+                  ) : null}
                   {canAdopt && wired && blockers.length ? (
                     <Tooltip title={blockers.join(" ")}>
                       <LockRounded fontSize="small" color="warning" aria-label={blockers[0]} />

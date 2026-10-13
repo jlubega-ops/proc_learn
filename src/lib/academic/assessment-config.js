@@ -12,17 +12,22 @@ import {
   DEFAULT_ASSESSMENT_PASS_MARK,
   DEFAULT_ASSESSMENT_TOTAL_MARKS,
   assessmentProcessMeta,
-  processDisableBlockers,
   validateAllowedProcessSet,
 } from "@/lib/academic/assessment-process-catalogue";
 import {
   PROCESS_SECTION_CODES,
   SCORING_GROUP_LABELS,
   SCORING_SECTIONS,
+  applyProcessAvailability,
   buildScoringTree,
   scoringItemRowKey,
   scoringTreeToRows,
 } from "@/lib/academic/assessment-sections";
+import {
+  intersectCodes,
+  projectProgrammeCodes,
+  resolveEffectiveProcessCodes,
+} from "@/lib/academic/programme-processes";
 
 /**
  * @param {unknown} value
@@ -32,22 +37,60 @@ function cleanText(value) {
 }
 
 /**
- * @param {any} assessment
+ * Process codes students may run. Uses the saved Processes-tab list; older projects fall back to
+ * the process sections that were switched on in scoring (which used to mean "available").
+ * @param {{ enabledProcessCodes?: unknown; processes?: any[]; totalMarks?: number } | null | undefined} assessment
+ * @returns {string[]}
  */
-export function serializeAssessmentConfig(assessment) {
+export function deriveEnabledProcessCodes(assessment) {
+  if (Array.isArray(assessment?.enabledProcessCodes)) {
+    return assessment.enabledProcessCodes.filter(
+      (c) => typeof c === "string" && PROCESS_SECTION_CODES.has(c),
+    );
+  }
+  const tree = buildScoringTree(
+    assessment?.processes || [],
+    assessment?.totalMarks || DEFAULT_ASSESSMENT_TOTAL_MARKS,
+  );
+  return tree.sections.filter((s) => s.processCode && s.isAllowed).map((s) => s.key);
+}
+
+/**
+ * Programme × year list for an academic project (null = no programme gate).
+ * @param {import("@prisma/client").PrismaClient | import("@prisma/client").Prisma.TransactionClient} db
+ * @param {string} projectId
+ */
+export async function assessmentProgrammeCodes(db, projectId) {
+  const project = await db.project.findUnique({
+    where: { id: projectId },
+    select: { programmeId: true, academicYearId: true },
+  });
+  return project ? projectProgrammeCodes(db, project) : null;
+}
+
+/**
+ * @param {any} assessment
+ * @param {string[] | null} [programmeCodes] programme × year list; examiner choices outside it are kept but inactive
+ */
+export function serializeAssessmentConfig(assessment, programmeCodes = null) {
   if (!assessment) return null;
   const totalMarks = Math.max(0, assessment.totalMarks || DEFAULT_ASSESSMENT_TOTAL_MARKS);
-  const tree = buildScoringTree(assessment.processes || [], totalMarks);
-  const allowedCodes = tree.sections
-    .filter((s) => s.processCode && s.isAllowed)
-    .map((s) => s.key);
+  const examinerCodes = deriveEnabledProcessCodes(assessment);
+  const enabledProcessCodes = intersectCodes(examinerCodes, programmeCodes) || examinerCodes;
+  const enabledSet = new Set(enabledProcessCodes);
+  const programmeSet = programmeCodes ? new Set(programmeCodes) : null;
+  const tree = buildScoringTree(
+    applyProcessAvailability(assessment.processes || [], enabledProcessCodes),
+    totalMarks,
+  );
   const sections = tree.sections.map((s) => {
     const meta = s.processCode ? assessmentProcessMeta(s.processCode) : null;
     return {
       ...s,
+      isAvailable: s.processCode ? enabledSet.has(s.key) : true,
+      isProgrammeEnabled: s.processCode && programmeSet ? programmeSet.has(s.key) : true,
       dependsOn: meta?.dependsOn || [],
       dependsOnAny: meta?.dependsOnAny || [],
-      disableBlockers: s.processCode ? processDisableBlockers(s.key, allowedCodes) : [],
     };
   });
   return {
@@ -63,6 +106,9 @@ export function serializeAssessmentConfig(assessment) {
     scoringEnabled: assessment.scoringEnabled !== false,
     resultsReleased: assessment.resultsReleased,
     resultsView: assessment.resultsView || "SUMMARY",
+    enabledProcessCodes: examinerCodes,
+    effectiveProcessCodes: enabledProcessCodes,
+    programmeProcessCodes: programmeCodes,
     sections,
     checkpoints: [],
     createdAt: assessment.createdAt,
@@ -82,6 +128,7 @@ export function assessmentScoringCatalogue() {
       dependsOn: p.dependsOn,
       dependsOnAny: p.dependsOnAny || [],
       group: p.group,
+      defaultAllowed: p.defaultAllowed !== false,
     })),
   };
 }
@@ -92,9 +139,12 @@ export function assessmentCheckpointCatalogue() {
 }
 
 /**
+ * Scoring payload. A process section switch means "scored"; availability is set on the
+ * Processes tab and passed in as `enabledCodes` (unavailable processes are never scored).
  * @param {any} body
+ * @param {Iterable<string>} [enabledCodes]
  */
-export function validateAssessmentProcessConfig(body) {
+export function validateAssessmentProcessConfig(body, enabledCodes) {
   /** @type {Record<string, string>} */
   const errors = {};
 
@@ -145,12 +195,10 @@ export function validateAssessmentProcessConfig(body) {
     }
   }
 
-  const tree = buildScoringTree(incoming, totalMarks);
-  const allowedCodes = tree.sections
-    .filter((s) => s.processCode && s.isAllowed)
-    .map((s) => s.key);
-  const depErrors = validateAllowedProcessSet(allowedCodes);
-  if (depErrors.length) errors.sections = depErrors[0];
+  const tree = buildScoringTree(
+    enabledCodes ? applyProcessAvailability(incoming, enabledCodes) : incoming,
+    totalMarks,
+  );
   if (tree.error) errors.marks = tree.error;
   for (const [key, message] of Object.entries(tree.sectionErrors)) {
     errors[`section.${key}`] = message;
@@ -224,10 +272,19 @@ export async function upsertProjectAssessmentConfig(opts) {
         scoringEnabled: enable,
       },
     });
-    return serializeAssessmentConfig(assessment);
+    return serializeAssessmentConfig(assessment, await projectProgrammeCodes(db, project));
   }
 
-  const validated = validateAssessmentProcessConfig(opts.body);
+  const existing = await db.projectAssessment.findUnique({
+    where: { projectId: opts.projectId },
+    include: { processes: true },
+  });
+  // Freeze availability before scoring switches stop meaning "available" for legacy projects.
+  const enabledProcessCodes = existing
+    ? deriveEnabledProcessCodes(existing)
+    : deriveEnabledProcessCodes({ processes: [] });
+
+  const validated = validateAssessmentProcessConfig(opts.body, enabledProcessCodes);
   if (!validated.ok) {
     const err = new Error("Please fix the highlighted fields.");
     // @ts-ignore
@@ -236,10 +293,6 @@ export async function upsertProjectAssessmentConfig(opts) {
     err.errors = validated.errors;
     throw err;
   }
-
-  const existing = await db.projectAssessment.findUnique({
-    where: { projectId: opts.projectId },
-  });
 
   const assessment = await db.$transaction(async (tx) => {
     const row = existing
@@ -251,6 +304,7 @@ export async function upsertProjectAssessmentConfig(opts) {
             passMarkPercent: validated.data.passMarkPercent,
             totalMarks: validated.data.totalMarks,
             scoringEnabled: validated.data.scoringEnabled,
+            enabledProcessCodes,
           },
         })
       : await tx.projectAssessment.create({
@@ -261,6 +315,7 @@ export async function upsertProjectAssessmentConfig(opts) {
             passMarkPercent: validated.data.passMarkPercent,
             totalMarks: validated.data.totalMarks,
             scoringEnabled: validated.data.scoringEnabled,
+            enabledProcessCodes,
           },
         });
 
@@ -296,14 +351,14 @@ export async function upsertProjectAssessmentConfig(opts) {
       gradingMode: AssessmentGradingMode.AUTOMATIC,
       totalMarks: validated.data.totalMarks,
       scoringEnabled: validated.data.scoringEnabled,
-      allowedProcessCount: validated.data.processes.filter(
+      scoredProcessCount: validated.data.processes.filter(
         (p) => p.isAllowed && PROCESS_SECTION_CODES.has(p.processCode),
       ).length,
       passMarkPercent: validated.data.passMarkPercent,
     },
   });
 
-  return serializeAssessmentConfig(assessment);
+  return serializeAssessmentConfig(assessment, await projectProgrammeCodes(db, project));
 }
 
 /**
@@ -318,9 +373,112 @@ export async function resolveAllowedProcessCodes(db, academicProjectId) {
     where: { projectId: academicProjectId },
     include: { processes: true },
   });
-  const rows = (assessment?.processes || []).filter((p) => PROCESS_SECTION_CODES.has(p.processCode));
-  if (!rows.length) return null;
-  return rows.filter((p) => p.isAllowed !== false).map((p) => p.processCode);
+  if (!assessment) return null;
+  if (!Array.isArray(assessment.enabledProcessCodes)) {
+    const rows = (assessment.processes || []).filter((p) => PROCESS_SECTION_CODES.has(p.processCode));
+    if (!rows.length) return null;
+  }
+  return deriveEnabledProcessCodes(assessment);
+}
+
+/**
+ * Processes tab: which engine processes students may run in this project. Newly enabled
+ * processes are scored by default; disabled ones stop being scored.
+ * @param {{
+ *   projectId: string;
+ *   actorUserId: string;
+ *   enabledProcessCodes: unknown;
+ *   db?: import("@prisma/client").PrismaClient;
+ * }} opts
+ */
+export async function setProjectEnabledProcesses(opts) {
+  const db = opts.db || prisma;
+  const raw = Array.isArray(opts.enabledProcessCodes) ? opts.enabledProcessCodes : null;
+  if (!raw) {
+    const err = new Error("Choose the processes to enable.");
+    // @ts-ignore
+    err.code = "VALIDATION";
+    throw err;
+  }
+  const programmeCodes = await assessmentProgrammeCodes(db, opts.projectId);
+  const programmeSet = programmeCodes ? new Set(programmeCodes) : null;
+  const requested = [
+    ...new Set(raw.map((c) => cleanText(c).toUpperCase()).filter((c) => PROCESS_SECTION_CODES.has(c))),
+  ];
+  const blocked = programmeSet ? requested.filter((c) => !programmeSet.has(c)) : [];
+  if (blocked.length) {
+    const err = new Error("Some processes are disabled for this programme and year.");
+    // @ts-ignore
+    err.code = "VALIDATION";
+    throw err;
+  }
+  const depErrors = validateAllowedProcessSet(requested);
+  if (depErrors.length) {
+    const err = new Error(depErrors[0]);
+    // @ts-ignore
+    err.code = "VALIDATION";
+    throw err;
+  }
+
+  const assessment = await getOrCreateProjectAssessment(db, {
+    projectId: opts.projectId,
+    createIfMissing: true,
+  });
+  const previousCodes = deriveEnabledProcessCodes(assessment);
+  const previous = new Set(previousCodes);
+  // Keep the examiner's choice for programme-disabled processes so re-enabling restores it.
+  const merged = programmeSet
+    ? [...requested, ...previousCodes.filter((c) => !programmeSet.has(c) && !requested.includes(c))]
+    : requested;
+  const codes = validateAllowedProcessSet(merged).length ? requested : merged;
+  const next = new Set(codes);
+  const totalMarks = assessment.totalMarks || DEFAULT_ASSESSMENT_TOTAL_MARKS;
+  const rows = (assessment.processes || []).map((r) => {
+    if (!PROCESS_SECTION_CODES.has(r.processCode)) return r;
+    if (!next.has(r.processCode)) return { ...r, isAllowed: false, marksPinned: false };
+    if (!previous.has(r.processCode)) return { ...r, isAllowed: true };
+    return r;
+  });
+  const tree = buildScoringTree(rows, totalMarks);
+  const nextRows = scoringTreeToRows(tree.sections);
+
+  const updated = await db.$transaction(async (tx) => {
+    await tx.projectAssessment.update({
+      where: { id: assessment.id },
+      data: { enabledProcessCodes: codes },
+    });
+    await tx.assessmentProcess.deleteMany({ where: { assessmentId: assessment.id } });
+    await tx.assessmentProcess.createMany({
+      data: nextRows.map((p, index) => ({
+        assessmentId: assessment.id,
+        processCode: p.processCode,
+        sortOrder: index,
+        isAllowed: p.isAllowed,
+        marks: p.marks,
+        marksPinned: p.marksPinned,
+      })),
+    });
+    return tx.projectAssessment.findUnique({
+      where: { id: assessment.id },
+      include: {
+        checkpoints: { orderBy: { sortOrder: "asc" } },
+        processes: { orderBy: { sortOrder: "asc" } },
+      },
+    });
+  });
+
+  await writeAuditLog({
+    eventType: AuditEvent.PROJECT_ASSESSMENT_UPDATED,
+    actorUserId: opts.actorUserId,
+    meta: {
+      projectId: opts.projectId,
+      assessmentId: assessment.id,
+      action: "SET_ENABLED_PROCESSES",
+      enabledProcessCodes: codes,
+    },
+  });
+
+  return serializeAssessmentConfig(updated, programmeCodes);
 }
 
 /**
@@ -329,19 +487,7 @@ export async function resolveAllowedProcessCodes(db, academicProjectId) {
  * @returns {Promise<string[] | null>} null = show full catalogue (personal org)
  */
 export async function resolveAllowedProcessCodesForOrgProject(db, orgProjectId) {
-  const project = await db.project.findUnique({
-    where: { id: orgProjectId },
-    select: {
-      isPersonalOrg: true,
-      isAttemptOrg: true,
-      sourceAcademicProjectId: true,
-    },
-  });
-  if (!project || project.isPersonalOrg || !project.isAttemptOrg || !project.sourceAcademicProjectId) {
-    return null;
-  }
-  const allowed = await resolveAllowedProcessCodes(db, project.sourceAcademicProjectId);
-  return allowed;
+  return resolveEffectiveProcessCodes(db, orgProjectId);
 }
 
 /**
@@ -400,7 +546,7 @@ export async function setAssessmentResultsReleased(opts) {
     });
   }
 
-  return serializeAssessmentConfig(assessment);
+  return serializeAssessmentConfig(assessment, await assessmentProgrammeCodes(db, opts.projectId));
 }
 
 export const RESULTS_VIEW = { SUMMARY: "SUMMARY", DETAILS: "DETAILS" };

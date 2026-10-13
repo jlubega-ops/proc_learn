@@ -1,47 +1,50 @@
 import { NextResponse } from "next/server";
-import { Role } from "@prisma/client";
 import { getSessionUser, sessionActiveRole } from "@/lib/api/get-session-user";
 import { prisma } from "@/lib/prisma";
-import { canManageExaminerProject, actsAsExaminerRole } from "@/lib/projects/access";
+import {
+  canManageExaminerProject,
+  canTeach,
+  canViewExaminerProject,
+} from "@/lib/projects/access";
 import {
   assessmentScoringCatalogue,
   getOrCreateProjectAssessment,
   serializeAssessmentConfig,
   upsertProjectAssessmentConfig,
   setAssessmentResultsReleased,
+  setProjectEnabledProcesses,
   parseResultsView,
 } from "@/lib/academic/assessment-config";
+import { projectProgrammeCodes } from "@/lib/academic/programme-processes";
 
 export const runtime = "nodejs";
 
-async function loadManagedProject(user, activeRole, projectId) {
+/**
+ * @param {{ write: boolean }} opts write = teaching action (examiner only); read = examiner or system admin
+ */
+async function loadProject(activeRole, projectId, opts) {
+  const notFound = { error: NextResponse.json({ error: "Not found." }, { status: 404 }) };
   const project = await prisma.project.findUnique({ where: { id: projectId } });
-  if (!project || project.isPersonalOrg || project.isAttemptOrg) return { error: NextResponse.json({ error: "Not found." }, { status: 404 }) };
-  if (
-    !canManageExaminerProject({ activeRole, project, userId: user.id }) &&
-    activeRole !== Role.SYSTEM_ADMIN
-  ) {
-    return { error: NextResponse.json({ error: "Forbidden." }, { status: 403 }) };
-  }
-  return { project };
+  if (!project || project.isPersonalOrg || project.isAttemptOrg) return notFound;
+  const allowed = opts.write
+    ? canManageExaminerProject({ activeRole, project })
+    : canViewExaminerProject({ activeRole, project });
+  return allowed ? { project } : notFound;
 }
 
 export async function GET(_request, context) {
   const user = await getSessionUser();
   if (!user) return NextResponse.json({ error: "Unauthorized." }, { status: 401 });
-  const activeRole = sessionActiveRole(user) || Role.STUDENT;
-  if (!actsAsExaminerRole(activeRole) && activeRole !== Role.SYSTEM_ADMIN) {
-    return NextResponse.json({ error: "Forbidden." }, { status: 403 });
-  }
+  const activeRole = sessionActiveRole(user);
 
   const params = await context.params;
   const id = String(params?.id || "").trim();
-  const gate = await loadManagedProject(user, activeRole, id);
+  const gate = await loadProject(activeRole, id, { write: false });
   if (gate.error) return gate.error;
 
   const assessment = await getOrCreateProjectAssessment(prisma, {
     projectId: id,
-    createIfMissing: true,
+    createIfMissing: canTeach(activeRole),
     scoringEnabled: gate.project.purpose === "ASSESSMENT",
   });
 
@@ -51,7 +54,7 @@ export async function GET(_request, context) {
       name: gate.project.name,
       purpose: gate.project.purpose,
     },
-    assessment: serializeAssessmentConfig(assessment),
+    assessment: serializeAssessmentConfig(assessment, await projectProgrammeCodes(prisma, gate.project)),
     catalogue: assessmentScoringCatalogue(),
   });
 }
@@ -59,11 +62,14 @@ export async function GET(_request, context) {
 export async function PUT(request, context) {
   const user = await getSessionUser();
   if (!user) return NextResponse.json({ error: "Unauthorized." }, { status: 401 });
-  const activeRole = sessionActiveRole(user) || Role.STUDENT;
+  const activeRole = sessionActiveRole(user);
+  if (!canTeach(activeRole)) {
+    return NextResponse.json({ error: "Only examiners can change assessments." }, { status: 403 });
+  }
 
   const params = await context.params;
   const id = String(params?.id || "").trim();
-  const gate = await loadManagedProject(user, activeRole, id);
+  const gate = await loadProject(activeRole, id, { write: true });
   if (gate.error) return gate.error;
 
   const body = await request.json().catch(() => ({}));
@@ -84,6 +90,23 @@ export async function PUT(request, context) {
     } catch (e) {
       // @ts-ignore
       if (e?.code === "NO_ASSESSMENT") {
+        return NextResponse.json({ error: e.message }, { status: 400 });
+      }
+      throw e;
+    }
+  }
+
+  if (body?.action === "set_processes") {
+    try {
+      const assessment = await setProjectEnabledProcesses({
+        projectId: id,
+        actorUserId: user.id,
+        enabledProcessCodes: body.enabledProcessCodes,
+      });
+      return NextResponse.json({ assessment });
+    } catch (e) {
+      // @ts-ignore
+      if (e?.code === "VALIDATION") {
         return NextResponse.json({ error: e.message }, { status: 400 });
       }
       throw e;

@@ -3,7 +3,7 @@ import { Role } from "@prisma/client";
 import { getReadableAppSession } from "@/lib/auth/session";
 import { getSessionUser, sessionActiveRole } from "@/lib/api/get-session-user";
 import { prisma } from "@/lib/prisma";
-import { actsAsExaminerRole } from "@/lib/projects/access";
+import { actsAsExaminerRole, canManageExaminerProject } from "@/lib/projects/access";
 import {
   fetchAuthorizedProjectWorkspace,
   fetchAuthorizedOrgUserWorkspace,
@@ -55,6 +55,7 @@ export default async function ProjectDetailLayout({ children, params }) {
       name: true,
       organizationName: true,
       purpose: true,
+      isPublished: true,
       openAt: true,
       closeAt: true,
       owner: { select: { firstName: true, lastName: true } },
@@ -69,6 +70,8 @@ export default async function ProjectDetailLayout({ children, params }) {
         organizationName: info.organizationName,
         purpose: info.purpose,
         windowState: projectWindowState(info),
+        isPublished: Boolean(info.isPublished),
+        canManage: canManageExaminerProject({ activeRole, project }),
         facts: [
           info.academicYear ? { label: "Academic year", value: info.academicYear.label } : null,
           info.programme

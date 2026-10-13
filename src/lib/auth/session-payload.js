@@ -17,10 +17,12 @@ import {
 import {
   ensureDemoStudentModeContext,
   isStudentMode,
+  permanentRoleIsStaff,
   resolveParticipationType,
   resolvePermanentRole,
   returnRoleLabel,
 } from "@/lib/academic/student-mode";
+import { serializeStudentView } from "@/lib/academic/student-view";
 
 /**
  * Build client session payload from DB (single source for active role + theme).
@@ -29,7 +31,12 @@ import {
 export async function buildSessionPayloadForUserId(userId) {
   const user = await prisma.user.findUnique({
     where: { id: userId },
-    include: { settings: true, userRoles: true },
+    include: {
+      settings: {
+        include: { studentViewProgramme: { select: { name: true, shortName: true } } },
+      },
+      userRoles: true,
+    },
   });
 
   if (!user) {
@@ -167,6 +174,7 @@ export async function buildSessionPayloadForUserId(userId) {
     activeRole: active,
   });
   const studentMode = isStudentMode({ grantedRoles: g, activeRole: active });
+  const studentView = permanentRoleIsStaff(g) ? serializeStudentView(user.settings) : null;
 
   return {
     authenticated: true,
@@ -184,6 +192,7 @@ export async function buildSessionPayloadForUserId(userId) {
     isStudentMode: studentMode,
     returnRoleLabel: studentMode ? returnRoleLabel(g) : null,
     returnRole: studentMode ? permanentRole : null,
+    studentView,
     mustChangePassword: Boolean(user.mustChangePassword),
     personalOrgProjectId,
     personalOrgName,

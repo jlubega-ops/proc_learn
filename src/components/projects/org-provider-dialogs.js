@@ -12,6 +12,8 @@ import TextField from "@mui/material/TextField";
 import Typography from "@mui/material/Typography";
 import AutoAwesomeRounded from "@mui/icons-material/AutoAwesomeRounded";
 import { useToast } from "@/components/providers/toast-provider";
+import { useDraftState } from "@/hooks/use-draft-state";
+import { useDraftSync } from "@/hooks/use-draft-sync";
 import { adminDialogPaperSx, adminMutedTextSx, themedTextFieldSx } from "@/lib/admin-mui-surfaces";
 import { GENERATE_MIX_OPTIONS, MAX_GENERATE_COUNT } from "@/lib/projects/provider-behaviours";
 import { PROVIDER_CATEGORY_OPTIONS } from "@/lib/projects/provider-terms";
@@ -29,15 +31,23 @@ async function readJson(res) {
  */
 export function OrgProviderStatusDialog({ projectId, provider, onClose, onDone }) {
   const { showToast } = useToast();
-  const [reason, setReason] = useState("");
+  const reactivating = provider && provider.status !== "ACTIVE";
+  const [reason, setReason, reasonDraft] = useDraftState(`org:provider:${provider?.id}:status-reason`, "", {
+    enabled: Boolean(provider) && !reactivating,
+    resetKey: provider?.id ?? null,
+  });
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
-  const reactivating = provider && provider.status !== "ACTIVE";
 
   useEffect(() => {
-    setReason("");
     setError("");
   }, [provider]);
+
+  function handleCancel() {
+    if (busy) return;
+    reasonDraft.clearDraft();
+    onClose();
+  }
 
   async function submit(e) {
     e.preventDefault();
@@ -71,6 +81,7 @@ export function OrgProviderStatusDialog({ projectId, provider, onClose, onDone }
         message: reactivating ? "Provider reactivated." : "Provider suspended.",
         severity: "success",
       });
+      reasonDraft.clearDraft();
       onDone(data.provider);
     } catch {
       showToast({ message: "Network error. Please try again.", severity: "error" });
@@ -82,7 +93,7 @@ export function OrgProviderStatusDialog({ projectId, provider, onClose, onDone }
   return (
     <Dialog
       open={Boolean(provider)}
-      onClose={() => !busy && onClose()}
+      onClose={handleCancel}
       fullWidth
       maxWidth="xs"
       slotProps={{ paper: { sx: adminDialogPaperSx } }}
@@ -121,7 +132,7 @@ export function OrgProviderStatusDialog({ projectId, provider, onClose, onDone }
           ) : null}
         </DialogContent>
         <DialogActions>
-          <Button onClick={onClose} disabled={busy}>
+          <Button onClick={handleCancel} disabled={busy}>
             Cancel
           </Button>
           <Button
@@ -213,10 +224,26 @@ export function OrgProviderGenerateDialog({ open, projectId, onClose, onDone }) 
   const [category, setCategory] = useState("");
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
+  const generateDraft = useDraftSync(
+    `org:providers:${projectId}:generate`,
+    { count, mix, category },
+    (d) => {
+      if (typeof d.count === "string") setCount(d.count);
+      if (typeof d.mix === "string") setMix(d.mix);
+      if (typeof d.category === "string") setCategory(d.category);
+    },
+    { enabled: open },
+  );
 
   useEffect(() => {
     if (open) setError("");
   }, [open]);
+
+  function handleCancel() {
+    if (busy) return;
+    generateDraft.clearDraft();
+    onClose();
+  }
 
   async function submit(e) {
     e.preventDefault();
@@ -248,6 +275,7 @@ export function OrgProviderGenerateDialog({ open, projectId, onClose, onDone }) 
         message: `${list.length} provider${list.length === 1 ? "" : "s"} generated.`,
         severity: "success",
       });
+      generateDraft.clearDraft();
       onDone(list);
     } catch {
       showToast({ message: "Network error. Please try again.", severity: "error" });
@@ -259,7 +287,7 @@ export function OrgProviderGenerateDialog({ open, projectId, onClose, onDone }) 
   return (
     <Dialog
       open={open}
-      onClose={() => !busy && onClose()}
+      onClose={handleCancel}
       fullWidth
       maxWidth="xs"
       slotProps={{ paper: { sx: adminDialogPaperSx } }}
@@ -316,7 +344,7 @@ export function OrgProviderGenerateDialog({ open, projectId, onClose, onDone }) 
           </TextField>
         </DialogContent>
         <DialogActions>
-          <Button onClick={onClose} disabled={busy}>
+          <Button onClick={handleCancel} disabled={busy}>
             Cancel
           </Button>
           <Button

@@ -6,6 +6,7 @@ import {
   Prisma,
 } from "@prisma/client";
 import { writeAuditLog, AuditEvent } from "@/lib/audit-log";
+import { runInTx } from "@/lib/db-tx";
 import { notifyOrgUsers, OrgNotificationType } from "@/lib/projects/org-notifications";
 import { requireCommitteeMembership, resolveCommitteeContext } from "@/lib/projects/committee-context";
 import { PROCESS_FLOW_CODES } from "@/lib/projects/process-catalogue";
@@ -253,7 +254,7 @@ export async function submitEvaluationReport(prisma, opts) {
   });
   if (!membership.ok) return membership;
 
-  const updated = await prisma.$transaction(async (tx) => {
+  const updated = await runInTx(prisma, async (tx) => {
     const u = await tx.projectOrgEvaluationReport.update({
       where: { id: row.id },
       data: { status: OrgEvaluationReportStatus.SUBMITTED },
@@ -345,7 +346,7 @@ export async function decideEvaluationReport(prisma, opts) {
     return { ok: false, error: "Choose Approve, Return, or Reject.", status: 400 };
   }
 
-  const updated = await prisma.$transaction(async (tx) => {
+  const updated = await runInTx(prisma, async (tx) => {
     const u = await tx.projectOrgEvaluationReport.update({
       where: { id: row.id },
       data: {

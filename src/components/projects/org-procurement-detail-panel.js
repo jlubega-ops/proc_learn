@@ -26,6 +26,7 @@ import {
   useConfirm,
 } from "@/components/providers/confirm-provider";
 import { WorkflowHistoryPanel } from "@/components/projects/workflow-history-panel";
+import { useDraftSync } from "@/hooks/use-draft-sync";
 import { notifyOrgTasksChanged } from "@/hooks/use-pending-task-counts";
 import { OrgBidDocumentSection } from "@/components/projects/org-bid-document-section";
 import {
@@ -342,6 +343,54 @@ export function OrgProcurementDetailPanel({ projectId, procurementId, stage = nu
   });
   /** @type {[Record<string, string>, Function]} */
   const [piErrors, setPiErrors] = useState({});
+  const taskDraft = useDraftSync(
+    `org:procurement:${procurementId}:task:${pendingTask?.id || ""}`,
+    {
+      decision,
+      comment,
+      approvalReference,
+      contractStartInput,
+      contractEndInput,
+      piSupplierIds,
+      inviteIds,
+      closingDate,
+      paymentRefInput,
+      closureRemarks,
+      deliveryQtys,
+      receivedOn,
+      receiveRemarks,
+      certifyComment,
+      inspectionNotes,
+      inspectionLineEdits,
+      rejectReason,
+      cancelAwardReason,
+      piTerms,
+    },
+    (d) => {
+      const str = (v) => typeof v === "string";
+      const obj = (v) => v && typeof v === "object" && !Array.isArray(v);
+      if (str(d.decision)) setDecision(d.decision);
+      if (str(d.comment)) setComment(d.comment);
+      if (str(d.approvalReference)) setApprovalReference(d.approvalReference);
+      if (d.contractStartInput === null || str(d.contractStartInput)) setContractStart(d.contractStartInput);
+      if (d.contractEndInput === null || str(d.contractEndInput)) setContractEnd(d.contractEndInput);
+      if (Array.isArray(d.piSupplierIds)) setPiSupplierIds(d.piSupplierIds);
+      if (Array.isArray(d.inviteIds)) setInviteIds(d.inviteIds);
+      if (str(d.closingDate)) setClosingDate(d.closingDate);
+      if (d.paymentRefInput === null || str(d.paymentRefInput)) setPaymentRef(d.paymentRefInput);
+      if (str(d.closureRemarks)) setClosureRemarks(d.closureRemarks);
+      if (obj(d.deliveryQtys)) setDeliveryQtys(d.deliveryQtys);
+      if (str(d.receivedOn)) setReceivedOn(d.receivedOn);
+      if (str(d.receiveRemarks)) setReceiveRemarks(d.receiveRemarks);
+      if (str(d.certifyComment)) setCertifyComment(d.certifyComment);
+      if (str(d.inspectionNotes)) setInspectionNotes(d.inspectionNotes);
+      if (obj(d.inspectionLineEdits)) setInspectionLineEdits(d.inspectionLineEdits);
+      if (str(d.rejectReason)) setRejectReason(d.rejectReason);
+      if (str(d.cancelAwardReason)) setCancelAwardReason(d.cancelAwardReason);
+      if (obj(d.piTerms)) setPiTerms((p) => ({ ...p, ...d.piTerms }));
+    },
+    { enabled: Boolean(pendingTask?.id) && !loading },
+  );
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -556,6 +605,7 @@ export function OrgProcurementDetailPanel({ projectId, procurementId, stage = nu
         return false;
       }
       showToast({ message: successMessage, severity: "success" });
+      taskDraft.clearDraft();
       await load();
       return true;
     } finally {
@@ -592,6 +642,7 @@ export function OrgProcurementDetailPanel({ projectId, procurementId, stage = nu
         return false;
       }
       showToast({ message: successMessage, severity: "success" });
+      taskDraft.clearDraft();
       notifyOrgTasksChanged();
       await load();
       return true;
@@ -819,6 +870,7 @@ export function OrgProcurementDetailPanel({ projectId, procurementId, stage = nu
                 ? `${row?.procurementMethod === "TENDER" ? "Bids" : "Quotations"} opened and submitted.`
                 : "Decision recorded.";
       showToast({ message, severity: "success" });
+      taskDraft.clearDraft();
       notifyOrgTasksChanged();
       await load();
       await loadSuppliers();

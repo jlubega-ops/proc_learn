@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { Role } from "@prisma/client";
+import { Role, UserAccountStatus } from "@prisma/client";
 import { getSessionUser, sessionActiveRole } from "@/lib/api/get-session-user";
 import { canManageStaffUsers } from "@/lib/api/student-scope";
 import { normalizeProfilePhotoInput } from "@/lib/profile-photo-url";
@@ -9,9 +9,23 @@ import { notifyAllSystemAdmins } from "@/lib/notify-system-admins";
 import { formatUserDisplayName } from "@/lib/user-display";
 import { prisma } from "@/lib/prisma";
 import { parseOptionalMaleFemaleSex } from "@/lib/validation/sex-male-female";
-import { deleteProjectsOwnedByUser } from "@/lib/projects/purge-project-data";
+import { PURGE_TX_OPTIONS, deleteProjectsOwnedByUser } from "@/lib/projects/purge-project-data";
 
 export const runtime = "nodejs";
+
+const STAFF_ROLES = [Role.EXAMINER, Role.SYSTEM_ADMIN];
+
+/** True when no other non-suspended user holds SYSTEM_ADMIN. */
+async function isLastSystemAdmin(userId) {
+  const others = await prisma.userRole.count({
+    where: {
+      role: Role.SYSTEM_ADMIN,
+      userId: { not: userId },
+      user: { accountStatus: { not: UserAccountStatus.SUSPENDED } },
+    },
+  });
+  return others === 0;
+}
 
 /**
  * @param {string} userId
@@ -84,6 +98,19 @@ export async function PATCH(request, ctx) {
     const vr = validateGrantedRolesForSave(roles);
     if (!vr.ok) {
       return NextResponse.json({ error: vr.error }, { status: 400 });
+    }
+    if (!roles.length || roles.some((r) => !STAFF_ROLES.includes(r))) {
+      return NextResponse.json(
+        { error: "Choose Examiner and/or System admin." },
+        { status: 400 },
+      );
+    }
+    const wasAdmin = check.user.userRoles.some((r) => r.role === Role.SYSTEM_ADMIN);
+    if (wasAdmin && !roles.includes(Role.SYSTEM_ADMIN) && (await isLastSystemAdmin(id))) {
+      return NextResponse.json(
+        { error: "Keep at least one system admin." },
+        { status: 400 },
+      );
     }
   }
 
@@ -180,13 +207,20 @@ export async function DELETE(request, ctx) {
     return NextResponse.json({ error: check.error }, { status: check.status });
   }
 
+  if (
+    check.user.userRoles.some((r) => r.role === Role.SYSTEM_ADMIN) &&
+    (await isLastSystemAdmin(id))
+  ) {
+    return NextResponse.json({ error: "Keep at least one system admin." }, { status: 400 });
+  }
+
   const em = check.user.email;
   const label = formatUserDisplayName(check.user);
 
   await prisma.$transaction(async (tx) => {
     await deleteProjectsOwnedByUser(tx, id);
     await tx.user.delete({ where: { id } });
-  });
+  }, PURGE_TX_OPTIONS);
 
   await writeAuditLog({
     eventType: AuditEvent.STAFF_USER_DELETED,

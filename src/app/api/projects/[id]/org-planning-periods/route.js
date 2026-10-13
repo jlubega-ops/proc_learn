@@ -3,6 +3,8 @@ import { Role } from "@prisma/client";
 import { getSessionUser, sessionActiveRole } from "@/lib/api/get-session-user";
 import { writeAuditLog, AuditEvent } from "@/lib/audit-log";
 import { prisma } from "@/lib/prisma";
+import { cachedRead } from "@/lib/server-cache";
+import { cachedJson } from "@/lib/api/cached-json";
 import { authorizeProjectOrgAdmin } from "@/lib/projects/workspace-access";
 import {
   authorizeProjectApiAccess,
@@ -10,7 +12,10 @@ import {
 } from "@/lib/projects/project-api-auth";
 import { ORG_PERMISSION } from "@/lib/projects/org-role-permissions";
 import {
-  listActiveProjectFinancialYears,
+  isFinancialYearCurrentlyValid,
+  listActiveFinancialYearRows,
+} from "@/lib/projects/org-financial-years";
+import {
   planningPeriodSelect,
   resolveActiveProjectFinancialYear,
   serializeProjectOrgPlanningPeriod,
@@ -60,24 +65,30 @@ export async function GET(request, context) {
     const where = { projectId };
     if (financialYearId) where.financialYearId = financialYearId;
 
-    const rows = await prisma.projectOrgPlanningPeriod.findMany({
-      where,
-      orderBy: [{ startDate: "desc" }, { createdAt: "desc" }],
-      take: 50,
-      select: planningPeriodSelect,
-    });
+    const rows = await cachedRead(
+      `org-planning-periods:${projectId}:selectable:${financialYearId}`,
+      PERIOD_MODELS,
+      () =>
+        prisma.projectOrgPlanningPeriod.findMany({
+          where,
+          orderBy: [{ startDate: "desc" }, { createdAt: "desc" }],
+          take: 50,
+          select: planningPeriodSelect,
+        }),
+    );
+    const now = new Date();
     const open = rows
-      .map((row) => serializeProjectOrgPlanningPeriod(row, new Date()))
+      .map((row) => serializeProjectOrgPlanningPeriod(row, now))
       .filter((p) => p.status === "OPEN");
 
-    return NextResponse.json({
+    return cachedJson(request, {
       planningPeriods: open,
       total: open.length,
       message:
         open.length > 0
           ? null
           : "No OPEN planning period is available. Ask the Organization Administrator to configure a planning period that covers today.",
-    });
+    }, { revalidate: true });
   }
 
   const auth = await authorizeProjectOrgRead(prisma, {
@@ -98,29 +109,40 @@ export async function GET(request, context) {
 
   const where = { projectId };
 
-  const [total, rows, activeFinancialYears] = await Promise.all([
-    prisma.projectOrgPlanningPeriod.count({ where }),
-    prisma.projectOrgPlanningPeriod.findMany({
-      where,
-      orderBy: [{ startDate: "desc" }, { createdAt: "desc" }],
-      skip,
-      take: pageSize,
-      select: planningPeriodSelect,
-    }),
-    listActiveProjectFinancialYears(prisma, projectId),
-  ]);
+  const { total, rows, financialYearRows } = await cachedRead(
+    `org-planning-periods:${projectId}:list:${page}:${pageSize}`,
+    PERIOD_MODELS,
+    async () => {
+      const [total, rows, financialYearRows] = await Promise.all([
+        prisma.projectOrgPlanningPeriod.count({ where }),
+        prisma.projectOrgPlanningPeriod.findMany({
+          where,
+          orderBy: [{ startDate: "desc" }, { createdAt: "desc" }],
+          skip,
+          take: pageSize,
+          select: planningPeriodSelect,
+        }),
+        listActiveFinancialYearRows(prisma, projectId),
+      ]);
+      return { total, rows, financialYearRows };
+    },
+  );
 
   const now = new Date();
-  return NextResponse.json({
+  return cachedJson(request, {
     planningPeriods: rows.map((row) => serializeProjectOrgPlanningPeriod(row, now)),
-    activeFinancialYears,
+    activeFinancialYears: financialYearRows
+      .filter((row) => isFinancialYearCurrentlyValid(row.startDate, row.endDate, now))
+      .map((row) => ({ id: row.id, label: row.label })),
     serverToday: toDateInputValue(now),
     page,
     pageSize,
     total,
     pageCount: Math.max(1, Math.ceil(total / pageSize)),
-  });
+  }, { revalidate: true });
 }
+
+const PERIOD_MODELS = ["ProjectOrgPlanningPeriod", "ProjectOrgFinancialYear", "Project:delete"];
 
 export async function POST(request, context) {
   const user = await getSessionUser();

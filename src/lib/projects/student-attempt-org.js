@@ -5,6 +5,7 @@
 import { ProjectPurpose, ProjectStatus, ProjectVisibility, Role } from "@prisma/client";
 import { generateUniqueProjectCode } from "@/lib/projects/project-identity";
 import { ensureProjectOwnerOrgUser } from "@/lib/projects/org-users";
+import { runInTx } from "@/lib/db-tx";
 
 export const ATTEMPT_ORG_SELECT = {
   id: true,
@@ -81,30 +82,31 @@ export async function ensureStudentAttemptOrganisation(db, { studentUserId, acad
       ? ProjectPurpose.ASSESSMENT
       : ProjectPurpose.PRACTICE;
 
-  const created = await db.project.create({
-    data: {
-      ownerUserId: studentUserId,
-      creatorRole: Role.STUDENT,
-      name: orgName,
-      organizationName: orgName,
-      description:
-        academicProject.description ||
-        "Isolated organisation workspace for this academic project. Staff and records start empty.",
-      purpose,
-      status: ProjectStatus.IN_PROGRESS,
-      visibility: ProjectVisibility.PRIVATE,
-      isPublished: true,
-      requiresEnrollment: false,
-      projectCode,
-      isPersonalOrg: false,
-      isAttemptOrg: true,
-      sourceAcademicProjectId: academicProject.id,
-    },
-    select: ATTEMPT_ORG_SELECT,
+  return runInTx(db, async (tx) => {
+    const created = await tx.project.create({
+      data: {
+        ownerUserId: studentUserId,
+        creatorRole: Role.STUDENT,
+        name: orgName,
+        organizationName: orgName,
+        description:
+          academicProject.description ||
+          "Isolated organisation workspace for this academic project. Staff and records start empty.",
+        purpose,
+        status: ProjectStatus.IN_PROGRESS,
+        visibility: ProjectVisibility.PRIVATE,
+        isPublished: true,
+        requiresEnrollment: false,
+        projectCode,
+        isPersonalOrg: false,
+        isAttemptOrg: true,
+        sourceAcademicProjectId: academicProject.id,
+      },
+      select: ATTEMPT_ORG_SELECT,
+    });
+    await ensureProjectOwnerOrgUser(tx, created.id, studentUserId);
+    return created;
   });
-
-  await ensureProjectOwnerOrgUser(db, created.id, studentUserId);
-  return created;
 }
 
 /**

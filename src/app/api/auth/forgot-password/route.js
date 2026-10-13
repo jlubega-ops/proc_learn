@@ -9,6 +9,7 @@ import { prisma } from "@/lib/prisma";
 import { normalizeEmail } from "@/lib/validation/email";
 import { schoolEmailFieldError } from "@/lib/validation/school-email";
 import { getRequestIp, getRequestUserAgent } from "@/lib/request-meta";
+import { hitRateLimit, RATE_LIMIT_MESSAGE } from "@/lib/rate-limit";
 import { getAppBaseUrl } from "@/lib/appConfig";
 
 export const runtime = "nodejs";
@@ -45,6 +46,14 @@ export async function POST(request) {
   }
 
   const email = normalizeEmail(body?.email);
+
+  const hourMs = 60 * 60 * 1000;
+  if (!hitRateLimit(`forgot:ip:${ip || "unknown"}`, { limit: 20, windowMs: hourMs }).ok) {
+    return NextResponse.json({ error: RATE_LIMIT_MESSAGE }, { status: 429 });
+  }
+  if (!hitRateLimit(`forgot:email:${email}`, { limit: 3, windowMs: hourMs }).ok) {
+    return NextResponse.json({ ok: true, message: PUBLIC_MESSAGE });
+  }
 
   const user = await prisma.user.findUnique({
     where: { email },

@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useMemo, useState } from "react";
 import Box from "@mui/material/Box";
 import Button from "@mui/material/Button";
 import Chip from "@mui/material/Chip";
@@ -29,7 +29,11 @@ import AddRounded from "@mui/icons-material/AddRounded";
 import DeleteOutlineRounded from "@mui/icons-material/DeleteOutlineRounded";
 import EditRounded from "@mui/icons-material/EditRounded";
 import RefreshRounded from "@mui/icons-material/RefreshRounded";
+import { discardConfirmOptions, useConfirm } from "@/components/providers/confirm-provider";
 import { useToast } from "@/components/providers/toast-provider";
+import { useDraftState } from "@/hooks/use-draft-state";
+import { useApi } from "@/hooks/use-api";
+import { deleteSucceeded, revalidateApi } from "@/lib/api-client-cache";
 import {
   adminCenteredLoadingBoxSx,
   adminDialogPaperSx,
@@ -94,68 +98,57 @@ function computePeriodLabel(form) {
  */
 export function ProjectOrgPlanningPeriodsPanel({ projectId, readOnly = false }) {
   const { showToast } = useToast();
-  const [rows, setRows] = useState(/** @type {any[]} */ ([]));
-  const [activeFinancialYears, setActiveFinancialYears] = useState(
-    /** @type {{ id: string; label: string }[]} */ ([]),
-  );
-  const [loading, setLoading] = useState(true);
-  const [refetching, setRefetching] = useState(false);
   const [page, setPage] = useState(0);
   const [rowsPerPage, setRowsPerPage] = useState(10);
-  const [total, setTotal] = useState(0);
+
+  const listQuery = new URLSearchParams({ page: String(page + 1), pageSize: String(rowsPerPage) });
+  const {
+    data: listData,
+    loading,
+    refreshing: refetching,
+    reload,
+  } = useApi(`/api/projects/${projectId}/org-planning-periods?${listQuery.toString()}`, {
+    errorMessage: "Could not load planning periods.",
+  });
+  const rows = Array.isArray(listData?.planningPeriods) ? listData.planningPeriods : [];
+  /** @type {{ id: string; label: string }[]} */
+  const activeFinancialYears = Array.isArray(listData?.activeFinancialYears)
+    ? listData.activeFinancialYears
+    : [];
+  const total = Number(listData?.total) || 0;
+  const load = useCallback(async () => {
+    await reload();
+    void revalidateApi(`/api/projects/${projectId}/org-planning-periods`);
+  }, [projectId, reload]);
 
   const [openCreate, setOpenCreate] = useState(false);
   const [createBusy, setCreateBusy] = useState(false);
-  const [createForm, setCreateForm] = useState(emptyForm());
+  const confirm = useConfirm();
+  const [createForm, setCreateForm, createDraft] = useDraftState(
+    `org:planning-period:${projectId}:new`,
+    { ...emptyForm(), financialYearId: activeFinancialYears[0]?.id || "" },
+    { enabled: openCreate, resetKey: openCreate },
+  );
   const [createErrors, setCreateErrors] = useState(/** @type {Record<string, string>} */ ({}));
 
   const [editRow, setEditRow] = useState(/** @type {any} */ (null));
-  const [editForm, setEditForm] = useState(emptyForm());
+  const [editForm, setEditForm, editDraft] = useDraftState(
+    `org:planning-period:${projectId}:edit:${editRow?.id || ""}`,
+    editRow
+      ? {
+          financialYearId: editRow.financialYearId || "",
+          label: editRow.label || "",
+          startDate: editRow.startDate || "",
+          endDate: editRow.endDate || "",
+        }
+      : emptyForm(),
+    { enabled: Boolean(editRow), resetKey: editRow?.id ?? null },
+  );
   const [editErrors, setEditErrors] = useState(/** @type {Record<string, string>} */ ({}));
   const [editBusy, setEditBusy] = useState(false);
 
   const [delRow, setDelRow] = useState(/** @type {any} */ (null));
   const [deleteBusy, setDeleteBusy] = useState(false);
-
-  const load = useCallback(
-    async (opts = /** @type {{ silent?: boolean }} */ ({})) => {
-      const silent = Boolean(opts.silent);
-      if (silent) setRefetching(true);
-      else setLoading(true);
-      try {
-        const qp = new URLSearchParams({
-          page: String(page + 1),
-          pageSize: String(rowsPerPage),
-        });
-        const res = await fetch(
-          `/api/projects/${projectId}/org-planning-periods?${qp.toString()}`,
-          { credentials: "include" },
-        );
-        const data = await res.json().catch(() => ({}));
-        if (!res.ok) {
-          showToast({
-            message:
-              typeof data.error === "string" ? data.error : "Could not load planning periods.",
-            severity: "error",
-          });
-          return;
-        }
-        setRows(Array.isArray(data.planningPeriods) ? data.planningPeriods : []);
-        setActiveFinancialYears(
-          Array.isArray(data.activeFinancialYears) ? data.activeFinancialYears : [],
-        );
-        setTotal(Number(data.total) || 0);
-      } finally {
-        if (silent) setRefetching(false);
-        else setLoading(false);
-      }
-    },
-    [page, projectId, rowsPerPage, showToast],
-  );
-
-  useEffect(() => {
-    void load();
-  }, [load]);
 
   async function createPlanningPeriod() {
     const validated = validateProjectOrgPlanningPeriodInput(createForm);
@@ -185,7 +178,7 @@ export function ProjectOrgPlanningPeriodsPanel({ projectId, readOnly = false }) 
       }
       showToast({ message: "Planning period created.", severity: "success" });
       setOpenCreate(false);
-      setCreateForm(emptyForm());
+      createDraft.resetForm(emptyForm());
       setCreateErrors({});
       await load({ silent: true });
     } finally {
@@ -195,12 +188,22 @@ export function ProjectOrgPlanningPeriodsPanel({ projectId, readOnly = false }) 
 
   function openEdit(row) {
     setEditRow(row);
-    setEditForm({
-      financialYearId: row.financialYearId || "",
-      label: row.label || "",
-      startDate: row.startDate || "",
-      endDate: row.endDate || "",
-    });
+    setEditErrors({});
+  }
+
+  async function closeCreate() {
+    if (createBusy) return;
+    if (createDraft.isDirty && !(await confirm(discardConfirmOptions()))) return;
+    createDraft.resetForm(emptyForm());
+    setOpenCreate(false);
+    setCreateErrors({});
+  }
+
+  async function closeEdit() {
+    if (editBusy) return;
+    if (editDraft.isDirty && !(await confirm(discardConfirmOptions()))) return;
+    editDraft.clearDraft();
+    setEditRow(null);
     setEditErrors({});
   }
 
@@ -240,6 +243,7 @@ export function ProjectOrgPlanningPeriodsPanel({ projectId, readOnly = false }) 
         return;
       }
       showToast({ message: "Planning period updated.", severity: "success" });
+      editDraft.clearDraft();
       setEditRow(null);
       await load({ silent: true });
     } finally {
@@ -256,7 +260,7 @@ export function ProjectOrgPlanningPeriodsPanel({ projectId, readOnly = false }) 
         { method: "DELETE", credentials: "include" },
       );
       const data = await res.json().catch(() => ({}));
-      if (!res.ok) {
+      if (!deleteSucceeded(res)) {
         showToast({
           message: typeof data.error === "string" ? data.error : "Could not delete.",
           severity: "error",
@@ -295,10 +299,6 @@ export function ProjectOrgPlanningPeriodsPanel({ projectId, readOnly = false }) 
             disabled={refetching || !canAdd}
             onClick={() => {
               setCreateErrors({});
-              setCreateForm({
-                ...emptyForm(),
-                financialYearId: activeFinancialYears[0]?.id || "",
-              });
               setOpenCreate(true);
             }}
             className="w-full sm:w-auto"
@@ -433,11 +433,7 @@ export function ProjectOrgPlanningPeriodsPanel({ projectId, readOnly = false }) 
         form={createForm}
         errors={createErrors}
         financialYears={activeFinancialYears}
-        onClose={() => {
-          if (createBusy) return;
-          setOpenCreate(false);
-          setCreateErrors({});
-        }}
+        onClose={() => void closeCreate()}
         onChange={(patch) => {
           setCreateForm((prev) => {
             const next = { ...prev, ...patch };
@@ -466,11 +462,7 @@ export function ProjectOrgPlanningPeriodsPanel({ projectId, readOnly = false }) 
         form={editForm}
         errors={editErrors}
         financialYears={activeFinancialYears}
-        onClose={() => {
-          if (editBusy) return;
-          setEditRow(null);
-          setEditErrors({});
-        }}
+        onClose={() => void closeEdit()}
         onChange={(patch) => {
           setEditForm((prev) => {
             const next = { ...prev, ...patch };

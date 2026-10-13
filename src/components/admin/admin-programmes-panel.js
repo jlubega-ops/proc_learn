@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useState } from "react";
 import Box from "@mui/material/Box";
 import Button from "@mui/material/Button";
 import CircularProgress from "@mui/material/CircularProgress";
@@ -37,12 +37,12 @@ import {
   themedTextFieldSx,
 } from "@/lib/admin-mui-surfaces";
 import { useToast } from "@/components/providers/toast-provider";
+import { useDraftSync } from "@/hooks/use-draft-sync";
+import { useApi } from "@/hooks/use-api";
+import { deleteSucceeded, revalidateApi } from "@/lib/api-client-cache";
 
 export function AdminProgrammesPanel() {
   const { showToast } = useToast();
-  const [rows, setRows] = useState(/** @type {any[]} */ ([]));
-  const [loading, setLoading] = useState(true);
-  const [refetching, setRefetching] = useState(false);
   const [createBusy, setCreateBusy] = useState(false);
   const [editBusy, setEditBusy] = useState(false);
   const [deleteBusy, setDeleteBusy] = useState(false);
@@ -59,33 +59,58 @@ export function AdminProgrammesPanel() {
   const [editErrors, setEditErrors] = useState(/** @type {Record<string, string>} */ ({}));
   const [delRow, setDelRow] = useState(/** @type {any} */ (null));
 
-  const load = useCallback(
-    async (opts = /** @type {{ silent?: boolean }} */ ({})) => {
-      const silent = Boolean(opts.silent);
-      if (silent) setRefetching(true);
-      else setLoading(true);
-      try {
-        const res = await fetch("/api/programmes", { credentials: "include" });
-        const data = await res.json().catch(() => ({}));
-        if (!res.ok) {
-          showToast({
-            message: typeof data.error === "string" ? data.error : "Could not load programmes.",
-            severity: "error",
-          });
-          return;
-        }
-        setRows(Array.isArray(data.programmes) ? data.programmes : []);
-      } finally {
-        if (silent) setRefetching(false);
-        else setLoading(false);
-      }
+  const createDraft = useDraftSync(
+    "admin:programme:new",
+    { name, shortName, defaultYearOfStudy },
+    (d) => {
+      if (typeof d.name === "string") setName(d.name);
+      if (typeof d.shortName === "string") setShortName(d.shortName);
+      if (typeof d.defaultYearOfStudy === "string") setDefaultYearOfStudy(d.defaultYearOfStudy);
     },
-    [showToast],
+    { enabled: open },
   );
 
-  useEffect(() => {
-    void load();
-  }, [load]);
+  const editDraft = useDraftSync(
+    editRow ? `admin:programme:edit:${editRow.id}` : "",
+    { editName, editShortName, editDefaultYear },
+    (d) => {
+      if (typeof d.editName === "string") setEditName(d.editName);
+      if (typeof d.editShortName === "string") setEditShortName(d.editShortName);
+      if (typeof d.editDefaultYear === "string") setEditDefaultYear(d.editDefaultYear);
+    },
+    { enabled: Boolean(editRow), resetKey: editRow?.id },
+  );
+
+  function closeCreate() {
+    if (createBusy) return;
+    createDraft.clearDraft();
+    setOpen(false);
+    setCreateErrors({});
+  }
+
+  function closeEdit() {
+    if (editBusy) return;
+    editDraft.clearDraft();
+    setEditRow(null);
+    setEditErrors({});
+  }
+
+  const {
+    data: listData,
+    loading,
+    refreshing: refetching,
+    reload,
+  } = useApi("/api/programmes", { errorMessage: "Could not load programmes." });
+  const rows = Array.isArray(listData?.programmes) ? listData.programmes : [];
+  const load = useCallback(async () => {
+    await reload();
+    void revalidateApi(
+      "/api/user/student-view",
+      "/api/programme-processes",
+      "/api/admin/courses",
+      "/api/admin/students",
+    );
+  }, [reload]);
 
   async function toggleActive(row) {
     setPatchingId(row.id);
@@ -146,6 +171,7 @@ export function AdminProgrammesPanel() {
         return;
       }
       showToast({ message: "Programme created.", severity: "success" });
+      createDraft.clearDraft();
       setOpen(false);
       setCreateErrors({});
       setName("");
@@ -202,6 +228,7 @@ export function AdminProgrammesPanel() {
         return;
       }
       showToast({ message: "Programme updated.", severity: "success" });
+      editDraft.clearDraft();
       setEditRow(null);
       setEditErrors({});
       await load({ silent: true });
@@ -219,7 +246,7 @@ export function AdminProgrammesPanel() {
         credentials: "include",
       });
       const data = await res.json().catch(() => ({}));
-      if (!res.ok) {
+      if (!deleteSucceeded(res)) {
         showToast({
           message: typeof data.error === "string" ? data.error : "Could not delete.",
           severity: "error",
@@ -449,11 +476,7 @@ export function AdminProgrammesPanel() {
         <DialogActions className="flex-col-reverse gap-2 sm:flex-row sm:gap-0">
           <Button
             type="button"
-            onClick={() => {
-              if (editBusy) return;
-              setEditRow(null);
-              setEditErrors({});
-            }}
+            onClick={closeEdit}
             disabled={editBusy}
             className="w-full sm:w-auto"
           >
@@ -473,11 +496,7 @@ export function AdminProgrammesPanel() {
 
       <Dialog
         open={open}
-        onClose={() => {
-          if (createBusy) return;
-          setOpen(false);
-          setCreateErrors({});
-        }}
+        onClose={closeCreate}
         fullWidth
         maxWidth="sm"
         slotProps={{ paper: { sx: adminDialogPaperSx } }}
@@ -557,11 +576,7 @@ export function AdminProgrammesPanel() {
         <DialogActions className="flex-col-reverse gap-2 sm:flex-row sm:gap-0">
           <Button
             type="button"
-            onClick={() => {
-              if (createBusy) return;
-              setCreateErrors({});
-              setOpen(false);
-            }}
+            onClick={closeCreate}
             disabled={createBusy}
             className="w-full sm:w-auto"
           >

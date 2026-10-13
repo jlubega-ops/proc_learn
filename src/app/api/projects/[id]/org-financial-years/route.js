@@ -3,6 +3,8 @@ import { Role } from "@prisma/client";
 import { getSessionUser, sessionActiveRole } from "@/lib/api/get-session-user";
 import { writeAuditLog, AuditEvent } from "@/lib/audit-log";
 import { prisma } from "@/lib/prisma";
+import { cachedRead } from "@/lib/server-cache";
+import { cachedJson } from "@/lib/api/cached-json";
 import { authorizeProjectOrgAdmin } from "@/lib/projects/workspace-access";
 import {
   authorizeProjectApiAccess,
@@ -11,11 +13,15 @@ import {
 import { ORG_PERMISSION } from "@/lib/projects/org-role-permissions";
 import {
   deactivateOtherProjectFinancialYears,
+  financialYearOverlapResponse,
   financialYearSelect,
-  listSelectableFinancialYears,
+  findOverlappingFinancialYear,
+  listActiveFinancialYearRows,
+  selectableFinancialYearsFromRows,
   serializeProjectOrgFinancialYear,
 } from "@/lib/projects/org-financial-years";
 import { validateProjectOrgFinancialYearInput } from "@/lib/validation/project-org-financial-year";
+import { toDateInputValue } from "@/lib/financial-year-dates";
 
 export const runtime = "nodejs";
 
@@ -56,8 +62,10 @@ export async function GET(request, context) {
         { status: auth.status },
       );
     }
-    const result = await listSelectableFinancialYears(prisma, projectId);
-    return NextResponse.json(result);
+    const rows = await cachedRead(`org-financial-years:${projectId}:active`, FY_MODELS, () =>
+      listActiveFinancialYearRows(prisma, projectId),
+    );
+    return cachedJson(request, selectableFinancialYearsFromRows(rows), { revalidate: true });
   }
 
   const auth = await authorizeProjectOrgRead(prisma, {
@@ -78,25 +86,36 @@ export async function GET(request, context) {
 
   const where = { projectId };
 
-  const [total, rows] = await Promise.all([
-    prisma.projectOrgFinancialYear.count({ where }),
-    prisma.projectOrgFinancialYear.findMany({
-      where,
-      orderBy: [{ startDate: "desc" }, { label: "desc" }],
-      skip,
-      take: pageSize,
-      select: financialYearSelect,
-    }),
-  ]);
+  const { total, rows, latestEndDate } = await cachedRead(
+    `org-financial-years:${projectId}:list:${page}:${pageSize}`,
+    FY_MODELS,
+    async () => {
+      const [total, rows, latest] = await Promise.all([
+        prisma.projectOrgFinancialYear.count({ where }),
+        prisma.projectOrgFinancialYear.findMany({
+          where,
+          orderBy: [{ startDate: "desc" }, { label: "desc" }],
+          skip,
+          take: pageSize,
+          select: financialYearSelect,
+        }),
+        prisma.projectOrgFinancialYear.aggregate({ where, _max: { endDate: true } }),
+      ]);
+      return { total, rows, latestEndDate: latest._max.endDate };
+    },
+  );
 
-  return NextResponse.json({
+  return cachedJson(request, {
     financialYears: rows.map((row) => serializeProjectOrgFinancialYear(row)),
+    latestEndDate: latestEndDate ? toDateInputValue(latestEndDate) : null,
     page,
     pageSize,
     total,
     pageCount: Math.max(1, Math.ceil(total / pageSize)),
-  });
+  }, { revalidate: true });
 }
+
+const FY_MODELS = ["ProjectOrgFinancialYear", "Project:delete"];
 
 export async function POST(request, context) {
   const user = await getSessionUser();
@@ -146,6 +165,11 @@ export async function POST(request, context) {
       },
       { status: 400 },
     );
+  }
+
+  const overlap = await findOverlappingFinancialYear(prisma, projectId, validated.data);
+  if (overlap) {
+    return NextResponse.json(financialYearOverlapResponse(overlap), { status: 400 });
   }
 
   const row = await prisma.$transaction(async (tx) => {

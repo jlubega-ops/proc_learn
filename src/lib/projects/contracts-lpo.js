@@ -10,6 +10,7 @@ import {
 import { validatePurchaseInstructionResponse } from "@/lib/validation/purchase-instruction";
 import { validateStartEndDateRange } from "@/lib/validation/date-range";
 import { writeAuditLog, AuditEvent } from "@/lib/audit-log";
+import { runInTx } from "@/lib/db-tx";
 import { notifyOrgUsers, OrgNotificationType } from "@/lib/projects/org-notifications";
 import { notifyProvider } from "@/lib/projects/provider-notifications";
 import { financialYearRefToken } from "@/lib/projects/org-reference";
@@ -479,7 +480,7 @@ export async function respondToOrder(prisma, opts) {
   const data = accept
     ? { acceptedAt: now, acceptedByName: v.values.acceptedByName }
     : { declinedAt: now, declineReason: v.values.declineReason };
-  const claimed = await prisma.$transaction(async (tx) => {
+  const claimed = await runInTx(prisma, async (tx) => {
     const res = isContract
       ? await tx.projectOrgContract.updateMany({
           where: { id: row.id, status: OrgContractStatus.ISSUED },

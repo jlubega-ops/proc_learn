@@ -1,4 +1,5 @@
 import { prisma } from "@/lib/prisma";
+import { runInTx } from "@/lib/db-tx";
 import { getAcademicYearDropdownChoices } from "@/lib/academic-years";
 import { validateStartEndDateRange } from "@/lib/validation/date-range";
 import { parseDateInputValue, toDateInputValue } from "@/lib/financial-year-dates";
@@ -109,10 +110,13 @@ export async function ensureCurrentAcademicContext(db = prisma) {
       },
     });
   } else if (!year.isCurrent) {
-    await db.academicYear.updateMany({ data: { isCurrent: false } });
-    year = await db.academicYear.update({
-      where: { id: year.id },
-      data: { isCurrent: true },
+    const yearId = year.id;
+    year = await runInTx(db, async (tx) => {
+      await tx.academicYear.updateMany({ data: { isCurrent: false } });
+      return tx.academicYear.update({
+        where: { id: yearId },
+        data: { isCurrent: true },
+      });
     });
   }
 

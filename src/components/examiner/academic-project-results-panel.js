@@ -29,6 +29,8 @@ import AutorenewRounded from "@mui/icons-material/AutorenewRounded";
 import ReplayRounded from "@mui/icons-material/ReplayRounded";
 import SendRounded from "@mui/icons-material/SendRounded";
 import DownloadRounded from "@mui/icons-material/DownloadRounded";
+import AssessmentRounded from "@mui/icons-material/AssessmentRounded";
+import { ProjectSectionBar } from "@/components/projects/project-section-bar";
 import FormControl from "@mui/material/FormControl";
 import InputLabel from "@mui/material/InputLabel";
 import Select from "@mui/material/Select";
@@ -38,7 +40,7 @@ import {
   BRAND_PAGE_SHELL_CLASS,
   BRAND_PAGE_LEAD_CLASS,
 } from "@/components/layout/dashboard-page-intro";
-import { BRAND_BTN_PRIMARY_CLASS, BRAND_SECTION_TITLE_CLASS } from "@/lib/brand-ui";
+import { BRAND_BTN_PRIMARY_CLASS } from "@/lib/brand-ui";
 import {
   adminCenteredLoadingBoxSx,
   adminDialogPaperSx,
@@ -48,11 +50,14 @@ import {
   themedTextFieldSx,
 } from "@/lib/admin-mui-surfaces";
 import { useToast } from "@/components/providers/toast-provider";
+import { useAuthSession } from "@/components/providers/auth-session-provider";
+import { ROLE } from "@/lib/roles";
 import { campusSelectOptions } from "@/lib/campuses";
 import { formatMarks } from "@/lib/academic/assessment-sections";
 import { ResultsViewDialog } from "@/components/examiner/results-view-dialog";
 import { clickableRowProps } from "@/lib/clickable-row";
 import { actionConfirmOptions, useConfirm } from "@/components/providers/confirm-provider";
+import { startVisibleInterval } from "@/lib/visible-interval";
 
 /**
  * @param {{ projectId: string }} props
@@ -60,6 +65,8 @@ import { actionConfirmOptions, useConfirm } from "@/components/providers/confirm
 export function AcademicProjectResultsPanel({ projectId }) {
   const router = useRouter();
   const { showToast } = useToast();
+  const { session } = useAuthSession();
+  const canTeach = session?.activeRole === ROLE.EXAMINER;
   const [loading, setLoading] = useState(true);
   const [data, setData] = useState(/** @type {any} */ (null));
   const [page, setPage] = useState(0);
@@ -188,8 +195,7 @@ export function AcademicProjectResultsPanel({ projectId }) {
 
   useEffect(() => {
     void load();
-    const timer = setInterval(() => void load({ silent: true }), 15000);
-    return () => clearInterval(timer);
+    return startVisibleInterval(() => void load({ silent: true }), 30_000);
   }, [load]);
 
   const participants = data?.participants || [];
@@ -332,70 +338,58 @@ export function AcademicProjectResultsPanel({ projectId }) {
     );
   }
 
-  const p = data.project;
   const counts = data.counts || {};
   const selectedCount = selected.size;
   const released = Boolean(data.scoring?.resultsReleased);
 
   return (
     <div className={BRAND_PAGE_SHELL_CLASS}>
-      <DashboardPageIntro
-        hero
+      <ProjectSectionBar
+        icon={AssessmentRounded}
         title="Results"
-        description="Scores for enrolled students."
-      >
-        <div className="mt-3 flex flex-wrap gap-2">
-          <Chip size="small" color="primary" label={p.purpose} />
-          <Chip size="small" color="info" label={`Enrolled ${counts.enrolled || 0}`} />
-          <Chip size="small" color="warning" label={`In progress ${counts.inProgress || 0}`} />
-          <Chip size="small" color="success" label={`Submitted ${counts.submitted || 0}`} />
-          {data.scoring ? (
-            <Chip
-              size="small"
-              variant="outlined"
-              color={data.scoring.resultsReleased ? "success" : "warning"}
-              label={
-                data.scoring.resultsReleased
-                  ? `Released · ${data.scoring.resultsView === "DETAILS" ? "Full details" : "Overview"}`
-                  : "Results hidden"
-              }
-            />
-          ) : null}
-          {selectedCount > 0 ? (
-            <Chip size="small" color="secondary" label={`${selectedCount} selected`} />
-          ) : null}
-        </div>
-        <div className="mt-3 flex flex-wrap gap-2">
-          <Button
-            type="button"
-            className="cursor-pointer"
-            startIcon={<RefreshRounded />}
-            onClick={() => void load()}
-          >
-            Refresh
-          </Button>
-          <Tooltip title="Download student details, times, and scores as Excel">
-            <span>
-              <Button
-                type="button"
-                variant="contained"
-                className={`${BRAND_BTN_PRIMARY_CLASS} cursor-pointer disabled:cursor-not-allowed`}
-                disabled={exporting}
-                startIcon={
-                  exporting ? (
-                    <CircularProgress size={14} color="inherit" />
-                  ) : (
-                    <DownloadRounded />
-                  )
+        stats={
+          <>
+            <Chip size="small" color="info" label={`Enrolled ${counts.enrolled || 0}`} />
+            <Chip size="small" color="warning" label={`In progress ${counts.inProgress || 0}`} />
+            <Chip size="small" color="success" label={`Submitted ${counts.submitted || 0}`} />
+            {data.scoring ? (
+              <Chip
+                size="small"
+                variant="outlined"
+                color={released ? "success" : "warning"}
+                label={
+                  released
+                    ? `Released · ${data.scoring.resultsView === "DETAILS" ? "Full details" : "Overview"}`
+                    : "Results hidden"
                 }
-                onClick={() => setExportOpen(true)}
-              >
-                Download Excel
-              </Button>
-            </span>
-          </Tooltip>
-          {data.scoring ? (
-            <>
+              />
+            ) : null}
+          </>
+        }
+        actions={
+          <>
+            {participants.length ? (
+              <FormControl sx={{ ...themedTextFieldSx, width: { xs: "100%", sm: 180 } }}>
+                <InputLabel id="results-campus-filter">Campus</InputLabel>
+                <Select
+                  labelId="results-campus-filter"
+                  label="Campus"
+                  value={campusFilter}
+                  onChange={(e) => {
+                    setCampusFilter(String(e.target.value || ""));
+                    setPage(0);
+                  }}
+                >
+                  <MenuItem value="">All campuses</MenuItem>
+                  {campusSelectOptions().map((c) => (
+                    <MenuItem key={c.value} value={c.value}>
+                      {c.label}
+                    </MenuItem>
+                  ))}
+                </Select>
+              </FormControl>
+            ) : null}
+            {data.scoring && canTeach ? (
               <Tooltip title={released ? "Change what students see" : "Show results to students"}>
                 <span>
                   <Button
@@ -407,102 +401,100 @@ export function AcademicProjectResultsPanel({ projectId }) {
                     onClick={() => setReleaseOpen(true)}
                     startIcon={releasing ? <CircularProgress size={14} color="inherit" /> : <VisibilityRounded />}
                   >
-                    {released ? "Change release" : "Release results"}
+                    {released ? "Change release" : "Release"}
                   </Button>
                 </span>
               </Tooltip>
-              {released ? (
+            ) : null}
+            <Tooltip title="Download student details, times, and scores as Excel">
+              <span>
+                <Button
+                  type="button"
+                  variant="contained"
+                  className={`${BRAND_BTN_PRIMARY_CLASS} cursor-pointer disabled:cursor-not-allowed`}
+                  disabled={exporting}
+                  startIcon={
+                    exporting ? <CircularProgress size={14} color="inherit" /> : <DownloadRounded />
+                  }
+                  onClick={() => setExportOpen(true)}
+                >
+                  Excel
+                </Button>
+              </span>
+            </Tooltip>
+            <div className="flex items-center">
+              {data.scoring && canTeach && released ? (
                 <Tooltip title="Hide results from students">
                   <span>
-                    <Button
-                      type="button"
-                      variant="outlined"
+                    <IconButton
+                      aria-label="Hide results from students"
                       color="warning"
                       disabled={releasing}
-                      className="cursor-pointer disabled:cursor-not-allowed"
                       onClick={() => void updateRelease({ release: false })}
-                      startIcon={<VisibilityOffRounded />}
                     >
-                      Hide results
-                    </Button>
+                      <VisibilityOffRounded />
+                    </IconButton>
                   </span>
                 </Tooltip>
               ) : null}
-            </>
-          ) : null}
-          <Button
-            type="button"
-            className="cursor-pointer disabled:cursor-not-allowed"
-            disabled={Boolean(busy) || selectedCount === 0}
-            color="warning"
-            variant="outlined"
-            startIcon={
-              busy === "selected" ? <CircularProgress size={14} color="inherit" /> : <ReplayRounded />
-            }
-            onClick={() => askConfirm("regrade", [...selected])}
-          >
-            Regrade selected
-          </Button>
-          <Button
-            type="button"
-            className="cursor-pointer disabled:cursor-not-allowed"
-            disabled={Boolean(busy) || selectedCount === 0}
-            color="error"
-            variant="outlined"
-            startIcon={
-              busy === "force" ? <CircularProgress size={14} color="inherit" /> : <SendRounded />
-            }
-            onClick={() => askConfirm("force_submit", [...selected])}
-          >
-            Force submit selected
-          </Button>
-          <Button
-            type="button"
-            className="cursor-pointer disabled:cursor-not-allowed"
-            disabled={Boolean(busy) || selectableAttemptIds.length === 0}
-            startIcon={
-              busy === "all" ? (
-                <CircularProgress size={14} color="inherit" />
-              ) : (
-                <AutorenewRounded />
-              )
-            }
-            onClick={() => askConfirm("regrade_all", selectableAttemptIds)}
-          >
-            Regrade all
-          </Button>
-          <Button component={Link} href={`/projects/${projectId}/assessment`} className="cursor-pointer">
-            Scoring setup
-          </Button>
-        </div>
-      </DashboardPageIntro>
+              {canTeach ? (
+                <Tooltip title="Regrade all submitted attempts">
+                  <span>
+                    <IconButton
+                      aria-label="Regrade all submitted attempts"
+                      color="primary"
+                      disabled={Boolean(busy) || selectableAttemptIds.length === 0}
+                      onClick={() => askConfirm("regrade_all", selectableAttemptIds)}
+                    >
+                      {busy === "all" ? <CircularProgress size={18} color="inherit" /> : <AutorenewRounded />}
+                    </IconButton>
+                  </span>
+                </Tooltip>
+              ) : null}
+              <Tooltip title="Refresh">
+                <IconButton aria-label="Refresh results" color="primary" onClick={() => void load()}>
+                  <RefreshRounded />
+                </IconButton>
+              </Tooltip>
+            </div>
+          </>
+        }
+      >
+        {canTeach && selectedCount > 0 ? (
+          <div className="flex flex-wrap items-center gap-2 border-t border-[color:var(--border-subtle)] pt-3">
+            <Chip size="small" color="secondary" label={`${selectedCount} selected`} />
+            <Button
+              type="button"
+              className="cursor-pointer disabled:cursor-not-allowed"
+              disabled={Boolean(busy)}
+              color="warning"
+              variant="outlined"
+              startIcon={
+                busy === "selected" ? <CircularProgress size={14} color="inherit" /> : <ReplayRounded />
+              }
+              onClick={() => askConfirm("regrade", [...selected])}
+            >
+              Regrade
+            </Button>
+            <Button
+              type="button"
+              className="cursor-pointer disabled:cursor-not-allowed"
+              disabled={Boolean(busy)}
+              color="error"
+              variant="outlined"
+              startIcon={busy === "force" ? <CircularProgress size={14} color="inherit" /> : <SendRounded />}
+              onClick={() => askConfirm("force_submit", [...selected])}
+            >
+              Force submit
+            </Button>
+          </div>
+        ) : null}
+      </ProjectSectionBar>
 
-      <h2 className={`${BRAND_SECTION_TITLE_CLASS} mb-2`}>Enrolled students</h2>
       {!participants.length ? (
         <p className={BRAND_PAGE_LEAD_CLASS}>No students have enrolled yet.</p>
       ) : (
         <>
-        <div className="mb-3 flex max-w-xs flex-col gap-2 sm:max-w-sm">
-          <FormControl fullWidth sx={themedTextFieldSx}>
-            <InputLabel id="results-campus-filter">Campus</InputLabel>
-            <Select
-              labelId="results-campus-filter"
-              label="Campus"
-              value={campusFilter}
-              onChange={(e) => {
-                setCampusFilter(String(e.target.value || ""));
-                setPage(0);
-              }}
-            >
-              <MenuItem value="">All campuses</MenuItem>
-              {campusSelectOptions().map((c) => (
-                <MenuItem key={c.value} value={c.value}>
-                  {c.label}
-                </MenuItem>
-              ))}
-            </Select>
-          </FormControl>
-        </div>
         {!filteredParticipants.length ? (
           <p className={BRAND_PAGE_LEAD_CLASS}>No students match this campus.</p>
         ) : (
@@ -597,7 +589,7 @@ export function AcademicProjectResultsPanel({ projectId }) {
                       </TableCell>
                       <TableCell align="right">
                         <div className="flex flex-nowrap justify-end gap-0.5">
-                          {attemptId ? (
+                          {attemptId && canTeach ? (
                             <Tooltip title="Regrade (submits if still in progress)">
                               <span>
                                 <IconButton

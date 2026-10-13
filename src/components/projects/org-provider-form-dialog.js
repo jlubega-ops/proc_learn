@@ -18,7 +18,9 @@ import useMediaQuery from "@mui/material/useMediaQuery";
 import { useTheme } from "@mui/material/styles";
 import DoneAllRounded from "@mui/icons-material/DoneAllRounded";
 import SaveRounded from "@mui/icons-material/SaveRounded";
+import { discardConfirmOptions, useConfirm } from "@/components/providers/confirm-provider";
 import { useToast } from "@/components/providers/toast-provider";
+import { useDraftState } from "@/hooks/use-draft-state";
 import { adminDialogPaperSx, adminMutedTextSx, themedTextFieldSx } from "@/lib/admin-mui-surfaces";
 import { PROVIDER_DOCUMENTS } from "@/lib/projects/provider-compliance";
 import { PROVIDER_CONDUCT_TRAITS } from "@/lib/projects/provider-behaviours";
@@ -101,17 +103,26 @@ export function OrgProviderFormDialog({ open, projectId, provider = null, onClos
   const theme = useTheme();
   const fullScreen = useMediaQuery(theme.breakpoints.down("sm"));
   const { showToast } = useToast();
+  const confirm = useConfirm();
   const isEdit = Boolean(provider?.id);
-  const [form, setForm] = useState(() => formFromProvider(provider));
+  const draftId = provider?.id || "new";
+  const [form, setForm, draft] = useDraftState(`org:provider:edit:${draftId}`, formFromProvider(provider), {
+    enabled: open,
+    resetKey: open ? draftId : null,
+  });
   const [errors, setErrors] = useState(/** @type {Record<string, string>} */ ({}));
   const [busy, setBusy] = useState(false);
 
   useEffect(() => {
-    if (open) {
-      setForm(formFromProvider(provider));
-      setErrors({});
-    }
-  }, [open, provider]);
+    if (open) setErrors({});
+  }, [open]);
+
+  async function handleCancel() {
+    if (busy) return;
+    if (draft.isDirty && !(await confirm(discardConfirmOptions()))) return;
+    draft.clearDraft();
+    onClose();
+  }
 
   /**
    * @param {string} key
@@ -185,6 +196,7 @@ export function OrgProviderFormDialog({ open, projectId, provider = null, onClos
         return;
       }
       showToast({ message: isEdit ? "Provider updated." : "Provider added to the register.", severity: "success" });
+      draft.clearDraft();
       onSaved(data.provider);
     } catch {
       showToast({ message: "Network error. Please try again.", severity: "error" });
@@ -196,7 +208,7 @@ export function OrgProviderFormDialog({ open, projectId, provider = null, onClos
   return (
     <Dialog
       open={open}
-      onClose={() => !busy && onClose()}
+      onClose={handleCancel}
       fullWidth
       maxWidth="md"
       fullScreen={fullScreen}
@@ -417,7 +429,7 @@ export function OrgProviderFormDialog({ open, projectId, provider = null, onClos
           </section>
         </DialogContent>
         <DialogActions className="flex-wrap gap-2">
-          <Button onClick={onClose} disabled={busy}>
+          <Button onClick={handleCancel} disabled={busy}>
             Cancel
           </Button>
           <Button

@@ -11,6 +11,7 @@ import ShoppingCartRounded from "@mui/icons-material/ShoppingCartRounded";
 import StorefrontRounded from "@mui/icons-material/StorefrontRounded";
 import TuneRounded from "@mui/icons-material/TuneRounded";
 import { RecordDetailsGrid } from "@/components/projects/record-details-grid";
+import { DashboardStatTiles } from "@/components/layout/dashboard-stat-tiles";
 import { BRAND_CARD_CLASS, BRAND_SECTION_TITLE_CLASS } from "@/lib/brand-ui";
 
 const ICONS = {
@@ -29,42 +30,14 @@ const ICONS = {
  */
 function StatTiles({ items, links = {} }) {
   return (
-    <div className="mt-3 grid grid-cols-2 gap-3 sm:grid-cols-4 xl:grid-cols-2">
-      {items.map((item) => {
-        const Icon = ICONS[item.key] || InventoryRounded;
-        const href = links[item.key];
-        const body = (
-          <>
-            <div className="flex items-center justify-between gap-2">
-              <span className="truncate text-xs font-semibold uppercase tracking-wide text-zinc-500 dark:text-zinc-400">
-                {item.label}
-              </span>
-              <Icon sx={{ fontSize: 20, color: "var(--brand-blue)" }} aria-hidden />
-            </div>
-            <div className="mt-1 text-2xl font-bold text-foreground">{item.value}</div>
-            {item.hint ? (
-              <div className="text-xs text-zinc-500 dark:text-zinc-400">{item.hint}</div>
-            ) : null}
-          </>
-        );
-        const tileClass =
-          "block min-w-0 rounded-xl border border-[color:var(--border-subtle)] p-3 transition";
-        return href ? (
-          <Link
-            key={item.key}
-            href={href}
-            title={`Open ${item.label}`}
-            className={`${tileClass} cursor-pointer hover:border-primary hover:bg-[color:var(--nav-active-bg)]`}
-          >
-            {body}
-          </Link>
-        ) : (
-          <div key={item.key} className={tileClass}>
-            {body}
-          </div>
-        );
-      })}
-    </div>
+    <DashboardStatTiles
+      gridClassName="grid-cols-2 sm:grid-cols-4 xl:grid-cols-2"
+      items={items.map((item) => ({
+        ...item,
+        Icon: ICONS[item.key] || InventoryRounded,
+        href: links[item.key] || null,
+      }))}
+    />
   );
 }
 

@@ -11,6 +11,7 @@ import {
 } from "react";
 import { usePathname } from "next/navigation";
 import { SessionIdleGuard } from "@/components/providers/session-idle-guard";
+import { clearApiCache } from "@/lib/api-client-cache";
 import { RoleSwitchOverlay } from "@/components/layout/role-switch-overlay";
 import {
   queuePostAuthToast,
@@ -37,6 +38,7 @@ const SESSION_BLOCKING_MAX_MS = 10000;
  * @property {boolean} [isStudentMode]
  * @property {string | null} [returnRoleLabel]
  * @property {string | null} [returnRole]
+ * @property {null | { programmeId: string; programmeName: string | null; programmeShortName: string | null; campus: string | null; campusLabel: string }} [studentView]
  * @property {number} [sessionIdleMinutes]
  * @property {string} [reason]
  */
@@ -190,6 +192,26 @@ export function AuthSessionProvider({ children, initialSession = null }) {
   useEffect(() => {
     void refresh();
   }, [refresh]);
+
+  // Cached API data belongs to one identity; a role, org or student-view switch must not show the old one.
+  const identity = session?.authenticated
+    ? [
+        session.userId,
+        session.orgUserId,
+        session.activeRole,
+        session.activeOrgProjectId,
+        session.activeAttempt?.attemptId,
+        session.studentView?.programmeId,
+        session.studentView?.campus,
+      ].join("|")
+    : "";
+  const identityRef = useRef(identity);
+  useEffect(() => {
+    if (identityRef.current === identity) return;
+    const hadIdentity = Boolean(identityRef.current);
+    identityRef.current = identity;
+    if (hadIdentity) void clearApiCache();
+  }, [identity]);
 
   useEffect(() => {
     if (signingOutRef.current) return;

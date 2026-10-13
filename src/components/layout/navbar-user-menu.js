@@ -28,8 +28,13 @@ import { useToast } from "@/components/providers/toast-provider";
 import { DEFAULT_POST_AUTH_PATH } from "@/lib/appConfig";
 import { ROLE_LABELS } from "@/lib/roles";
 import { adminDialogPaperSx, adminMutedTextSx } from "@/lib/admin-mui-surfaces";
-import { formatCommitteeSeatLabel } from "@/lib/projects/committee-context";
+import { formatCommitteeSeatLabel } from "@/lib/projects/committee-context-shared";
 import { OPEN_COMMITTEE_CONTEXT_EVENT } from "@/components/layout/active-committee-context-banner";
+import {
+  StudentViewFields,
+  useStudentViewOptions,
+  validateStudentViewFields,
+} from "@/components/academic/student-view-fields";
 
 /**
  * @param {string} displayName
@@ -72,6 +77,18 @@ export function NavbarUserMenu() {
   const [committeeLoading, setCommitteeLoading] = useState(false);
   const [committeeBusy, setCommitteeBusy] = useState(false);
   const [committeeError, setCommitteeError] = useState("");
+  const [studentView, setStudentView] = useState({ programmeId: "", campus: "" });
+  const [studentViewErrors, setStudentViewErrors] = useState(
+    /** @type {Record<string, string>} */ ({}),
+  );
+
+  const enteringStudentMode =
+    roleDialogOpen &&
+    picked === "STUDENT" &&
+    session?.activeRole !== "STUDENT" &&
+    Array.isArray(session?.switchableRoles) &&
+    session.switchableRoles.some((r) => r !== "STUDENT");
+  const studentViewOptions = useStudentViewOptions(enteringStudentMode);
 
   const email = session?.email || "";
   const displayName =
@@ -150,6 +167,11 @@ export function NavbarUserMenu() {
 
   async function confirmRoleSwitch() {
     setSwitchError("");
+    if (enteringStudentMode) {
+      const fe = validateStudentViewFields(studentView);
+      setStudentViewErrors(fe);
+      if (Object.keys(fe).length) return;
+    }
     setBusy(true);
     setSessionBlocking(true, "Switching your role…");
     let keepOrganisationBlocking = false;
@@ -158,7 +180,11 @@ export function NavbarUserMenu() {
         method: "POST",
         credentials: "include",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ role: picked }),
+        body: JSON.stringify(
+          enteringStudentMode
+            ? { role: picked, programmeId: studentView.programmeId, campus: studentView.campus }
+            : { role: picked },
+        ),
       });
       const data = await res.json().catch(() => ({}));
       if (!res.ok) {
@@ -351,6 +377,12 @@ export function NavbarUserMenu() {
           <MenuItem
             onClick={() => {
               setPicked(session.activeRole ?? "STUDENT");
+              setStudentView({
+                programmeId: session.studentView?.programmeId || "",
+                campus: session.studentView?.campus || "",
+              });
+              setStudentViewErrors({});
+              setSwitchError("");
               setRoleDialogOpen(true);
               closeMenu();
             }}
@@ -403,6 +435,26 @@ export function NavbarUserMenu() {
               />
             ))}
           </RadioGroup>
+          {enteringStudentMode ? (
+            <div className="mt-3">
+              {studentViewOptions.loading ? (
+                <div className="flex justify-center py-3" role="status" aria-busy="true">
+                  <CircularProgress size={24} aria-label="Loading programmes" />
+                </div>
+              ) : (
+                <StudentViewFields
+                  value={studentView}
+                  onChange={(next) => {
+                    setStudentView(next);
+                    if (next.programmeId) setStudentViewErrors({});
+                  }}
+                  programmes={studentViewOptions.programmes}
+                  errors={studentViewErrors}
+                  disabled={busy}
+                />
+              )}
+            </div>
+          ) : null}
           {switchError ? (
             <Typography variant="caption" color="error" sx={{ display: "block", mt: 1 }}>
               {switchError}
@@ -416,7 +468,11 @@ export function NavbarUserMenu() {
           <Button
             variant="contained"
             onClick={confirmRoleSwitch}
-            disabled={busy || picked === session.activeRole}
+            disabled={
+              busy ||
+              picked === session.activeRole ||
+              (enteringStudentMode && studentViewOptions.loading)
+            }
             {...(busy
               ? {
                   startIcon: (

@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { readFile } from "fs/promises";
+import { getSessionUser } from "@/lib/api/get-session-user";
 import { mutateActiveAppSession } from "@/lib/auth/session";
 import { buildIronSessionOptions } from "@/lib/auth/session-options";
 import { prisma } from "@/lib/prisma";
@@ -16,7 +17,7 @@ export async function GET(_request, context) {
   }
 
   const session = await mutateActiveAppSession();
-  if (!session?.userId) {
+  if (!session?.userId || !(await getSessionUser())) {
     return NextResponse.json({ error: "Unauthorized." }, { status: 401 });
   }
 
@@ -46,6 +47,8 @@ export async function GET(_request, context) {
       headers: {
         "Content-Type": media.mimeType || "application/octet-stream",
         "Cache-Control": "private, no-store",
+        "X-Content-Type-Options": "nosniff",
+        "Content-Disposition": "inline",
       },
     });
   } catch {

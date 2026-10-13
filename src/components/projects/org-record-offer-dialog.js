@@ -10,7 +10,9 @@ import DialogTitle from "@mui/material/DialogTitle";
 import TextField from "@mui/material/TextField";
 import Typography from "@mui/material/Typography";
 import SaveRounded from "@mui/icons-material/SaveRounded";
+import { discardConfirmOptions, useConfirm } from "@/components/providers/confirm-provider";
 import { useToast } from "@/components/providers/toast-provider";
+import { useDraftSync } from "@/hooks/use-draft-sync";
 import { adminDialogPaperSx, adminMutedTextSx, themedTextFieldSx } from "@/lib/admin-mui-surfaces";
 import { formatMoneyUGX, parseMoneyInput, validatePositiveMoney } from "@/lib/money";
 import { draftLinesTotal } from "@/lib/projects/offer-line-items";
@@ -44,8 +46,29 @@ export function OrgRecordOfferDialog({ projectId, procurementId, taskId, decisio
   const [remarks, setRemarks] = useState("");
   /** @type {[Record<string, string>, Function]} */
   const [errors, setErrors] = useState({});
+  const [loadedFor, setLoadedFor] = useState("");
+  const confirm = useConfirm();
 
   const providerId = provider?.id || "";
+  const offerDraft = useDraftSync(
+    `org:procurement:${procurementId}:task:${taskId}:offer:${providerId}`,
+    { unitPrices, amount, deliveryDays, remarks },
+    (d) => {
+      if (d.unitPrices && typeof d.unitPrices === "object") setUnitPrices(d.unitPrices);
+      if (typeof d.amount === "string") setAmount(d.amount);
+      if (typeof d.deliveryDays === "string") setDeliveryDays(d.deliveryDays);
+      if (typeof d.remarks === "string") setRemarks(d.remarks);
+    },
+    { enabled: Boolean(providerId) && loadedFor === providerId && !loading },
+  );
+
+  async function handleCancel() {
+    if (busy) return;
+    if (offerDraft.isDirty && !(await confirm(discardConfirmOptions()))) return;
+    offerDraft.clearDraft();
+    onClose();
+  }
+
   useEffect(() => {
     if (!providerId) return;
     let cancelled = false;
@@ -69,6 +92,7 @@ export function OrgRecordOfferDialog({ projectId, procurementId, taskId, decisio
         setAmount(d.amount ? String(d.amount) : "");
         setDeliveryDays(d.deliveryDays ? String(d.deliveryDays) : "");
         setRemarks(d.remarks || "");
+        setLoadedFor(providerId);
       })
       .catch(() => {
         if (!cancelled) showToast({ message: "Could not load the draft.", severity: "error" });
@@ -135,6 +159,7 @@ export function OrgRecordOfferDialog({ projectId, procurementId, taskId, decisio
         return;
       }
       showToast({ message: `${Word} recorded.`, severity: "success" });
+      offerDraft.clearDraft();
       await onSaved();
       onClose();
     } finally {
@@ -145,7 +170,7 @@ export function OrgRecordOfferDialog({ projectId, procurementId, taskId, decisio
   return (
     <Dialog
       open={Boolean(provider)}
-      onClose={busy ? undefined : onClose}
+      onClose={handleCancel}
       maxWidth="sm"
       fullWidth
       slotProps={{ paper: { sx: adminDialogPaperSx } }}
@@ -249,7 +274,7 @@ export function OrgRecordOfferDialog({ projectId, procurementId, taskId, decisio
           )}
         </DialogContent>
         <DialogActions className="flex-wrap gap-2">
-          <Button onClick={onClose} disabled={busy}>
+          <Button onClick={handleCancel} disabled={busy}>
             Cancel
           </Button>
           <Button

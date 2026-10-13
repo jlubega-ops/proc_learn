@@ -46,6 +46,20 @@ export function actionConfirmOptions(label, opts = {}) {
 }
 
 /**
+ * Cancel on a form with unsaved input: the autosaved draft is removed on confirm.
+ * @returns {ConfirmOptions}
+ */
+export function discardConfirmOptions() {
+  return {
+    title: "Discard unsaved changes?",
+    message: "Your unsaved data on this form will be removed.",
+    confirmLabel: "Discard",
+    cancelLabel: "Keep editing",
+    color: "error",
+  };
+}
+
+/**
  * Confirm options for a workflow decision (APPROVE, RETURN, REJECT, …).
  * @param {string} decision
  * @param {string} [subject] e.g. "this budget"

@@ -3,7 +3,7 @@ import { Role } from "@prisma/client";
 import { getSessionUser, sessionActiveRole } from "@/lib/api/get-session-user";
 import { listAcademicProjectParticipants } from "@/lib/academic/project-attempts";
 import { prisma } from "@/lib/prisma";
-import { canManageExaminerProject } from "@/lib/projects/access";
+import { canViewExaminerProject } from "@/lib/projects/access";
 
 export const runtime = "nodejs";
 
@@ -24,11 +24,8 @@ export async function GET(_request, context) {
     return NextResponse.json({ error: "Not found." }, { status: 404 });
   }
 
-  if (
-    !canManageExaminerProject({ activeRole, project, userId: user.id }) &&
-    activeRole !== Role.SYSTEM_ADMIN
-  ) {
-    return NextResponse.json({ error: "Forbidden." }, { status: 403 });
+  if (!canViewExaminerProject({ activeRole, project })) {
+    return NextResponse.json({ error: "Not found." }, { status: 404 });
   }
 
   const data = await listAcademicProjectParticipants({ projectId: id });

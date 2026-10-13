@@ -9,7 +9,14 @@ import {
   Prisma,
 } from "@prisma/client";
 import { writeAuditLog, AuditEvent } from "@/lib/audit-log";
+import { isTxClient, runInTx } from "@/lib/db-tx";
+import { throttleSync } from "@/lib/sync-throttle";
 import { committeeTypeForWorkflowRole } from "@/lib/projects/committee-context";
+import { processCodeOfFlow } from "@/lib/projects/process-dependencies";
+import {
+  processDisabledForProgrammeMessage,
+  resolveEffectiveProcessCodes,
+} from "@/lib/academic/programme-processes";
 import {
   WORKFLOW_TRIGGERS,
   TRIGGER_TO_PROCESS_CODE,
@@ -51,6 +58,25 @@ export async function findActiveProcessForTrigger(prisma, projectId, triggerKey)
 }
 
 /**
+ * Blocks work on a process the programme × year list (or the examiner) no longer allows.
+ * @param {import("@prisma/client").PrismaClient | import("@prisma/client").Prisma.TransactionClient} prisma
+ * @param {string} projectId
+ * @param {{ code?: string | null; triggerKey?: string | null; name?: string | null } | null | undefined} flow
+ */
+async function programmeFreezeResult(prisma, projectId, flow) {
+  const code = processCodeOfFlow(flow);
+  if (!code) return null;
+  const allowed = await resolveEffectiveProcessCodes(prisma, projectId);
+  if (!allowed || allowed.includes(code)) return null;
+  return {
+    ok: false,
+    error: processDisabledForProgrammeMessage(flow?.name || "process"),
+    code: "PROCESS_FROZEN",
+    status: 403,
+  };
+}
+
+/**
  * Roles that must match the requisition department (or subunit under it).
  */
 const DEPARTMENT_SCOPED_ROLES = new Set([
@@ -59,6 +85,11 @@ const DEPARTMENT_SCOPED_ROLES = new Set([
   "User Department",
   "Head of User Department",
 ]);
+
+/** User Department roles only see / act on their own department's records. */
+export function isDepartmentScopedRole(roleName) {
+  return DEPARTMENT_SCOPED_ROLES.has(String(roleName || ""));
+}
 
 /** Legacy / alternate role labels that map to the same workflow assignees. */
 const ROLE_NAME_ALIASES = {
@@ -237,6 +268,16 @@ export async function createTasksForStep(prisma, opts) {
  * @param {string} [budgetId]
  */
 export async function healMissingStepTasks(prisma, projectId, budgetId = null) {
+  await healThrottled(prisma, projectId, budgetId);
+  return { created: 0 };
+}
+
+/**
+ * @param {import("@prisma/client").PrismaClient} prisma
+ * @param {string} projectId
+ * @param {string | null} [budgetId]
+ */
+async function healMissingStepTasksNow(prisma, projectId, budgetId = null) {
   const instances = await prisma.projectOrgWorkflowInstance.findMany({
     where: {
       projectId,
@@ -268,67 +309,100 @@ export async function healMissingStepTasks(prisma, projectId, budgetId = null) {
   let created = 0;
   for (const instance of instances) {
     const items = instance.processFlow?.items || [];
-    let step = items.find((i) => i.stepNumber === instance.currentStepNumber);
-    if (!step) {
-      // The current step was retired from the catalogue: move on to the next remaining step.
-      step = items.find((i) => i.stepNumber > instance.currentStepNumber);
-      if (!step) continue;
-      await prisma.$transaction([
-        prisma.projectOrgWorkflowTask.updateMany({
+    const current = items.find((i) => i.stepNumber === instance.currentStepNumber);
+    // The current step was retired from the catalogue: move on to the next remaining step.
+    const step = current || items.find((i) => i.stepNumber > instance.currentStepNumber);
+    if (!step) continue;
+    let tasks = current ? instance.tasks || [] : [];
+    // The catalogue moved this step to another role: re-route its open tasks.
+    const roleName = step.projectOrgRole?.name || "";
+    const misrouted = tasks.filter(
+      (t) => t.stepNumber === step.stepNumber && roleName && t.requiredRoleName && t.requiredRoleName !== roleName,
+    );
+    tasks = tasks.filter((t) => !misrouted.includes(t));
+    const hasPending = tasks.some((t) => t.stepNumber === step.stepNumber);
+    if (current && !misrouted.length && hasPending) continue;
+
+    created += await runInTx(prisma, async (tx) => {
+      if (!current) {
+        await tx.projectOrgWorkflowTask.updateMany({
           where: {
             instanceId: instance.id,
             stepNumber: instance.currentStepNumber,
             status: { in: [OrgWorkflowTaskStatus.PENDING, OrgWorkflowTaskStatus.IN_PROGRESS] },
           },
           data: { status: OrgWorkflowTaskStatus.CANCELLED },
-        }),
-        prisma.projectOrgWorkflowInstance.update({
+        });
+        await tx.projectOrgWorkflowInstance.update({
           where: { id: instance.id },
           data: { currentStepNumber: step.stepNumber },
-        }),
-      ]);
-      instance.tasks = [];
-    }
-    // The catalogue moved this step to another role: re-route its open tasks.
-    const roleName = step.projectOrgRole?.name || "";
-    const misrouted = (instance.tasks || []).filter(
-      (t) => t.stepNumber === step.stepNumber && roleName && t.requiredRoleName && t.requiredRoleName !== roleName,
-    );
-    if (misrouted.length) {
-      await prisma.projectOrgWorkflowTask.updateMany({
-        where: { id: { in: misrouted.map((t) => t.id) }, status: OrgWorkflowTaskStatus.PENDING },
-        data: { status: OrgWorkflowTaskStatus.CANCELLED },
+        });
+      }
+      if (misrouted.length) {
+        await tx.projectOrgWorkflowTask.updateMany({
+          where: { id: { in: misrouted.map((t) => t.id) }, status: OrgWorkflowTaskStatus.PENDING },
+          data: { status: OrgWorkflowTaskStatus.CANCELLED },
+        });
+      }
+      if (hasPending) return 0;
+      const result = await createTasksForStep(tx, {
+        projectId,
+        instanceId: instance.id,
+        step,
+        departmentId:
+          instance.requisition?.departmentId ||
+          instance.procurementPlan?.departmentId ||
+          instance.budget?.departmentId ||
+          instance.procurement?.departmentId ||
+          null,
+        entityTitle:
+          instance.budget?.title ||
+          instance.procurementPlan?.title ||
+          instance.requisition?.title ||
+          (instance.procurement
+            ? `${instance.procurement.procurementNumber}: ${instance.procurement.title}`
+            : null),
       });
-      instance.tasks = (instance.tasks || []).filter((t) => !misrouted.includes(t));
-    }
-    const hasPending = (instance.tasks || []).some((t) => t.stepNumber === step.stepNumber);
-    if (hasPending) continue;
-
-    const result = await createTasksForStep(prisma, {
-      projectId,
-      instanceId: instance.id,
-      step,
-      departmentId:
-        instance.requisition?.departmentId ||
-        instance.procurementPlan?.departmentId ||
-        instance.budget?.departmentId ||
-        instance.procurement?.departmentId ||
-        null,
-      entityTitle:
-        instance.budget?.title ||
-        instance.procurementPlan?.title ||
-        instance.requisition?.title ||
-        (instance.procurement
-          ? `${instance.procurement.procurementNumber}: ${instance.procurement.title}`
-          : null),
+      return result.eligibleCount || 0;
     });
-    created += result.eligibleCount || 0;
   }
   return { created };
 }
 
 /**
+ * Repair legacy catalogue adoptions (name-only rows without triggerKey) before a trigger lookup.
+ * Call outside any transaction.
+ * @param {import("@prisma/client").PrismaClient} prisma
+ * @param {string} projectId
+ */
+export async function prepareWorkflowTriggers(prisma, projectId) {
+  try {
+    await ensureBaselineProcessTemplates(prisma);
+    await migrateProjectAdoptions(prisma, projectId);
+  } catch {
+    // Non-fatal — lookup may still succeed if already migrated.
+  }
+}
+
+const migrateProjectAdoptions = throttleSync(
+  10 * 60_000,
+  (prisma, projectId) => migrateLegacyProcessAdoptions(prisma, { projectId }),
+  (_prisma, projectId) => String(projectId || ""),
+);
+
+/**
+ * Task repair runs from list/detail GETs; once a minute per project scope is plenty.
+ */
+const healThrottled = throttleSync(
+  60_000,
+  (prisma, projectId, budgetId) => healMissingStepTasksNow(prisma, projectId, budgetId),
+  (_prisma, projectId, budgetId) => `${projectId}|${budgetId || ""}`,
+);
+
+/**
  * Start a workflow instance for an entity when its trigger fires.
+ * Pass a transaction client to start it inside the caller's transaction; a `{ ok: false }`
+ * result must then be turned into a rollback (`okOrAbort`).
  * @param {import("@prisma/client").PrismaClient} prisma
  * @param {{
  *   projectId: string;
@@ -347,13 +421,8 @@ export async function healMissingStepTasks(prisma, projectId, budgetId = null) {
  * }} opts
  */
 export async function startWorkflowFromTrigger(prisma, opts) {
-  // Repair legacy catalogue adoptions (name-only rows without triggerKey) before lookup.
-  try {
-    await ensureBaselineProcessTemplates(prisma);
-    await migrateLegacyProcessAdoptions(prisma, { projectId: opts.projectId });
-  } catch {
-    // Non-fatal — lookup may still succeed if already migrated.
-  }
+  // Inside a caller's transaction the caller runs `prepareWorkflowTriggers` first.
+  if (!isTxClient(prisma)) await prepareWorkflowTriggers(prisma, opts.projectId);
 
   const adoption = await findActiveProcessForTrigger(prisma, opts.projectId, opts.triggerKey);
   if (!adoption) {
@@ -381,6 +450,8 @@ export async function startWorkflowFromTrigger(prisma, opts) {
   }
 
   const flow = adoption.processFlow;
+  const frozenResult = await programmeFreezeResult(prisma, opts.projectId, flow);
+  if (frozenResult) return frozenResult;
   const firstStep = flow.items[0];
   if (!firstStep) {
     return {
@@ -497,7 +568,7 @@ export async function startWorkflowFromTrigger(prisma, opts) {
 
   let result;
   try {
-    result = await prisma.$transaction(async (tx) => {
+    result = await runInTx(prisma, async (tx) => {
       const instance = await tx.projectOrgWorkflowInstance.create({
         data: {
           projectId: opts.projectId,
@@ -606,6 +677,82 @@ export function computeBudgetAvailability(line, requested) {
 }
 
 /**
+ * Who may act on a workflow task — run BEFORE any business write tied to the task.
+ * The actor must belong to the task's project, the task must be PENDING, and either be assigned
+ * to the actor or (unassigned) require a role the actor holds. Committee tasks need a live seat
+ * on the acting committee.
+ * @param {import("@prisma/client").PrismaClient} prisma
+ * @param {{ taskId: string; actorOrgUserId: string; actorRoleName?: string | null; projectId?: string | null; committeeId?: string | null }} opts
+ * @returns {Promise<{ ok: true; task: { id: string; projectId: string; requiredRoleName: string | null; assigneeOrgUserId: string | null } } | { ok: false; error: string; status: number; code?: string }>}
+ */
+export async function checkWorkflowTaskActor(prisma, opts) {
+  const notAvailable = { ok: false, error: "Task is not available.", status: 404 };
+  if (!opts.taskId || !opts.actorOrgUserId) return notAvailable;
+  const [task, actor] = await Promise.all([
+    prisma.projectOrgWorkflowTask.findUnique({
+      where: { id: opts.taskId },
+      select: {
+        id: true,
+        projectId: true,
+        status: true,
+        requiredRoleName: true,
+        assigneeOrgUserId: true,
+        instance: {
+          select: { processFlow: { select: { code: true, triggerKey: true, name: true } } },
+        },
+      },
+    }),
+    prisma.projectOrgUser.findUnique({
+      where: { id: opts.actorOrgUserId },
+      select: { projectId: true },
+    }),
+  ]);
+  if (!task || !actor || actor.projectId !== task.projectId) return notAvailable;
+  if (opts.projectId && opts.projectId !== task.projectId) return notAvailable;
+  const frozen = await programmeFreezeResult(prisma, task.projectId, task.instance?.processFlow);
+  if (frozen) return frozen;
+  if (task.status !== OrgWorkflowTaskStatus.PENDING) {
+    return {
+      ok: false,
+      error: "This task has already been completed.",
+      code: "TASK_ALREADY_COMPLETED",
+      status: 409,
+    };
+  }
+  const committeeType = committeeTypeForWorkflowRole(task.requiredRoleName);
+  if (committeeType) {
+    if (!opts.committeeId) {
+      return {
+        ok: false,
+        error: `This is ${task.requiredRoleName} work. Switch to the ${task.requiredRoleName} (account menu) before acting on it.`,
+        code: "COMMITTEE_MODE_REQUIRED",
+        status: 403,
+      };
+    }
+    const { requireCommitteeMembership } = await import("@/lib/projects/committee-context");
+    const seat = await requireCommitteeMembership(prisma, {
+      projectId: task.projectId,
+      orgUserId: opts.actorOrgUserId,
+      committeeId: opts.committeeId,
+      committeeType,
+    });
+    if (!seat.ok) return { ok: false, error: seat.error, status: seat.status || 403 };
+  }
+  if (task.assigneeOrgUserId) {
+    if (task.assigneeOrgUserId !== opts.actorOrgUserId) {
+      return { ok: false, error: "You are not assigned to this task.", status: 403 };
+    }
+  } else if (!committeeType) {
+    const role = String(opts.actorRoleName || "");
+    const allowed = task.requiredRoleName ? expandOrgRoleNames(task.requiredRoleName) : [];
+    if (!role || (!allowed.includes(role) && task.requiredRoleName !== role)) {
+      return { ok: false, error: "Your active organisation role cannot complete this task.", status: 403 };
+    }
+  }
+  return { ok: true, task };
+}
+
+/**
  * @param {import("@prisma/client").PrismaClient} prisma
  * @param {{
  *   taskId: string;
@@ -621,6 +768,8 @@ export function computeBudgetAvailability(line, requested) {
  * }} opts `returnToStep` sends a RETURN back to the latest earlier step whose description matches.
  */
 export async function completeWorkflowTask(prisma, opts) {
+  const actorCheck = await checkWorkflowTaskActor(prisma, opts);
+  if (!actorCheck.ok) return actorCheck;
   const task = await prisma.projectOrgWorkflowTask.findUnique({
     where: { id: opts.taskId },
     include: {
@@ -931,7 +1080,7 @@ export async function completeWorkflowTask(prisma, opts) {
         : newReqStatus;
 
   try {
-    const outcome = await prisma.$transaction(async (tx) => {
+    const outcome = await runInTx(prisma, async (tx) => {
       const claimStatus =
         decision === OrgWorkflowDecision.RETURN
           ? OrgWorkflowTaskStatus.RETURNED

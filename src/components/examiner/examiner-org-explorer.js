@@ -64,6 +64,8 @@ import { PrintButton, PrintDocument } from "@/components/print/print-document";
 import {
   ParticipantHeroChips,
   ParticipantMarksView,
+  observationPrintMeta,
+  observationPrintSections,
   participantPrintMeta,
   participantPrintSections,
 } from "@/components/examiner/participant-marks";
@@ -208,7 +210,11 @@ export function ExaminerOrgExplorer({
   const org = overview.organisation;
   const counts = overview.counts || {};
   const navGroups = participant ? [PARTICIPANT_NAV_GROUP, ...EXPLORER_SECTION_GROUPS] : EXPLORER_SECTION_GROUPS;
-  const printMeta = participant ? participantPrintMeta(overview) : null;
+  const printMeta = participant
+    ? participantPrintMeta(overview)
+    : org
+      ? observationPrintMeta(overview)
+      : null;
 
   return (
     <div className={BRAND_PAGE_SHELL_CLASS}>
@@ -236,11 +242,11 @@ export function ExaminerOrgExplorer({
 
       {printMeta ? (
         <PrintDocument
-          documentTitle="Student assessment report"
+          documentTitle={participant ? "Student assessment report" : "Student organisation report"}
           reference={printMeta.reference}
           status={printMeta.status}
           organisation={printMeta.organisation}
-          sections={participantPrintSections(overview)}
+          sections={participant ? participantPrintSections(overview) : observationPrintSections(overview)}
           signatures={printMeta.signatures}
           printedBy={overview.printedBy || null}
         />

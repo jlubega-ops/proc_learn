@@ -8,12 +8,14 @@ import { validateProjectCreateInput } from "@/lib/validation/project";
 import {
   canManageExaminerProject,
   canManageStudentProjectSettings,
+  isSystemManagedOrg,
 } from "@/lib/projects/access";
 import { fetchAuthorizedProjectWorkspace } from "@/lib/projects/workspace-access";
 import { authorizeProjectOrgMember } from "@/lib/projects/workspace-access";
 import { ORG_PERMISSION } from "@/lib/projects/org-role-permissions";
-import { deleteProjectFully } from "@/lib/projects/purge-project-data";
+import { PURGE_TX_OPTIONS, deleteProjectFully } from "@/lib/projects/purge-project-data";
 import { notifyStudentsProjectAvailable } from "@/lib/academic/student-academic-notifications";
+import { academicQuestionFields } from "@/lib/academic/project-attempts";
 
 export const runtime = "nodejs";
 
@@ -80,7 +82,10 @@ export async function GET(_request, context) {
           owner: { select: { id: true, firstName: true, lastName: true, email: true } },
           enrollments: { where: { studentUserId: user.id } },
         }
-      : { owner: { select: { id: true, firstName: true, lastName: true, email: true } } };
+      : {
+          owner: { select: { id: true, firstName: true, lastName: true, email: true } },
+          campuses: { select: { campus: true } },
+        };
   const project = await prisma.project.findUnique({ where: { id }, include });
   if (!project) {
     return NextResponse.json({ error: "Not found." }, { status: 404 });
@@ -90,6 +95,9 @@ export async function GET(_request, context) {
     return NextResponse.json({
       project: {
         ...project,
+        ...(project.creatorRole === Role.EXAMINER
+          ? academicQuestionFields(project, Boolean(project.enrollments?.length))
+          : {}),
         hasEnrollmentKey: Boolean(project?.enrollmentKey),
         enrollmentKey: null,
         canManageOrgAdmin: access.canManageOrgAdmin,
@@ -108,20 +116,21 @@ export async function PATCH(request, context) {
   if (!id) return NextResponse.json({ error: "Invalid project id." }, { status: 400 });
 
   const existing = await prisma.project.findUnique({ where: { id } });
-  if (!existing) return NextResponse.json({ error: "Not found." }, { status: 404 });
+  if (!existing || isSystemManagedOrg(existing)) {
+    return NextResponse.json({ error: "Not found." }, { status: 404 });
+  }
 
   const staffManagesStudent = canManageStudentProjectSettings({ activeRole, project: existing });
   const isStudentOwnerEdit =
-    activeRole === Role.STUDENT && existing.creatorRole === Role.STUDENT;
+    activeRole === Role.STUDENT &&
+    existing.creatorRole === Role.STUDENT &&
+    existing.ownerUserId === user.id;
   const managesExaminerProject = canManageExaminerProject({
     activeRole,
     project: existing,
     userId: user.id,
   });
 
-  if (!staffManagesStudent && !managesExaminerProject && existing.ownerUserId !== user.id) {
-    return NextResponse.json({ error: "Forbidden." }, { status: 403 });
-  }
   if (!isStudentOwnerEdit && !staffManagesStudent && !managesExaminerProject) {
     return NextResponse.json(
       { error: "You do not have permission to edit this project in the current role." },
@@ -137,6 +146,28 @@ export async function PATCH(request, context) {
   }
 
   const editsExaminerProject = managesExaminerProject && !staffManagesStudent;
+
+  const keys = body && typeof body === "object" ? Object.keys(body) : [];
+  if (keys.length === 1 && keys[0] === "isPublished") {
+    if (!editsExaminerProject || typeof body.isPublished !== "boolean") {
+      return NextResponse.json({ error: "Invalid request." }, { status: 400 });
+    }
+    const row = await prisma.project.update({
+      where: { id },
+      data: { isPublished: body.isPublished },
+      select: { id: true, isPublished: true },
+    });
+    if (!existing.isPublished && row.isPublished) {
+      await notifyStudentsProjectAvailable(row.id).catch(() => 0);
+    }
+    await writeAuditLog({
+      eventType: AuditEvent.PROJECT_UPDATED,
+      actorUserId: user.id,
+      meta: { projectId: row.id, isPublished: row.isPublished },
+    });
+    return NextResponse.json({ project: row });
+  }
+
   const validated = validateProjectCreateInput({
     body: { ...existing, ...body },
     activeRole,
@@ -262,7 +293,9 @@ export async function DELETE(_request, context) {
   if (!id) return NextResponse.json({ error: "Invalid project id." }, { status: 400 });
 
   const existing = await prisma.project.findUnique({ where: { id } });
-  if (!existing) return NextResponse.json({ error: "Not found." }, { status: 404 });
+  if (!existing || isSystemManagedOrg(existing)) {
+    return NextResponse.json({ error: "Not found." }, { status: 404 });
+  }
   const isStudentOwnerDelete =
     activeRole === Role.STUDENT &&
     existing.creatorRole === Role.STUDENT &&
@@ -311,7 +344,7 @@ export async function DELETE(_request, context) {
       await deleteProjectFully(tx, row.id);
     }
     await deleteProjectFully(tx, id);
-  });
+  }, PURGE_TX_OPTIONS);
   await writeAuditLog({
     eventType: AuditEvent.PROJECT_DELETED,
     actorUserId: user.id,

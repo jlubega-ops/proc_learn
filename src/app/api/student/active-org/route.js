@@ -163,6 +163,7 @@ export async function POST(request) {
         projectId: academicProjectId,
         studentUserId: user.id,
         actorUserId: user.id,
+        enrollmentAccessKey: body?.enrollmentAccessKey,
       });
       return NextResponse.json({
         ok: true,

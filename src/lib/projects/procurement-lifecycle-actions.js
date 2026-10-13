@@ -40,6 +40,7 @@ import {
 import { COMMITTEE_TYPE_WORKFLOW_ROLES } from "@/lib/projects/committee-context";
 import { PHASE_PROCESS_BY_ACTION } from "@/lib/projects/process-catalogue";
 import { assertProcessActive } from "@/lib/projects/process-activation";
+import { okOrAbort, runInTx, withTxAbort } from "@/lib/db-tx";
 
 export { LIFECYCLE_ACTION_ROLES };
 
@@ -107,6 +108,17 @@ export function canPerformLifecycleAction(action, roleName, actingCommitteeType 
  * }} opts
  */
 export async function actOnProcurementLifecycle(prisma, opts) {
+  return withTxAbort(() =>
+    runInTx(prisma, async (tx) => okOrAbort(await performLifecycleAction(tx, opts))),
+  );
+}
+
+/**
+ * One lifecycle action and its record updates (e.g. payment + procurement status), all or nothing.
+ * @param {import("@prisma/client").Prisma.TransactionClient} prisma
+ * @param {any} opts
+ */
+async function performLifecycleAction(prisma, opts) {
   const action = String(opts.action || "").trim();
   const roleCheck = canPerformLifecycleAction(action, opts.actorRoleName, opts.actingCommitteeType || null);
   if (!roleCheck.ok) return { ...roleCheck, status: 403 };

@@ -12,7 +12,9 @@
     "db:seed": "node prisma/seed.cjs",
     "db:seed:deploy": "node --import ./scripts/register-path-alias.mjs scripts/seed-deploy-defaults.mjs",
     "db:seed:presentation": "node --import ./scripts/register-path-alias.mjs scripts/seed-presentation.mjs",
-    "db:migrate:logins": "node --import ./scripts/register-path-alias.mjs scripts/migrate-org-login-emails.mjs"
+    "db:backfill:audit": "node scripts/backfill-audit-project-id.mjs",
+    "db:migrate:logins": "node --import ./scripts/register-path-alias.mjs scripts/migrate-org-login-emails.mjs",
+    "test:routes": "node --import ./scripts/register-path-alias.mjs scripts/run-route-access-acceptance.mjs"
   },
   "prisma": {
     "seed": "node prisma/seed.cjs"
@@ -33,6 +35,7 @@
     "nodemailer": "^6.10.1",
     "react": "19.2.4",
     "react-dom": "19.2.4",
+    "swr": "^2.5.1",
     "xlsx": "^0.18.5"
   },
   "devDependencies": {

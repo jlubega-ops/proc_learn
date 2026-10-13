@@ -10,6 +10,7 @@ import {
   resolvePermanentRole,
 } from "@/lib/academic/student-mode";
 import { buildSessionPayloadForUserId } from "@/lib/auth/session-payload";
+import { parseStudentViewInput, saveStudentView } from "@/lib/academic/student-view";
 
 /**
  * Switch effective (active) role. Permanent grants are unchanged.
@@ -18,6 +19,7 @@ import { buildSessionPayloadForUserId } from "@/lib/auth/session-payload";
  * @param {{
  *   userId: string;
  *   nextRole: string;
+ *   studentView?: { programmeId?: unknown; campus?: unknown } | null;
  *   db?: import("@prisma/client").PrismaClient;
  *   buildPayload?: boolean;
  * }} opts
@@ -49,6 +51,17 @@ export async function switchActiveRole(opts) {
 
   const previousRole = user.settings.activeRole;
   const permanentRole = resolvePermanentRole(g);
+  const enteringStudentMode =
+    nextRole === Role.STUDENT && isStudentMode({ grantedRoles: g, activeRole: nextRole });
+
+  /** @type {null | { programmeId: string; campus: string | null }} */
+  let studentView = null;
+  if (enteringStudentMode && opts.studentView) {
+    const parsed = await parseStudentViewInput(db, opts.studentView);
+    if (!parsed.ok) return { ok: false, status: 400, error: parsed.error };
+    studentView = { programmeId: parsed.programmeId, campus: parsed.campus };
+    await saveStudentView(db, user.id, studentView);
+  }
 
   await db.userSettings.update({
     where: { userId: user.id },
@@ -57,7 +70,7 @@ export async function switchActiveRole(opts) {
 
   /** @type {any} */
   let demoContext = null;
-  if (nextRole === Role.STUDENT && isStudentMode({ grantedRoles: g, activeRole: nextRole })) {
+  if (enteringStudentMode) {
     const participationType = resolveParticipationType({
       grantedRoles: g,
       activeRole: nextRole,
@@ -112,6 +125,15 @@ export async function switchActiveRole(opts) {
       enrollmentId: demoContext?.enrollment?.id || null,
       orgAcademicSlateId: demoContext?.orgAcademicSlate?.id || null,
       projectId: demoContext?.projectId || null,
+      ...(enteringStudentMode
+        ? {
+            studentViewProgrammeId:
+              studentView?.programmeId || user.settings.studentViewProgrammeId || null,
+            studentViewCampus: studentView
+              ? studentView.campus
+              : user.settings.studentViewCampus || null,
+          }
+        : {}),
       action: previousRole === nextRole ? "noop" : `${previousRole}→${nextRole}`,
     },
   });

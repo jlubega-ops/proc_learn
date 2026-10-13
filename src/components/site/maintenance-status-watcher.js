@@ -4,6 +4,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import Button from "@mui/material/Button";
 import CircularProgress from "@mui/material/CircularProgress";
 import RefreshRounded from "@mui/icons-material/RefreshRounded";
+import { startVisibleInterval } from "@/lib/visible-interval";
 
 const POLL_MS = 30_000;
 
@@ -31,10 +32,7 @@ export function MaintenanceStatusWatcher() {
     }
   }, []);
 
-  useEffect(() => {
-    const id = window.setInterval(check, POLL_MS);
-    return () => window.clearInterval(id);
-  }, [check]);
+  useEffect(() => startVisibleInterval(check, POLL_MS), [check]);
 
   return (
     <div className="mt-7 flex flex-col items-center gap-3">

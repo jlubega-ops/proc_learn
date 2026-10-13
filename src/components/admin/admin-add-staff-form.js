@@ -2,6 +2,7 @@
 
 import { useMemo, useState } from "react";
 import Button from "@mui/material/Button";
+import CloseRounded from "@mui/icons-material/CloseRounded";
 import TextField from "@mui/material/TextField";
 import MenuItem from "@mui/material/MenuItem";
 import FormGroup from "@mui/material/FormGroup";
@@ -14,6 +15,9 @@ import { ROLE } from "@/lib/roles";
 import { validateStaffInviteForm } from "@/lib/validation/staff-invite-form";
 import { themedTextFieldSx } from "@/lib/admin-mui-surfaces";
 import { useToast } from "@/components/providers/toast-provider";
+import { discardConfirmOptions, useConfirm } from "@/components/providers/confirm-provider";
+import { useDraftSync } from "@/hooks/use-draft-sync";
+import { revalidateApi } from "@/lib/api-client-cache";
 import { useRouter } from "next/navigation";
 
 const STAFF_ROLE_OPTIONS = [ROLE.SYSTEM_ADMIN, ROLE.EXAMINER];
@@ -39,6 +43,29 @@ export function AdminAddStaffForm() {
   const [roles, setRoles] = useState(/** @type {Record<string, boolean>} */ ({}));
   /** @type {[Record<string, string>, import("react").Dispatch<import("react").SetStateAction<Record<string, string>>>]} */
   const [errors, setErrors] = useState({});
+  const confirm = useConfirm();
+
+  const { isDirty, clearDraft } = useDraftSync(
+    "admin:staff:new",
+    { email, firstName, middleName, lastName, sex, profilePhotoUrl, roles },
+    (d) => {
+      if (typeof d.email === "string") setEmail(d.email);
+      if (typeof d.firstName === "string") setFirstName(d.firstName);
+      if (typeof d.middleName === "string") setMiddleName(d.middleName);
+      if (typeof d.lastName === "string") setLastName(d.lastName);
+      if (typeof d.sex === "string") setSex(d.sex);
+      if (typeof d.profilePhotoUrl === "string") setProfilePhotoUrl(d.profilePhotoUrl);
+      if (d.roles && typeof d.roles === "object" && !Array.isArray(d.roles)) {
+        setRoles(/** @type {Record<string, boolean>} */ (d.roles));
+      }
+    },
+  );
+
+  async function cancel() {
+    if (isDirty && !(await confirm(discardConfirmOptions()))) return;
+    clearDraft();
+    router.push("/admin/staff");
+  }
 
   function toggleRole(r) {
     setRoles((prev) => ({ ...prev, [r]: !prev[r] }));
@@ -98,6 +125,8 @@ export function AdminAddStaffForm() {
         message: "Staff user created. Welcome email with sign-in details sent.",
         severity: "success",
       });
+      clearDraft();
+      void revalidateApi("/api/admin/staff");
       router.push("/admin/staff");
     } finally {
       setBusy(false);
@@ -238,7 +267,18 @@ export function AdminAddStaffForm() {
         ))}
       </FormGroup>
 
-      <div className="flex flex-col gap-2 pt-1 sm:flex-row sm:justify-end">
+      <div className="flex flex-col-reverse gap-2 pt-1 sm:flex-row sm:justify-end">
+        <Button
+          type="button"
+          onClick={() => void cancel()}
+          variant="outlined"
+          startIcon={<CloseRounded />}
+          disabled={busy}
+          title="Discard and return to the staff list"
+          className="w-full sm:w-auto"
+        >
+          Cancel
+        </Button>
         <Button type="submit" variant="contained" disabled={busy} className="w-full sm:w-auto">
           {busy ? <CircularProgress size={22} color="inherit" /> : "Create staff user"}
         </Button>

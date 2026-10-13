@@ -40,10 +40,12 @@ import ContentCopyRounded from "@mui/icons-material/ContentCopyRounded";
 import AutorenewRounded from "@mui/icons-material/AutorenewRounded";
 import SettingsRounded from "@mui/icons-material/SettingsRounded";
 import dynamic from "next/dynamic";
-import { useRouter, usePathname } from "next/navigation";
+import { useRouter, usePathname, useSearchParams } from "next/navigation";
 import { format, isValid, parseISO } from "date-fns";
 import { useToast } from "@/components/providers/toast-provider";
 import { useAuthSession } from "@/components/providers/auth-session-provider";
+import { discardConfirmOptions, useConfirm } from "@/components/providers/confirm-provider";
+import { useDraftState } from "@/hooks/use-draft-state";
 import { sanitizeRichHtml } from "@/lib/sanitize-rich-html";
 import {
   adminCenteredLoadingBoxSx,
@@ -191,6 +193,8 @@ function defaultForm() {
   };
 }
 
+const PROJECT_DRAFT_OMIT_KEYS = ["enrollmentAccessKey"];
+
 function generateEnrollmentAccessKey() {
   const chars = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
   let out = "";
@@ -276,7 +280,7 @@ export function ProjectsPanel() {
   const isSystemAdmin = activeRole === "SYSTEM_ADMIN";
   const isExaminerLike = isExaminer || isSystemAdmin;
   const isStaffViewer = isExaminerLike;
-  const canCreate = isStudent || isExaminerLike;
+  const canCreate = isStudent || isExaminer;
   const filterOptions = STUDENT_FILTERS;
   const staffPurposeFilters = STAFF_PURPOSE_FILTERS;
   const router = useRouter();
@@ -304,7 +308,14 @@ export function ProjectsPanel() {
   const [editingId, setEditingId] = useState("");
   const [editingManagedStudent, setEditingManagedStudent] = useState(false);
   const [isDuplicateDraft, setIsDuplicateDraft] = useState(false);
-  const [form, setForm] = useState(defaultForm());
+  const [editorSeed, setEditorSeed] = useState(defaultForm);
+  const [editorSession, setEditorSession] = useState(0);
+  const [form, setForm, formDraft] = useDraftState(`project:edit:${editingId || "new"}`, editorSeed, {
+    enabled: openEditor,
+    resetKey: editorSession,
+    omitKeys: PROJECT_DRAFT_OMIT_KEYS,
+  });
+  const confirm = useConfirm();
   const [fieldErrors, setFieldErrors] = useState({});
 
   const [deleteRow, setDeleteRow] = useState(null);
@@ -322,6 +333,9 @@ export function ProjectsPanel() {
   const [instructionsEditorReady, setInstructionsEditorReady] = useState(false);
   const [questionEditorReady, setQuestionEditorReady] = useState(false);
   const hasLoadedRef = useRef(false);
+  const editReturnToRef = useRef("");
+  const searchParams = useSearchParams();
+  const editParam = searchParams.get("edit") || "";
 
   const tinyApiKey = process.env.NEXT_PUBLIC_TINYMCE_API_KEY || "";
   const projectDateConstraints = useMemo(
@@ -440,14 +454,37 @@ export function ProjectsPanel() {
     setOpenStatus("open");
   }, [activeRole]);
 
+  const { resetForm: resetProjectForm } = formDraft;
   const resetEditorState = useCallback(() => {
+    resetProjectForm(defaultForm());
     setEditingId("");
     setEditingManagedStudent(false);
     setIsDuplicateDraft(false);
-    setForm(defaultForm());
     setFieldErrors({});
     setOpenEditor(false);
-  }, []);
+    const returnTo = editReturnToRef.current;
+    editReturnToRef.current = "";
+    if (returnTo) {
+      router.replace(returnTo);
+      router.refresh();
+    }
+  }, [resetProjectForm, router]);
+
+  const closeEditor = async () => {
+    if (busyEditor) return;
+    if (formDraft.isDirty && !(await confirm(discardConfirmOptions()))) return;
+    resetEditorState();
+  };
+
+  /** @param {ReturnType<typeof defaultForm>} seed */
+  const startEditor = (seed) => {
+    setEditorSeed(seed);
+    setEditorSession((n) => n + 1);
+    setFieldErrors({});
+    setInstructionsEditorReady(false);
+    setQuestionEditorReady(false);
+    setOpenEditor(true);
+  };
 
   const openCreate = () => {
     setEditingId("");
@@ -458,7 +495,7 @@ export function ProjectsPanel() {
       programmes.find((p) => p.id === filterProgrammeId) ||
       programmes.find((p) => p.shortName === "GEN") ||
       programmes[0];
-    setForm({
+    startEditor({
       ...defaultForm(),
       visibility: isStudent ? "PRIVATE" : "PUBLIC",
       purpose: "PRACTICE",
@@ -467,17 +504,13 @@ export function ProjectsPanel() {
       academicYearId: yearId,
       programmeId: defaultProgramme?.id || "",
     });
-    setFieldErrors({});
-    setInstructionsEditorReady(false);
-    setQuestionEditorReady(false);
-    setOpenEditor(true);
   };
 
   const openEdit = (row, managedStudent = false) => {
     setEditingId(row.id);
     setEditingManagedStudent(Boolean(managedStudent));
     setIsDuplicateDraft(false);
-    setForm({
+    startEditor({
       name: row.name || "",
       description: row.description || "",
       organizationName: row.organizationName || "",
@@ -498,17 +531,41 @@ export function ProjectsPanel() {
       programmeId: row.programmeId || row.programme?.id || "",
       campuses: formCampusesFromRow(row),
     });
-    setFieldErrors({});
-    setInstructionsEditorReady(false);
-    setQuestionEditorReady(false);
-    setOpenEditor(true);
   };
+
+  const openEditRef = useRef(openEdit);
+  useEffect(() => {
+    openEditRef.current = openEdit;
+  });
+
+  useEffect(() => {
+    if (!editParam || !isExaminer) return undefined;
+    let cancelled = false;
+    (async () => {
+      const res = await fetch(`/api/projects/${encodeURIComponent(editParam)}`, { credentials: "include" });
+      const data = await res.json().catch(() => ({}));
+      if (cancelled) return;
+      if (!res.ok || !data.project || data.project.creatorRole !== "EXAMINER") {
+        showToast({
+          message: typeof data.error === "string" ? data.error : "Could not open this project.",
+          severity: "error",
+        });
+        router.replace(pathname);
+        return;
+      }
+      editReturnToRef.current = `/projects/${data.project.id}`;
+      openEditRef.current(data.project);
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [editParam, isExaminer, pathname, router, showToast]);
 
   const openDuplicate = (row) => {
     setEditingId("");
     setEditingManagedStudent(false);
     setIsDuplicateDraft(true);
-    setForm({
+    startEditor({
       name: `Copy of ${row.name || "project"}`.slice(0, 255),
       description: row.description || "",
       organizationName: row.organizationName || "",
@@ -529,10 +586,6 @@ export function ProjectsPanel() {
       programmeId: row.programmeId || row.programme?.id || filterProgrammeId || "",
       campuses: formCampusesFromRow(row),
     });
-    setFieldErrors({});
-    setInstructionsEditorReady(false);
-    setQuestionEditorReady(false);
-    setOpenEditor(true);
   };
 
   const saveProject = async () => {
@@ -852,12 +905,10 @@ export function ProjectsPanel() {
 
   const canManageStudentSettings = useMemo(
     () => (row) => {
-      if (row.creatorRole !== "STUDENT") return false;
-      if (isSystemAdmin) return true;
-      if (isExaminer && row.visibility === "PUBLIC") return true;
-      return false;
+      if (row.creatorRole !== "STUDENT" || row.isPersonalOrg || row.isAttemptOrg) return false;
+      return isExaminer && row.visibility === "PUBLIC";
     },
-    [isSystemAdmin, isExaminer],
+    [isExaminer],
   );
 
   const canEditOrDelete = useMemo(
@@ -865,10 +916,10 @@ export function ProjectsPanel() {
       if (isStudent) {
         return row.ownerUserId === session?.userId && row.creatorRole === "STUDENT";
       }
-      if (isExaminerLike) return row.creatorRole === "EXAMINER";
+      if (isExaminer) return row.creatorRole === "EXAMINER";
       return false;
     },
-    [isStudent, isExaminerLike, session?.userId],
+    [isStudent, isExaminer, session?.userId],
   );
 
   if (sessionLoading || loading) {
@@ -1159,11 +1210,11 @@ export function ProjectsPanel() {
                                 <GroupRounded fontSize="small" />
                               </IconButton>
                             </Tooltip>
-                            <Tooltip title="Assessment scoring setup">
+                            <Tooltip title={isExaminer ? "Assessment scoring setup" : "View assessment scoring"}>
                               <IconButton
                                 size="small"
                                 color="primary"
-                                aria-label="Assessment scoring setup"
+                                aria-label={isExaminer ? "Assessment scoring setup" : "View assessment scoring"}
                                 onClick={() => router.push(`/projects/${row.id}/assessment`)}
                               >
                                 <SettingsRounded fontSize="small" />
@@ -1184,7 +1235,11 @@ export function ProjectsPanel() {
                         {isStudent &&
                         String(row.creatorRole || "") === "EXAMINER" &&
                         Array.isArray(row.enrollments) &&
-                        row.enrollments.some((enrollment) => enrollment?.studentUserId === session?.userId) ? (
+                        row.enrollments.some(
+                          (enrollment) =>
+                            enrollment?.studentUserId === session?.userId &&
+                            (!enrollment?.status || enrollment.status === "NOT_STARTED"),
+                        ) ? (
                           <Tooltip title="Unenroll from project">
                             <IconButton
                               size="small"
@@ -1230,7 +1285,7 @@ export function ProjectsPanel() {
         />
       </Box>
 
-      <Dialog open={openEditor} onClose={() => (busyEditor ? null : resetEditorState())} fullWidth maxWidth="md">
+      <Dialog open={openEditor} onClose={() => void closeEditor()} fullWidth maxWidth="md">
         <DialogTitle>
           {editingManagedStudent
             ? "Manage student project settings"
@@ -1670,7 +1725,7 @@ export function ProjectsPanel() {
           ) : null}
         </DialogContent>
         <DialogActions sx={adminDialogPaperSx}>
-          <Button onClick={resetEditorState} disabled={busyEditor}>
+          <Button onClick={() => void closeEditor()} disabled={busyEditor}>
             {isDuplicateDraft ? "Discard" : "Cancel"}
           </Button>
           <Button onClick={saveProject} variant="contained" disabled={busyEditor}>

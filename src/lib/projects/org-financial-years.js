@@ -1,6 +1,7 @@
 import { canManageProjectOrgUsers } from "@/lib/projects/org-users";
 import {
   compareUtcCalendarParts,
+  formatCalendarDateLabel,
   serverUtcTodayParts,
   toDateInputValue,
   utcCalendarParts,
@@ -62,11 +63,28 @@ export function serializeProjectOrgFinancialYear(row) {
  * @param {Date} [now]
  */
 export async function listSelectableFinancialYears(prisma, projectId, now = new Date()) {
-  const rows = await prisma.projectOrgFinancialYear.findMany({
+  const rows = await listActiveFinancialYearRows(prisma, projectId);
+  return selectableFinancialYearsFromRows(rows, now);
+}
+
+/**
+ * Active financial year rows (not yet date-filtered).
+ * @param {import("@prisma/client").PrismaClient} prisma
+ * @param {string} projectId
+ */
+export function listActiveFinancialYearRows(prisma, projectId) {
+  return prisma.projectOrgFinancialYear.findMany({
     where: { projectId, isActive: true },
     orderBy: [{ startDate: "desc" }, { label: "desc" }],
     select: financialYearSelect,
   });
+}
+
+/**
+ * @param {any[]} rows active financial year rows
+ * @param {Date} [now]
+ */
+export function selectableFinancialYearsFromRows(rows, now = new Date()) {
   const selectable = rows
     .filter((row) => isFinancialYearCurrentlyValid(row.startDate, row.endDate, now))
     .map((row) => serializeProjectOrgFinancialYear(row));
@@ -112,6 +130,38 @@ export async function resolveSelectableFinancialYear(
   if (!row) return null;
   if (!isFinancialYearCurrentlyValid(row.startDate, row.endDate, now)) return null;
   return row;
+}
+
+/**
+ * First existing financial year whose dates overlap [startDate, endDate] (inclusive calendar days).
+ * @param {import("@prisma/client").PrismaClient | import("@prisma/client").Prisma.TransactionClient} prisma
+ * @param {string} projectId
+ * @param {{ startDate: Date; endDate: Date; excludeId?: string | null }} range
+ */
+export function findOverlappingFinancialYear(prisma, projectId, { startDate, endDate, excludeId = null }) {
+  return prisma.projectOrgFinancialYear.findFirst({
+    where: {
+      projectId,
+      ...(excludeId ? { id: { not: excludeId } } : {}),
+      startDate: { lte: endDate },
+      endDate: { gte: startDate },
+    },
+    orderBy: { startDate: "asc" },
+    select: { id: true, label: true, startDate: true, endDate: true },
+  });
+}
+
+/**
+ * Field errors for an overlap with `row` (from {@link findOverlappingFinancialYear}).
+ * @param {{ label: string; startDate: Date | string; endDate: Date | string }} row
+ */
+export function financialYearOverlapResponse(row) {
+  const range = `${formatCalendarDateLabel(row.startDate)} – ${formatCalendarDateLabel(row.endDate)}`;
+  const message = `Overlaps ${row.label} (${range}).`;
+  return {
+    error: `Dates overlap financial year ${row.label}.`,
+    fieldErrors: { startDate: message, endDate: message },
+  };
 }
 
 /**

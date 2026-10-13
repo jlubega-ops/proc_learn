@@ -3,6 +3,7 @@ import { prisma } from "@/lib/prisma";
 import { getExaminerAcademicProjectStudentReport } from "@/lib/academic/examiner-project-student-report";
 import { authorizeParticipantView } from "@/lib/academic/participant-workspace";
 import { countExplorerSections } from "@/lib/academic/examiner-org-explorer";
+import { resolveEffectiveProcessCodes } from "@/lib/academic/programme-processes";
 import { AuditEvent, writeAuditLog } from "@/lib/audit-log";
 import { formatRoleLabel } from "@/lib/roles";
 
@@ -27,11 +28,13 @@ export async function GET(request, context) {
 
     const orgId = data.organisation?.projectId || null;
     if (orgId) {
-      const [counts, org] = await Promise.all([
+      const [counts, org, availableProcessCodes] = await Promise.all([
         countExplorerSections(prisma, orgId),
         prisma.project.findUnique({ where: { id: orgId }, select: { createdAt: true, projectCode: true } }),
+        resolveEffectiveProcessCodes(prisma, orgId).catch(() => null),
       ]);
       data.counts = counts;
+      data.availableProcessCodes = availableProcessCodes;
       data.organisation.createdAt = org?.createdAt || null;
       data.organisation.projectCode = data.organisation.projectCode || org?.projectCode || null;
     }

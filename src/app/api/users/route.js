@@ -31,7 +31,7 @@ export async function POST(request) {
   const active = sessionActiveRole(actor);
   if (!canManageStudents(active)) {
     return NextResponse.json(
-      { error: "Only system administrators and examiners can add students." },
+      { error: "Only system admins can add students." },
       { status: 403 },
     );
   }

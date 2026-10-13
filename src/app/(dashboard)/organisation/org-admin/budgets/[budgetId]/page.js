@@ -23,7 +23,6 @@ export default async function OrganisationBudgetDetailPage({ params }) {
         budgetId={budgetId}
         listHref="/organisation/org-admin/budgets"
         readOnly
-        allowClose
       />
     </div>
   );

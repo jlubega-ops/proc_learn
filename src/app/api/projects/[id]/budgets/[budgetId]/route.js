@@ -1,5 +1,4 @@
 import { NextResponse } from "next/server";
-import { OrgBudgetStatus } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { authorizeProjectApiAccess } from "@/lib/projects/project-api-auth";
 import { ORG_PERMISSION } from "@/lib/projects/org-role-permissions";
@@ -9,7 +8,6 @@ import {
   deleteDraftBudget,
   getBudgetWorkflowStage,
   serializeBudget,
-  setBudgetStatus,
   submitBudget,
   updateDraftBudget,
 } from "@/lib/projects/budgets";
@@ -24,7 +22,9 @@ import {
 export const runtime = "nodejs";
 
 function canPrepareBudget(roleName) {
-  return roleName === "User Department Officer" || roleName === "User Department";
+  return (
+    roleName === "User Department Officer" || roleName === "User Department"
+  );
 }
 
 export async function GET(_request, context) {
@@ -75,6 +75,7 @@ export async function GET(_request, context) {
 
   const history = await prisma.auditLog.findMany({
     where: {
+      projectId,
       eventType: {
         in: [
           "PROJECT_ORG_BUDGET_CREATED",
@@ -88,9 +89,11 @@ export async function GET(_request, context) {
       },
     },
     orderBy: { createdAt: "desc" },
-    take: 80,
+    take: 300,
   });
-  const audit = history.filter((a) => JSON.stringify(a.meta || {}).includes(budgetId));
+  const audit = history.filter((a) =>
+    JSON.stringify(a.meta || {}).includes(budgetId),
+  );
 
   /** @type {any} */
   let pendingTask = null;
@@ -100,7 +103,10 @@ export async function GET(_request, context) {
   let canEditDraft = false;
   let canDeleteDraft = false;
 
-  const workflowStage = await getBudgetWorkflowStage(prisma, { projectId, budgetId });
+  const workflowStage = await getBudgetWorkflowStage(prisma, {
+    projectId,
+    budgetId,
+  });
   let lastDecision = null;
   let viewerHasPendingAction = false;
 
@@ -110,7 +116,9 @@ export async function GET(_request, context) {
       where: {
         projectId,
         budgetId,
-        status: { in: ["ACTIVE", "IN_PROGRESS", "SUSPENDED", "COMPLETED", "CANCELLED"] },
+        status: {
+          in: ["ACTIVE", "IN_PROGRESS", "SUSPENDED", "COMPLETED", "CANCELLED"],
+        },
       },
       orderBy: { createdAt: "desc" },
       select: {
@@ -121,8 +129,13 @@ export async function GET(_request, context) {
       },
     }),
   ]);
-  workflowHistory = await attachCommitteeNames(prisma, mapWorkflowHistoryActions(instance?.actions));
-  const latestAction = workflowHistory.length ? workflowHistory[workflowHistory.length - 1] : null;
+  workflowHistory = await attachCommitteeNames(
+    prisma,
+    mapWorkflowHistoryActions(instance?.actions),
+  );
+  const latestAction = workflowHistory.length
+    ? workflowHistory[workflowHistory.length - 1]
+    : null;
   if (latestAction) {
     lastDecision = {
       decision: latestAction.decision,
@@ -134,7 +147,8 @@ export async function GET(_request, context) {
 
   if (auth.ok && auth.type === "org") {
     try {
-      const { healMissingStepTasks } = await import("@/lib/projects/workflow-engine");
+      const { healMissingStepTasks } =
+        await import("@/lib/projects/workflow-engine");
       await healMissingStepTasks(prisma, projectId, budgetId);
     } catch {
       // Non-fatal
@@ -152,7 +166,8 @@ export async function GET(_request, context) {
       canPrepareBudget(role) &&
       (row.status === "DRAFT" || row.status === "RETURNED") &&
       isCreator;
-    canDeleteDraft = canPrepareBudget(role) && row.status === "DRAFT" && isCreator;
+    canDeleteDraft =
+      canPrepareBudget(role) && row.status === "DRAFT" && isCreator;
 
     const task = await prisma.projectOrgWorkflowTask.findFirst({
       where: {
@@ -211,7 +226,10 @@ export async function PATCH(request, context) {
   try {
     body = await request.json();
   } catch {
-    return NextResponse.json({ error: "Invalid request body." }, { status: 400 });
+    return NextResponse.json(
+      { error: "Invalid request body." },
+      { status: 400 },
+    );
   }
 
   // Operational submit
@@ -221,7 +239,10 @@ export async function PATCH(request, context) {
       orgPermission: ORG_PERMISSION.CREATE_BUDGET,
     });
     if (!auth.ok || auth.type !== "org") {
-      return NextResponse.json({ error: "Forbidden." }, { status: 403 });
+      return NextResponse.json(
+        { error: auth.ok ? "Forbidden." : "Not found." },
+        { status: auth.ok ? 403 : auth.status || 404 },
+      );
     }
     const result = await submitBudget(prisma, {
       projectId,
@@ -245,7 +266,10 @@ export async function PATCH(request, context) {
       orgPermission: ORG_PERMISSION.CREATE_BUDGET,
     });
     if (!auth.ok || auth.type !== "org") {
-      return NextResponse.json({ error: "Forbidden." }, { status: 403 });
+      return NextResponse.json(
+        { error: auth.ok ? "Forbidden." : "Not found." },
+        { status: auth.ok ? 403 : auth.status || 404 },
+      );
     }
     const roleName = auth.orgUser.projectOrgRole?.name || "";
     if (!canPrepareBudget(roleName)) {
@@ -255,6 +279,7 @@ export async function PATCH(request, context) {
       projectId,
       budgetId,
       actorOrgUserId: auth.orgUser.id,
+      actorDepartmentId: auth.orgUser.departmentId,
       body,
     });
     if (!result.ok) {
@@ -273,61 +298,37 @@ export async function PATCH(request, context) {
       orgPermission: ORG_PERMISSION.CREATE_BUDGET,
     });
     if (!auth.ok || auth.type !== "org") {
+      return NextResponse.json(
+        { error: auth.ok ? "Forbidden." : "Not found." },
+        { status: auth.ok ? 403 : auth.status || 404 },
+      );
+    }
+    if (!canPrepareBudget(auth.orgUser.projectOrgRole?.name || "")) {
       return NextResponse.json({ error: "Forbidden." }, { status: 403 });
     }
     const result = await addBudgetLines(prisma, {
       projectId,
       budgetId,
       actorUserId: null,
+      actorOrgUserId: auth.orgUser.id,
+      actorDepartmentId: auth.orgUser.departmentId,
       lines: Array.isArray(body.lines) ? body.lines : [],
     });
     if (!result.ok) {
-      return NextResponse.json({ error: result.error }, { status: result.status || 400 });
+      return NextResponse.json(
+        { error: result.error },
+        { status: result.status || 400 },
+      );
     }
     return NextResponse.json(result);
   }
 
-  // Organization Administrator may only CLOSE (system housekeeping) — not APPROVE.
+  // Budget status only changes through the budgeting workflow.
   if (body?.action === "setStatus") {
-    const status = String(body.status || "").trim();
-    if (status === OrgBudgetStatus.APPROVED) {
-      return NextResponse.json(
-        {
-          error:
-            "Budgets are approved through the budgeting workflow by operational roles, not by the Organization Administrator.",
-          code: "ADMIN_CANNOT_APPROVE_BUDGET",
-        },
-        { status: 403 },
-      );
-    }
-    if (status !== OrgBudgetStatus.CLOSED) {
-      return NextResponse.json(
-        {
-          error:
-            "Direct budget status changes are limited to closing. Use the budgeting workflow for approvals.",
-        },
-        { status: 403 },
-      );
-    }
-
-    const adminAuth = await authorizeProjectApiAccess(prisma, {
-      projectId,
-      requireOrgAdmin: true,
-    });
-    if (!adminAuth.ok) {
-      return NextResponse.json({ error: "Forbidden." }, { status: 403 });
-    }
-
-    const result = await setBudgetStatus(prisma, {
-      projectId,
-      budgetId,
-      actorUserId: adminAuth.user?.id || null,
-      status: OrgBudgetStatus.CLOSED,
-    });
-    if (!result.ok) {
-      return NextResponse.json({ error: result.error }, { status: result.status || 400 });
-    }
-    return NextResponse.json(result);
+    return NextResponse.json(
+      { error: "Budget status changes go through the budgeting workflow." },
+      { status: 403 },
+    );
   }
 
   return NextResponse.json({ error: "Unsupported action." }, { status: 400 });
@@ -346,7 +347,10 @@ export async function DELETE(_request, context) {
     orgPermission: ORG_PERMISSION.CREATE_BUDGET,
   });
   if (!auth.ok || auth.type !== "org") {
-    return NextResponse.json({ error: "Forbidden." }, { status: 403 });
+    return NextResponse.json(
+      { error: auth.ok ? "Forbidden." : "Not found." },
+      { status: auth.ok ? 403 : auth.status || 404 },
+    );
   }
   const roleName = auth.orgUser.projectOrgRole?.name || "";
   if (!canPrepareBudget(roleName)) {
@@ -357,9 +361,13 @@ export async function DELETE(_request, context) {
     projectId,
     budgetId,
     actorOrgUserId: auth.orgUser.id,
+    actorDepartmentId: auth.orgUser.departmentId,
   });
   if (!result.ok) {
-    return NextResponse.json({ error: result.error }, { status: result.status || 400 });
+    return NextResponse.json(
+      { error: result.error },
+      { status: result.status || 400 },
+    );
   }
   return NextResponse.json({ ok: true });
 }

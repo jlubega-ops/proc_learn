@@ -6,6 +6,7 @@ import { getSessionUser, sessionActiveRole } from "@/lib/api/get-session-user";
 import { Role } from "@prisma/client";
 import { ORG_PERMISSION } from "@/lib/projects/org-role-permissions";
 import { listSelectableBudgetLines } from "@/lib/projects/budgets";
+import { isDepartmentScopedRole } from "@/lib/projects/workflow-engine";
 
 export const runtime = "nodejs";
 
@@ -23,24 +24,19 @@ export async function GET(request, context) {
   const departmentId = searchParams.get("departmentId") || "";
 
   let allowed = false;
-  const auth = await authorizeProjectApiAccess(prisma, {
-    projectId,
-    orgPermission: ORG_PERMISSION.VIEW_BUDGETS,
-  });
-  if (auth.ok) allowed = true;
-  if (!allowed) {
-    const alt = await authorizeProjectApiAccess(prisma, {
-      projectId,
-      orgPermission: ORG_PERMISSION.CREATE_REQUISITION,
-    });
-    if (alt.ok) allowed = true;
-  }
-  if (!allowed) {
-    const alt2 = await authorizeProjectApiAccess(prisma, {
-      projectId,
-      orgPermission: ORG_PERMISSION.VIEW_PROCUREMENT_PLANS,
-    });
-    if (alt2.ok) allowed = true;
+  /** @type {any} */
+  let orgUser = null;
+  for (const orgPermission of [
+    ORG_PERMISSION.VIEW_BUDGETS,
+    ORG_PERMISSION.CREATE_REQUISITION,
+    ORG_PERMISSION.VIEW_PROCUREMENT_PLANS,
+  ]) {
+    const auth = await authorizeProjectApiAccess(prisma, { projectId, orgPermission });
+    if (auth.ok) {
+      allowed = true;
+      if (auth.type === "org") orgUser = auth.orgUser;
+      break;
+    }
   }
   if (!allowed) {
     const user = await getSessionUser();
@@ -57,10 +53,12 @@ export async function GET(request, context) {
     return NextResponse.json({ error: "Not found." }, { status: 404 });
   }
 
+  const ownDepartmentOnly =
+    orgUser?.departmentId && isDepartmentScopedRole(orgUser.projectOrgRole?.name);
   const budgetLines = await listSelectableBudgetLines(prisma, {
     projectId,
     financialYearId: financialYearId || null,
-    departmentId: departmentId || null,
+    departmentId: ownDepartmentOnly ? orgUser.departmentId : departmentId || null,
   });
 
   return NextResponse.json({ budgetLines });

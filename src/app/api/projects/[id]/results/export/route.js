@@ -4,7 +4,7 @@ import { getSessionUser, sessionActiveRole } from "@/lib/api/get-session-user";
 import { buildProjectGradesWorkbook } from "@/lib/academic/project-grades-export";
 import { parseResultsView } from "@/lib/academic/assessment-config";
 import { prisma } from "@/lib/prisma";
-import { canManageExaminerProject } from "@/lib/projects/access";
+import { canViewExaminerProject } from "@/lib/projects/access";
 
 export const runtime = "nodejs";
 
@@ -25,10 +25,7 @@ export async function GET(request, context) {
     return NextResponse.json({ error: "Not found." }, { status: 404 });
   }
 
-  if (
-    !canManageExaminerProject({ activeRole, project, userId: user.id }) &&
-    activeRole !== Role.SYSTEM_ADMIN
-  ) {
+  if (!canViewExaminerProject({ activeRole, project })) {
     return NextResponse.json({ error: "Not found." }, { status: 404 });
   }
 

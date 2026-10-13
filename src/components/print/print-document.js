@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState, useSyncExternalStore } from "react";
+import { useSiteBranding } from "@/components/providers/site-branding-provider";
 import { createPortal } from "react-dom";
 import { format, isValid } from "date-fns";
 import Button from "@mui/material/Button";
@@ -272,6 +273,7 @@ export function PrintDocument({
     () => false,
   );
   const [printedAt, setPrintedAt] = useState(() => new Date());
+  const { logoUrl } = useSiteBranding();
 
   useEffect(() => {
     const onBefore = () => setPrintedAt(new Date());
@@ -291,7 +293,7 @@ export function PrintDocument({
               <td className={`${CELL} w-[22%]`}>
                 <div className="flex items-center gap-2">
                   {/* eslint-disable-next-line @next/next/no-img-element */}
-                  <img src="/assets/mubs.png" alt="" className="h-10 w-10 object-contain" />
+                  <img src={logoUrl} alt="" className="h-10 w-10 object-contain" />
                   <div>
                     <p className="text-[8pt] font-bold">{ORG_SHORT}</p>
                     <p className="text-[11pt] font-extrabold text-[#008bd0]">{APP_NAME}</p>

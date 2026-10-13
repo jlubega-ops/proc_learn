@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import bcrypt from "bcryptjs";
 import { UserAccountStatus } from "@prisma/client";
 import { getAppSession, initSessionActivity } from "@/lib/auth/session";
+import { bumpSessionVersion } from "@/lib/auth/session-version";
 import { buildIronSessionOptions } from "@/lib/auth/session-options";
 import { buildSessionPayloadForUserId } from "@/lib/auth/session-payload";
 import { prisma } from "@/lib/prisma";
@@ -12,6 +13,7 @@ import {
 } from "@/lib/validation/login";
 import { writeAuditLog, AuditEvent } from "@/lib/audit-log";
 import { getRequestIp, getRequestUserAgent } from "@/lib/request-meta";
+import { hitRateLimit, RATE_LIMIT_MESSAGE } from "@/lib/rate-limit";
 import { isOrgLoginIdentifier } from "@/lib/projects/org-login-identity";
 import { authenticateProjectOrgUserLogin } from "@/lib/projects/org-login-auth";
 import { buildSessionPayloadForOrgUserId } from "@/lib/auth/org-session-payload";
@@ -79,6 +81,24 @@ export async function POST(request) {
     return NextResponse.json(
       { error: "Validation failed.", fields: fieldErrors },
       { status: 400 },
+    );
+  }
+
+  const windowMs = 15 * 60 * 1000;
+  const limitByIp = hitRateLimit(`login:ip:${ip || "unknown"}`, { limit: 50, windowMs });
+  const limitById = hitRateLimit(`login:id:${String(rawId).trim().toLowerCase()}`, {
+    limit: 10,
+    windowMs,
+  });
+  if (!limitByIp.ok || !limitById.ok) {
+    return NextResponse.json(
+      { error: RATE_LIMIT_MESSAGE },
+      {
+        status: 429,
+        headers: {
+          "Retry-After": String(Math.max(limitByIp.retryAfterSeconds, limitById.retryAfterSeconds)),
+        },
+      },
     );
   }
 
@@ -281,6 +301,7 @@ export async function POST(request) {
   delete session.orgUserId;
   delete session.providerId;
   session.userId = user.id;
+  session.sv = await bumpSessionVersion(prisma, user.id);
   initSessionActivity(session);
   await session.save();
 

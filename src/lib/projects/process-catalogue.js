@@ -2,6 +2,8 @@
  * Stable process catalogue codes and triggers for the simulation engine.
  */
 
+import { throttleSync } from "@/lib/sync-throttle";
+
 export const PROCESS_FLOW_CODES = {
   BUDGETING: "BUDGETING",
   PROCUREMENT_PLANNING: "PROCUREMENT_PLANNING",
@@ -1028,10 +1030,14 @@ export const BASELINE_PROCESS_TEMPLATES = [
 ];
 
 /**
- * Ensures baseline process templates exist with steps.
- * @param {import("@prisma/client").PrismaClient} prisma
+ * Ensures baseline process templates exist with steps. Runs at most every 10 minutes per server
+ * process (deploy seeding does the first full sync).
+ * @type {(prisma: import("@prisma/client").PrismaClient) => Promise<void>}
  */
-export async function ensureBaselineProcessTemplates(prisma) {
+export const ensureBaselineProcessTemplates = throttleSync(10 * 60_000, syncBaselineProcessTemplates);
+
+/** @param {import("@prisma/client").PrismaClient} prisma */
+async function syncBaselineProcessTemplates(prisma) {
   const { ensureCoreProjectOrgRoles } = await import("@/lib/project-org-role");
   await ensureCoreProjectOrgRoles(prisma);
 

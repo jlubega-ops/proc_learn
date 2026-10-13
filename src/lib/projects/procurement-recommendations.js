@@ -9,6 +9,7 @@ import {
   Prisma,
 } from "@prisma/client";
 import { writeAuditLog, AuditEvent } from "@/lib/audit-log";
+import { runInTx } from "@/lib/db-tx";
 import { assessProviderSelection } from "@/lib/projects/providers";
 import { resolveEligibleOrgUsers } from "@/lib/projects/workflow-engine";
 import { notifyOrgUsers, OrgNotificationType } from "@/lib/projects/org-notifications";
@@ -368,7 +369,7 @@ export async function submitRecommendation(prisma, opts) {
   });
   const taskTitle = `${RECOMMENDATION_TASK_PREFIX}: ${proc.procurementNumber}: ${proc.title}`.slice(0, 255);
 
-  const created = await prisma.$transaction(async (tx) => {
+  const created = await runInTx(prisma, async (tx) => {
     const rec = await tx.projectOrgProcurementRecommendation.create({
       data: {
         projectId: opts.projectId,
@@ -573,7 +574,7 @@ export async function decideRecommendation(prisma, opts) {
 
   const now = new Date();
   try {
-    await prisma.$transaction(async (tx) => {
+    await runInTx(prisma, async (tx) => {
       const claimed = await tx.projectOrgProcurementRecommendation.updateMany({
         where: { id: rec.id, status: OrgProcurementRecommendationStatus.PENDING },
         data: {

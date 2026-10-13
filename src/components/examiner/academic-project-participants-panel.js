@@ -19,6 +19,8 @@ import IconButton from "@mui/material/IconButton";
 import Tooltip from "@mui/material/Tooltip";
 import VisibilityRounded from "@mui/icons-material/VisibilityRounded";
 import RefreshRounded from "@mui/icons-material/RefreshRounded";
+import GroupsRounded from "@mui/icons-material/GroupsRounded";
+import { ProjectSectionBar } from "@/components/projects/project-section-bar";
 import FormControl from "@mui/material/FormControl";
 import InputLabel from "@mui/material/InputLabel";
 import Select from "@mui/material/Select";
@@ -28,7 +30,6 @@ import {
   BRAND_PAGE_SHELL_CLASS,
   BRAND_PAGE_LEAD_CLASS,
 } from "@/components/layout/dashboard-page-intro";
-import { BRAND_SECTION_TITLE_CLASS } from "@/lib/brand-ui";
 import {
   adminCenteredLoadingBoxSx,
   adminLoadingSpinnerSx,
@@ -40,6 +41,7 @@ import { useToast } from "@/components/providers/toast-provider";
 import { formatDurationClock } from "@/lib/academic/attempt-timer-format";
 import { campusSelectOptions } from "@/lib/campuses";
 import { clickableRowProps } from "@/lib/clickable-row";
+import { startVisibleInterval } from "@/lib/visible-interval";
 
 /**
  * @param {{ projectId: string }} props
@@ -83,8 +85,7 @@ export function AcademicProjectParticipantsPanel({ projectId }) {
 
   useEffect(() => {
     void load();
-    const timer = setInterval(() => void load({ silent: true }), 15000);
-    return () => clearInterval(timer);
+    return startVisibleInterval(() => void load({ silent: true }), 30_000);
   }, [load]);
 
   const participants = data?.participants || [];
@@ -117,70 +118,56 @@ export function AcademicProjectParticipantsPanel({ projectId }) {
     );
   }
 
-  const p = data.project;
   const counts = data.counts || {};
 
   return (
     <div className={BRAND_PAGE_SHELL_CLASS}>
-      <DashboardPageIntro
-        hero
+      <ProjectSectionBar
+        icon={GroupsRounded}
         title="Participants"
-        description="Enrolled students and their progress."
-      >
-        <div className="mt-3 flex flex-wrap gap-2">
-          <Chip size="small" color="primary" label={p.purpose} />
-          <Chip size="small" color="info" label={`Enrolled ${counts.enrolled || 0}`} />
-          <Chip size="small" color="warning" label={`In progress ${counts.inProgress || 0}`} />
-          <Chip size="small" color="success" label={`Submitted ${counts.submitted || 0}`} />
-        </div>
-        <div className="mt-3 flex flex-wrap gap-2">
-          <Button
-            type="button"
-            className="cursor-pointer"
-            startIcon={<RefreshRounded />}
-            onClick={() => void load()}
-          >
-            Refresh
-          </Button>
-          <Button
-            component={Link}
-            href={`/projects/${projectId}/assessment`}
-            className="cursor-pointer"
-          >
-            Scoring setup
-          </Button>
-          <Button component={Link} href={`/projects/${projectId}/results`} className="cursor-pointer">
-            Results
-          </Button>
-        </div>
-      </DashboardPageIntro>
+        stats={
+          <>
+            <Chip size="small" color="info" label={`Enrolled ${counts.enrolled || 0}`} />
+            <Chip size="small" color="warning" label={`In progress ${counts.inProgress || 0}`} />
+            <Chip size="small" color="success" label={`Submitted ${counts.submitted || 0}`} />
+          </>
+        }
+        actions={
+          <>
+            {participants.length ? (
+              <FormControl sx={{ ...themedTextFieldSx, width: { xs: "100%", sm: 180 } }}>
+                <InputLabel id="participants-campus-filter">Campus</InputLabel>
+                <Select
+                  labelId="participants-campus-filter"
+                  label="Campus"
+                  value={campusFilter}
+                  onChange={(e) => {
+                    setCampusFilter(String(e.target.value || ""));
+                    setPage(0);
+                  }}
+                >
+                  <MenuItem value="">All campuses</MenuItem>
+                  {campusSelectOptions().map((c) => (
+                    <MenuItem key={c.value} value={c.value}>
+                      {c.label}
+                    </MenuItem>
+                  ))}
+                </Select>
+              </FormControl>
+            ) : null}
+            <Tooltip title="Refresh">
+              <IconButton aria-label="Refresh participants" color="primary" onClick={() => void load()}>
+                <RefreshRounded />
+              </IconButton>
+            </Tooltip>
+          </>
+        }
+      />
 
-      <h2 className={`${BRAND_SECTION_TITLE_CLASS} mb-2`}>Participants</h2>
       {!participants.length ? (
         <p className={BRAND_PAGE_LEAD_CLASS}>No students have enrolled yet.</p>
       ) : (
         <>
-        <div className="mb-3 flex max-w-xs flex-col gap-2 sm:max-w-sm">
-          <FormControl fullWidth sx={themedTextFieldSx}>
-            <InputLabel id="participants-campus-filter">Campus</InputLabel>
-            <Select
-              labelId="participants-campus-filter"
-              label="Campus"
-              value={campusFilter}
-              onChange={(e) => {
-                setCampusFilter(String(e.target.value || ""));
-                setPage(0);
-              }}
-            >
-              <MenuItem value="">All campuses</MenuItem>
-              {campusSelectOptions().map((c) => (
-                <MenuItem key={c.value} value={c.value}>
-                  {c.label}
-                </MenuItem>
-              ))}
-            </Select>
-          </FormControl>
-        </div>
         {!filteredParticipants.length ? (
           <p className={BRAND_PAGE_LEAD_CLASS}>No participants match this campus.</p>
         ) : (

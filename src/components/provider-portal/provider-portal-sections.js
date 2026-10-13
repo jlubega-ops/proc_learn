@@ -21,7 +21,12 @@ import PlaceRounded from "@mui/icons-material/PlaceRounded";
 import SendRounded from "@mui/icons-material/SendRounded";
 import { format } from "date-fns";
 import { useToast } from "@/components/providers/toast-provider";
-import { actionConfirmOptions, useConfirm } from "@/components/providers/confirm-provider";
+import {
+  actionConfirmOptions,
+  discardConfirmOptions,
+  useConfirm,
+} from "@/components/providers/confirm-provider";
+import { useDraftSync } from "@/hooks/use-draft-sync";
 import { formatMoneyUGX, parseMoneyInput, validatePositiveMoney } from "@/lib/money";
 import { draftLinesTotal } from "@/lib/projects/offer-line-items";
 import { BRAND_CARD_CLASS } from "@/lib/brand-ui";
@@ -169,7 +174,26 @@ export function OfferForm({ opportunity, onCancel = null, onSaved }) {
   /** @type {[Record<string, string>, Function]} */
   const [errors, setErrors] = useState({});
   const [busy, setBusy] = useState(false);
+  const offerDraft = useDraftSync(
+    `offer:${opportunity.id}:${existing?.id || "new"}`,
+    { unitPrices, amount, deliveryDays, remarks },
+    (d) => {
+      if (d.unitPrices && typeof d.unitPrices === "object") {
+        setUnitPrices(/** @type {Record<string, string>} */ (d.unitPrices));
+      }
+      if (typeof d.amount === "string") setAmount(d.amount);
+      if (typeof d.deliveryDays === "string") setDeliveryDays(d.deliveryDays);
+      if (typeof d.remarks === "string") setRemarks(d.remarks);
+    },
+    { scope: `provider-portal:${opportunity.id}` },
+  );
   const lineTotal = byLine ? draftLinesTotal(items, unitPrices) : 0;
+
+  async function cancel() {
+    if (offerDraft.isDirty && !(await confirm(discardConfirmOptions()))) return;
+    offerDraft.clearDraft();
+    onCancel?.();
+  }
   const total = byLine ? lineTotal : parseMoneyInput(amount);
 
   async function submit(e) {
@@ -227,6 +251,7 @@ export function OfferForm({ opportunity, onCancel = null, onSaved }) {
         return;
       }
       showToast({ message: existing ? `Your ${word} was updated.` : `Your ${word} was submitted.`, severity: "success" });
+      offerDraft.clearDraft();
       onSaved();
     } finally {
       setBusy(false);
@@ -322,7 +347,7 @@ export function OfferForm({ opportunity, onCancel = null, onSaved }) {
         </p>
         <div className="flex w-full flex-wrap justify-end gap-2 sm:w-auto">
           {onCancel ? (
-            <Button onClick={onCancel} disabled={busy} className="w-full sm:w-auto">
+            <Button onClick={() => void cancel()} disabled={busy} className="w-full sm:w-auto">
               Cancel
             </Button>
           ) : null}
@@ -539,6 +564,18 @@ export function SubmitInvoiceCard({ order, onSaved }) {
   const [errors, setErrors] = useState({});
   const [busy, setBusy] = useState(false);
   const today = format(new Date(), "yyyy-MM-dd");
+  const invoiceScopeId = order.procurement?.id || order.number || "";
+  const invoiceDraft = useDraftSync(
+    `invoice:${invoiceScopeId}:${order.number || ""}`,
+    { amount, invoiceDate, supplierReference, notes },
+    (d) => {
+      if (typeof d.amount === "string") setAmount(d.amount);
+      if (typeof d.invoiceDate === "string") setInvoiceDate(d.invoiceDate);
+      if (typeof d.supplierReference === "string") setSupplierReference(d.supplierReference);
+      if (typeof d.notes === "string") setNotes(d.notes);
+    },
+    { enabled: Boolean(invoiceScopeId), scope: `provider-portal:${invoiceScopeId}` },
+  );
 
   async function submit(e) {
     e.preventDefault();
@@ -577,6 +614,7 @@ export function SubmitInvoiceCard({ order, onSaved }) {
         return;
       }
       showToast({ message: "Invoice submitted. The procurement unit has been notified.", severity: "success" });
+      invoiceDraft.clearDraft();
       onSaved();
     } finally {
       setBusy(false);

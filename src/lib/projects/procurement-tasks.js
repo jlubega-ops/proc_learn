@@ -6,7 +6,12 @@ import {
   OrgSolicitationStatus,
   OrgOfferType,
 } from "@prisma/client";
-import { completeWorkflowTask, computeBudgetAvailability } from "@/lib/projects/workflow-engine";
+import {
+  checkWorkflowTaskActor,
+  completeWorkflowTask,
+  computeBudgetAvailability,
+} from "@/lib/projects/workflow-engine";
+import { okOrAbort, runInTx, withTxAbort } from "@/lib/db-tx";
 import {
   afterPurchaseInstructionIssued,
   issuePurchaseInstruction,
@@ -134,6 +139,21 @@ async function orderDocumentIds(prisma, projectId, procurementId, body) {
  * }} opts
  */
 export async function actOnProcurementTask(prisma, opts) {
+  return withTxAbort(() =>
+    runInTx(prisma, async (tx) => okOrAbort(await actOnProcurementTaskSteps(tx, opts)), {
+      maxWait: 10_000,
+      timeout: 60_000,
+    }),
+  );
+}
+
+/**
+ * Runs inside one transaction: the business write (PI, solicitation, award, payment …) and the
+ * task completion commit together, or not at all.
+ * @param {import("@prisma/client").Prisma.TransactionClient} prisma
+ * @param {Parameters<typeof actOnProcurementTask>[1]} opts
+ */
+async function actOnProcurementTaskSteps(prisma, opts) {
   const body = opts.body || {};
 
   const taskPreview = await prisma.projectOrgWorkflowTask.findUnique({
@@ -162,6 +182,8 @@ export async function actOnProcurementTask(prisma, opts) {
       status: 409,
     };
   }
+  const actorCheck = await checkWorkflowTaskActor(prisma, opts);
+  if (!actorCheck.ok) return actorCheck;
 
   const projectId = taskPreview.instance.projectId;
   const procurementId = taskPreview.instance.procurementId;
@@ -392,38 +414,29 @@ export async function actOnProcurementTask(prisma, opts) {
     // Re-issue after a provider declined is an ad-hoc task outside the step sequence.
     if (!taskPreview.processFlowItemId) {
       const now = new Date();
-      await prisma.$transaction([
-        prisma.projectOrgWorkflowTask.update({
-          where: { id: taskPreview.id },
-          data: { status: OrgWorkflowTaskStatus.COMPLETED, completedAt: now },
-        }),
-        prisma.projectOrgWorkflowAction.create({
-          data: {
-            projectId,
-            instanceId: taskPreview.instance.id,
-            taskId: taskPreview.id,
-            actorOrgUserId: opts.actorOrgUserId,
-            actorRoleName: opts.actorRoleName,
-            decision: OrgWorkflowDecision.COMPLETE,
-            comment: opts.comment?.trim() || null,
-            metadata: { ...piMeta, stepNumber: 0, taskTitle: taskPreview.title },
-          },
-        }),
-      ]);
+      await prisma.projectOrgWorkflowTask.update({
+        where: { id: taskPreview.id },
+        data: { status: OrgWorkflowTaskStatus.COMPLETED, completedAt: now },
+      });
+      await prisma.projectOrgWorkflowAction.create({
+        data: {
+          projectId,
+          instanceId: taskPreview.instance.id,
+          taskId: taskPreview.id,
+          actorOrgUserId: opts.actorOrgUserId,
+          actorRoleName: opts.actorRoleName,
+          decision: OrgWorkflowDecision.COMPLETE,
+          comment: opts.comment?.trim() || null,
+          metadata: { ...piMeta, stepNumber: 0, taskTitle: taskPreview.title },
+        },
+      });
       await notifyIssued();
       return { ok: true, purchaseInstruction: issued.purchaseInstruction };
     }
 
     const result = await complete(piMeta);
+    if (!result.ok) return result;
     await notifyIssued();
-    if (!result.ok) {
-      return {
-        ...result,
-        purchaseInstruction: issued.purchaseInstruction,
-        warning:
-          "The purchase instruction was issued, but the task could not be closed automatically. Refresh My Tasks to continue.",
-      };
-    }
     return { ...result, purchaseInstruction: issued.purchaseInstruction };
   }
 
@@ -960,8 +973,8 @@ export async function actOnProcurementTask(prisma, opts) {
         deliveryId,
         resultNotes: body.resultNotes || opts.comment || null,
         lineDecisions: body.lineDecisions,
-        committeeId: actingCommitteeType ? opts.committeeId : body.committeeId || null,
-        committeeRole: actingCommitteeType ? opts.committeeRole || null : body.committeeRole || null,
+        committeeId: actingCommitteeType ? opts.committeeId : null,
+        committeeRole: actingCommitteeType ? opts.committeeRole || null : null,
       },
     });
     if (!out.ok) return out;

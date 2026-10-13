@@ -50,13 +50,14 @@ export default async function LoginPage({ searchParams }) {
 
   const oauthError =
     typeof sp?.error === "string" && sp.error ? sp.error : "";
-  const idleLogout = sp?.reason === "idle";
+  const signedOutReason =
+    sp?.reason === "idle" || sp?.reason === "session_ended" ? sp.reason : "";
 
   return (
     <LoginPageShell
       initialNext={nextDest}
       oauthError={oauthError}
-      idleLogout={idleLogout}
+      signedOutReason={signedOutReason}
     />
   );
 }

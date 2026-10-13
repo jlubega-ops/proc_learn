@@ -14,6 +14,8 @@ import {
 import { prisma } from "@/lib/prisma";
 import { orgOpsSlateListWhere, resolveCurrentOrgSlateId } from "@/lib/academic/org-academic-slate";
 import { formatUserDisplayName } from "@/lib/user-display";
+import { PROCESS_FLOW_CODES } from "@/lib/projects/process-catalogue";
+import { resolveEffectiveProcessCodes } from "@/lib/academic/programme-processes";
 
 /** @typedef {'done'|'current'|'todo'|'blocked'} StageState */
 
@@ -145,6 +147,38 @@ function humanStatus(status) {
     .replace(/_/g, " ");
 }
 
+const METHOD_PROCESS_CODES = [
+  PROCESS_FLOW_CODES.MICRO_PROCUREMENT,
+  PROCESS_FLOW_CODES.QUOTATION_PROCESS,
+  PROCESS_FLOW_CODES.TENDER_PROCESS,
+];
+
+/** Stage → processes that make it reachable (any of). Financial Year is always tracked. */
+const STAGE_PROCESS_CODES = {
+  BUDGET: [PROCESS_FLOW_CODES.BUDGETING],
+  PROCUREMENT_PLANNING: [PROCESS_FLOW_CODES.PROCUREMENT_PLANNING],
+  REQUISITION: [PROCESS_FLOW_CODES.PROCUREMENT_REQUISITION],
+  APPROVAL: [PROCESS_FLOW_CODES.PROCUREMENT_REQUISITION],
+  PROCUREMENT_METHOD: METHOD_PROCESS_CODES,
+  EVALUATION: [PROCESS_FLOW_CODES.EVALUATION_PROCESS],
+  CONTRACT: [PROCESS_FLOW_CODES.LPO_PROCESS, PROCESS_FLOW_CODES.CONTRACT_PROCESS],
+  DELIVERY: [PROCESS_FLOW_CODES.INVOICE_PROCESS],
+  CLOSURE: [PROCESS_FLOW_CODES.PAYMENT_PROCESS],
+};
+
+/**
+ * Stages on the organisation's allowed path (all stages when unrestricted).
+ * @param {string[] | null | undefined} allowedCodes
+ */
+export function trackedStageKeys(allowedCodes) {
+  if (!allowedCodes) return OBSERVATION_STAGE_KEYS;
+  const allowed = new Set(allowedCodes);
+  return OBSERVATION_STAGE_KEYS.filter((key) => {
+    const codes = STAGE_PROCESS_CODES[key];
+    return !codes || codes.some((c) => allowed.has(c));
+  });
+}
+
 /**
  * Mark all stages before `key` as done.
  * @param {Record<string, boolean>} done
@@ -168,8 +202,9 @@ function markBeforeDone(done, key) {
  *   bestReq?: any;
  *   bestProc?: any;
  * }} snaps
+ * @param {string[] | null} [allowedCodes] effective process codes; null = full path
  */
-export function computeObservationStageStates(snaps = {}) {
+export function computeObservationStageStates(snaps = {}, allowedCodes = null) {
   const activeFy = snaps.activeFy || null;
   const bestBudget = snaps.bestBudget || null;
   const bestPlan = snaps.bestPlan || null;
@@ -217,15 +252,15 @@ export function computeObservationStageStates(snaps = {}) {
     }
   }
 
-  const currentKey =
-    OBSERVATION_STAGE_KEYS.find((key) => !done[key]) ||
-    (done.CLOSURE ? "CLOSURE" : OBSERVATION_STAGE_KEYS[0]);
+  const tracked = trackedStageKeys(allowedCodes);
+  const lastKey = tracked[tracked.length - 1];
+  const finished = tracked.every((key) => done[key]);
+  const currentKey = tracked.find((key) => !done[key]) || (finished ? lastKey : tracked[0]);
 
-  const stages = OBSERVATION_STAGE_KEYS.map((key) => {
+  const stages = tracked.map((key) => {
     /** @type {StageState} */
     let state = "todo";
-    if (done.CLOSURE && key === "CLOSURE") state = "done";
-    else if (done[key]) state = "done";
+    if (done[key]) state = "done";
     else if (key === currentKey) state = "current";
     return {
       key,
@@ -246,8 +281,8 @@ export function computeObservationStageStates(snaps = {}) {
       completedCount,
       totalCount: stages.length,
       percent: Math.round((completedCount / Math.max(stages.length, 1)) * 100),
-      currentStageKey: currentStage?.key || (done.CLOSURE ? "CLOSURE" : null),
-      currentStageLabel: currentStage?.label || (done.CLOSURE ? "Closure" : null),
+      currentStageKey: currentStage?.key || (finished ? lastKey : null),
+      currentStageLabel: currentStage?.label || (finished ? OBSERVATION_STAGE_LABELS[lastKey] : null),
       remainingCount: stages.filter((s) => s.state === "todo" || s.state === "current").length,
     },
   };
@@ -334,13 +369,11 @@ export async function deriveOrganisationProcurementProgress(projectId, opts = {}
   const bestProc = procurements[0] || null;
   const openTask = openTasks[0] || null;
 
-  const computed = computeObservationStageStates({
-    activeFy,
-    bestBudget,
-    bestPlan,
-    bestReq,
-    bestProc,
-  });
+  const allowedCodes = await resolveEffectiveProcessCodes(db, projectId).catch(() => null);
+  const computed = computeObservationStageStates(
+    { activeFy, bestBudget, bestPlan, bestReq, bestProc },
+    allowedCodes,
+  );
 
   const stages = computed.stages.map((stage) => {
     const detail = stageDetail({
@@ -776,6 +809,11 @@ export async function listPersonalOrgProgressSummaries(ownerUserIds, opts = {}) 
     return map;
   };
 
+  const allowedEntries = await Promise.all(
+    orgs.map(async (o) => [o.id, await resolveEffectiveProcessCodes(db, o.id).catch(() => null)]),
+  );
+  /** @type {Map<string, string[] | null>} */
+  const allowedBy = new Map(/** @type {any} */ (allowedEntries));
   const fyBy = groupByProject(financialYears);
   const budgetBy = groupByProject(budgets);
   const planBy = groupByProject(plans);
@@ -791,13 +829,10 @@ export async function listPersonalOrgProgressSummaries(ownerUserIds, opts = {}) 
     const bestReq = pickBestByRank(reqBy.get(org.id) || [], (r) => REQ_RANK[r.status] ?? 0);
     const bestProc = (procBy.get(org.id) || [])[0] || null;
     const openTask = (taskBy.get(org.id) || [])[0] || null;
-    const computed = computeObservationStageStates({
-      activeFy,
-      bestBudget,
-      bestPlan,
-      bestReq,
-      bestProc,
-    });
+    const computed = computeObservationStageStates(
+      { activeFy, bestBudget, bestPlan, bestReq, bestProc },
+      allowedBy.get(org.id) ?? null,
+    );
     byOwner.set(org.ownerUserId, {
       organisation: {
         projectId: org.id,

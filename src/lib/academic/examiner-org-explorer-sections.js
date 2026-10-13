@@ -64,6 +64,42 @@ export const EXPLORER_SCORING_SECTIONS = {
   payments: [C.PAYMENT_PROCESS],
 };
 
+const PROCESS_CODES = new Set(Object.values(C));
+
+/** Engine processes behind each explorer section (sections not listed are always available). */
+const EXPLORER_SECTION_PROCESS_CODES = {
+  ...Object.fromEntries(
+    Object.entries(EXPLORER_SCORING_SECTIONS)
+      .map(([key, codes]) => [key, codes.filter((c) => PROCESS_CODES.has(c))])
+      .filter(([, codes]) => codes.length),
+  ),
+  procurements: [C.MICRO_PROCUREMENT, C.QUOTATION_PROCESS, C.TENDER_PROCESS],
+  "purchase-instructions": [C.LPO_PROCESS, C.CONTRACT_PROCESS],
+  deliveries: [C.LPO_PROCESS, C.CONTRACT_PROCESS],
+  closures: [C.PAYMENT_PROCESS],
+};
+
+/**
+ * Whether a scoring section / process code was available (null list = unrestricted).
+ * @param {string} key scoring section key or process code
+ * @param {string[] | null | undefined} availableCodes
+ */
+export function isProcessKeyAvailable(key, availableCodes) {
+  if (!Array.isArray(availableCodes) || !PROCESS_CODES.has(key)) return true;
+  return availableCodes.includes(key);
+}
+
+/**
+ * Whether an explorer section belongs to at least one available process.
+ * @param {string} sectionKey
+ * @param {string[] | null | undefined} availableCodes
+ */
+export function isExplorerSectionAvailable(sectionKey, availableCodes) {
+  const codes = EXPLORER_SECTION_PROCESS_CODES[sectionKey];
+  if (!Array.isArray(availableCodes) || !codes) return true;
+  return codes.some((c) => availableCodes.includes(c));
+}
+
 /** @param {string} key */
 export function explorerSectionLabel(key) {
   for (const group of EXPLORER_SECTION_GROUPS) {

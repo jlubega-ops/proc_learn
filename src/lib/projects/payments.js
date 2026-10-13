@@ -1,5 +1,6 @@
 import { OrgInvoiceStatus, OrgPaymentStatus, OrgProcurementStatus, Prisma } from "@prisma/client";
 import { writeAuditLog, AuditEvent } from "@/lib/audit-log";
+import { runInTx } from "@/lib/db-tx";
 import { notifyOrgUsers, OrgNotificationType } from "@/lib/projects/org-notifications";
 import { notifyProvider } from "@/lib/projects/provider-notifications";
 import { formatMoneyUGX } from "@/lib/money";
@@ -152,7 +153,7 @@ export async function approvePayment(prisma, opts) {
     return { ok: false, error: "Only a pending payment can be approved.", status: 400 };
   }
 
-  const updated = await prisma.$transaction(async (tx) => {
+  const updated = await runInTx(prisma, async (tx) => {
     const p = await tx.projectOrgPayment.update({
       where: { id: row.id },
       data: { status: OrgPaymentStatus.APPROVED, approvedByOrgUserId: opts.actorOrgUserId },

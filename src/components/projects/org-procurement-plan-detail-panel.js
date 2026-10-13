@@ -24,6 +24,7 @@ import { RecordDetailsGrid, recordPersonLine } from "@/components/projects/recor
 import { WorkflowHistoryPanel } from "@/components/projects/workflow-history-panel";
 import { useToast } from "@/components/providers/toast-provider";
 import { decisionConfirmOptions, useConfirm } from "@/components/providers/confirm-provider";
+import { useDraftSync } from "@/hooks/use-draft-sync";
 import { notifyOrgTasksChanged } from "@/hooks/use-pending-task-counts";
 import { useProcessActivation } from "@/hooks/use-process-activation";
 import { ProcessGateTooltip } from "@/components/projects/process-gate";
@@ -233,6 +234,15 @@ export function OrgProcurementPlanDetailPanel({ projectId, planId }) {
   const [printedBy, setPrintedBy] = useState(/** @type {any} */ (null));
   const [decision, setDecision] = useState("APPROVE");
   const [comment, setComment] = useState("");
+  const decisionDraft = useDraftSync(
+    `org:plan:${planId}:task:${pendingTask?.id || ""}:decision`,
+    { decision, comment },
+    (d) => {
+      if (typeof d.decision === "string") setDecision(d.decision);
+      if (typeof d.comment === "string") setComment(d.comment);
+    },
+    { enabled: Boolean(pendingTask?.id) && !loading },
+  );
   const processes = useProcessActivation(projectId);
   const planCode = plan?.isEmergency
     ? PROCESS_FLOW_CODES.EMERGENCY_PLANNING
@@ -317,6 +327,7 @@ export function OrgProcurementPlanDetailPanel({ projectId, planId }) {
         return;
       }
       showToast({ message: "Decision recorded.", severity: "success" });
+      decisionDraft.clearDraft();
       notifyOrgTasksChanged();
       await load();
     } finally {

@@ -44,7 +44,10 @@ import {
   themedTextFieldSx,
 } from "@/lib/admin-mui-surfaces";
 import { useToast } from "@/components/providers/toast-provider";
+import { useApi } from "@/hooks/use-api";
+import { useAuthSession } from "@/components/providers/auth-session-provider";
 import { campusSelectOptions } from "@/lib/campuses";
+import { ROLE } from "@/lib/roles";
 
 function fmtDate(value) {
   if (!value) return "—";
@@ -57,12 +60,17 @@ function fmtDate(value) {
  */
 export function AcademicResultsPanel() {
   const { showToast } = useToast();
+  const { session } = useAuthSession();
+  const canTeach = session?.activeRole === ROLE.EXAMINER;
   const searchParams = useSearchParams();
   const initialProjectId = searchParams.get("projectId") || "";
 
   const [loading, setLoading] = useState(true);
   const [data, setData] = useState(/** @type {any} */ (null));
-  const [years, setYears] = useState(/** @type {any[]} */ ([]));
+  const { data: yearsData } = useApi("/api/admin/academic-years", { silentErrors: true });
+  const years = /** @type {any[]} */ (
+    Array.isArray(yearsData?.academicYears) ? yearsData.academicYears : []
+  );
   const [academicYearId, setAcademicYearId] = useState("");
   const [participation, setParticipation] = useState("all");
   const [campus, setCampus] = useState("");
@@ -75,12 +83,6 @@ export function AcademicResultsPanel() {
   const [fieldErrors, setFieldErrors] = useState(/** @type {Record<string, string>} */ ({}));
 
   useEffect(() => {
-    (async () => {
-      const res = await fetch("/api/admin/academic-years", { credentials: "include" });
-      const json = await res.json().catch(() => ({}));
-      const list = json.academicYears || [];
-      setYears(Array.isArray(list) ? list : []);
-    })();
     (async () => {
       const res = await fetch("/api/projects?page=1&pageSize=50&scope=examiner", {
         credentials: "include",
@@ -214,7 +216,7 @@ export function AcademicResultsPanel() {
       <DashboardPageIntro
         hero
         title="Results"
-        description="View attempts, scores, and grades. Official statistics and Excel export include real students only — demo participation is excluded server-side."
+        description="Attempts, scores and grades."
       >
         <div className="mt-3 flex flex-wrap gap-2">
           <Button
@@ -392,6 +394,7 @@ export function AcademicResultsPanel() {
                   <TableCell>{row.grade?.passFailLabel || "—"}</TableCell>
                   <TableCell>{fmtDate(row.submittedAt)}</TableCell>
                   <TableCell align="right">
+                    {canTeach ? (
                     <div className="flex flex-nowrap justify-end gap-0.5">
                       <Tooltip title="Recalculate automatic score">
                         <IconButton
@@ -425,6 +428,9 @@ export function AcademicResultsPanel() {
                         </IconButton>
                       </Tooltip>
                     </div>
+                    ) : (
+                      "—"
+                    )}
                   </TableCell>
                 </TableRow>
               ))}

@@ -89,7 +89,16 @@ export async function ensureProjectOwnerOrgUser(prisma, projectId, ownerUserId) 
   };
 
   let row;
-  if (existing) {
+  if (
+    existing &&
+    existing.firstName === profile.firstName &&
+    existing.lastName === profile.lastName &&
+    existing.email === profile.email &&
+    existing.projectOrgRoleId === profile.projectOrgRoleId &&
+    existing.isProjectAdmin
+  ) {
+    row = existing;
+  } else if (existing) {
     row = await prisma.projectOrgUser.update({
       where: { id: existing.id },
       data: {

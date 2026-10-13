@@ -4,6 +4,7 @@ import { prisma } from "@/lib/prisma";
 import { AuditEvent, writeAuditLog } from "@/lib/audit-log";
 import { getSessionUser, sessionActiveRole } from "@/lib/api/get-session-user";
 import { isProjectMeantForStudent } from "@/lib/academic/student-project-eligibility";
+import { checkEnrollmentKey } from "@/lib/academic/project-attempts";
 
 export const runtime = "nodejs";
 
@@ -59,14 +60,9 @@ export async function POST(request, context) {
   } catch {
     body = {};
   }
-  const providedKey = String(body?.enrollmentAccessKey || "").trim().toUpperCase();
-  if (project.enrollmentKey) {
-    if (!providedKey) {
-      return NextResponse.json({ error: "Enrollment key is required for this project." }, { status: 400 });
-    }
-    if (providedKey !== String(project.enrollmentKey).toUpperCase()) {
-      return NextResponse.json({ error: "Invalid enrollment key." }, { status: 400 });
-    }
+  if (!alreadyJoined) {
+    const keyCheck = checkEnrollmentKey(user.id, project, body?.enrollmentAccessKey);
+    if (!keyCheck.ok) return NextResponse.json({ error: keyCheck.error }, { status: 400 });
   }
 
   const enrollment = await prisma.projectEnrollment.upsert({

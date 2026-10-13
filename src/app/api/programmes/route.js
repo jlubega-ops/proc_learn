@@ -5,10 +5,12 @@ import { writeAuditLog, AuditEvent } from "@/lib/audit-log";
 import { notifyAllSystemAdmins } from "@/lib/notify-system-admins";
 import { formatUserDisplayName } from "@/lib/user-display";
 import { prisma } from "@/lib/prisma";
+import { cachedRead } from "@/lib/server-cache";
+import { cachedJson } from "@/lib/api/cached-json";
 
 export const runtime = "nodejs";
 
-export async function GET() {
+export async function GET(request) {
   const user = await getSessionUser();
   if (!user) {
     return NextResponse.json({ error: "Unauthorized." }, { status: 401 });
@@ -17,12 +19,17 @@ export async function GET() {
   const active = sessionActiveRole(user);
   const isAdmin = active === Role.SYSTEM_ADMIN;
 
-  const rows = await prisma.programme.findMany({
-    where: isAdmin ? {} : { isActive: true },
-    orderBy: { name: "asc" },
-  });
+  const programmes = await cachedRead(
+    `programmes:${isAdmin ? "all" : "active"}`,
+    ["Programme"],
+    () =>
+      prisma.programme.findMany({
+        where: isAdmin ? {} : { isActive: true },
+        orderBy: { name: "asc" },
+      }),
+  );
 
-  return NextResponse.json({ programmes: rows });
+  return cachedJson(request, { programmes }, { revalidate: true });
 }
 
 export async function POST(request) {

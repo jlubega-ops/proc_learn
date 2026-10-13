@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { Role, UserAccountStatus } from "@prisma/client";
 import { getSessionUser, sessionActiveRole } from "@/lib/api/get-session-user";
 import { prisma } from "@/lib/prisma";
+import { writeAuditLog, AuditEvent } from "@/lib/audit-log";
 
 export const runtime = "nodejs";
 
@@ -14,8 +15,7 @@ export async function PATCH(request, ctx) {
     return NextResponse.json({ error: "Unauthorized." }, { status: 401 });
   }
 
-  const active = sessionActiveRole(actor);
-  if (active !== Role.SYSTEM_ADMIN && active !== Role.EXAMINER) {
+  if (sessionActiveRole(actor) !== Role.SYSTEM_ADMIN) {
     return NextResponse.json({ error: "Forbidden." }, { status: 403 });
   }
 
@@ -44,40 +44,70 @@ export async function PATCH(request, ctx) {
 
   const target = await prisma.user.findUnique({
     where: { id },
-    select: { studentProfile: { select: { userId: true } } },
+    select: { id: true, email: true, activatedAt: true },
   });
   if (!target) {
     return NextResponse.json({ error: "User not found." }, { status: 404 });
   }
-  const isStudent = Boolean(target.studentProfile);
-  if (active === Role.EXAMINER && !isStudent) {
+
+  const reason =
+    typeof body?.reason === "string" && body.reason.trim() ? body.reason.trim().slice(0, 1024) : "";
+  if (body.suspended && !reason) {
     return NextResponse.json(
-      { error: "Examiners may only suspend or unsuspend student accounts." },
-      { status: 403 },
+      { error: "Enter a reason.", fieldErrors: { reason: "Enter a reason." } },
+      { status: 400 },
     );
   }
 
   if (body.suspended) {
-    const reason =
-      typeof body?.reason === "string" && body.reason.trim()
-        ? body.reason.trim().slice(0, 1024)
-        : "No reason provided.";
-    await prisma.user.update({
-      where: { id },
-      data: {
-        accountStatus: UserAccountStatus.SUSPENDED,
-        suspendedReason: reason,
+    if (target.id === actor.id) {
+      return NextResponse.json({ error: "You cannot suspend your own account." }, { status: 400 });
+    }
+    const otherAdmins = await prisma.userRole.count({
+      where: {
+        role: Role.SYSTEM_ADMIN,
+        userId: { not: target.id },
+        user: { accountStatus: { not: UserAccountStatus.SUSPENDED } },
       },
     });
+    const targetIsAdmin = await prisma.userRole.count({
+      where: { role: Role.SYSTEM_ADMIN, userId: target.id },
+    });
+    if (targetIsAdmin && !otherAdmins) {
+      return NextResponse.json({ error: "Keep at least one system admin." }, { status: 400 });
+    }
+    await prisma.$transaction([
+      prisma.user.update({
+        where: { id },
+        data: {
+          accountStatus: UserAccountStatus.SUSPENDED,
+          suspendedReason: reason,
+          sessionVersion: { increment: 1 },
+        },
+      }),
+      prisma.authToken.updateMany({
+        where: { userId: id, usedAt: null },
+        data: { usedAt: new Date() },
+      }),
+    ]);
   } else {
     await prisma.user.update({
       where: { id },
       data: {
-        accountStatus: UserAccountStatus.ACTIVE,
+        accountStatus: target.activatedAt
+          ? UserAccountStatus.ACTIVE
+          : UserAccountStatus.PENDING_ACTIVATION,
         suspendedReason: null,
       },
     });
   }
+
+  await writeAuditLog({
+    eventType: body.suspended ? AuditEvent.USER_SUSPENDED : AuditEvent.USER_UNSUSPENDED,
+    actorUserId: actor.id,
+    targetUserId: target.id,
+    meta: { email: target.email, ...(body.suspended ? { reason } : {}) },
+  });
 
   return NextResponse.json({ ok: true });
 }

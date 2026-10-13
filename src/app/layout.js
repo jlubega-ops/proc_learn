@@ -7,6 +7,9 @@ import { MuiAppThemeProvider } from "@/components/providers/mui-app-theme-provid
 import { ConnectionBanner } from "@/components/connection/connection-banner";
 import { ToastProvider } from "@/components/providers/toast-provider";
 import { ConfirmProvider } from "@/components/providers/confirm-provider";
+import { SwrProvider } from "@/components/providers/swr-provider";
+import { SiteBrandingProvider } from "@/components/providers/site-branding-provider";
+import { getSiteBranding } from "@/lib/site-branding";
 import { APP_NAME, ORG_SHORT } from "@/lib/appConfig";
 import { resolveHtmlThemeClass } from "@/lib/resolve-html-theme-class";
 
@@ -20,16 +23,21 @@ const geistMono = Geist_Mono({
   subsets: ["latin"],
 });
 
-export const metadata = {
-  title: {
-    template: `%s — ${APP_NAME}`,
-    default: `${APP_NAME} — ${ORG_SHORT}`,
-  },
-  description: `${APP_NAME} — learning platform for students at Makerere University Business School.`,
-};
+export async function generateMetadata() {
+  const { logoUrl } = await getSiteBranding();
+  const icon = `/_next/image?url=${encodeURIComponent(logoUrl)}&w=64&q=75`;
+  return {
+    title: {
+      template: `%s — ${APP_NAME}`,
+      default: `${APP_NAME} — ${ORG_SHORT}`,
+    },
+    description: `${APP_NAME} — learning platform for students at Makerere University Business School.`,
+    icons: { icon, shortcut: icon, apple: icon },
+  };
+}
 
 export default async function RootLayout({ children }) {
-  const [cookieStore, headerStore] = await Promise.all([cookies(), headers()]);
+  const [cookieStore, headerStore, branding] = await Promise.all([cookies(), headers(), getSiteBranding()]);
   const pathname = headerStore.get("x-pl-pathname") || "/";
   const themeClass = resolveHtmlThemeClass(pathname, cookieStore);
 
@@ -40,18 +48,22 @@ export default async function RootLayout({ children }) {
       suppressHydrationWarning
     >
       <body className="min-h-dvh bg-background font-sans text-foreground">
-        <AuthSessionProvider>
-          <ThemeProvider>
-            <MuiAppThemeProvider>
-              <ToastProvider>
-                <ConfirmProvider>
-                  <ConnectionBanner />
-                  {children}
-                </ConfirmProvider>
-              </ToastProvider>
-            </MuiAppThemeProvider>
-          </ThemeProvider>
-        </AuthSessionProvider>
+        <SiteBrandingProvider branding={branding}>
+          <AuthSessionProvider>
+            <ThemeProvider>
+              <MuiAppThemeProvider>
+                <ToastProvider>
+                  <ConfirmProvider>
+                    <SwrProvider>
+                      <ConnectionBanner />
+                      {children}
+                    </SwrProvider>
+                  </ConfirmProvider>
+                </ToastProvider>
+              </MuiAppThemeProvider>
+            </ThemeProvider>
+          </AuthSessionProvider>
+        </SiteBrandingProvider>
       </body>
     </html>
   );

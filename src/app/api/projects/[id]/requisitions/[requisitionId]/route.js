@@ -10,10 +10,14 @@ import {
   createOrUpdateRequisitionDraft,
   deleteRequisitionByRequester,
   buildRequisitionVerificationEvidence,
+  requisitionViewScopeWhere,
 } from "@/lib/projects/requisitions";
 import { healMissingStepTasks } from "@/lib/projects/workflow-engine";
 import { fetchForm5OrgDefaults } from "@/lib/projects/form5-prefill";
-import { checkActingModeForTask, getActiveCommittee } from "@/lib/projects/committee-context";
+import {
+  checkActingModeForTask,
+  getActiveCommittee,
+} from "@/lib/projects/committee-context";
 import {
   WORKFLOW_HISTORY_ACTION_SELECT,
   attachCommitteeNames,
@@ -57,7 +61,10 @@ export async function GET(_request, context) {
       ...requisitionInclude,
       instances: {
         include: {
-          actions: { orderBy: { createdAt: "asc" }, select: WORKFLOW_HISTORY_ACTION_SELECT },
+          actions: {
+            orderBy: { createdAt: "asc" },
+            select: WORKFLOW_HISTORY_ACTION_SELECT,
+          },
           tasks: { orderBy: { createdAt: "asc" } },
         },
         orderBy: { createdAt: "desc" },
@@ -66,6 +73,25 @@ export async function GET(_request, context) {
     },
   });
   if (!row) return NextResponse.json({ error: "Not found." }, { status: 404 });
+  if (auth.type === "org") {
+    const scope = requisitionViewScopeWhere(auth.orgUser);
+    const inScope = Object.entries(scope).every(
+      ([key, value]) => row[key] === value,
+    );
+    if (
+      !inScope &&
+      !(await prisma.projectOrgWorkflowTask.findFirst({
+        where: {
+          projectId,
+          assigneeOrgUserId: auth.orgUser.id,
+          instance: { requisitionId },
+        },
+        select: { id: true },
+      }))
+    ) {
+      return NextResponse.json({ error: "Not found." }, { status: 404 });
+    }
+  }
 
   /** @type {any} */
   let pendingTask = null;
@@ -125,7 +151,6 @@ export async function GET(_request, context) {
   });
   if (openTask) {
     workflowStage = {
-      taskId: openTask.id,
       title: openTask.title,
       requiredRoleName: openTask.requiredRoleName || null,
       stepNumber: openTask.stepNumber,
@@ -135,7 +160,9 @@ export async function GET(_request, context) {
 
   const history = await attachCommitteeNames(
     prisma,
-    [...(row.instances || [])].reverse().flatMap((inst) => mapWorkflowHistoryActions(inst.actions)),
+    [...(row.instances || [])]
+      .reverse()
+      .flatMap((inst) => mapWorkflowHistoryActions(inst.actions)),
   );
   if (history.length) {
     const latest = history[history.length - 1];
@@ -217,7 +244,10 @@ export async function POST(request, context) {
   try {
     body = await request.json();
   } catch {
-    return NextResponse.json({ error: "Invalid request body." }, { status: 400 });
+    return NextResponse.json(
+      { error: "Invalid request body." },
+      { status: 400 },
+    );
   }
 
   const auth = await authorizeProjectApiAccess(prisma, {
@@ -225,7 +255,10 @@ export async function POST(request, context) {
     orgPermission: ORG_PERMISSION.CREATE_REQUISITION,
   });
   if (!auth.ok || auth.type !== "org") {
-    return NextResponse.json({ error: "Forbidden." }, { status: 403 });
+    return NextResponse.json(
+      { error: auth.ok ? "Forbidden." : "Not found." },
+      { status: auth.ok ? 403 : auth.status || 404 },
+    );
   }
 
   if (body?.action !== "submit") {
@@ -236,7 +269,8 @@ export async function POST(request, context) {
     requisitionId,
     projectId,
     actorOrgUserId: auth.orgUser.id,
-    actorRoleName: auth.orgUser.projectOrgRole?.name || "User Department Officer",
+    actorRoleName:
+      auth.orgUser.projectOrgRole?.name || "User Department Officer",
   });
   if (!submitted.ok) {
     return NextResponse.json(
@@ -259,7 +293,10 @@ export async function PATCH(request, context) {
   try {
     body = await request.json();
   } catch {
-    return NextResponse.json({ error: "Invalid request body." }, { status: 400 });
+    return NextResponse.json(
+      { error: "Invalid request body." },
+      { status: 400 },
+    );
   }
 
   const auth = await authorizeProjectApiAccess(prisma, {
@@ -267,7 +304,10 @@ export async function PATCH(request, context) {
     orgPermission: ORG_PERMISSION.CREATE_REQUISITION,
   });
   if (!auth.ok || auth.type !== "org") {
-    return NextResponse.json({ error: "Forbidden." }, { status: 403 });
+    return NextResponse.json(
+      { error: auth.ok ? "Forbidden." : "Not found." },
+      { status: auth.ok ? 403 : auth.status || 404 },
+    );
   }
 
   if (body?.action === "update") {
@@ -296,7 +336,10 @@ export async function PATCH(request, context) {
       actorRoleName: auth.orgUser.projectOrgRole?.name || null,
     });
     if (!deleted.ok) {
-      return NextResponse.json({ error: deleted.error }, { status: deleted.status || 400 });
+      return NextResponse.json(
+        { error: deleted.error },
+        { status: deleted.status || 400 },
+      );
     }
     return NextResponse.json(deleted);
   }

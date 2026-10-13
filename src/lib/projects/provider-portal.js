@@ -625,6 +625,7 @@ export async function listPortalOrders(prisma, opts) {
         where: {
           projectId: opts.projectId,
           procurementId: { in: procurementIds },
+          supplierId: opts.providerId,
           status: { in: ["RECEIVED", "CERTIFIED", "VERIFIED", "APPROVED_FOR_PAYMENT"] },
         },
         _sum: { amount: true },

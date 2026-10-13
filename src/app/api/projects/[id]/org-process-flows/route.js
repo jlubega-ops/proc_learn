@@ -1,5 +1,7 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
+import { cachedRead } from "@/lib/server-cache";
+import { cachedJson } from "@/lib/api/cached-json";
 import { authorizeProjectOrgRead } from "@/lib/projects/project-api-auth";
 import { ORG_PERMISSION } from "@/lib/projects/org-role-permissions";
 import {
@@ -32,22 +34,28 @@ export async function GET(request, context) {
   const pageSize = Math.min(50, Math.max(1, Number.isFinite(pageSizeRaw) ? pageSizeRaw : 10));
   const skip = (page - 1) * pageSize;
 
-  const [total, rows] = await Promise.all([
-    prisma.projectOrgProcessFlow.count(),
-    prisma.projectOrgProcessFlow.findMany({
-      orderBy: [{ name: "asc" }, { createdAt: "asc" }],
-      skip,
-      take: pageSize,
-      select: processFlowSelect,
-    }),
-  ]);
-
-  return NextResponse.json({
-    processFlows: rows.map((row) => serializeProjectOrgProcessFlow(row)),
-    page,
-    pageSize,
-    total,
-    pageCount: Math.max(1, Math.ceil(total / pageSize)),
-    canManage: false,
-  });
+  const payload = await cachedRead(
+    `org-process-flows:catalogue:${page}:${pageSize}`,
+    ["ProjectOrgProcessFlow", "ProjectOrgProcessFlowItem"],
+    async () => {
+      const [total, rows] = await Promise.all([
+        prisma.projectOrgProcessFlow.count(),
+        prisma.projectOrgProcessFlow.findMany({
+          orderBy: [{ name: "asc" }, { createdAt: "asc" }],
+          skip,
+          take: pageSize,
+          select: processFlowSelect,
+        }),
+      ]);
+      return {
+        processFlows: rows.map((row) => serializeProjectOrgProcessFlow(row)),
+        page,
+        pageSize,
+        total,
+        pageCount: Math.max(1, Math.ceil(total / pageSize)),
+        canManage: false,
+      };
+    },
+  );
+  return cachedJson(request, payload, { revalidate: true });
 }

@@ -12,6 +12,7 @@ import {
  *   userId?: string;
  *   orgUserId?: string;
  *   providerId?: string;
+ *   sv?: number;
  *   lastActivityAt?: number;
  * }> | null>}
  */

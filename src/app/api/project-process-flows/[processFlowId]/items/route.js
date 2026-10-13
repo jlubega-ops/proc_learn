@@ -3,6 +3,8 @@ import { Role } from "@prisma/client";
 import { getSessionUser, sessionActiveRole } from "@/lib/api/get-session-user";
 import { writeAuditLog, AuditEvent } from "@/lib/audit-log";
 import { prisma } from "@/lib/prisma";
+import { cachedRead } from "@/lib/server-cache";
+import { cachedJson } from "@/lib/api/cached-json";
 import {
   canManageProjectProcessFlows,
   canViewProjectProcessFlows,
@@ -38,9 +40,6 @@ export async function GET(request, context) {
   const processFlowId = String(params?.processFlowId || "").trim();
   if (!processFlowId) return NextResponse.json({ error: "Invalid request." }, { status: 400 });
 
-  const processFlow = await resolveProcessFlow(processFlowId);
-  if (!processFlow) return NextResponse.json({ error: "Not found." }, { status: 404 });
-
   const { searchParams } = new URL(request.url);
   const page = Math.max(1, Number(searchParams.get("page") || 1));
   const pageSizeRaw = Number(searchParams.get("pageSize") || 10);
@@ -49,28 +48,37 @@ export async function GET(request, context) {
 
   const where = { processFlowId };
 
-  const [total, rows, assignableRoles] = await Promise.all([
-    prisma.projectOrgProcessFlowItem.count({ where }),
-    prisma.projectOrgProcessFlowItem.findMany({
-      where,
-      orderBy: [{ stepNumber: "asc" }, { createdAt: "asc" }],
-      skip,
-      take: pageSize,
-      select: processFlowItemSelect,
-    }),
-    listAssignableProjectOrgRoles(prisma),
-  ]);
+  const payload = await cachedRead(
+    `project-process-flows:${processFlowId}:items:${page}:${pageSize}`,
+    ["ProjectOrgProcessFlow", "ProjectOrgProcessFlowItem", "ProjectOrgRole"],
+    async () => {
+      const processFlow = await resolveProcessFlow(processFlowId);
+      if (!processFlow) return null;
+      const [total, rows, assignableRoles] = await Promise.all([
+        prisma.projectOrgProcessFlowItem.count({ where }),
+        prisma.projectOrgProcessFlowItem.findMany({
+          where,
+          orderBy: [{ stepNumber: "asc" }, { createdAt: "asc" }],
+          skip,
+          take: pageSize,
+          select: processFlowItemSelect,
+        }),
+        listAssignableProjectOrgRoles(prisma),
+      ]);
+      return {
+        processFlow,
+        items: rows.map((row) => serializeProjectOrgProcessFlowItem(row)),
+        assignableRoles,
+        page,
+        pageSize,
+        total,
+        pageCount: Math.max(1, Math.ceil(total / pageSize)),
+      };
+    },
+  );
+  if (!payload) return NextResponse.json({ error: "Not found." }, { status: 404 });
 
-  return NextResponse.json({
-    processFlow,
-    items: rows.map((row) => serializeProjectOrgProcessFlowItem(row)),
-    assignableRoles,
-    page,
-    pageSize,
-    total,
-    pageCount: Math.max(1, Math.ceil(total / pageSize)),
-    canManage: canManageProjectProcessFlows(activeRole),
-  });
+  return cachedJson(request, { ...payload, canManage: canManageProjectProcessFlows(activeRole) }, { revalidate: true });
 }
 
 export async function POST(request, context) {

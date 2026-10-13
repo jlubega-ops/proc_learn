@@ -3,7 +3,7 @@ import {
   committeeMayPerformLifecycleAction,
 } from "@/lib/projects/procurement-lifecycle-roles";
 import { PROJECT_ORG_ENTRY_ROLE_NAME } from "@/lib/project-org-role";
-import { COMMITTEE_TYPE_WORKFLOW_ROLES } from "@/lib/projects/committee-context";
+import { COMMITTEE_TYPE_WORKFLOW_ROLES } from "@/lib/projects/committee-context-shared";
 
 /** Lifecycle actions that each procurement-page section exposes. */
 export const PROCUREMENT_SECTION_ACTIONS = {

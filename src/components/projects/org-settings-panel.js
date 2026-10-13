@@ -12,6 +12,7 @@ import RestartAltRounded from "@mui/icons-material/RestartAltRounded";
 import SaveRounded from "@mui/icons-material/SaveRounded";
 import { useToast } from "@/components/providers/toast-provider";
 import { useAuthSession } from "@/components/providers/auth-session-provider";
+import { useDraftState } from "@/hooks/use-draft-state";
 import { themedTextFieldSx } from "@/lib/admin-mui-surfaces";
 import { BRAND_CARD_CLASS, BRAND_SECTION_TITLE_CLASS } from "@/lib/brand-ui";
 import {
@@ -44,7 +45,9 @@ export function OrgSettingsPanel({ projectId, initialSettings, readOnly = false 
   const { showToast } = useToast();
   const { refresh } = useAuthSession();
   const [settings, setSettings] = useState(initialSettings);
-  const [form, setForm] = useState(() => toForm(initialSettings));
+  const [form, setForm, formDraft] = useDraftState(`org:settings:${projectId}`, toForm(initialSettings), {
+    enabled: !readOnly,
+  });
   const [errors, setErrors] = useState(/** @type {Record<string, string>} */ ({}));
   const [busy, setBusy] = useState(/** @type {"" | "save" | "reset"} */ (""));
 
@@ -76,7 +79,7 @@ export function OrgSettingsPanel({ projectId, initialSettings, readOnly = false 
         return;
       }
       setSettings(json.settings);
-      setForm(toForm(json.settings));
+      formDraft.resetForm(toForm(json.settings));
       setErrors({});
       showToast({
         message: mode === "reset" ? "Organisation name reset." : "Settings saved.",

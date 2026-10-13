@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useState } from "react";
 import Box from "@mui/material/Box";
 import Button from "@mui/material/Button";
 import CircularProgress from "@mui/material/CircularProgress";
@@ -28,6 +28,9 @@ import ExpandLessRounded from "@mui/icons-material/ExpandLessRounded";
 import ExpandMoreRounded from "@mui/icons-material/ExpandMoreRounded";
 import RefreshRounded from "@mui/icons-material/RefreshRounded";
 import { useToast } from "@/components/providers/toast-provider";
+import { useDraftState } from "@/hooks/use-draft-state";
+import { useApi } from "@/hooks/use-api";
+import { deleteSucceeded, revalidateApi } from "@/lib/api-client-cache";
 import {
   adminCenteredLoadingBoxSx,
   adminDialogPaperSx,
@@ -52,26 +55,36 @@ function emptyForm() {
  */
 export function ProjectOrgDepartmentsPanel({ projectId, readOnly = false }) {
   const { showToast } = useToast();
-  const [rows, setRows] = useState(/** @type {any[]} */ ([]));
-  const [loading, setLoading] = useState(true);
-  const [refetching, setRefetching] = useState(false);
   const [page, setPage] = useState(0);
   const [rowsPerPage, setRowsPerPage] = useState(10);
-  const [total, setTotal] = useState(0);
   const [expanded, setExpanded] = useState(/** @type {Record<string, boolean>} */ ({}));
 
   const [createDeptOpen, setCreateDeptOpen] = useState(false);
   const [createDeptBusy, setCreateDeptBusy] = useState(false);
-  const [createDeptForm, setCreateDeptForm] = useState(emptyForm());
+  const [createDeptForm, setCreateDeptForm, createDeptDraft] = useDraftState(
+    `org:department:${projectId}:new`,
+    emptyForm(),
+    { enabled: createDeptOpen },
+  );
   const [createDeptErrors, setCreateDeptErrors] = useState(/** @type {Record<string, string>} */ ({}));
 
   const [subunitParent, setSubunitParent] = useState(/** @type {any} */ (null));
   const [createSubBusy, setCreateSubBusy] = useState(false);
-  const [createSubForm, setCreateSubForm] = useState(emptyForm());
+  const [createSubForm, setCreateSubForm, createSubDraft] = useDraftState(
+    `org:department:${projectId}:${subunitParent?.id || ""}:new-subunit`,
+    emptyForm(),
+    { enabled: Boolean(subunitParent), resetKey: subunitParent?.id ?? null },
+  );
   const [createSubErrors, setCreateSubErrors] = useState(/** @type {Record<string, string>} */ ({}));
 
   const [editRow, setEditRow] = useState(/** @type {any} */ (null));
-  const [editForm, setEditForm] = useState(emptyForm());
+  const [editForm, setEditForm, editDraft] = useDraftState(
+    `org:department:${projectId}:edit:${editRow?.id || ""}`,
+    editRow
+      ? { name: editRow.name || "", description: editRow.description || "", isActive: editRow.isActive !== false }
+      : emptyForm(),
+    { enabled: Boolean(editRow), resetKey: editRow?.id ?? null },
+  );
   const [editErrors, setEditErrors] = useState(/** @type {Record<string, string>} */ ({}));
   const [editBusy, setEditBusy] = useState(false);
 
@@ -79,40 +92,21 @@ export function ProjectOrgDepartmentsPanel({ projectId, readOnly = false }) {
   const [deleteBusy, setDeleteBusy] = useState(false);
   const [patchingId, setPatchingId] = useState("");
 
-  const load = useCallback(
-    async (opts = /** @type {{ silent?: boolean }} */ ({})) => {
-      const silent = Boolean(opts.silent);
-      if (silent) setRefetching(true);
-      else setLoading(true);
-      try {
-        const qp = new URLSearchParams({
-          page: String(page + 1),
-          pageSize: String(rowsPerPage),
-        });
-        const res = await fetch(`/api/projects/${projectId}/org-departments?${qp.toString()}`, {
-          credentials: "include",
-        });
-        const data = await res.json().catch(() => ({}));
-        if (!res.ok) {
-          showToast({
-            message: typeof data.error === "string" ? data.error : "Could not load departments.",
-            severity: "error",
-          });
-          return;
-        }
-        setRows(Array.isArray(data.departments) ? data.departments : []);
-        setTotal(Number(data.total) || 0);
-      } finally {
-        if (silent) setRefetching(false);
-        else setLoading(false);
-      }
-    },
-    [page, projectId, rowsPerPage, showToast],
-  );
-
-  useEffect(() => {
-    void load();
-  }, [load]);
+  const listQuery = new URLSearchParams({ page: String(page + 1), pageSize: String(rowsPerPage) });
+  const {
+    data: listData,
+    loading,
+    refreshing: refetching,
+    reload,
+  } = useApi(`/api/projects/${projectId}/org-departments?${listQuery.toString()}`, {
+    errorMessage: "Could not load departments.",
+  });
+  const rows = Array.isArray(listData?.departments) ? listData.departments : [];
+  const total = Number(listData?.total) || 0;
+  const load = useCallback(async () => {
+    await reload();
+    void revalidateApi(`/api/projects/${projectId}/org-departments`);
+  }, [projectId, reload]);
 
   async function toggleActive(row) {
     setPatchingId(row.id);
@@ -174,13 +168,13 @@ export function ProjectOrgDepartmentsPanel({ projectId, readOnly = false }) {
         severity: "success",
       });
       if (parentId) {
+        createSubDraft.resetForm(emptyForm());
         setSubunitParent(null);
-        setCreateSubForm(emptyForm());
         setCreateSubErrors({});
         setExpanded((p) => ({ ...p, [parentId]: true }));
       } else {
         setCreateDeptOpen(false);
-        setCreateDeptForm(emptyForm());
+        createDeptDraft.resetForm(emptyForm());
         setCreateDeptErrors({});
       }
       await load({ silent: true });
@@ -192,11 +186,6 @@ export function ProjectOrgDepartmentsPanel({ projectId, readOnly = false }) {
 
   function openEdit(row) {
     setEditRow(row);
-    setEditForm({
-      name: row.name || "",
-      description: row.description || "",
-      isActive: row.isActive !== false,
-    });
     setEditErrors({});
   }
 
@@ -226,6 +215,7 @@ export function ProjectOrgDepartmentsPanel({ projectId, readOnly = false }) {
         return;
       }
       showToast({ message: "Saved.", severity: "success" });
+      editDraft.clearDraft();
       setEditRow(null);
       await load({ silent: true });
     } finally {
@@ -242,7 +232,7 @@ export function ProjectOrgDepartmentsPanel({ projectId, readOnly = false }) {
         credentials: "include",
       });
       const data = await res.json().catch(() => ({}));
-      if (!res.ok) {
+      if (!deleteSucceeded(res)) {
         showToast({
           message: typeof data.error === "string" ? data.error : "Could not delete.",
           severity: "error",
@@ -275,7 +265,6 @@ export function ProjectOrgDepartmentsPanel({ projectId, readOnly = false }) {
             disabled={refetching}
             onClick={() => {
               setCreateDeptErrors({});
-              setCreateDeptForm(emptyForm());
               setCreateDeptOpen(true);
             }}
             className="w-full sm:w-auto"
@@ -356,7 +345,6 @@ export function ProjectOrgDepartmentsPanel({ projectId, readOnly = false }) {
                             onDelete={() => setDelRow(dept)}
                             onAddSubunit={() => {
                               setCreateSubErrors({});
-                              setCreateSubForm(emptyForm());
                               setSubunitParent(dept);
                             }}
                             showAddSubunit
@@ -423,7 +411,11 @@ export function ProjectOrgDepartmentsPanel({ projectId, readOnly = false }) {
         busy={createDeptBusy}
         form={createDeptForm}
         errors={createDeptErrors}
-        onClose={() => !createDeptBusy && setCreateDeptOpen(false)}
+        onClose={() => {
+          if (createDeptBusy) return;
+          createDeptDraft.resetForm(emptyForm());
+          setCreateDeptOpen(false);
+        }}
         onChange={(patch) => setCreateDeptForm((p) => ({ ...p, ...patch }))}
         onClearError={(key) =>
           setCreateDeptErrors((prev) => {
@@ -441,7 +433,11 @@ export function ProjectOrgDepartmentsPanel({ projectId, readOnly = false }) {
         busy={createSubBusy}
         form={createSubForm}
         errors={createSubErrors}
-        onClose={() => !createSubBusy && setSubunitParent(null)}
+        onClose={() => {
+          if (createSubBusy) return;
+          createSubDraft.clearDraft();
+          setSubunitParent(null);
+        }}
         onChange={(patch) => setCreateSubForm((p) => ({ ...p, ...patch }))}
         onClearError={(key) =>
           setCreateSubErrors((prev) => {
@@ -459,7 +455,11 @@ export function ProjectOrgDepartmentsPanel({ projectId, readOnly = false }) {
         busy={editBusy}
         form={editForm}
         errors={editErrors}
-        onClose={() => !editBusy && setEditRow(null)}
+        onClose={() => {
+          if (editBusy) return;
+          editDraft.clearDraft();
+          setEditRow(null);
+        }}
         onChange={(patch) => setEditForm((p) => ({ ...p, ...patch }))}
         onClearError={(key) =>
           setEditErrors((prev) => {

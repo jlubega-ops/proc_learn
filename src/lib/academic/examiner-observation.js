@@ -14,7 +14,11 @@ import {
   isOfficialStudentParticipation,
   observationDemoBadge,
 } from "@/lib/academic/examiner-observation-access";
-import { campusLabel, parseCampus } from "@/lib/campuses";
+import { parseCampus } from "@/lib/campuses";
+import {
+  participantProgrammeCampus,
+  STUDENT_VIEW_SETTINGS_SELECT,
+} from "@/lib/academic/student-view";
 import { budgetInclude, serializeBudget } from "@/lib/projects/budgets";
 import {
   procurementPlanInclude,
@@ -45,7 +49,7 @@ export async function getExaminerStudentObservation(studentUserId, opts = {}) {
     include: {
       studentProfile: { include: { programme: true } },
       userRoles: true,
-      settings: true,
+      settings: { include: { studentViewProgramme: { select: { name: true, shortName: true } } } },
       academicEnrollments: {
         include: { academicYear: true },
         orderBy: [{ status: "asc" }, { academicYear: { label: "desc" } }],
@@ -238,11 +242,16 @@ export async function getExaminerStudentObservation(studentUserId, opts = {}) {
       accountStatus: user.accountStatus,
       studentNumber: user.studentProfile?.studentNumber || null,
       registrationNumber: user.studentProfile?.registrationNumber || null,
-      programmeName: user.studentProfile?.programme?.name || null,
-      programmeShortName: user.studentProfile?.programme?.shortName || null,
+      ...(() => {
+        const pc = participantProgrammeCampus(user);
+        return {
+          programmeName: pc.programmeName,
+          programmeShortName: pc.programmeShortName,
+          campus: pc.campus,
+          campusLabel: pc.campusLabel,
+        };
+      })(),
       yearOfStudy: user.studentProfile?.yearOfStudy || null,
-      campus: user.studentProfile?.campus || null,
-      campusLabel: campusLabel(user.studentProfile?.campus) || null,
       lastLoginAt: user.lastLoginAt,
       hasStudentProfile: Boolean(user.studentProfile),
     },
@@ -398,6 +407,7 @@ async function loadObservationWorkDossier(db, projectId) {
  *   q?: string;
  *   academicYearId?: string | null;
  *   campus?: string | null;
+ *   programmeId?: string | null;
  *   participation?: 'all' | 'students' | 'demo';
  *   page?: number;
  *   pageSize?: number;
@@ -409,6 +419,7 @@ export async function listExaminerObservationStudents(opts = {}) {
   const university = await getCurrentAcademicContext(db);
   const yearId = opts.academicYearId || university.academicYear?.id || null;
   const campus = parseCampus(opts.campus);
+  const programmeId = String(opts.programmeId || "").trim() || null;
   const participation = opts.participation || "all";
   const q = (opts.q || "").trim();
   const page = Math.max(1, Number(opts.page) || 1);
@@ -431,8 +442,28 @@ export async function listExaminerObservationStudents(opts = {}) {
     };
   }
 
-  if (campus) {
-    where.user = { studentProfile: { is: { campus } } };
+  /** @type {import("@prisma/client").Prisma.StudentProfileWhereInput} */
+  const profileWhere = {
+    ...(campus ? { campus } : {}),
+    ...(programmeId ? { programmeId } : {}),
+  };
+  const hasProfileFilter = Object.keys(profileWhere).length > 0;
+  if (hasProfileFilter) {
+    where.user = {
+      OR: [
+        { studentProfile: { is: profileWhere } },
+        // Staff in Student Mode follow a programme/campus stored on settings.
+        {
+          studentProfile: { is: null },
+          settings: {
+            is: {
+              ...(campus ? { studentViewCampus: /** @type {any} */ (campus) } : {}),
+              ...(programmeId ? { studentViewProgrammeId: programmeId } : {}),
+            },
+          },
+        },
+      ],
+    };
   }
 
   const enrollments = await db.studentAcademicEnrollment.findMany({
@@ -442,6 +473,7 @@ export async function listExaminerObservationStudents(opts = {}) {
       user: {
         include: {
           studentProfile: { include: { programme: true } },
+          settings: STUDENT_VIEW_SETTINGS_SELECT,
         },
       },
     },
@@ -454,9 +486,7 @@ export async function listExaminerObservationStudents(opts = {}) {
   if (participation !== "demo") {
     profileOnly = await db.user.findMany({
       where: {
-        studentProfile: campus
-          ? { is: { campus } }
-          : { isNot: null },
+        studentProfile: hasProfileFilter ? { is: profileWhere } : { isNot: null },
         academicEnrollments: yearId
           ? { none: { academicYearId: yearId } }
           : { none: { status: AcademicEnrollmentStatus.ACTIVE } },
@@ -481,7 +511,12 @@ export async function listExaminerObservationStudents(opts = {}) {
 
   const fromEnrollments = enrollments
     .filter((e) => {
-      if (campus && e.user?.studentProfile?.campus !== campus) return false;
+      const p = e.user?.studentProfile;
+      const s = e.user?.settings;
+      if (campus && (p ? p.campus : s?.studentViewCampus) !== campus) return false;
+      if (programmeId && (p ? p.programmeId : s?.studentViewProgrammeId) !== programmeId) {
+        return false;
+      }
       if (!q) return true;
       const u = e.user;
       const hay = [
@@ -526,17 +561,24 @@ export async function listExaminerObservationStudents(opts = {}) {
     };
   });
 
-  const years = await db.academicYear.findMany({
-    orderBy: { label: "desc" },
-    take: 12,
-    select: { id: true, label: true, isCurrent: true },
-  });
+  const [years, programmes] = await Promise.all([
+    db.academicYear.findMany({
+      orderBy: { label: "desc" },
+      take: 12,
+      select: { id: true, label: true, isCurrent: true },
+    }),
+    db.programme.findMany({
+      orderBy: [{ isActive: "desc" }, { name: "asc" }],
+      select: { id: true, name: true, shortName: true, isActive: true },
+    }),
+  ]);
 
   return {
     academicYear: yearId
       ? years.find((y) => y.id === yearId) || university.academicYear
       : university.academicYear,
     availableYears: years,
+    availableProgrammes: programmes,
     page,
     pageSize,
     total,
@@ -551,17 +593,19 @@ export async function listExaminerObservationStudents(opts = {}) {
 function serializeObservationRow(user, enrollment) {
   const participationType = enrollment?.participationType || AcademicParticipationType.STUDENT;
   const badge = observationDemoBadge(participationType);
+  const profile = user.studentProfile || null;
+  const pc = participantProgrammeCampus(user);
   return {
     id: user.id,
     email: user.email,
     displayName: formatUserDisplayName(user),
-    studentNumber: user.studentProfile?.studentNumber || null,
-    registrationNumber: user.studentProfile?.registrationNumber || null,
-    programmeShortName: user.studentProfile?.programme?.shortName || null,
-    programmeName: user.studentProfile?.programme?.name || null,
-    yearOfStudy: user.studentProfile?.yearOfStudy || null,
-    campus: user.studentProfile?.campus || null,
-    campusLabel: campusLabel(user.studentProfile?.campus) || null,
+    studentNumber: profile?.studentNumber || null,
+    registrationNumber: profile?.registrationNumber || null,
+    programmeShortName: pc.programmeShortName,
+    programmeName: pc.programmeName,
+    yearOfStudy: profile?.yearOfStudy || null,
+    campus: pc.campus,
+    campusLabel: pc.campusLabel,
     lastLoginAt: user.lastLoginAt || null,
     enrollmentStatus: enrollment?.status || null,
     participationType,
@@ -579,25 +623,11 @@ function serializeObservationRow(user, enrollment) {
  * @param {number} take
  */
 async function loadOrgAudits(db, projectId, take) {
-  try {
-    return await db.auditLog.findMany({
-      where: {
-        eventType: { startsWith: "PROJECT_ORG_" },
-        meta: { path: "$.projectId", equals: projectId },
-      },
-      orderBy: { createdAt: "desc" },
-      take,
-    });
-  } catch {
-    const rows = await db.auditLog.findMany({
-      where: { eventType: { startsWith: "PROJECT_ORG_" } },
-      orderBy: { createdAt: "desc" },
-      take: 5000,
-    });
-    return rows
-      .filter((a) => a.meta && typeof a.meta === "object" && /** @type {any} */ (a.meta).projectId === projectId)
-      .slice(0, take);
-  }
+  return db.auditLog.findMany({
+    where: { projectId, eventType: { startsWith: "PROJECT_ORG_" } },
+    orderBy: { createdAt: "desc" },
+    take,
+  });
 }
 
 /** @param {string} eventType */

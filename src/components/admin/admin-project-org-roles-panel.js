@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useState } from "react";
 import Box from "@mui/material/Box";
 import Button from "@mui/material/Button";
 import CircularProgress from "@mui/material/CircularProgress";
@@ -36,21 +36,19 @@ import {
   themedTextFieldSx,
 } from "@/lib/admin-mui-surfaces";
 import { useToast } from "@/components/providers/toast-provider";
+import { useDraftSync } from "@/hooks/use-draft-sync";
+import { useApi } from "@/hooks/use-api";
+import { deleteSucceeded, revalidateApi } from "@/lib/api-client-cache";
 import { isProjectOrgAdminRole } from "@/lib/project-org-role";
 
 function emptyForm() {
-  return { name: "", description: "", sortOrder: "0" };
+  return { name: "", description: "" };
 }
 
 export function AdminProjectOrgRolesPanel() {
   const { showToast } = useToast();
-  const [rows, setRows] = useState(/** @type {any[]} */ ([]));
-  const [canManage, setCanManage] = useState(false);
-  const [loading, setLoading] = useState(true);
-  const [refetching, setRefetching] = useState(false);
   const [page, setPage] = useState(0);
   const [rowsPerPage, setRowsPerPage] = useState(10);
-  const [total, setTotal] = useState(0);
   const [createBusy, setCreateBusy] = useState(false);
   const [editBusy, setEditBusy] = useState(false);
   const [deleteBusy, setDeleteBusy] = useState(false);
@@ -63,41 +61,45 @@ export function AdminProjectOrgRolesPanel() {
   const [editErrors, setEditErrors] = useState(/** @type {Record<string, string>} */ ({}));
   const [delRow, setDelRow] = useState(/** @type {any} */ (null));
 
-  const load = useCallback(
-    async (opts = /** @type {{ silent?: boolean }} */ ({})) => {
-      const silent = Boolean(opts.silent);
-      if (silent) setRefetching(true);
-      else setLoading(true);
-      try {
-        const qp = new URLSearchParams({
-          page: String(page + 1),
-          pageSize: String(rowsPerPage),
-        });
-        const res = await fetch(`/api/project-org-roles?${qp.toString()}`, {
-          credentials: "include",
-        });
-        const data = await res.json().catch(() => ({}));
-        if (!res.ok) {
-          showToast({
-            message: typeof data.error === "string" ? data.error : "Could not load project roles.",
-            severity: "error",
-          });
-          return;
-        }
-        setRows(Array.isArray(data.roles) ? data.roles : []);
-        setTotal(Number(data.total) || 0);
-        setCanManage(Boolean(data.canManage));
-      } finally {
-        if (silent) setRefetching(false);
-        else setLoading(false);
-      }
-    },
-    [page, rowsPerPage, showToast],
+  const createDraft = useDraftSync(
+    "admin:project-role:new",
+    { name: form.name, description: form.description },
+    (d) =>
+      setForm((p) => ({
+        name: typeof d.name === "string" ? d.name : p.name,
+        description: typeof d.description === "string" ? d.description : p.description,
+      })),
+    { enabled: open },
   );
 
-  useEffect(() => {
-    void load();
-  }, [load]);
+  const editDraft = useDraftSync(
+    editRow ? `admin:project-role:edit:${editRow.id}` : "",
+    { description: editForm.description },
+    (d) => {
+      if (typeof d.description === "string") {
+        const description = d.description;
+        setEditForm((p) => ({ ...p, description }));
+      }
+    },
+    { enabled: Boolean(editRow), resetKey: editRow?.id },
+  );
+
+  const listQuery = new URLSearchParams({ page: String(page + 1), pageSize: String(rowsPerPage) });
+  const {
+    data: listData,
+    loading,
+    refreshing: refetching,
+    reload,
+  } = useApi(`/api/project-org-roles?${listQuery.toString()}`, {
+    errorMessage: "Could not load project roles.",
+  });
+  const rows = Array.isArray(listData?.roles) ? listData.roles : [];
+  const total = Number(listData?.total) || 0;
+  const canManage = Boolean(listData?.canManage);
+  const load = useCallback(async () => {
+    await reload();
+    void revalidateApi("/api/project-org-roles", "/api/project-process-flows");
+  }, [reload]);
 
   async function toggleActive(row) {
     if (!canManage) return;
@@ -127,12 +129,8 @@ export function AdminProjectOrgRolesPanel() {
     /** @type {Record<string, string>} */
     const next = {};
     if (!String(values.name || "").trim()) next.name = "Role name is required.";
-    const sort = String(values.sortOrder ?? "").trim();
-    if (sort !== "") {
-      const n = Number(sort);
-      if (!Number.isInteger(n) || n < 0 || n > 9999) {
-        next.sortOrder = "Sort order must be a whole number from 0 to 9999.";
-      }
+    if (String(values.description || "").trim().length > 512) {
+      next.description = "Description must be 512 characters or fewer.";
     }
     return next;
   }
@@ -154,7 +152,6 @@ export function AdminProjectOrgRolesPanel() {
         body: JSON.stringify({
           name: form.name.trim(),
           description: form.description.trim() || null,
-          sortOrder: Number(form.sortOrder || 0),
         }),
       });
       const data = await res.json().catch(() => ({}));
@@ -169,6 +166,7 @@ export function AdminProjectOrgRolesPanel() {
         return;
       }
       showToast({ message: "Project role created.", severity: "success" });
+      createDraft.clearDraft();
       setOpen(false);
       setCreateErrors({});
       setForm(emptyForm());
@@ -183,7 +181,6 @@ export function AdminProjectOrgRolesPanel() {
     setEditForm({
       name: row.name || "",
       description: row.description || "",
-      sortOrder: String(row.sortOrder ?? 0),
     });
     setEditErrors({});
   }
@@ -204,9 +201,7 @@ export function AdminProjectOrgRolesPanel() {
         credentials: "include",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          name: editForm.name.trim(),
           description: editForm.description.trim() || null,
-          sortOrder: Number(editForm.sortOrder || 0),
         }),
       });
       const data = await res.json().catch(() => ({}));
@@ -221,6 +216,7 @@ export function AdminProjectOrgRolesPanel() {
         return;
       }
       showToast({ message: "Project role updated.", severity: "success" });
+      editDraft.clearDraft();
       setEditRow(null);
       setEditErrors({});
       await load({ silent: true });
@@ -238,7 +234,7 @@ export function AdminProjectOrgRolesPanel() {
         credentials: "include",
       });
       const data = await res.json().catch(() => ({}));
-      if (!res.ok) {
+      if (!deleteSucceeded(res)) {
         showToast({
           message: typeof data.error === "string" ? data.error : "Could not delete role.",
           severity: "error",
@@ -265,10 +261,6 @@ export function AdminProjectOrgRolesPanel() {
     <>
       {canManage ? (
         <>
-          <Typography variant="body2" sx={{ ...adminMutedTextSx, mb: 2 }}>
-            The <strong>Admin</strong> role is required — students enter every project workspace as Admin. It
-            cannot be deleted, renamed, or deactivated.
-          </Typography>
           <Button
             variant="contained"
             startIcon={<AddRounded />}
@@ -298,7 +290,6 @@ export function AdminProjectOrgRolesPanel() {
               <TableRow>
                 <TableCell>Name</TableCell>
                 <TableCell>Description</TableCell>
-                <TableCell>Order</TableCell>
                 <TableCell>Active</TableCell>
                 {canManage ? <TableCell align="right">Actions</TableCell> : null}
               </TableRow>
@@ -306,7 +297,7 @@ export function AdminProjectOrgRolesPanel() {
             <TableBody>
               {rows.length === 0 ? (
                 <TableRow>
-                  <TableCell colSpan={canManage ? 5 : 4} align="center" sx={{ py: 5 }}>
+                  <TableCell colSpan={canManage ? 4 : 3} align="center" sx={{ py: 5 }}>
                     <Typography variant="body2" sx={adminMutedTextSx}>
                       No project roles yet.
                       {canManage ? " Add one with the button above." : ""}
@@ -331,7 +322,6 @@ export function AdminProjectOrgRolesPanel() {
                         {row.description || "—"}
                       </Typography>
                     </TableCell>
-                    <TableCell>{row.sortOrder ?? 0}</TableCell>
                     <TableCell>
                       {canManage ? (
                         <Switch
@@ -346,10 +336,11 @@ export function AdminProjectOrgRolesPanel() {
                     {canManage ? (
                       <TableCell align="right">
                         <Box sx={{ display: "inline-flex", gap: 0.25, justifyContent: "flex-end" }}>
-                          <Tooltip title={required ? "Edit description or sort order" : "Edit project role"}>
+                          <Tooltip title="Edit description (role names are fixed)">
                             <IconButton
                               size="small"
-                              aria-label="Edit project role"
+                              color="primary"
+                              aria-label={`Edit description for ${row.name}`}
                               disabled={refetching}
                               onClick={() => openEdit(row)}
                             >
@@ -420,14 +411,15 @@ export function AdminProjectOrgRolesPanel() {
       </Dialog>
 
       <RoleFormDialog
-        title="Edit project role"
+        title="Edit role description"
         open={Boolean(editRow)}
         busy={editBusy}
         form={editForm}
         errors={editErrors}
-        nameDisabled={Boolean(editRow && isProjectOrgAdminRole(editRow.name))}
+        nameDisabled
         onClose={() => {
           if (editBusy) return;
+          editDraft.clearDraft();
           setEditRow(null);
           setEditErrors({});
         }}
@@ -450,6 +442,7 @@ export function AdminProjectOrgRolesPanel() {
         errors={createErrors}
         onClose={() => {
           if (createBusy) return;
+          createDraft.clearDraft();
           setOpen(false);
           setCreateErrors({});
         }}
@@ -472,10 +465,10 @@ export function AdminProjectOrgRolesPanel() {
  *   title: string;
  *   open: boolean;
  *   busy: boolean;
- *   form: { name: string; description: string; sortOrder: string };
+ *   form: { name: string; description: string };
  *   errors: Record<string, string>;
  *   onClose: () => void;
- *   onChange: (patch: Partial<{ name: string; description: string; sortOrder: string }>) => void;
+ *   onChange: (patch: Partial<{ name: string; description: string }>) => void;
  *   onClearError: (key: string) => void;
  *   onSubmit: () => void;
  *   nameDisabled?: boolean;
@@ -511,9 +504,7 @@ function RoleFormDialog({ title, open, busy, form, errors, onClose, onChange, on
             error={Boolean(errors.name)}
             helperText={
               errors.name ||
-              (nameDisabled
-                ? "Admin is required for every student project and cannot be renamed."
-                : "e.g. Procurement Officer")
+              (nameDisabled ? "Fixed" : "Cannot be changed later")
             }
             fullWidth
             disabled={nameDisabled}
@@ -531,18 +522,6 @@ function RoleFormDialog({ title, open, busy, form, errors, onClose, onChange, on
             fullWidth
             multiline
             minRows={2}
-            sx={themedTextFieldSx}
-          />
-          <TextField
-            label="Sort order"
-            value={form.sortOrder}
-            onChange={(e) => {
-              onChange({ sortOrder: e.target.value });
-              onClearError("sortOrder");
-            }}
-            error={Boolean(errors.sortOrder)}
-            helperText={errors.sortOrder || "Lower numbers appear first in student lists."}
-            fullWidth
             sx={themedTextFieldSx}
           />
         </Box>

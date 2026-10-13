@@ -4,6 +4,10 @@ import {
   migrateLegacyProcessAdoptions,
   processCodesForMethod,
 } from "@/lib/projects/process-catalogue";
+import {
+  processDisabledForProgrammeMessage,
+  resolveEffectiveProcessCodes,
+} from "@/lib/academic/programme-processes";
 
 /** @type {Record<string, string>} */
 const DEFAULT_PROCESS_NAMES = Object.fromEntries(
@@ -13,20 +17,26 @@ const DEFAULT_PROCESS_NAMES = Object.fromEntries(
 /**
  * Engine process codes adopted and active for an organisation, with their display names.
  * Matches `findActiveProcessForTrigger`: a flow counts by `code`, or by its bound `triggerKey`.
+ * Adoptions the programme × year list (or the examiner) no longer allows are `frozen`, not active.
  *
  * @param {import("@prisma/client").PrismaClient | import("@prisma/client").Prisma.TransactionClient} prisma
  * @param {string} projectId
- * @returns {Promise<{ active: Set<string>; names: Record<string, string> }>}
+ * @returns {Promise<{ active: Set<string>; frozen: Set<string>; allowed: string[] | null; names: Record<string, string> }>}
  */
 export async function loadProcessActivation(prisma, projectId) {
-  const rows = await prisma.projectOrgProcessFlowAdoption.findMany({
-    where: { projectId },
-    select: {
-      isActive: true,
-      processFlow: { select: { code: true, triggerKey: true, name: true } },
-    },
-  });
+  const [rows, allowed] = await Promise.all([
+    prisma.projectOrgProcessFlowAdoption.findMany({
+      where: { projectId },
+      select: {
+        isActive: true,
+        processFlow: { select: { code: true, triggerKey: true, name: true } },
+      },
+    }),
+    resolveEffectiveProcessCodes(prisma, projectId),
+  ]);
+  const allowedSet = allowed ? new Set(allowed) : null;
   const active = new Set();
+  const frozen = new Set();
   /** @type {Record<string, string>} */
   const names = { ...DEFAULT_PROCESS_NAMES };
   for (const row of rows) {
@@ -34,9 +44,11 @@ export async function loadProcessActivation(prisma, projectId) {
     const code = flow?.code || TRIGGER_TO_PROCESS_CODE[flow?.triggerKey || ""] || null;
     if (!code) continue;
     if (flow?.name) names[code] = flow.name;
-    if (row.isActive) active.add(code);
+    if (!row.isActive) continue;
+    if (allowedSet && !allowedSet.has(code)) frozen.add(code);
+    else active.add(code);
   }
-  return { active, names };
+  return { active, frozen, allowed, names };
 }
 
 /**
@@ -71,20 +83,25 @@ export async function assertMethodProcessesActive(prisma, projectId, method) {
  * @returns {Promise<null | { ok: false; error: string; status: number; code: "WORKFLOW_INACTIVE" }>}
  */
 export async function assertProcessActive(prisma, projectId, code) {
-  let { active, names } = await loadProcessActivation(prisma, projectId);
+  let { active, allowed, names } = await loadProcessActivation(prisma, projectId);
   if (active.has(code)) return null;
-  try {
-    // Name-only legacy adoptions only resolve to a code after migration.
-    await migrateLegacyProcessAdoptions(prisma, { projectId });
-    ({ active, names } = await loadProcessActivation(prisma, projectId));
-    if (active.has(code)) return null;
-  } catch {
-    // Fall through: treat as inactive.
+  if (!allowed || allowed.includes(code)) {
+    try {
+      // Name-only legacy adoptions only resolve to a code after migration.
+      await migrateLegacyProcessAdoptions(prisma, { projectId });
+      ({ active, allowed, names } = await loadProcessActivation(prisma, projectId));
+      if (active.has(code)) return null;
+    } catch {
+      // Fall through: treat as inactive.
+    }
   }
+  const disabledForProgramme = Boolean(allowed && !allowed.includes(code));
   return {
     ok: false,
-    error: processInactiveMessage(names[code] || "process"),
-    status: 400,
+    error: disabledForProgramme
+      ? processDisabledForProgrammeMessage(names[code] || "process")
+      : processInactiveMessage(names[code] || "process"),
+    status: disabledForProgramme ? 403 : 400,
     code: "WORKFLOW_INACTIVE",
   };
 }

@@ -1,4 +1,4 @@
-import Image from "next/image";
+import { BrandLogoImage, BrandBackgroundImage } from "@/components/providers/site-branding-provider";
 
 /**
  * Full-viewport MUBS-branded backdrop (matches sign-in). Use with {@link BrandedAuthCard}.
@@ -11,8 +11,7 @@ export function BrandedPublicShell({ children, className = "" }) {
     >
       <div className="pointer-events-none absolute inset-0 z-0" aria-hidden>
         <div className="relative h-full w-full min-h-dvh">
-          <Image
-            src="/assets/mubs-banner.jpg"
+          <BrandBackgroundImage
             alt=""
             fill
             priority
@@ -55,8 +54,7 @@ export function BrandedAuthCard({ title, subtitle, children, maxWidthClass = "ma
         <div className="px-5 py-5 sm:px-6 sm:py-6">
           <div className="mb-1 flex items-center gap-3">
             <div className="relative h-11 w-11 shrink-0 sm:h-12 sm:w-12">
-              <Image
-                src="/assets/mubs.png"
+              <BrandLogoImage
                 alt="MUBS"
                 width={48}
                 height={48}

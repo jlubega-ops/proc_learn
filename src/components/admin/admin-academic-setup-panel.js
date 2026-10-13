@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useState } from "react";
 import Box from "@mui/material/Box";
 import Button from "@mui/material/Button";
 import CircularProgress from "@mui/material/CircularProgress";
@@ -38,6 +38,9 @@ import {
   themedTextFieldSx,
 } from "@/lib/admin-mui-surfaces";
 import { useToast } from "@/components/providers/toast-provider";
+import { useDraftSync } from "@/hooks/use-draft-sync";
+import { useApi } from "@/hooks/use-api";
+import { revalidateApi } from "@/lib/api-client-cache";
 import { BRAND_BTN_PRIMARY_CLASS } from "@/lib/brand-ui";
 
 /**
@@ -46,12 +49,7 @@ import { BRAND_BTN_PRIMARY_CLASS } from "@/lib/brand-ui";
 export function AdminAcademicSetupPanel() {
   const { showToast } = useToast();
   const [tab, setTab] = useState(0);
-  const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
-  const [years, setYears] = useState(/** @type {any[]} */ ([]));
-  const [courses, setCourses] = useState(/** @type {any[]} */ ([]));
-  const [programmes, setProgrammes] = useState(/** @type {any[]} */ ([]));
-  const [context, setContext] = useState(/** @type {any} */ (null));
 
   const [yearDialog, setYearDialog] = useState(false);
   const [courseDialog, setCourseDialog] = useState(false);
@@ -73,37 +71,76 @@ export function AdminAcademicSetupPanel() {
     isActive: true,
   });
 
-  const load = useCallback(async () => {
-    setLoading(true);
-    try {
-      const [yRes, cRes, pRes, ctxRes] = await Promise.all([
-        fetch("/api/admin/academic-years", { credentials: "include" }),
-        fetch("/api/admin/courses", { credentials: "include" }),
-        fetch("/api/programmes", { credentials: "include" }),
-        fetch("/api/meta/academic-context", { credentials: "include" }),
-      ]);
-      const yData = await yRes.json().catch(() => ({}));
-      const cData = await cRes.json().catch(() => ({}));
-      const pData = await pRes.json().catch(() => ({}));
-      const ctxData = await ctxRes.json().catch(() => ({}));
-      if (!yRes.ok) throw new Error(yData.error || "Could not load academic years.");
-      setYears(Array.isArray(yData.academicYears) ? yData.academicYears : []);
-      setCourses(Array.isArray(cData.courses) ? cData.courses : []);
-      setProgrammes(Array.isArray(pData.programmes) ? pData.programmes : []);
-      setContext(ctxRes.ok ? ctxData : null);
-    } catch (e) {
-      showToast({
-        message: e instanceof Error ? e.message : "Could not load academic setup.",
-        severity: "error",
-      });
-    } finally {
-      setLoading(false);
-    }
-  }, [showToast]);
+  const editingKey = editing?.id ? String(editing.id) : "new";
 
-  useEffect(() => {
-    void load();
-  }, [load]);
+  const yearDraft = useDraftSync(
+    `admin:academic-year:${editingKey}`,
+    yearForm,
+    (d) =>
+      setYearForm((f) => ({
+        label: typeof d.label === "string" ? d.label : f.label,
+        startDate: typeof d.startDate === "string" ? d.startDate : f.startDate,
+        endDate: typeof d.endDate === "string" ? d.endDate : f.endDate,
+        description: typeof d.description === "string" ? d.description : f.description,
+        isCurrent: typeof d.isCurrent === "boolean" ? d.isCurrent : f.isCurrent,
+      })),
+    { enabled: yearDialog, resetKey: editingKey },
+  );
+
+  const courseDraft = useDraftSync(
+    `admin:course:${editingKey}`,
+    courseForm,
+    (d) =>
+      setCourseForm((f) => ({
+        code: typeof d.code === "string" ? d.code : f.code,
+        name: typeof d.name === "string" ? d.name : f.name,
+        programmeId: typeof d.programmeId === "string" ? d.programmeId : f.programmeId,
+        description: typeof d.description === "string" ? d.description : f.description,
+        isActive: typeof d.isActive === "boolean" ? d.isActive : f.isActive,
+      })),
+    { enabled: courseDialog, resetKey: editingKey },
+  );
+
+  function closeYearDialog() {
+    if (busy) return;
+    yearDraft.clearDraft();
+    setYearDialog(false);
+  }
+
+  function closeCourseDialog() {
+    if (busy) return;
+    courseDraft.clearDraft();
+    setCourseDialog(false);
+  }
+
+  const yearsQuery = useApi("/api/admin/academic-years", {
+    errorMessage: "Could not load academic years.",
+  });
+  const coursesQuery = useApi("/api/admin/courses", { silentErrors: true });
+  const programmesQuery = useApi("/api/programmes", { silentErrors: true });
+  const contextQuery = useApi("/api/meta/academic-context", { silentErrors: true });
+  const years = Array.isArray(yearsQuery.data?.academicYears) ? yearsQuery.data.academicYears : [];
+  const courses = Array.isArray(coursesQuery.data?.courses) ? coursesQuery.data.courses : [];
+  const programmes = Array.isArray(programmesQuery.data?.programmes)
+    ? programmesQuery.data.programmes
+    : [];
+  const context = contextQuery.error ? null : contextQuery.data || null;
+  const loading =
+    yearsQuery.loading || coursesQuery.loading || programmesQuery.loading || contextQuery.loading;
+  const refreshing =
+    yearsQuery.refreshing ||
+    coursesQuery.refreshing ||
+    programmesQuery.refreshing ||
+    contextQuery.refreshing;
+  const reloadYears = yearsQuery.reload;
+  const reloadCourses = coursesQuery.reload;
+  const reloadProgrammes = programmesQuery.reload;
+  const reloadContext = contextQuery.reload;
+
+  const load = useCallback(async () => {
+    await Promise.all([reloadYears(), reloadCourses(), reloadProgrammes(), reloadContext()]);
+    void revalidateApi("/api/meta/academic-years", "/api/programme-processes");
+  }, [reloadYears, reloadCourses, reloadProgrammes, reloadContext]);
 
   async function submitYear(e) {
     e.preventDefault();
@@ -129,6 +166,7 @@ export function AdminAcademicSetupPanel() {
         return;
       }
       showToast({ message: "Academic year saved.", severity: "success" });
+      yearDraft.clearDraft();
       setYearDialog(false);
       setEditing(null);
       await load();
@@ -186,6 +224,7 @@ export function AdminAcademicSetupPanel() {
         return;
       }
       showToast({ message: "Course saved.", severity: "success" });
+      courseDraft.clearDraft();
       setCourseDialog(false);
       setEditing(null);
       await load();
@@ -236,7 +275,7 @@ export function AdminAcademicSetupPanel() {
           size="small"
           startIcon={<RefreshRounded />}
           onClick={() => void load()}
-          disabled={busy}
+          disabled={busy || refreshing}
           className="cursor-pointer"
         >
           Refresh
@@ -411,7 +450,7 @@ export function AdminAcademicSetupPanel() {
 
       <Dialog
         open={yearDialog}
-        onClose={() => !busy && setYearDialog(false)}
+        onClose={closeYearDialog}
         fullWidth
         maxWidth="sm"
         PaperProps={{ sx: adminDialogPaperSx }}
@@ -473,7 +512,7 @@ export function AdminAcademicSetupPanel() {
             ) : null}
           </DialogContent>
           <DialogActions>
-            <Button onClick={() => setYearDialog(false)} disabled={busy} className="cursor-pointer">
+            <Button onClick={closeYearDialog} disabled={busy} className="cursor-pointer">
               Cancel
             </Button>
             <Button type="submit" variant="contained" disabled={busy} className="cursor-pointer">
@@ -485,7 +524,7 @@ export function AdminAcademicSetupPanel() {
 
       <Dialog
         open={courseDialog}
-        onClose={() => !busy && setCourseDialog(false)}
+        onClose={closeCourseDialog}
         fullWidth
         maxWidth="sm"
         PaperProps={{ sx: adminDialogPaperSx }}
@@ -548,7 +587,7 @@ export function AdminAcademicSetupPanel() {
             />
           </DialogContent>
           <DialogActions>
-            <Button onClick={() => setCourseDialog(false)} disabled={busy} className="cursor-pointer">
+            <Button onClick={closeCourseDialog} disabled={busy} className="cursor-pointer">
               Cancel
             </Button>
             <Button type="submit" variant="contained" disabled={busy} className="cursor-pointer">

@@ -12,6 +12,11 @@ import {
   BUILT_IN_PROCESS_LOCKED_MESSAGE,
   isBuiltInProcessCode,
 } from "@/lib/projects/process-catalogue";
+import {
+  IN_USE_MESSAGE,
+  isForeignKeyViolation,
+  processFlowDeleteBlocker,
+} from "@/lib/projects/delete-guards";
 
 export const runtime = "nodejs";
 
@@ -132,7 +137,15 @@ export async function DELETE(_request, context) {
     return NextResponse.json({ error: "Built-in processes cannot be deleted." }, { status: 400 });
   }
 
-  await prisma.projectOrgProcessFlow.delete({ where: { id: processFlowId } });
+  const blocker = await processFlowDeleteBlocker(prisma, processFlowId);
+  if (blocker) return NextResponse.json({ error: blocker }, { status: 409 });
+
+  try {
+    await prisma.projectOrgProcessFlow.delete({ where: { id: processFlowId } });
+  } catch (e) {
+    if (isForeignKeyViolation(e)) return NextResponse.json({ error: IN_USE_MESSAGE }, { status: 409 });
+    throw e;
+  }
 
   await writeAuditLog({
     eventType: AuditEvent.PROJECT_ORG_PROCESS_FLOW_DELETED,

@@ -3,6 +3,7 @@ import { prisma } from "@/lib/prisma";
 import { requireProviderPortalSession } from "@/lib/projects/provider-portal";
 import { loadProviderAssignment } from "@/lib/projects/provider-assignments";
 import { submitDeliveryNote } from "@/lib/projects/delivery-notes";
+import { okOrAbort, runInTx, withTxAbort } from "@/lib/db-tx";
 
 export const runtime = "nodejs";
 
@@ -23,7 +24,9 @@ export async function POST(request, context) {
   } catch {
     return NextResponse.json({ error: "Invalid request body." }, { status: 400 });
   }
-  const result = await submitDeliveryNote(prisma, { ...opts, body });
+  const result = await withTxAbort(() =>
+    runInTx(prisma, async (tx) => okOrAbort(await submitDeliveryNote(tx, { ...opts, body }))),
+  );
   if (!result.ok) {
     return NextResponse.json({ error: result.error, fieldErrors: result.fieldErrors }, { status: result.status || 400 });
   }

@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import bcrypt from "bcryptjs";
 import { getSessionUser } from "@/lib/api/get-session-user";
+import { getAppSession } from "@/lib/auth/session";
 import { writeAuditLog, AuditEvent } from "@/lib/audit-log";
 import { validateNewPassword } from "@/lib/password-policy";
 import { prisma } from "@/lib/prisma";
@@ -48,10 +49,14 @@ export async function POST(request) {
   }
 
   const passwordHash = await bcrypt.hash(newPassword, 12);
-  await prisma.user.update({
+  const updated = await prisma.user.update({
     where: { id: user.id },
-    data: { passwordHash },
+    data: { passwordHash, sessionVersion: { increment: 1 } },
+    select: { sessionVersion: true },
   });
+  const session = await getAppSession();
+  session.sv = updated.sessionVersion;
+  await session.save();
 
   const ip = getRequestIp(request);
   const userAgent = getRequestUserAgent(request);

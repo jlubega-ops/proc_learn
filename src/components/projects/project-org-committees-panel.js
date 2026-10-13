@@ -23,7 +23,11 @@ import EditRounded from "@mui/icons-material/EditRounded";
 import PersonRemoveRounded from "@mui/icons-material/PersonRemoveRounded";
 import RefreshRounded from "@mui/icons-material/RefreshRounded";
 import { format, parseISO } from "date-fns";
+import { discardConfirmOptions, useConfirm } from "@/components/providers/confirm-provider";
 import { useToast } from "@/components/providers/toast-provider";
+import { useDraftState } from "@/hooks/use-draft-state";
+import { useApi } from "@/hooks/use-api";
+import { deleteSucceeded, revalidateApi } from "@/lib/api-client-cache";
 import {
   adminCenteredLoadingBoxSx,
   adminDialogPaperSx,
@@ -37,7 +41,7 @@ import {
   orgRoleMayAppearOnCommittee,
   validateCommitteeSeatEligibility,
 } from "@/lib/projects/committee-eligibility";
-import { formatCommitteeSeatLabel } from "@/lib/projects/committee-context";
+import { formatCommitteeSeatLabel } from "@/lib/projects/committee-context-shared";
 
 const COMMITTEE_TYPES = [
   { value: "CONTRACTS", label: "Contracts Committee" },
@@ -57,30 +61,58 @@ const MEMBER_ROLES = [
  */
 export function ProjectOrgCommitteesPanel({ projectId, readOnly = false }) {
   const { showToast } = useToast();
-  const [loading, setLoading] = useState(true);
-  const [committees, setCommittees] = useState(/** @type {any[]} */ ([]));
-  const [users, setUsers] = useState(/** @type {any[]} */ ([]));
+  const {
+    data: committeesData,
+    loading: committeesLoading,
+    reload: reloadCommittees,
+  } = useApi(`/api/projects/${projectId}/org-committees`, {
+    errorMessage: "Could not load committees.",
+  });
+  const {
+    data: usersData,
+    loading: usersLoading,
+    reload: reloadUsers,
+  } = useApi(`/api/projects/${projectId}/org-users?page=1&pageSize=50`, { silentErrors: true });
+  const loading = committeesLoading || usersLoading;
+  const committees = useMemo(
+    () => (Array.isArray(committeesData?.committees) ? committeesData.committees : []),
+    [committeesData],
+  );
+  const users = useMemo(
+    () => (Array.isArray(usersData?.users) ? usersData.users : []).filter((u) => !u.isProjectAdmin),
+    [usersData],
+  );
   const [busy, setBusy] = useState(false);
-  const [form, setForm] = useState({
-    committeeType: "EVALUATION",
-    description: "",
-  });
-  const [memberForm, setMemberForm] = useState({
-    committeeId: "",
-    orgUserId: "",
-    committeeRole: "MEMBER",
-    startDate: format(new Date(), "yyyy-MM-dd"),
-  });
+  const confirm = useConfirm();
+  const [form, setForm, formDraft] = useDraftState(
+    `org:committee:${projectId}:new`,
+    { committeeType: "EVALUATION", description: "" },
+    { enabled: !loading },
+  );
+  const [memberForm, setMemberForm, memberDraft] = useDraftState(
+    `org:committee:${projectId}:new-seat`,
+    {
+      committeeId: "",
+      orgUserId: "",
+      committeeRole: "MEMBER",
+      startDate: format(new Date(), "yyyy-MM-dd"),
+    },
+    { enabled: !loading },
+  );
   const [memberFieldErrors, setMemberFieldErrors] = useState(
     /** @type {Record<string, string>} */ ({}),
   );
 
   const [editRow, setEditRow] = useState(/** @type {any | null} */ (null));
-  const [editForm, setEditForm] = useState({
-    committeeType: "EVALUATION",
-    description: "",
-    isActive: true,
-  });
+  const [editForm, setEditForm, editDraft] = useDraftState(
+    `org:committee:${projectId}:edit:${editRow?.id || ""}`,
+    {
+      committeeType: editRow?.committeeType || "EVALUATION",
+      description: editRow?.description || "",
+      isActive: editRow ? editRow.isActive !== false : true,
+    },
+    { enabled: Boolean(editRow), resetKey: editRow?.id ?? null },
+  );
   const [editErrors, setEditErrors] = useState(/** @type {Record<string, string>} */ ({}));
   const [editBusy, setEditBusy] = useState(false);
 
@@ -119,7 +151,7 @@ export function ProjectOrgCommitteesPanel({ projectId, readOnly = false }) {
     if (!availableCreateTypes.some((t) => t.value === form.committeeType)) {
       setForm((f) => ({ ...f, committeeType: availableCreateTypes[0].value }));
     }
-  }, [availableCreateTypes, form.committeeType]);
+  }, [availableCreateTypes, form.committeeType, setForm]);
 
   const eligibleUsers = useMemo(() => {
     if (!selectedCommittee) return users;
@@ -155,51 +187,27 @@ export function ProjectOrgCommitteesPanel({ projectId, readOnly = false }) {
   }, [users, committees, selectedCommittee, memberForm.committeeRole]);
 
   const load = useCallback(async () => {
-    setLoading(true);
-    try {
-      const [cRes, uRes] = await Promise.all([
-        fetch(`/api/projects/${projectId}/org-committees`, { credentials: "include" }),
-        fetch(`/api/projects/${projectId}/org-users?page=1&pageSize=50`, {
-          credentials: "include",
-        }),
-      ]);
-      const cData = await cRes.json().catch(() => ({}));
-      const uData = await uRes.json().catch(() => ({}));
-      if (!cRes.ok) {
-        showToast({
-          message: typeof cData.error === "string" ? cData.error : "Could not load committees.",
-          severity: "error",
-        });
-        return;
-      }
-      setCommittees(Array.isArray(cData.committees) ? cData.committees : []);
-      setUsers(
-        (Array.isArray(uData.users) ? uData.users : []).filter((u) => !u.isProjectAdmin),
-      );
-    } finally {
-      setLoading(false);
-    }
-  }, [projectId, showToast]);
-
-  useEffect(() => {
-    void load();
-  }, [load]);
+    await Promise.all([reloadCommittees(), reloadUsers()]);
+    void revalidateApi(`/api/projects/${projectId}/org-`, `/api/projects/${projectId}/my-committee-context`);
+  }, [projectId, reloadCommittees, reloadUsers]);
 
   useEffect(() => {
     if (!memberForm.orgUserId) return;
     if (!eligibleUsers.some((u) => u.id === memberForm.orgUserId)) {
       setMemberForm((f) => ({ ...f, orgUserId: "" }));
     }
-  }, [eligibleUsers, memberForm.orgUserId]);
+  }, [eligibleUsers, memberForm.orgUserId, setMemberForm]);
 
   function openEdit(c) {
     setEditErrors({});
-    setEditForm({
-      committeeType: c.committeeType || "EVALUATION",
-      description: c.description || "",
-      isActive: c.isActive !== false,
-    });
     setEditRow(c);
+  }
+
+  async function closeEdit() {
+    if (editBusy) return;
+    if (editDraft.isDirty && !(await confirm(discardConfirmOptions()))) return;
+    editDraft.clearDraft();
+    setEditRow(null);
   }
 
   async function createCommittee(e) {
@@ -228,7 +236,7 @@ export function ProjectOrgCommitteesPanel({ projectId, readOnly = false }) {
         return;
       }
       showToast({ message: "Committee created.", severity: "success" });
-      setForm({ committeeType: "EVALUATION", description: "" });
+      formDraft.resetForm({ committeeType: "EVALUATION", description: "" });
       await load();
     } finally {
       setBusy(false);
@@ -269,6 +277,7 @@ export function ProjectOrgCommitteesPanel({ projectId, readOnly = false }) {
         return;
       }
       showToast({ message: "Committee updated.", severity: "success" });
+      editDraft.clearDraft();
       setEditRow(null);
       await load();
     } finally {
@@ -285,7 +294,7 @@ export function ProjectOrgCommitteesPanel({ projectId, readOnly = false }) {
         credentials: "include",
       });
       const data = await res.json().catch(() => ({}));
-      if (!res.ok) {
+      if (!deleteSucceeded(res)) {
         showToast({
           message: typeof data.error === "string" ? data.error : "Could not delete committee.",
           severity: "error",
@@ -319,7 +328,7 @@ export function ProjectOrgCommitteesPanel({ projectId, readOnly = false }) {
         { method: "DELETE", credentials: "include" },
       );
       const data = await res.json().catch(() => ({}));
-      if (!res.ok) {
+      if (!deleteSucceeded(res)) {
         showToast({
           message: typeof data.error === "string" ? data.error : "Could not unassign seat.",
           severity: "error",
@@ -411,7 +420,7 @@ export function ProjectOrgCommitteesPanel({ projectId, readOnly = false }) {
         return;
       }
       showToast({ message: "Committee seat added.", severity: "success" });
-      setMemberForm((f) => ({ ...f, orgUserId: "", committeeRole: "MEMBER" }));
+      memberDraft.resetForm({ ...memberForm, orgUserId: "", committeeRole: "MEMBER" });
       setMemberFieldErrors({});
       await load();
     } finally {
@@ -676,7 +685,7 @@ export function ProjectOrgCommitteesPanel({ projectId, readOnly = false }) {
 
       <Dialog
         open={Boolean(editRow)}
-        onClose={() => !editBusy && setEditRow(null)}
+        onClose={() => void closeEdit()}
         fullWidth
         maxWidth="sm"
         slotProps={{ paper: { sx: adminDialogPaperSx } }}
@@ -731,7 +740,7 @@ export function ProjectOrgCommitteesPanel({ projectId, readOnly = false }) {
           </Box>
         </DialogContent>
         <DialogActions>
-          <Button onClick={() => setEditRow(null)} disabled={editBusy}>
+          <Button onClick={() => void closeEdit()} disabled={editBusy}>
             Cancel
           </Button>
           <Button

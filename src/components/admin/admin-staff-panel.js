@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useMemo, useState } from "react";
 import Button from "@mui/material/Button";
 import CircularProgress from "@mui/material/CircularProgress";
 import Dialog from "@mui/material/Dialog";
@@ -41,6 +41,10 @@ import {
   themedTextFieldSx,
 } from "@/lib/admin-mui-surfaces";
 import { useToast } from "@/components/providers/toast-provider";
+import { discardConfirmOptions, useConfirm } from "@/components/providers/confirm-provider";
+import { useDraftSync } from "@/hooks/use-draft-sync";
+import { useApi } from "@/hooks/use-api";
+import { deleteSucceeded } from "@/lib/api-client-cache";
 import { ROLE, formatRoleLabel } from "@/lib/roles";
 import { BRAND_BTN_PRIMARY_CLASS } from "@/lib/brand-ui";
 
@@ -82,15 +86,12 @@ function statusLabel(row) {
 
 export function AdminStaffPanel() {
   const { showToast } = useToast();
-  /** @type {[StaffRow[], import("react").Dispatch<import("react").SetStateAction<StaffRow[]>>]} */
-  const [rows, setRows] = useState([]);
-  const [loading, setLoading] = useState(true);
-  const [refetching, setRefetching] = useState(false);
   const [reasonOpen, setReasonOpen] = useState(
     /** @type {{ title: string; text: string } | null} */ (null),
   );
   const [suspendTarget, setSuspendTarget] = useState(/** @type {StaffRow | null} */ (null));
   const [suspendReason, setSuspendReason] = useState("");
+  const [suspendReasonError, setSuspendReasonError] = useState("");
   const [editRow, setEditRow] = useState(/** @type {StaffRow | null} */ (null));
   const [delRow, setDelRow] = useState(/** @type {StaffRow | null} */ (null));
   const [deleteConfirmText, setDeleteConfirmText] = useState("");
@@ -105,39 +106,61 @@ export function AdminStaffPanel() {
   const [unsuspendBusy, setUnsuspendBusy] = useState(false);
   const [resendingId, setResendingId] = useState(/** @type {string | null} */ (null));
 
+  const confirm = useConfirm();
+
   const pickedRoles = useMemo(
     () => STAFF_ROLES.filter((r) => rolePick[r]),
     [rolePick],
   );
 
-  const load = useCallback(
-    async (opts = /** @type {{ silent?: boolean }} */ ({})) => {
-      const silent = Boolean(opts.silent);
-      if (silent) setRefetching(true);
-      else setLoading(true);
-      try {
-        const res = await fetch("/api/admin/staff", { credentials: "include" });
-        const data = await res.json().catch(() => ({}));
-        if (!res.ok) {
-          showToast({
-            message: typeof data.error === "string" ? data.error : "Could not load staff.",
-            severity: "error",
-          });
-          setRows([]);
-          return;
-        }
-        setRows(Array.isArray(data.users) ? data.users : []);
-      } finally {
-        if (silent) setRefetching(false);
-        else setLoading(false);
+  const editDraft = useDraftSync(
+    editRow ? `admin:staff:edit:${editRow.id}` : "",
+    { firstName, lastName, middleName, rolePick },
+    (d) => {
+      if (typeof d.firstName === "string") setFirstName(d.firstName);
+      if (typeof d.lastName === "string") setLastName(d.lastName);
+      if (typeof d.middleName === "string") setMiddleName(d.middleName);
+      if (d.rolePick && typeof d.rolePick === "object" && !Array.isArray(d.rolePick)) {
+        setRolePick(/** @type {Record<string, boolean>} */ (d.rolePick));
       }
     },
-    [showToast],
+    { enabled: Boolean(editRow), resetKey: editRow?.id },
   );
 
-  useEffect(() => {
-    void load();
-  }, [load]);
+  const suspendDraft = useDraftSync(
+    suspendTarget ? `admin:staff:suspend:${suspendTarget.id}` : "",
+    { suspendReason },
+    (d) => {
+      if (typeof d.suspendReason === "string") setSuspendReason(d.suspendReason);
+    },
+    { enabled: Boolean(suspendTarget), resetKey: suspendTarget?.id },
+  );
+
+  async function cancelEdit() {
+    if (saving) return;
+    if (editDraft.isDirty && !(await confirm(discardConfirmOptions()))) return;
+    editDraft.clearDraft();
+    setEditRow(null);
+  }
+
+  function cancelSuspend() {
+    if (suspendBusy) return;
+    suspendDraft.clearDraft();
+    setSuspendTarget(null);
+  }
+
+  const {
+    data: listData,
+    error: listError,
+    loading,
+    refreshing: refetching,
+    reload,
+  } = useApi("/api/admin/staff", { errorMessage: "Could not load staff." });
+  /** @type {StaffRow[]} */
+  const rows = !listError && Array.isArray(listData?.users) ? listData.users : [];
+  const load = useCallback(async () => {
+    await reload();
+  }, [reload]);
 
   function openEdit(row) {
     setEditRow(row);
@@ -179,6 +202,7 @@ export function AdminStaffPanel() {
         return;
       }
       showToast({ message: "Staff user updated.", severity: "success" });
+      editDraft.clearDraft();
       setEditRow(null);
       await load({ silent: true });
     } finally {
@@ -204,7 +228,7 @@ export function AdminStaffPanel() {
         body: JSON.stringify({ confirmText: deleteConfirmText.trim() }),
       });
       const data = await res.json().catch(() => ({}));
-      if (!res.ok) {
+      if (!deleteSucceeded(res)) {
         showToast({
           message: typeof data.error === "string" ? data.error : "Could not delete.",
           severity: "error",
@@ -247,6 +271,11 @@ export function AdminStaffPanel() {
 
   async function confirmSuspend() {
     if (!suspendTarget) return;
+    if (!suspendReason.trim()) {
+      setSuspendReasonError("Enter a reason.");
+      return;
+    }
+    setSuspendReasonError("");
     setSuspendBusy(true);
     try {
       const res = await fetch(`/api/users/${suspendTarget.id}`, {
@@ -255,7 +284,7 @@ export function AdminStaffPanel() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           suspended: true,
-          reason: suspendReason.trim() || "No reason provided.",
+          reason: suspendReason.trim(),
         }),
       });
       const data = await res.json().catch(() => ({}));
@@ -267,6 +296,7 @@ export function AdminStaffPanel() {
         return;
       }
       showToast({ message: "User suspended.", severity: "success" });
+      suspendDraft.clearDraft();
       setSuspendTarget(null);
       setSuspendReason("");
       await load({ silent: true });
@@ -450,6 +480,7 @@ export function AdminStaffPanel() {
                           onClick={() => {
                             setSuspendTarget(row);
                             setSuspendReason("");
+                            setSuspendReasonError("");
                           }}
                         >
                           <BlockRounded fontSize="small" />
@@ -476,9 +507,7 @@ export function AdminStaffPanel() {
 
       <Dialog
         open={Boolean(editRow)}
-        onClose={() => {
-          if (!saving) setEditRow(null);
-        }}
+        onClose={() => void cancelEdit()}
         fullWidth
         maxWidth="sm"
         slotProps={{ paper: { sx: adminDialogPaperSx } }}
@@ -529,7 +558,7 @@ export function AdminStaffPanel() {
           </FormGroup>
         </DialogContent>
         <DialogActions>
-          <Button onClick={() => !saving && setEditRow(null)} disabled={saving}>
+          <Button onClick={() => void cancelEdit()} disabled={saving}>
             Cancel
           </Button>
           <Button variant="contained" onClick={() => void saveEdit()} disabled={saving}>
@@ -639,7 +668,7 @@ export function AdminStaffPanel() {
 
       <Dialog
         open={Boolean(suspendTarget)}
-        onClose={() => !suspendBusy && setSuspendTarget(null)}
+        onClose={cancelSuspend}
         fullWidth
         maxWidth="sm"
         slotProps={{ paper: { sx: adminDialogPaperSx } }}
@@ -654,12 +683,17 @@ export function AdminStaffPanel() {
             multiline
             minRows={2}
             value={suspendReason}
-            onChange={(e) => setSuspendReason(e.target.value)}
+            onChange={(e) => {
+              setSuspendReason(e.target.value);
+              if (e.target.value.trim()) setSuspendReasonError("");
+            }}
+            error={Boolean(suspendReasonError)}
+            helperText={suspendReasonError || " "}
             sx={themedTextFieldSx}
           />
         </DialogContent>
         <DialogActions>
-          <Button onClick={() => setSuspendTarget(null)} disabled={suspendBusy}>
+          <Button onClick={cancelSuspend} disabled={suspendBusy}>
             Cancel
           </Button>
           <Button

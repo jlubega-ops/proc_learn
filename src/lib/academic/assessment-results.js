@@ -17,8 +17,13 @@ import {
   humanPassFail,
 } from "@/lib/academic/assessment-scoring";
 import { getOrCreateProjectAssessment, serializeAssessmentConfig } from "@/lib/academic/assessment-config";
+import { projectProgrammeCodes } from "@/lib/academic/programme-processes";
 import { ensureCurrentAcademicContext } from "@/lib/academic/academic-context";
-import { campusLabel, parseCampus } from "@/lib/campuses";
+import { parseCampus } from "@/lib/campuses";
+import {
+  participantProgrammeCampus,
+  STUDENT_VIEW_SETTINGS_SELECT,
+} from "@/lib/academic/student-view";
 
 /**
  * @param {any} grade
@@ -94,6 +99,7 @@ export async function listAssessmentResultRows(opts = {}) {
           student: {
             include: {
               studentProfile: { include: { programme: true } },
+              settings: STUDENT_VIEW_SETTINGS_SELECT,
             },
           },
         },
@@ -128,9 +134,10 @@ export async function listAssessmentResultRows(opts = {}) {
       studentName: formatUserDisplayName(student),
       studentEmail: student.email,
       studentNumber: student.studentProfile?.studentNumber || null,
-      programme: student.studentProfile?.programme?.shortName || null,
-      campus: student.studentProfile?.campus || null,
-      campusLabel: campusLabel(student.studentProfile?.campus) || null,
+      ...(() => {
+        const pc = participantProgrammeCampus(student);
+        return { programme: pc.programmeShortName, campus: pc.campus, campusLabel: pc.campusLabel };
+      })(),
       academicYearId: attempt.studentAcademicEnrollment?.academicYearId || null,
       academicYearLabel: attempt.studentAcademicEnrollment?.academicYear?.label || null,
       participationType,
@@ -270,7 +277,7 @@ export async function getExaminerAssessmentResults(opts = {}) {
       projectId: opts.projectId,
       createIfMissing: false,
     });
-    assessment = serializeAssessmentConfig(cfg);
+    assessment = serializeAssessmentConfig(cfg, project ? await projectProgrammeCodes(db, project) : null);
   }
 
   return {

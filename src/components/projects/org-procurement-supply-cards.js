@@ -17,6 +17,7 @@ import EditLocationAltRounded from "@mui/icons-material/EditLocationAltRounded";
 import PlaceRounded from "@mui/icons-material/PlaceRounded";
 import { format, isValid, parseISO } from "date-fns";
 import { useToast } from "@/components/providers/toast-provider";
+import { useDraftSync } from "@/hooks/use-draft-sync";
 import {
   adminDialogPaperSx,
   adminMutedTextSx,
@@ -190,6 +191,20 @@ export function OrgDeliveryAddressLine({ address, fallback, editableKind, busy, 
   const [error, setError] = useState("");
   const { showToast } = useToast();
   const shown = address || fallback || "";
+  const addressDraft = useDraftSync(
+    `org:delivery-address:${editableKind || ""}:${shown}`,
+    { value },
+    (d) => {
+      if (typeof d.value === "string") setValue(d.value);
+    },
+    { enabled: open },
+  );
+
+  function handleCancel() {
+    if (busy) return;
+    addressDraft.clearDraft();
+    setOpen(false);
+  }
 
   async function save(e) {
     e.preventDefault();
@@ -205,7 +220,10 @@ export function OrgDeliveryAddressLine({ address, fallback, editableKind, busy, 
     }
     if (!editableKind || !onSave) return;
     const ok = await onSave(editableKind, trimmed);
-    if (ok) setOpen(false);
+    if (ok) {
+      addressDraft.clearDraft();
+      setOpen(false);
+    }
   }
 
   return (
@@ -235,7 +253,7 @@ export function OrgDeliveryAddressLine({ address, fallback, editableKind, busy, 
       ) : null}
       <Dialog
         open={open}
-        onClose={() => (busy ? null : setOpen(false))}
+        onClose={handleCancel}
         fullWidth
         maxWidth="sm"
         PaperProps={{ sx: adminDialogPaperSx }}
@@ -263,7 +281,7 @@ export function OrgDeliveryAddressLine({ address, fallback, editableKind, busy, 
             />
           </DialogContent>
           <DialogActions>
-            <Button onClick={() => setOpen(false)} disabled={busy}>
+            <Button onClick={handleCancel} disabled={busy}>
               Cancel
             </Button>
             <Button

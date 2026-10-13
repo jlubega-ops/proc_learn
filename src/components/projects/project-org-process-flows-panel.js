@@ -1,9 +1,11 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { Fragment, useCallback, useState } from "react";
 import Box from "@mui/material/Box";
 import Button from "@mui/material/Button";
+import Chip from "@mui/material/Chip";
 import CircularProgress from "@mui/material/CircularProgress";
+import Collapse from "@mui/material/Collapse";
 import Dialog from "@mui/material/Dialog";
 import DialogActions from "@mui/material/DialogActions";
 import DialogContent from "@mui/material/DialogContent";
@@ -27,9 +29,14 @@ import Typography from "@mui/material/Typography";
 import AddRounded from "@mui/icons-material/AddRounded";
 import DeleteOutlineRounded from "@mui/icons-material/DeleteOutlineRounded";
 import EditRounded from "@mui/icons-material/EditRounded";
-import ListAltRounded from "@mui/icons-material/ListAltRounded";
+import KeyboardArrowDownRounded from "@mui/icons-material/KeyboardArrowDownRounded";
+import KeyboardArrowUpRounded from "@mui/icons-material/KeyboardArrowUpRounded";
 import RefreshRounded from "@mui/icons-material/RefreshRounded";
+import UnfoldLessRounded from "@mui/icons-material/UnfoldLessRounded";
 import { useToast } from "@/components/providers/toast-provider";
+import { useDraftSync } from "@/hooks/use-draft-sync";
+import { useApi } from "@/hooks/use-api";
+import { deleteSucceeded, revalidateApi } from "@/lib/api-client-cache";
 import {
   adminCenteredLoadingBoxSx,
   adminDialogPaperSx,
@@ -50,6 +57,10 @@ import {
 } from "@/lib/validation/project-org-process-flow-item";
 import { isBuiltInProcessCode } from "@/lib/projects/process-catalogue";
 
+/** Max steps the items API returns per page; processes are far shorter in practice. */
+const STEPS_PAGE_SIZE = 50;
+const COLUMN_COUNT = 6;
+
 function emptyProcessForm() {
   return { name: "", description: "", engineEvent: "" };
 }
@@ -59,36 +70,58 @@ function emptyItemForm() {
 }
 
 /**
+ * @template {Record<string, string>} T
+ * @param {T} prev
+ * @param {Record<string, unknown>} draft
+ * @returns {T}
+ */
+function mergeStringDraft(prev, draft) {
+  const next = /** @type {Record<string, string>} */ ({ ...prev });
+  for (const k of Object.keys(prev)) {
+    if (typeof draft[k] === "string") next[k] = /** @type {string} */ (draft[k]);
+  }
+  return /** @type {T} */ (next);
+}
+
+/**
+ * @typedef {{ rows: any[]; total: number; loading: boolean; refetching: boolean; loaded: boolean }} StepsState
+ */
+
+/**
  * @param {{ apiBase: string }} p
  */
 export function ProjectProcessFlowsPanel({ apiBase }) {
   const { showToast } = useToast();
-  const [canManage, setCanManage] = useState(false);
-  const readOnly = !canManage;
-
-  const [processRows, setProcessRows] = useState(/** @type {any[]} */ ([]));
-  const [processLoading, setProcessLoading] = useState(true);
-  const [processRefetching, setProcessRefetching] = useState(false);
   const [processPage, setProcessPage] = useState(0);
   const [processRowsPerPage, setProcessRowsPerPage] = useState(10);
-  const [processTotal, setProcessTotal] = useState(0);
 
-  const [selectedProcess, setSelectedProcess] = useState(/** @type {any} */ (null));
+  const processQuery = new URLSearchParams({
+    page: String(processPage + 1),
+    pageSize: String(processRowsPerPage),
+  });
+  const {
+    data: processData,
+    loading: processLoading,
+    refreshing: processRefetching,
+    reload: reloadProcesses,
+  } = useApi(`${apiBase}?${processQuery.toString()}`, { errorMessage: "Could not load processes." });
+  const processRows = Array.isArray(processData?.processFlows) ? processData.processFlows : [];
+  const processTotal = Number(processData?.total) || 0;
+  const canManage = processData?.canManage === true;
+  const readOnly = !canManage;
+  const engineBindings =
+    Array.isArray(processData?.engineBindings) && processData.engineBindings.length
+      ? processData.engineBindings
+      : ENGINE_PROCESS_BINDINGS;
 
-  const [itemRows, setItemRows] = useState(/** @type {any[]} */ ([]));
+  const [expanded, setExpanded] = useState(/** @type {Record<string, boolean>} */ ({}));
+  const [steps, setSteps] = useState(/** @type {Record<string, StepsState>} */ ({}));
   const [assignableRoles, setAssignableRoles] = useState(
     /** @type {{ id: string; name: string }[]} */ ([]),
   );
-  const [itemLoading, setItemLoading] = useState(false);
-  const [itemRefetching, setItemRefetching] = useState(false);
-  const [itemPage, setItemPage] = useState(0);
-  const [itemRowsPerPage, setItemRowsPerPage] = useState(10);
-  const [itemTotal, setItemTotal] = useState(0);
 
   const [editProcessRow, setEditProcessRow] = useState(/** @type {any} */ (null));
   const editBuiltIn = isBuiltInProcessCode(editProcessRow?.code);
-  const selectedBuiltIn = isBuiltInProcessCode(selectedProcess?.code);
-  const stepsLocked = readOnly || selectedBuiltIn;
   const [editProcessForm, setEditProcessForm] = useState(emptyProcessForm());
   const [editProcessErrors, setEditProcessErrors] = useState(
     /** @type {Record<string, string>} */ ({}),
@@ -98,72 +131,84 @@ export function ProjectProcessFlowsPanel({ apiBase }) {
   const [delProcessRow, setDelProcessRow] = useState(/** @type {any} */ (null));
   const [deleteProcessBusy, setDeleteProcessBusy] = useState(false);
 
-  const [openCreateItem, setOpenCreateItem] = useState(false);
+  const [createItemProcess, setCreateItemProcess] = useState(/** @type {any} */ (null));
   const [createItemBusy, setCreateItemBusy] = useState(false);
   const [createItemForm, setCreateItemForm] = useState(emptyItemForm());
   const [createItemErrors, setCreateItemErrors] = useState(
     /** @type {Record<string, string>} */ ({}),
   );
 
-  const [editItemRow, setEditItemRow] = useState(/** @type {any} */ (null));
+  const [editItem, setEditItem] = useState(
+    /** @type {{ process: any; row: any } | null} */ (null),
+  );
   const [editItemForm, setEditItemForm] = useState(emptyItemForm());
   const [editItemErrors, setEditItemErrors] = useState(/** @type {Record<string, string>} */ ({}));
   const [editItemBusy, setEditItemBusy] = useState(false);
 
-  const [delItemRow, setDelItemRow] = useState(/** @type {any} */ (null));
+  const [delItem, setDelItem] = useState(/** @type {{ process: any; row: any } | null} */ (null));
   const [deleteItemBusy, setDeleteItemBusy] = useState(false);
-  const [engineBindings, setEngineBindings] = useState(ENGINE_PROCESS_BINDINGS);
 
-  const loadProcesses = useCallback(
-    async (opts = /** @type {{ silent?: boolean }} */ ({})) => {
-      const silent = Boolean(opts.silent);
-      if (silent) setProcessRefetching(true);
-      else setProcessLoading(true);
-      try {
-        const qp = new URLSearchParams({
-          page: String(processPage + 1),
-          pageSize: String(processRowsPerPage),
-        });
-        const res = await fetch(`${apiBase}?${qp.toString()}`, { credentials: "include" });
-        const data = await res.json().catch(() => ({}));
-        if (!res.ok) {
-          showToast({
-            message: typeof data.error === "string" ? data.error : "Could not load processes.",
-            severity: "error",
-          });
-          return;
-        }
-        const flows = Array.isArray(data.processFlows) ? data.processFlows : [];
-        setProcessRows(flows);
-        setProcessTotal(Number(data.total) || 0);
-        if (typeof data.canManage === "boolean") setCanManage(data.canManage);
-        if (Array.isArray(data.engineBindings) && data.engineBindings.length) {
-          setEngineBindings(data.engineBindings);
-        }
-        setSelectedProcess((prev) => {
-          if (!prev) return null;
-          const match = flows.find((row) => row.id === prev.id);
-          return match || null;
-        });
-      } finally {
-        if (silent) setProcessRefetching(false);
-        else setProcessLoading(false);
-      }
-    },
-    [apiBase, processPage, processRowsPerPage, showToast],
+  const editProcessDraft = useDraftSync(
+    editProcessRow ? `process-flows:${apiBase}:process:${editProcessRow.id}` : "",
+    editProcessForm,
+    (d) => setEditProcessForm((f) => mergeStringDraft(f, d)),
+    { enabled: Boolean(editProcessRow), resetKey: editProcessRow?.id },
   );
 
-  const loadItems = useCallback(
+  const createItemDraft = useDraftSync(
+    createItemProcess ? `process-flows:${apiBase}:step:new:${createItemProcess.id}` : "",
+    createItemForm,
+    (d) => setCreateItemForm((f) => mergeStringDraft(f, d)),
+    { enabled: Boolean(createItemProcess), resetKey: createItemProcess?.id },
+  );
+
+  const editItemDraft = useDraftSync(
+    editItem ? `process-flows:${apiBase}:step:${editItem.row.id}` : "",
+    editItemForm,
+    (d) => setEditItemForm((f) => mergeStringDraft(f, d)),
+    { enabled: Boolean(editItem), resetKey: editItem?.row?.id },
+  );
+
+  function closeEditProcess() {
+    if (editProcessBusy) return;
+    editProcessDraft.clearDraft();
+    setEditProcessRow(null);
+  }
+
+  function closeCreateItem() {
+    if (createItemBusy) return;
+    createItemDraft.clearDraft();
+    setCreateItemProcess(null);
+  }
+
+  function closeEditItem() {
+    if (editItemBusy) return;
+    editItemDraft.clearDraft();
+    setEditItem(null);
+  }
+
+  const loadProcesses = useCallback(async () => {
+    await reloadProcesses();
+    void revalidateApi(apiBase);
+  }, [apiBase, reloadProcesses]);
+
+  const loadSteps = useCallback(
     async (processId, opts = /** @type {{ silent?: boolean }} */ ({})) => {
       if (!processId) return;
       const silent = Boolean(opts.silent);
-      if (silent) setItemRefetching(true);
-      else setItemLoading(true);
+      setSteps((prev) => ({
+        ...prev,
+        [processId]: {
+          rows: prev[processId]?.rows || [],
+          total: prev[processId]?.total || 0,
+          loaded: prev[processId]?.loaded || false,
+          loading: !silent,
+          refetching: silent,
+        },
+      }));
+      let next = /** @type {{ rows: any[]; total: number } | null} */ (null);
       try {
-        const qp = new URLSearchParams({
-          page: String(itemPage + 1),
-          pageSize: String(itemRowsPerPage),
-        });
+        const qp = new URLSearchParams({ page: "1", pageSize: String(STEPS_PAGE_SIZE) });
         const res = await fetch(`${apiBase}/${processId}/items?${qp.toString()}`, {
           credentials: "include",
         });
@@ -173,37 +218,42 @@ export function ProjectProcessFlowsPanel({ apiBase }) {
             message: typeof data.error === "string" ? data.error : "Could not load process steps.",
             severity: "error",
           });
-          return;
+        } else {
+          next = {
+            rows: Array.isArray(data.items) ? data.items : [],
+            total: Number(data.total) || 0,
+          };
+          if (Array.isArray(data.assignableRoles)) setAssignableRoles(data.assignableRoles);
         }
-        setItemRows(Array.isArray(data.items) ? data.items : []);
-        setAssignableRoles(Array.isArray(data.assignableRoles) ? data.assignableRoles : []);
-        setItemTotal(Number(data.total) || 0);
       } finally {
-        if (silent) setItemRefetching(false);
-        else setItemLoading(false);
+        setSteps((prev) => ({
+          ...prev,
+          [processId]: {
+            rows: next ? next.rows : prev[processId]?.rows || [],
+            total: next ? next.total : prev[processId]?.total || 0,
+            loaded: Boolean(next) || prev[processId]?.loaded || false,
+            loading: false,
+            refetching: false,
+          },
+        }));
       }
     },
-    [apiBase, itemPage, itemRowsPerPage, showToast],
+    [apiBase, showToast],
   );
 
-  useEffect(() => {
-    void loadProcesses();
-  }, [loadProcesses]);
+  function toggleExpanded(row) {
+    const open = !expanded[row.id];
+    setExpanded((prev) => ({ ...prev, [row.id]: open }));
+    if (open && !steps[row.id]?.loaded && !steps[row.id]?.loading) void loadSteps(row.id);
+  }
 
-  useEffect(() => {
-    if (!selectedProcess?.id) {
-      setItemRows([]);
-      setItemTotal(0);
-      return;
-    }
-    void loadItems(selectedProcess.id);
-  }, [loadItems, selectedProcess?.id]);
-
-  const nextStepNumber = useMemo(() => {
-    if (itemRows.length === 0) return 1;
-    const max = itemRows.reduce((acc, row) => Math.max(acc, Number(row.stepNumber) || 0), 0);
-    return max + 1;
-  }, [itemRows]);
+  async function refreshAll() {
+    const openIds = Object.keys(expanded).filter((id) => expanded[id]);
+    await Promise.all([
+      loadProcesses({ silent: true }),
+      ...openIds.map((id) => loadSteps(id, { silent: true })),
+    ]);
+  }
 
   function openEditProcess(row) {
     setEditProcessRow(row);
@@ -242,6 +292,7 @@ export function ProjectProcessFlowsPanel({ apiBase }) {
         return;
       }
       showToast({ message: "Process updated.", severity: "success" });
+      editProcessDraft.clearDraft();
       setEditProcessRow(null);
       await loadProcesses({ silent: true });
     } finally {
@@ -258,7 +309,7 @@ export function ProjectProcessFlowsPanel({ apiBase }) {
         credentials: "include",
       });
       const data = await res.json().catch(() => ({}));
-      if (!res.ok) {
+      if (!deleteSucceeded(res)) {
         showToast({
           message: typeof data.error === "string" ? data.error : "Could not delete.",
           severity: "error",
@@ -266,7 +317,8 @@ export function ProjectProcessFlowsPanel({ apiBase }) {
         return;
       }
       showToast({ message: "Process deleted.", severity: "success" });
-      if (selectedProcess?.id === delProcessRow.id) setSelectedProcess(null);
+      const id = delProcessRow.id;
+      setExpanded((prev) => ({ ...prev, [id]: false }));
       setDelProcessRow(null);
       await loadProcesses({ silent: true });
     } finally {
@@ -274,8 +326,20 @@ export function ProjectProcessFlowsPanel({ apiBase }) {
     }
   }
 
+  function openCreateItem(process) {
+    const rows = steps[process.id]?.rows || [];
+    const next = rows.reduce((acc, r) => Math.max(acc, Number(r.stepNumber) || 0), 0) + 1;
+    setCreateItemErrors({});
+    setCreateItemForm({
+      ...emptyItemForm(),
+      stepNumber: String(next),
+      projectOrgRoleId: assignableRoles[0]?.id || "",
+    });
+    setCreateItemProcess(process);
+  }
+
   async function createItem() {
-    if (!selectedProcess?.id) return;
+    if (!createItemProcess?.id) return;
     const validated = validateProjectOrgProcessFlowItemInput(createItemForm);
     if (!validated.ok) {
       setCreateItemErrors(validated.errors);
@@ -285,7 +349,8 @@ export function ProjectProcessFlowsPanel({ apiBase }) {
 
     setCreateItemBusy(true);
     try {
-      const res = await fetch(`${apiBase}/${selectedProcess.id}/items`, {
+      const processId = createItemProcess.id;
+      const res = await fetch(`${apiBase}/${processId}/items`, {
         method: "POST",
         credentials: "include",
         headers: { "Content-Type": "application/json" },
@@ -301,20 +366,18 @@ export function ProjectProcessFlowsPanel({ apiBase }) {
         return;
       }
       showToast({ message: "Process step added.", severity: "success" });
-      setOpenCreateItem(false);
+      createItemDraft.clearDraft();
+      setCreateItemProcess(null);
       setCreateItemForm(emptyItemForm());
       setCreateItemErrors({});
-      await Promise.all([
-        loadItems(selectedProcess.id, { silent: true }),
-        loadProcesses({ silent: true }),
-      ]);
+      await Promise.all([loadSteps(processId, { silent: true }), loadProcesses({ silent: true })]);
     } finally {
       setCreateItemBusy(false);
     }
   }
 
-  function openEditItem(row) {
-    setEditItemRow(row);
+  function openEditItem(process, row) {
+    setEditItem({ process, row });
     setEditItemForm({
       stepNumber: String(row.stepNumber ?? ""),
       taskDescription: row.taskDescription || "",
@@ -324,7 +387,7 @@ export function ProjectProcessFlowsPanel({ apiBase }) {
   }
 
   async function saveEditItem() {
-    if (!editItemRow || !selectedProcess?.id) return;
+    if (!editItem) return;
     const validated = validateProjectOrgProcessFlowItemPatch(editItemForm);
     if (!validated.ok) {
       setEditItemErrors(validated.errors);
@@ -334,7 +397,8 @@ export function ProjectProcessFlowsPanel({ apiBase }) {
 
     setEditItemBusy(true);
     try {
-      const res = await fetch(`${apiBase}/${selectedProcess.id}/items/${editItemRow.id}`, {
+      const processId = editItem.process.id;
+      const res = await fetch(`${apiBase}/${processId}/items/${editItem.row.id}`, {
         method: "PATCH",
         credentials: "include",
         headers: { "Content-Type": "application/json" },
@@ -350,23 +414,25 @@ export function ProjectProcessFlowsPanel({ apiBase }) {
         return;
       }
       showToast({ message: "Process step updated.", severity: "success" });
-      setEditItemRow(null);
-      await loadItems(selectedProcess.id, { silent: true });
+      editItemDraft.clearDraft();
+      setEditItem(null);
+      await loadSteps(processId, { silent: true });
     } finally {
       setEditItemBusy(false);
     }
   }
 
   async function deleteItem() {
-    if (!delItemRow || !selectedProcess?.id) return;
+    if (!delItem) return;
     setDeleteItemBusy(true);
     try {
-      const res = await fetch(`${apiBase}/${selectedProcess.id}/items/${delItemRow.id}`, {
+      const processId = delItem.process.id;
+      const res = await fetch(`${apiBase}/${processId}/items/${delItem.row.id}`, {
         method: "DELETE",
         credentials: "include",
       });
       const data = await res.json().catch(() => ({}));
-      if (!res.ok) {
+      if (!deleteSucceeded(res)) {
         showToast({
           message: typeof data.error === "string" ? data.error : "Could not delete.",
           severity: "error",
@@ -374,11 +440,8 @@ export function ProjectProcessFlowsPanel({ apiBase }) {
         return;
       }
       showToast({ message: "Process step deleted.", severity: "success" });
-      setDelItemRow(null);
-      await Promise.all([
-        loadItems(selectedProcess.id, { silent: true }),
-        loadProcesses({ silent: true }),
-      ]);
+      setDelItem(null);
+      await Promise.all([loadSteps(processId, { silent: true }), loadProcesses({ silent: true })]);
     } finally {
       setDeleteItemBusy(false);
     }
@@ -409,17 +472,130 @@ export function ProjectProcessFlowsPanel({ apiBase }) {
     );
   }
 
+  /** @param {any} process */
+  function renderSteps(process) {
+    const state = steps[process.id];
+    const locked = readOnly || isBuiltInProcessCode(process.code);
+    const rows = state?.rows || [];
+
+    if (!state || (state.loading && !state.loaded)) {
+      return (
+        <Box sx={{ ...adminCenteredLoadingBoxSx, minHeight: 96 }} aria-busy="true">
+          <CircularProgress size={28} sx={adminLoadingSpinnerSx} />
+        </Box>
+      );
+    }
+
+    return (
+      <Box sx={{ py: 1.5, pl: { xs: 0, sm: 5 }, pr: { xs: 0, sm: 1 } }}>
+        <div className="mb-2 flex flex-wrap items-center gap-2">
+          <Typography variant="subtitle2" sx={{ fontWeight: 600, mr: "auto" }}>
+            Steps
+          </Typography>
+          {isBuiltInProcessCode(process.code) ? (
+            <Tooltip title="Steps match the workflow engine and cannot be changed">
+              <Chip size="small" color="info" label="Fixed steps" />
+            </Tooltip>
+          ) : null}
+          {!locked ? (
+            <Button
+              size="small"
+              variant="contained"
+              startIcon={<AddRounded />}
+              disabled={state.refetching || assignableRoles.length === 0}
+              onClick={() => openCreateItem(process)}
+              className="w-full sm:w-auto"
+              title="Add process step"
+            >
+              Add step
+            </Button>
+          ) : null}
+        </div>
+
+        {!locked && assignableRoles.length === 0 ? (
+          <Typography variant="body2" sx={{ ...adminMutedTextSx, mb: 1 }}>
+            Add organisation roles first.
+          </Typography>
+        ) : null}
+
+        <Box sx={{ position: "relative" }}>
+          <TableContainer component={Paper} variant="outlined" sx={adminOutlinedTableContainerSx}>
+            <Table size="small" sx={adminTableSx} aria-label={`Steps for ${process.name}`}>
+              <TableHead>
+                <TableRow>
+                  <TableCell sx={{ width: 64 }}>Step</TableCell>
+                  <TableCell>Task description</TableCell>
+                  <TableCell>Required role</TableCell>
+                  {!locked ? <TableCell align="right">Actions</TableCell> : null}
+                </TableRow>
+              </TableHead>
+              <TableBody>
+                {rows.length === 0 ? (
+                  <TableRow>
+                    <TableCell colSpan={locked ? 3 : 4} align="center" sx={{ py: 3 }}>
+                      <Typography variant="body2" sx={adminMutedTextSx}>
+                        No steps yet.
+                      </Typography>
+                    </TableCell>
+                  </TableRow>
+                ) : (
+                  rows.map((row) => (
+                    <TableRow key={row.id} hover>
+                      <TableCell>{row.stepNumber}</TableCell>
+                      <TableCell>{row.taskDescription}</TableCell>
+                      <TableCell>{row.requiredRole?.name || "—"}</TableCell>
+                      {!locked ? (
+                        <TableCell align="right">
+                          <Box sx={{ display: "inline-flex", gap: 0.25, whiteSpace: "nowrap" }}>
+                            <Tooltip title="Edit step">
+                              <IconButton
+                                size="small"
+                                color="primary"
+                                aria-label={`Edit step ${row.stepNumber}`}
+                                onClick={() => openEditItem(process, row)}
+                              >
+                                <EditRounded fontSize="small" />
+                              </IconButton>
+                            </Tooltip>
+                            <Tooltip title="Delete step">
+                              <IconButton
+                                size="small"
+                                color="error"
+                                aria-label={`Delete step ${row.stepNumber}`}
+                                onClick={() => setDelItem({ process, row })}
+                              >
+                                <DeleteOutlineRounded fontSize="small" />
+                              </IconButton>
+                            </Tooltip>
+                          </Box>
+                        </TableCell>
+                      ) : null}
+                    </TableRow>
+                  ))
+                )}
+              </TableBody>
+            </Table>
+          </TableContainer>
+          {state.refetching ? <Box sx={adminTableRefetchOverlaySx} aria-hidden /> : null}
+        </Box>
+        {state.total > rows.length ? (
+          <Typography variant="caption" sx={{ ...adminMutedTextSx, display: "block", mt: 1 }}>
+            Showing first {rows.length} of {state.total} steps.
+          </Typography>
+        ) : null}
+      </Box>
+    );
+  }
+
   if (processLoading) {
     return (
-      <Box
-        sx={adminCenteredLoadingBoxSx}
-        aria-busy="true"
-        aria-label="Loading process flows"
-      >
+      <Box sx={adminCenteredLoadingBoxSx} aria-busy="true" aria-label="Loading process flows">
         <CircularProgress size={40} sx={adminLoadingSpinnerSx} />
       </Box>
     );
   }
+
+  const anyExpanded = Object.values(expanded).some(Boolean);
 
   return (
     <div className="space-y-4">
@@ -427,21 +603,26 @@ export function ProjectProcessFlowsPanel({ apiBase }) {
         variant="outlined"
         sx={{ p: { xs: 2, sm: 3 }, borderRadius: 2, ...adminOutlinedTableContainerSx }}
       >
-        <Typography variant="subtitle1" sx={{ fontWeight: 600, mb: 1 }}>
-          Processes
-        </Typography>
-        <Typography variant="body2" sx={{ ...adminMutedTextSx, mb: 2 }}>
-          {readOnly
-            ? "These process flows are configured by system administrators and shared across all student project workspaces."
-            : "Predefined processes. You can rename them; steps are fixed."}
-        </Typography>
-
-        <div className="mb-3 flex flex-wrap gap-2">
+        <div className="mb-3 flex flex-wrap items-center gap-2">
+          <Typography variant="subtitle1" sx={{ fontWeight: 600, mr: "auto" }}>
+            Processes
+          </Typography>
+          {anyExpanded ? (
+            <Button
+              variant="outlined"
+              startIcon={<UnfoldLessRounded />}
+              onClick={() => setExpanded({})}
+              className="w-full sm:w-auto"
+              title="Collapse all processes"
+            >
+              Collapse all
+            </Button>
+          ) : null}
           <Button
             variant="outlined"
             startIcon={processRefetching ? <CircularProgress size={16} /> : <RefreshRounded />}
             disabled={processRefetching}
-            onClick={() => loadProcesses({ silent: true })}
+            onClick={() => void refreshAll()}
             className="w-full sm:w-auto"
             title="Refresh processes"
           >
@@ -454,6 +635,7 @@ export function ProjectProcessFlowsPanel({ apiBase }) {
             <Table size="small" sx={adminTableSx}>
               <TableHead>
                 <TableRow>
+                  <TableCell sx={{ width: 48 }} />
                   <TableCell>Process name</TableCell>
                   <TableCell>Engine event</TableCell>
                   <TableCell>Description</TableCell>
@@ -464,51 +646,59 @@ export function ProjectProcessFlowsPanel({ apiBase }) {
               <TableBody>
                 {processRows.length === 0 ? (
                   <TableRow>
-                    <TableCell colSpan={5} align="center" sx={{ py: 5 }}>
+                    <TableCell colSpan={COLUMN_COUNT} align="center" sx={{ py: 5 }}>
                       <Typography variant="body2" sx={adminMutedTextSx}>
-                        No processes yet. Add a process to get started.
+                        No processes yet.
                       </Typography>
                     </TableCell>
                   </TableRow>
                 ) : (
                   processRows.map((row) => {
-                    const selected = selectedProcess?.id === row.id;
+                    const open = Boolean(expanded[row.id]);
                     const binding = engineBindings.find((b) => b.triggerKey === row.triggerKey);
+                    const stepsId = `process-steps-${row.id}`;
                     return (
-                      <TableRow
-                        key={row.id}
-                        hover
-                        selected={selected}
-                        onClick={() => setSelectedProcess(row)}
-                        sx={{ cursor: "pointer" }}
-                      >
-                        <TableCell sx={{ fontWeight: selected ? 600 : 400 }}>{row.name}</TableCell>
-                        <TableCell>
-                          {binding ? (
-                            <span title={row.triggerKey || undefined}>
-                              {binding.label}
-                              {row.code ? ` · ${row.code}` : ""}
-                            </span>
-                          ) : (
-                            <span style={{ opacity: 0.7 }}>Not wired</span>
-                          )}
-                        </TableCell>
-                        <TableCell>{row.description || "—"}</TableCell>
-                        <TableCell align="right">{row.itemCount ?? 0}</TableCell>
-                        <TableCell align="right" onClick={(e) => e.stopPropagation()}>
-                          <Box sx={{ display: "inline-flex", gap: 0.25 }}>
-                            <Tooltip title="Manage process steps">
+                      <Fragment key={row.id}>
+                        <TableRow
+                          hover
+                          selected={open}
+                          onClick={() => toggleExpanded(row)}
+                          sx={{ cursor: "pointer", "& > td": { borderBottom: open ? "none" : undefined } }}
+                        >
+                          <TableCell onClick={(e) => e.stopPropagation()}>
+                            <Tooltip title={open ? "Hide steps" : "Show steps"}>
                               <IconButton
                                 size="small"
                                 color="info"
-                                aria-label={`Manage steps for ${row.name}`}
-                                onClick={() => setSelectedProcess(row)}
+                                aria-label={`${open ? "Hide" : "Show"} steps for ${row.name}`}
+                                aria-expanded={open}
+                                aria-controls={stepsId}
+                                onClick={() => toggleExpanded(row)}
                               >
-                                <ListAltRounded fontSize="small" />
+                                {open ? (
+                                  <KeyboardArrowUpRounded fontSize="small" />
+                                ) : (
+                                  <KeyboardArrowDownRounded fontSize="small" />
+                                )}
                               </IconButton>
                             </Tooltip>
+                          </TableCell>
+                          <TableCell sx={{ fontWeight: open ? 600 : 400 }}>{row.name}</TableCell>
+                          <TableCell>
+                            {binding ? (
+                              <span title={row.triggerKey || undefined}>
+                                {binding.label}
+                                {row.code ? ` · ${row.code}` : ""}
+                              </span>
+                            ) : (
+                              <span style={{ opacity: 0.7 }}>Not wired</span>
+                            )}
+                          </TableCell>
+                          <TableCell>{row.description || "—"}</TableCell>
+                          <TableCell align="right">{row.itemCount ?? 0}</TableCell>
+                          <TableCell align="right" onClick={(e) => e.stopPropagation()}>
                             {!readOnly ? (
-                              <>
+                              <Box sx={{ display: "inline-flex", gap: 0.25, whiteSpace: "nowrap" }}>
                                 <Tooltip title="Edit process">
                                   <IconButton
                                     size="small"
@@ -531,11 +721,23 @@ export function ProjectProcessFlowsPanel({ apiBase }) {
                                     </IconButton>
                                   </Tooltip>
                                 )}
-                              </>
-                            ) : null}
-                          </Box>
-                        </TableCell>
-                      </TableRow>
+                              </Box>
+                            ) : (
+                              "—"
+                            )}
+                          </TableCell>
+                        </TableRow>
+                        <TableRow>
+                          <TableCell
+                            colSpan={COLUMN_COUNT}
+                            sx={{ py: 0, ...(open ? {} : { borderBottom: "none" }) }}
+                          >
+                            <Collapse in={open} timeout="auto" unmountOnExit>
+                              <div id={stepsId}>{renderSteps(row)}</div>
+                            </Collapse>
+                          </TableCell>
+                        </TableRow>
+                      </Fragment>
                     );
                   })
                 )}
@@ -559,163 +761,9 @@ export function ProjectProcessFlowsPanel({ apiBase }) {
         />
       </Paper>
 
-      {selectedProcess ? (
-        <Paper
-          variant="outlined"
-          sx={{ p: { xs: 2, sm: 3 }, borderRadius: 2, ...adminOutlinedTableContainerSx }}
-        >
-          <Typography variant="subtitle1" sx={{ fontWeight: 600, mb: 0.5 }}>
-            Process steps — {selectedProcess.name}
-          </Typography>
-          <Typography variant="body2" sx={{ ...adminMutedTextSx, mb: 2 }}>
-            {selectedBuiltIn
-              ? "Built-in process. Steps are fixed to match the workflow engine."
-              : "Each step has a number, task description, and the organisation role required to perform it. Admin is not listed as a required role."}
-          </Typography>
-
-          <div className="mb-3 flex flex-wrap gap-2">
-            {!stepsLocked ? (
-              <Button
-                variant="contained"
-                startIcon={<AddRounded />}
-                disabled={itemRefetching || itemLoading || assignableRoles.length === 0}
-                onClick={() => {
-                  setCreateItemErrors({});
-                  setCreateItemForm({
-                    ...emptyItemForm(),
-                    stepNumber: String(nextStepNumber),
-                    projectOrgRoleId: assignableRoles[0]?.id || "",
-                  });
-                  setOpenCreateItem(true);
-                }}
-                className="w-full sm:w-auto"
-                title="Add process step"
-              >
-                Add process step
-              </Button>
-            ) : null}
-            <Button
-              variant="outlined"
-              startIcon={itemRefetching ? <CircularProgress size={16} /> : <RefreshRounded />}
-              disabled={itemRefetching || itemLoading}
-              onClick={() => selectedProcess?.id && loadItems(selectedProcess.id, { silent: true })}
-              className="w-full sm:w-auto"
-              title="Refresh process steps"
-            >
-              Refresh
-            </Button>
-          </div>
-
-          {assignableRoles.length === 0 && !stepsLocked ? (
-            <Typography variant="body2" sx={{ ...adminMutedTextSx, mb: 2 }}>
-              Add organisation roles under Roles &amp; Permissions before defining process steps.
-            </Typography>
-          ) : null}
-
-          {itemLoading ? (
-            <Box sx={{ ...adminCenteredLoadingBoxSx, minHeight: 160 }} aria-busy="true">
-              <CircularProgress size={32} sx={adminLoadingSpinnerSx} />
-            </Box>
-          ) : (
-            <>
-              <Box sx={{ position: "relative" }}>
-                <TableContainer
-                  component={Paper}
-                  variant="outlined"
-                  sx={adminOutlinedTableContainerSx}
-                >
-                  <Table size="small" sx={adminTableSx}>
-                    <TableHead>
-                      <TableRow>
-                        <TableCell>Step</TableCell>
-                        <TableCell>Task description</TableCell>
-                        <TableCell>Required role</TableCell>
-                        {!stepsLocked ? <TableCell align="right">Actions</TableCell> : null}
-                      </TableRow>
-                    </TableHead>
-                    <TableBody>
-                      {itemRows.length === 0 ? (
-                        <TableRow>
-                          <TableCell colSpan={stepsLocked ? 3 : 4} align="center" sx={{ py: 5 }}>
-                            <Typography variant="body2" sx={adminMutedTextSx}>
-                              No steps yet for this process.
-                            </Typography>
-                          </TableCell>
-                        </TableRow>
-                      ) : (
-                        itemRows.map((row) => (
-                          <TableRow key={row.id} hover>
-                            <TableCell>{row.stepNumber}</TableCell>
-                            <TableCell>{row.taskDescription}</TableCell>
-                            <TableCell>{row.requiredRole?.name || "—"}</TableCell>
-                            {!stepsLocked ? (
-                              <TableCell align="right">
-                                <Box sx={{ display: "inline-flex", gap: 0.25 }}>
-                                  <Tooltip title="Edit process step">
-                                    <IconButton
-                                      size="small"
-                                      color="primary"
-                                      aria-label={`Edit step ${row.stepNumber}`}
-                                      onClick={() => openEditItem(row)}
-                                    >
-                                      <EditRounded fontSize="small" />
-                                    </IconButton>
-                                  </Tooltip>
-                                  <Tooltip title="Delete process step">
-                                    <IconButton
-                                      size="small"
-                                      color="error"
-                                      aria-label={`Delete step ${row.stepNumber}`}
-                                      onClick={() => setDelItemRow(row)}
-                                    >
-                                      <DeleteOutlineRounded fontSize="small" />
-                                    </IconButton>
-                                  </Tooltip>
-                                </Box>
-                              </TableCell>
-                            ) : null}
-                          </TableRow>
-                        ))
-                      )}
-                    </TableBody>
-                  </Table>
-                </TableContainer>
-                {itemRefetching ? <Box sx={adminTableRefetchOverlaySx} aria-hidden /> : null}
-              </Box>
-
-              <TablePagination
-                component="div"
-                count={itemTotal}
-                page={itemPage}
-                onPageChange={(_e, p) => setItemPage(p)}
-                rowsPerPage={itemRowsPerPage}
-                onRowsPerPageChange={(e) => {
-                  setItemRowsPerPage(parseInt(e.target.value, 10));
-                  setItemPage(0);
-                }}
-                rowsPerPageOptions={[5, 10, 25]}
-              />
-            </>
-          )}
-        </Paper>
-      ) : (
-        <Paper
-          variant="outlined"
-          sx={{
-            p: { xs: 2, sm: 3 },
-            borderRadius: 2,
-            ...adminOutlinedTableContainerSx,
-          }}
-        >
-          <Typography variant="body2" sx={adminMutedTextSx}>
-            Select a process above to view or manage its steps.
-          </Typography>
-        </Paper>
-      )}
-
       <Dialog
         open={Boolean(editProcessRow)}
-        onClose={() => !editProcessBusy && setEditProcessRow(null)}
+        onClose={closeEditProcess}
         fullWidth
         maxWidth="sm"
         slotProps={{ paper: { sx: adminDialogPaperSx } }}
@@ -728,7 +776,7 @@ export function ProjectProcessFlowsPanel({ apiBase }) {
               value={editProcessForm.name}
               onChange={(e) => setEditProcessForm((f) => ({ ...f, name: e.target.value }))}
               error={Boolean(editProcessErrors.name)}
-              helperText={editProcessErrors.name || "Display label only — does not change the engine binding."}
+              helperText={editProcessErrors.name || "Display label only"}
               fullWidth
               sx={themedTextFieldSx}
             />
@@ -739,10 +787,7 @@ export function ProjectProcessFlowsPanel({ apiBase }) {
               onChange={(e) => setEditProcessForm((f) => ({ ...f, engineEvent: e.target.value }))}
               disabled={editBuiltIn}
               error={Boolean(editProcessErrors.engineEvent)}
-              helperText={
-                editProcessErrors.engineEvent ||
-                "Change or clear the submit trigger this process handles. Only one process may use each event."
-              }
+              helperText={editProcessErrors.engineEvent || "One process per event"}
               fullWidth
               sx={themedTextFieldSx}
             >
@@ -778,7 +823,7 @@ export function ProjectProcessFlowsPanel({ apiBase }) {
           </Box>
         </DialogContent>
         <DialogActions sx={{ px: 3, pb: 2 }}>
-          <Button onClick={() => setEditProcessRow(null)} disabled={editProcessBusy}>
+          <Button onClick={closeEditProcess} disabled={editProcessBusy}>
             Cancel
           </Button>
           <Button
@@ -824,13 +869,13 @@ export function ProjectProcessFlowsPanel({ apiBase }) {
       </Dialog>
 
       <Dialog
-        open={openCreateItem}
-        onClose={() => !createItemBusy && setOpenCreateItem(false)}
+        open={Boolean(createItemProcess)}
+        onClose={closeCreateItem}
         fullWidth
         maxWidth="sm"
         slotProps={{ paper: { sx: adminDialogPaperSx } }}
       >
-        <DialogTitle>Add process step</DialogTitle>
+        <DialogTitle>Add step — {createItemProcess?.name}</DialogTitle>
         <DialogContent>
           <Box component="form" noValidate sx={{ display: "grid", gap: 2, pt: 1 }}>
             <TextField
@@ -865,7 +910,7 @@ export function ProjectProcessFlowsPanel({ apiBase }) {
           </Box>
         </DialogContent>
         <DialogActions sx={{ px: 3, pb: 2 }}>
-          <Button onClick={() => setOpenCreateItem(false)} disabled={createItemBusy}>
+          <Button onClick={closeCreateItem} disabled={createItemBusy}>
             Cancel
           </Button>
           <Button
@@ -880,13 +925,13 @@ export function ProjectProcessFlowsPanel({ apiBase }) {
       </Dialog>
 
       <Dialog
-        open={Boolean(editItemRow)}
-        onClose={() => !editItemBusy && setEditItemRow(null)}
+        open={Boolean(editItem)}
+        onClose={closeEditItem}
         fullWidth
         maxWidth="sm"
         slotProps={{ paper: { sx: adminDialogPaperSx } }}
       >
-        <DialogTitle>Edit process step</DialogTitle>
+        <DialogTitle>Edit step — {editItem?.process?.name}</DialogTitle>
         <DialogContent>
           <Box component="form" noValidate sx={{ display: "grid", gap: 2, pt: 1 }}>
             <TextField
@@ -918,7 +963,7 @@ export function ProjectProcessFlowsPanel({ apiBase }) {
           </Box>
         </DialogContent>
         <DialogActions sx={{ px: 3, pb: 2 }}>
-          <Button onClick={() => setEditItemRow(null)} disabled={editItemBusy}>
+          <Button onClick={closeEditItem} disabled={editItemBusy}>
             Cancel
           </Button>
           <Button
@@ -933,19 +978,19 @@ export function ProjectProcessFlowsPanel({ apiBase }) {
       </Dialog>
 
       <Dialog
-        open={Boolean(delItemRow)}
-        onClose={() => !deleteItemBusy && setDelItemRow(null)}
+        open={Boolean(delItem)}
+        onClose={() => !deleteItemBusy && setDelItem(null)}
         slotProps={{ paper: { sx: adminDialogPaperSx } }}
       >
         <DialogTitle>Delete process step?</DialogTitle>
         <DialogContent>
           <Typography variant="body2">
-            Delete step <strong>{delItemRow?.stepNumber}</strong> ({delItemRow?.taskDescription})?
+            Delete step <strong>{delItem?.row?.stepNumber}</strong> ({delItem?.row?.taskDescription})?
             This cannot be undone.
           </Typography>
         </DialogContent>
         <DialogActions sx={{ px: 3, pb: 2 }}>
-          <Button onClick={() => setDelItemRow(null)} disabled={deleteItemBusy}>
+          <Button onClick={() => setDelItem(null)} disabled={deleteItemBusy}>
             Cancel
           </Button>
           <Button

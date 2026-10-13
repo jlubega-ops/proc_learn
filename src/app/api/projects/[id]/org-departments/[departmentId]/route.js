@@ -9,6 +9,11 @@ import {
   serializeProjectOrgDepartment,
 } from "@/lib/projects/org-departments";
 import { validateProjectOrgDepartmentPatch } from "@/lib/validation/project-org-department";
+import {
+  IN_USE_MESSAGE,
+  departmentDeleteBlocker,
+  isForeignKeyViolation,
+} from "@/lib/projects/delete-guards";
 
 export const runtime = "nodejs";
 
@@ -105,32 +110,18 @@ export async function DELETE(_request, context) {
   });
   if (!existing) return NextResponse.json({ error: "Not found." }, { status: 404 });
 
-  const assignedCount = await prisma.projectOrgUser.count({
-    where: {
-      projectId,
-      OR: [{ departmentId }, { subunitId: departmentId }],
-    },
-  });
-  if (assignedCount > 0) {
-    return NextResponse.json(
-      { error: "Remove or reassign users linked to this department before deleting it." },
-      { status: 400 },
-    );
-  }
+  const blocker = await departmentDeleteBlocker(prisma, projectId, [
+    departmentId,
+    ...existing.subunits.map((s) => s.id),
+  ]);
+  if (blocker) return NextResponse.json({ error: blocker }, { status: 409 });
 
-  if (!existing.parentId && existing.subunits.length > 0) {
-    const subAssigned = await prisma.projectOrgUser.count({
-      where: { projectId, subunitId: { in: existing.subunits.map((s) => s.id) } },
-    });
-    if (subAssigned > 0) {
-      return NextResponse.json(
-        { error: "Remove or reassign users linked to subunits before deleting this department." },
-        { status: 400 },
-      );
-    }
+  try {
+    await prisma.projectOrgDepartment.delete({ where: { id: departmentId } });
+  } catch (e) {
+    if (isForeignKeyViolation(e)) return NextResponse.json({ error: IN_USE_MESSAGE }, { status: 409 });
+    throw e;
   }
-
-  await prisma.projectOrgDepartment.delete({ where: { id: departmentId } });
 
   await writeAuditLog({
     eventType: AuditEvent.PROJECT_ORG_DEPARTMENT_DELETED,

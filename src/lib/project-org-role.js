@@ -1,3 +1,5 @@
+import { throttleSync } from "@/lib/sync-throttle";
+
 /** Default organisation role for student Organization Administrator entry. */
 export const PROJECT_ORG_ENTRY_ROLE_NAME = "Organization Administrator";
 
@@ -98,9 +100,18 @@ export function isProjectOrgAdminRole(name) {
 
 /**
  * Guarantees the Organization Administrator role exists (migrates legacy "Admin" if needed).
+ * The repair writes run at most every 10 minutes per server process.
  * @param {import("@prisma/client").PrismaClient} prisma
  */
 export async function ensureProjectOrgAdminRole(prisma) {
+  await adminRoleSync(prisma);
+  return prisma.projectOrgRole.findUnique({ where: { name: PROJECT_ORG_ENTRY_ROLE_NAME } });
+}
+
+const adminRoleSync = throttleSync(10 * 60_000, syncProjectOrgAdminRole);
+
+/** @param {import("@prisma/client").PrismaClient} prisma */
+async function syncProjectOrgAdminRole(prisma) {
   const legacy = await prisma.projectOrgRole.findUnique({
     where: { name: PROJECT_ORG_ENTRY_ROLE_LEGACY_NAME },
   });
@@ -144,10 +155,13 @@ export async function ensureProjectOrgAdminRole(prisma) {
 }
 
 /**
- * Seeds/updates the core organisation role catalogue used by the simulation.
- * @param {import("@prisma/client").PrismaClient} prisma
+ * Seeds/updates the core organisation role catalogue. Runs at most every 10 minutes per server process.
+ * @type {(prisma: import("@prisma/client").PrismaClient) => Promise<void>}
  */
-export async function ensureCoreProjectOrgRoles(prisma) {
+export const ensureCoreProjectOrgRoles = throttleSync(10 * 60_000, syncCoreProjectOrgRoles);
+
+/** @param {import("@prisma/client").PrismaClient} prisma */
+async function syncCoreProjectOrgRoles(prisma) {
   await ensureProjectOrgAdminRole(prisma);
   for (const def of CORE_ORG_ROLE_DEFINITIONS) {
     if (isProjectOrgAdminRole(def.name)) continue;

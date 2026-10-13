@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { Role } from "@prisma/client";
 import { getSessionUser, sessionActiveRole } from "@/lib/api/get-session-user";
 import { prisma } from "@/lib/prisma";
-import { canManageExaminerProject, actsAsExaminerRole } from "@/lib/projects/access";
+import { canManageExaminerProject, canTeach } from "@/lib/projects/access";
 import {
   autoEvaluateProjectAttempt,
   manualGradeProjectAttempt,
@@ -15,8 +15,8 @@ export async function POST(request, context) {
   const user = await getSessionUser();
   if (!user) return NextResponse.json({ error: "Unauthorized." }, { status: 401 });
   const activeRole = sessionActiveRole(user) || Role.STUDENT;
-  if (!actsAsExaminerRole(activeRole) && activeRole !== Role.SYSTEM_ADMIN) {
-    return NextResponse.json({ error: "Forbidden." }, { status: 403 });
+  if (!canTeach(activeRole)) {
+    return NextResponse.json({ error: "Only examiners can grade." }, { status: 403 });
   }
 
   const params = await context.params;
@@ -30,11 +30,8 @@ export async function POST(request, context) {
   if (!project || project.isPersonalOrg || project.isAttemptOrg) {
     return NextResponse.json({ error: "Not found." }, { status: 404 });
   }
-  if (
-    !canManageExaminerProject({ activeRole, project, userId: user.id }) &&
-    activeRole !== Role.SYSTEM_ADMIN
-  ) {
-    return NextResponse.json({ error: "Forbidden." }, { status: 403 });
+  if (!canManageExaminerProject({ activeRole, project, userId: user.id })) {
+    return NextResponse.json({ error: "Not found." }, { status: 404 });
   }
 
   const attempt = await prisma.projectAttempt.findFirst({

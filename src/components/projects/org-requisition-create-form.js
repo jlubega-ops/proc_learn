@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Box from "@mui/material/Box";
 import Button from "@mui/material/Button";
 import CircularProgress from "@mui/material/CircularProgress";
@@ -18,7 +18,11 @@ import { useRouter } from "next/navigation";
 import { format } from "date-fns";
 import { useAuthSession } from "@/components/providers/auth-session-provider";
 import { useToast } from "@/components/providers/toast-provider";
-import { decisionConfirmOptions, useConfirm } from "@/components/providers/confirm-provider";
+import {
+  decisionConfirmOptions,
+  discardConfirmOptions,
+  useConfirm,
+} from "@/components/providers/confirm-provider";
 import { OrgLineItemsTable } from "@/components/projects/org-line-items-table";
 import {
   adminCenteredLoadingBoxSx,
@@ -40,6 +44,7 @@ import {
 import { ORG_REF_DOC, nextOrgDocumentReference } from "@/lib/projects/org-reference";
 import { PPDA_YES_NO } from "@/lib/projects/ppda-forms";
 import { usePersistedFormDraft } from "@/hooks/use-persisted-form-draft";
+import { useApi } from "@/hooks/use-api";
 import { useProcessActivation } from "@/hooks/use-process-activation";
 import { ProcessGateTooltip } from "@/components/projects/process-gate";
 import { PROCESS_FLOW_CODES } from "@/lib/projects/process-catalogue";
@@ -58,6 +63,42 @@ function futureDateOrEmpty(value) {
   const s = typeof value === "string" ? value.slice(0, 10) : "";
   if (!/^\d{4}-\d{2}-\d{2}$/.test(s)) return "";
   return s >= format(new Date(), "yyyy-MM-dd") ? s : "";
+}
+
+/**
+ * Fields the user fills in (auto-filled references, member name and market price excluded).
+ * @param {any} f
+ */
+function requisitionEntryFingerprint(f) {
+  const form5 = f.form5 || {};
+  return JSON.stringify({
+    title: f.title,
+    category: f.category,
+    justification: f.justification,
+    needDescription: f.needDescription,
+    requiredByDate: f.requiredByDate,
+    deliveryLocation: f.deliveryLocation,
+    remarks: f.remarks,
+    procurementPlanId: f.procurementPlanId,
+    procurementPlanItemId: f.procurementPlanItemId,
+    budgetLineId: f.budgetLineId,
+    items: (Array.isArray(f.items) ? f.items : []).map((i) => [
+      i.itemName,
+      i.quantity,
+      i.unitOfMeasure,
+      i.estimatedUnitPrice,
+    ]),
+    form5: [
+      form5.multiYearContracting,
+      form5.resourcesYearOne,
+      form5.resourcesYearTwo,
+      form5.resourcesYearThree,
+      form5.resourcesYearFour,
+      form5.voteHeadNo,
+      form5.programme,
+      form5.subProgramme,
+    ],
+  });
 }
 
 /**
@@ -87,6 +128,14 @@ export function OrgRequisitionCreateForm({ projectId, requisitionId = "" }) {
     budgetLines: [],
     fyEmptyMessage: null,
   });
+  const { data: fyData, reload: reloadYears } = useApi(
+    `/api/projects/${projectId}/org-financial-years?selectable=1`,
+    { silentErrors: true },
+  );
+  const fyDataRef = useRef(fyData);
+  useEffect(() => {
+    fyDataRef.current = fyData;
+  }, [fyData]);
   const [fieldErrors, setFieldErrors] = useState(/** @type {Record<string, string>} */ ({}));
   const [marketPriceManual, setMarketPriceManual] = useState(false);
   const [form, setForm] = useState({
@@ -129,6 +178,9 @@ export function OrgRequisitionCreateForm({ projectId, requisitionId = "" }) {
   });
   const [metaReady, setMetaReady] = useState(false);
   const [orgVoteCode, setOrgVoteCode] = useState("");
+  const [entryBaseline, setEntryBaseline] = useState(/** @type {string | null} */ (null));
+  if (metaReady && entryBaseline === null) setEntryBaseline(requisitionEntryFingerprint(form));
+  const hasEntry = entryBaseline !== null && requisitionEntryFingerprint(form) !== entryBaseline;
 
   const { serverSyncState, clearDraft } = usePersistedFormDraft({
     formKey: isEdit ? `requisition:edit:${requisitionId}` : "requisition:new",
@@ -248,9 +300,6 @@ export function OrgRequisitionCreateForm({ projectId, requisitionId = "" }) {
     setLoading(true);
     try {
       const fetches = [
-        fetch(`/api/projects/${projectId}/org-financial-years?selectable=1`, {
-          credentials: "include",
-        }),
         fetch(`/api/projects/${projectId}/procurement-plans?approved=1`, {
           credentials: "include",
         }),
@@ -266,13 +315,15 @@ export function OrgRequisitionCreateForm({ projectId, requisitionId = "" }) {
           }),
         );
       }
-      const [yRes, pRes, bRes, rRes, editRes] = await Promise.all(fetches);
-      const yData = await yRes.json().catch(() => ({}));
+      const [yData, [pRes, bRes, rRes, editRes]] = await Promise.all([
+        fyDataRef.current ? Promise.resolve(fyDataRef.current) : reloadYears(),
+        Promise.all(fetches),
+      ]);
       const pData = await pRes.json().catch(() => ({}));
       const bData = await bRes.json().catch(() => ({}));
       const rData = await rRes.json().catch(() => ({}));
       const editData = editRes ? await editRes.json().catch(() => ({})) : null;
-      const nextYears = Array.isArray(yData.financialYears) ? yData.financialYears : [];
+      const nextYears = Array.isArray(yData?.financialYears) ? yData.financialYears : [];
       const dept =
         rData.actorDepartment ||
         pData.actorDepartment ||
@@ -292,7 +343,7 @@ export function OrgRequisitionCreateForm({ projectId, requisitionId = "" }) {
           (p) => p.status === "APPROVED",
         ),
         budgetLines: Array.isArray(bData.budgetLines) ? bData.budgetLines : [],
-        fyEmptyMessage: typeof yData.message === "string" ? yData.message : null,
+        fyEmptyMessage: typeof yData?.message === "string" ? yData.message : null,
       });
 
       if (isEdit) {
@@ -413,7 +464,7 @@ export function OrgRequisitionCreateForm({ projectId, requisitionId = "" }) {
       setLoading(false);
       setMetaReady(true);
     }
-  }, [projectId, isEdit, requisitionId, showToast, router, listHref, detailHref]);
+  }, [projectId, isEdit, requisitionId, reloadYears, showToast, router, listHref, detailHref]);
 
   useEffect(() => {
     void load();
@@ -788,6 +839,15 @@ export function OrgRequisitionCreateForm({ projectId, requisitionId = "" }) {
     });
   }
 
+  /** @param {import("react").MouseEvent} e */
+  async function leaveForm(e) {
+    if (!hasEntry) return;
+    e.preventDefault();
+    if (!(await confirm(discardConfirmOptions()))) return;
+    await clearDraft();
+    router.push(isEdit ? detailHref : listHref);
+  }
+
   if (loading) {
     return (
       <Box sx={adminCenteredLoadingBoxSx} aria-busy>
@@ -802,6 +862,7 @@ export function OrgRequisitionCreateForm({ projectId, requisitionId = "" }) {
         <Button
           component={Link}
           href={isEdit ? detailHref : listHref}
+          onClick={(e) => void leaveForm(e)}
           startIcon={<ArrowBackRounded />}
           variant="outlined"
           size="small"

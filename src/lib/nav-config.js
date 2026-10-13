@@ -154,7 +154,7 @@ export const SIDEBAR_SECTIONS = [
         label: "Students",
         title: "Search and manage student accounts",
         Icon: SchoolRounded,
-        anyOf: [ROLE.SYSTEM_ADMIN, ROLE.EXAMINER],
+        anyOf: [ROLE.SYSTEM_ADMIN],
       },
       {
         href: "/admin/staff",
@@ -181,6 +181,13 @@ export const SIDEBAR_SECTIONS = [
         label: "Process flow",
         title: "Organisation process flows for student project workspaces",
         Icon: AccountTreeRounded,
+        anyOf: [ROLE.SYSTEM_ADMIN, ROLE.EXAMINER],
+      },
+      {
+        href: "/project-settings/programme-processes",
+        label: "Programme processes",
+        title: "Processes each programme may use per academic year",
+        Icon: TuneRounded,
         anyOf: [ROLE.SYSTEM_ADMIN, ROLE.EXAMINER],
       },
     ],

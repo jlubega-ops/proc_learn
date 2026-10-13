@@ -18,6 +18,11 @@ import {
   ORG_USER_EXISTS_FIELD_ERRORS,
 } from "@/lib/projects/org-user-identity";
 import { orgUserNameKey } from "@/lib/projects/org-login-identity";
+import {
+  IN_USE_MESSAGE,
+  isForeignKeyViolation,
+  orgUserDeleteBlocker,
+} from "@/lib/projects/delete-guards";
 
 export const runtime = "nodejs";
 
@@ -195,7 +200,15 @@ export async function DELETE(_request, context) {
     );
   }
 
-  await prisma.projectOrgUser.delete({ where: { id: orgUserId } });
+  const blocker = await orgUserDeleteBlocker(prisma, orgUserId);
+  if (blocker) return NextResponse.json({ error: blocker }, { status: 409 });
+
+  try {
+    await prisma.projectOrgUser.delete({ where: { id: orgUserId } });
+  } catch (e) {
+    if (isForeignKeyViolation(e)) return NextResponse.json({ error: IN_USE_MESSAGE }, { status: 409 });
+    throw e;
+  }
 
   await writeAuditLog({
     eventType: AuditEvent.PROJECT_ORG_USER_DELETED,

@@ -238,7 +238,8 @@ export async function findStudentPracticeJoinOffer(db, studentUserId) {
         latest.status === ProjectAttemptStatus.RETURNED)
     );
   });
-  const project = inProgress || catalog[0];
+  const project =
+    inProgress || catalog.find((p) => !p.enrollmentKey || byProject.has(p.id));
   if (!project) return null;
 
   return {

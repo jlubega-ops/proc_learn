@@ -8,6 +8,7 @@ import {
 } from "@prisma/client";
 import { format } from "date-fns";
 import { writeAuditLog, AuditEvent } from "@/lib/audit-log";
+import { runInTx } from "@/lib/db-tx";
 import { notifyProvider } from "@/lib/projects/provider-notifications";
 import { serializeProviderSummary } from "@/lib/projects/providers";
 import { buildBidDocument } from "@/lib/projects/ppda-forms";
@@ -885,8 +886,12 @@ export async function openSolicitation(prisma, opts) {
   }
 
   const now = new Date();
-  const [updated] = await prisma.$transaction([
-    prisma.projectOrgSolicitation.update({
+  const updated = await runInTx(prisma, async (tx) => {
+    await tx.projectOrgOffer.updateMany({
+      where: { solicitationId: solicitation.id, status: OrgOfferStatus.SUBMITTED },
+      data: { status: OrgOfferStatus.OPENED, openedAt: now },
+    });
+    return tx.projectOrgSolicitation.update({
       where: { id: solicitation.id },
       data: {
         openedAt: now,
@@ -894,12 +899,8 @@ export async function openSolicitation(prisma, opts) {
         ...(opts.finalize ? { closedAt: now } : {}),
       },
       include: SOLICITATION_INCLUDE,
-    }),
-    prisma.projectOrgOffer.updateMany({
-      where: { solicitationId: solicitation.id, status: OrgOfferStatus.SUBMITTED },
-      data: { status: OrgOfferStatus.OPENED, openedAt: now },
-    }),
-  ]);
+    });
+  });
 
   await writeAuditLog({
     eventType: AuditEvent.PROJECT_ORG_SOLICITATION_OPENED,
@@ -999,20 +1000,20 @@ export async function reopenSolicitationSubmissions(prisma, opts) {
     };
   }
 
-  const [updated] = await prisma.$transaction([
-    prisma.projectOrgSolicitation.update({
+  const updated = await runInTx(prisma, async (tx) => {
+    await tx.projectOrgSolicitationInvite.updateMany({
+      where: { solicitationId: solicitation.id, noResponseAt: { not: null } },
+      data: { noResponseAt: null },
+    });
+    return tx.projectOrgSolicitation.update({
       where: { id: solicitation.id },
       data: {
         closingDate,
         ...(solicitation.originalClosingDate ? {} : { originalClosingDate: solicitation.closingDate }),
       },
       include: SOLICITATION_INCLUDE,
-    }),
-    prisma.projectOrgSolicitationInvite.updateMany({
-      where: { solicitationId: solicitation.id, noResponseAt: { not: null } },
-      data: { noResponseAt: null },
-    }),
-  ]);
+    });
+  });
 
   await writeAuditLog({
     eventType: AuditEvent.PROJECT_ORG_SOLICITATION_REOPENED,

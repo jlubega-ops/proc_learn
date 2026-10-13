@@ -5,7 +5,12 @@ import LinearProgress from "@mui/material/LinearProgress";
 import { BRAND_CARD_CLASS, BRAND_SECTION_TITLE_CLASS } from "@/lib/brand-ui";
 import { formatMarks } from "@/lib/academic/assessment-sections";
 import { ScoreSectionsList } from "@/components/academic/score-sections-list";
-import { EXPLORER_SECTION_GROUPS } from "@/lib/academic/examiner-org-explorer-sections";
+import {
+  EXPLORER_SECTION_GROUPS,
+  isExplorerSectionAvailable,
+  isProcessKeyAvailable,
+} from "@/lib/academic/examiner-org-explorer-sections";
+import { ASSESSMENT_PROCESS_CATALOGUE } from "@/lib/academic/assessment-process-catalogue";
 import { formatDurationClock, formatDurationHuman } from "@/lib/academic/attempt-timer-format";
 import { formatPrintDate, formatPrintDateTime } from "@/components/print/print-document";
 
@@ -131,13 +136,15 @@ export function participantPrintSections(data) {
   const attempt = data?.attempt;
   const timer = data?.timer;
   const score = scoreOf(data);
-  const sections = Array.isArray(data?.processScores) ? data.processScores : [];
-  const counts = data?.counts || {};
+  const available = data?.availableProcessCodes;
+  const sections = (Array.isArray(data?.processScores) ? data.processScores : []).filter((sec) =>
+    isProcessKeyAvailable(sec.sectionKey, available),
+  );
 
-  return [
+  return letterSections([
     {
       type: "fields",
-      title: "Section A: Student and attempt",
+      title: "Student and attempt",
       fields: [
         { label: "Student", value: s.displayName },
         { label: "Email", value: s.email },
@@ -158,9 +165,10 @@ export function participantPrintSections(data) {
         { label: "Result", value: resultChip(data?.marks?.passFail)?.label || null },
       ],
     },
+    availableProcessesSection(available),
     {
       type: "table",
-      title: "Section B: Marks by section",
+      title: "Marks by section",
       columns: [
         { id: "no", label: "No.", width: "5%" },
         { id: "section", label: "Section" },
@@ -183,7 +191,7 @@ export function participantPrintSections(data) {
     },
     {
       type: "table",
-      title: "Section C: Marks by item",
+      title: "Marks by item",
       columns: [
         { id: "section", label: "Section", width: "22%" },
         { id: "item", label: "Item" },
@@ -205,18 +213,141 @@ export function participantPrintSections(data) {
       ),
       empty: "No scored items.",
     },
+    orgRecordsSection(data),
+  ]);
+}
+
+/**
+ * Prefixes "Section A:", "Section B:" … in order.
+ * @param {import("@/components/print/print-document").PrintSection[]} sections
+ */
+function letterSections(sections) {
+  return sections.map((sec, i) => ({ ...sec, title: `Section ${String.fromCharCode(65 + i)}: ${sec.title}` }));
+}
+
+/**
+ * Processes the student could run (programme × year, and the examiner's list for attempts).
+ * @param {string[] | null | undefined} available
+ * @returns {import("@/components/print/print-document").PrintSection}
+ */
+function availableProcessesSection(available) {
+  const list = Array.isArray(available)
+    ? ASSESSMENT_PROCESS_CATALOGUE.filter((p) => available.includes(p.code))
+    : ASSESSMENT_PROCESS_CATALOGUE;
+  return {
+    type: "table",
+    title: "Processes available",
+    columns: [
+      { id: "no", label: "No.", width: "5%" },
+      { id: "process", label: "Process" },
+    ],
+    rows: list.map((p, i) => ({ key: p.code, cells: { no: `${i + 1}.`, process: p.name } })),
+    empty: "No processes available.",
+  };
+}
+
+/**
+ * Record counts for explorer sections whose processes were available.
+ * @param {any} data
+ * @returns {import("@/components/print/print-document").PrintSection}
+ */
+function orgRecordsSection(data) {
+  const counts = data?.counts || {};
+  const available = data?.availableProcessCodes;
+  return {
+    type: "table",
+    title: "Organisation records",
+    columns: [
+      { id: "record", label: "Record" },
+      { id: "count", label: "Count", align: "right", width: "15%" },
+    ],
+    rows: EXPLORER_SECTION_GROUPS.flatMap((g) => g.items)
+      .filter((it) => it.key !== "overview" && it.key !== "structure")
+      .filter((it) => isExplorerSectionAvailable(it.key, available))
+      .map((it) => ({ key: it.key, cells: { record: it.label, count: String(counts[it.key] ?? 0) } })),
+  };
+}
+
+const STAGE_STATE_LABELS = { done: "Done", current: "In progress", todo: "Not started" };
+
+/**
+ * Printable report of a student's default organisation (no attempt / marks).
+ * @param {any} data observation payload
+ * @returns {import("@/components/print/print-document").PrintSection[]}
+ */
+export function observationPrintSections(data) {
+  const s = data?.student || {};
+  const org = data?.organisation || {};
+  const summary = data?.progress?.summary;
+  const stages = Array.isArray(data?.progress?.stages) ? data.progress.stages : [];
+  const academicYear =
+    data?.academic?.enrollment?.academicYear?.label || data?.academic?.currentUniversityYear?.label || null;
+
+  return letterSections([
+    {
+      type: "fields",
+      title: "Student and organisation",
+      fields: [
+        { label: "Student", value: s.displayName },
+        { label: "Email", value: s.email },
+        { label: "Student no.", value: s.studentNumber },
+        { label: "Reg. no.", value: s.registrationNumber },
+        { label: "Programme", value: s.programmeShortName || s.programmeName },
+        { label: "Campus", value: s.campusLabel },
+        { label: "Year of study", value: s.yearOfStudy ? `Year ${s.yearOfStudy}` : null },
+        { label: "Academic year", value: academicYear },
+        { label: "Organisation", value: org.displayName || org.name },
+        { label: "Current stage", value: summary?.currentStageLabel || "Not started" },
+        {
+          label: "Progress",
+          value: summary ? `${summary.completedCount}/${summary.totalCount} stages (${summary.percent}%)` : null,
+        },
+      ],
+    },
+    availableProcessesSection(data?.availableProcessCodes),
     {
       type: "table",
-      title: "Section D: Organisation records",
+      title: "Progress by stage",
       columns: [
-        { id: "record", label: "Record" },
-        { id: "count", label: "Count", align: "right", width: "15%" },
+        { id: "no", label: "No.", width: "5%" },
+        { id: "stage", label: "Stage" },
+        { id: "state", label: "Status", width: "16%" },
+        { id: "detail", label: "Record status", width: "22%" },
+        { id: "date", label: "Updated", width: "16%" },
       ],
-      rows: EXPLORER_SECTION_GROUPS.flatMap((g) => g.items)
-        .filter((it) => it.key !== "overview" && it.key !== "structure")
-        .map((it) => ({ key: it.key, cells: { record: it.label, count: String(counts[it.key] ?? 0) } })),
+      rows: stages.map((st, i) => ({
+        key: st.key,
+        cells: {
+          no: `${i + 1}.`,
+          stage: st.label,
+          state: STAGE_STATE_LABELS[st.state] || st.state,
+          detail: st.status || "—",
+          date: st.occurredAt ? formatPrintDate(st.occurredAt) : "—",
+        },
+      })),
+      empty: "No stages.",
     },
-  ];
+    orgRecordsSection(data),
+  ]);
+}
+
+/** @param {any} data observation payload */
+export function observationPrintMeta(data) {
+  const org = data?.organisation || {};
+  return {
+    organisation: { name: org.displayName || org.name || "—", code: org.projectCode || null },
+    reference: data?.student?.studentNumber || null,
+    status: data?.progress?.summary?.currentStageLabel || "Not started",
+    signatures: [
+      {
+        label: "Observed by",
+        name: data?.printedBy?.name || null,
+        role: data?.printedBy?.role || null,
+        date: new Date(),
+      },
+    ],
+    fileName: `Organisation ${data?.student?.studentNumber || data?.student?.displayName || ""} ${formatPrintDate(new Date())}`.trim(),
+  };
 }
 
 /** @param {any} data */

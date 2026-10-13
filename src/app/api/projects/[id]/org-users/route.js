@@ -3,6 +3,8 @@ import { Role } from "@prisma/client";
 import { getSessionUser, sessionActiveRole } from "@/lib/api/get-session-user";
 import { writeAuditLog, AuditEvent } from "@/lib/audit-log";
 import { prisma } from "@/lib/prisma";
+import { cachedRead } from "@/lib/server-cache";
+import { cachedJson } from "@/lib/api/cached-json";
 import { authorizeProjectOrgAdmin } from "@/lib/projects/workspace-access";
 import { listAssignableProjectOrgDepartments } from "@/lib/projects/org-departments";
 import {
@@ -60,38 +62,50 @@ export async function GET(request, context) {
 
   const where = { projectId };
 
-  const [total, rows, assignableRoles, assignableDepartments] = await Promise.all([
-    prisma.projectOrgUser.count({ where }),
-    prisma.projectOrgUser.findMany({
-      where,
-      orderBy: [{ isProjectAdmin: "desc" }, { createdAt: "asc" }],
-      skip,
-      take: pageSize,
-      include: orgUserInclude,
-    }),
-    listAssignableProjectOrgRoles(prisma),
-    listAssignableProjectOrgDepartments(prisma, projectId),
-  ]);
+  const cached = await cachedRead(
+    `org-users:${projectId}:list:${page}:${pageSize}`,
+    ORG_USER_MODELS,
+    async () => {
+      const [total, rows, assignableRoles, assignableDepartments] = await Promise.all([
+        prisma.projectOrgUser.count({ where }),
+        prisma.projectOrgUser.findMany({
+          where,
+          orderBy: [{ isProjectAdmin: "desc" }, { createdAt: "asc" }],
+          skip,
+          take: pageSize,
+          include: orgUserInclude,
+        }),
+        listAssignableProjectOrgRoles(prisma),
+        listAssignableProjectOrgDepartments(prisma, projectId),
+      ]);
+      return {
+        users: rows.map((row) => serializeProjectOrgUser(row)),
+        assignableRoles,
+        assignableDepartments,
+        total,
+      };
+    },
+  );
 
-  const users = rows.map((row) => {
-    const studentNumber =
-      row.isProjectAdmin && row.linkedUserId === user.id
-        ? ownerSeed?.studentNumber || null
-        : null;
-    return serializeProjectOrgUser(row, studentNumber);
-  });
+  const users = cached.users.map((row) =>
+    row.isProjectAdmin && row.linkedUserId === user.id
+      ? { ...row, studentNumber: ownerSeed?.studentNumber || null }
+      : row,
+  );
 
-  return NextResponse.json({
+  return cachedJson(request, {
     users,
     projectCode,
-    assignableRoles,
-    assignableDepartments,
+    assignableRoles: cached.assignableRoles,
+    assignableDepartments: cached.assignableDepartments,
     page,
     pageSize,
-    total,
-    pageCount: Math.max(1, Math.ceil(total / pageSize)),
+    total: cached.total,
+    pageCount: Math.max(1, Math.ceil(cached.total / pageSize)),
   });
 }
+
+const ORG_USER_MODELS = ["ProjectOrgUser", "ProjectOrgRole", "ProjectOrgDepartment", "Project:delete"];
 
 export async function POST(request, context) {
   const user = await getSessionUser();

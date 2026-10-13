@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useState } from "react";
 import Box from "@mui/material/Box";
 import Button from "@mui/material/Button";
 import Chip from "@mui/material/Chip";
@@ -32,7 +32,11 @@ import RefreshRounded from "@mui/icons-material/RefreshRounded";
 import VisibilityRounded from "@mui/icons-material/VisibilityRounded";
 import ContentCopyRounded from "@mui/icons-material/ContentCopyRounded";
 import { format } from "date-fns";
+import { discardConfirmOptions, useConfirm } from "@/components/providers/confirm-provider";
 import { useToast } from "@/components/providers/toast-provider";
+import { useDraftState } from "@/hooks/use-draft-state";
+import { useApi } from "@/hooks/use-api";
+import { deleteSucceeded, revalidateApi } from "@/lib/api-client-cache";
 import { formatUserDisplayName } from "@/lib/user-display";
 import {
   validateProjectOrgUserInput,
@@ -75,26 +79,59 @@ function fmtDate(value) {
  */
 export function ProjectOrgUsersPanel({ projectId }) {
   const { showToast } = useToast();
-  const [rows, setRows] = useState(/** @type {any[]} */ ([]));
-  const [roles, setRoles] = useState(
-    /** @type {{ id: string; name: string }[]} */ ([]),
-  );
-  const [departments, setDepartments] = useState(/** @type {any[]} */ ([]));
-  const [loading, setLoading] = useState(true);
-  const [refetching, setRefetching] = useState(false);
   const [page, setPage] = useState(0);
   const [rowsPerPage, setRowsPerPage] = useState(10);
-  const [total, setTotal] = useState(0);
+
+  const listQuery = new URLSearchParams({ page: String(page + 1), pageSize: String(rowsPerPage) });
+  const {
+    data: listData,
+    loading,
+    refreshing: refetching,
+    reload,
+  } = useApi(`/api/projects/${projectId}/org-users?${listQuery.toString()}`, {
+    errorMessage: "Could not load user accounts.",
+  });
+  const rows = Array.isArray(listData?.users) ? listData.users : [];
+  /** @type {{ id: string; name: string }[]} */
+  const roles = Array.isArray(listData?.assignableRoles) ? listData.assignableRoles : [];
+  const departments = Array.isArray(listData?.assignableDepartments) ? listData.assignableDepartments : [];
+  const total = Number(listData?.total) || 0;
+  const projectCode = typeof listData?.projectCode === "string" ? listData.projectCode : "";
+  const load = useCallback(async () => {
+    await reload();
+    void revalidateApi(`/api/projects/${projectId}/org-`);
+  }, [projectId, reload]);
 
   const [openCreate, setOpenCreate] = useState(false);
   const [createBusy, setCreateBusy] = useState(false);
-  const [createForm, setCreateForm] = useState(emptyForm());
+  const confirm = useConfirm();
+  const [createForm, setCreateForm, createDraft] = useDraftState(
+    `org:user:${projectId}:new`,
+    {
+      ...emptyForm(),
+      projectOrgRoleId: roles[0]?.id || "",
+      departmentId: departments[0]?.id || "",
+    },
+    { enabled: openCreate, resetKey: openCreate },
+  );
   const [createErrors, setCreateErrors] = useState(
     /** @type {Record<string, string>} */ ({}),
   );
 
   const [editRow, setEditRow] = useState(/** @type {any} */ (null));
-  const [editForm, setEditForm] = useState(emptyForm());
+  const [editForm, setEditForm, editDraft] = useDraftState(
+    `org:user:${projectId}:edit:${editRow?.id || ""}`,
+    editRow
+      ? {
+          firstName: editRow.firstName || "",
+          lastName: editRow.lastName || "",
+          projectOrgRoleId: editRow.role?.id || "",
+          departmentId: editRow.department?.id || "",
+          subunitId: editRow.subunit?.id || "",
+        }
+      : emptyForm(),
+    { enabled: Boolean(editRow), resetKey: editRow?.id ?? null },
+  );
   const [editErrors, setEditErrors] = useState(
     /** @type {Record<string, string>} */ ({}),
   );
@@ -103,57 +140,6 @@ export function ProjectOrgUsersPanel({ projectId }) {
   const [delRow, setDelRow] = useState(/** @type {any} */ (null));
   const [deleteBusy, setDeleteBusy] = useState(false);
   const [viewRow, setViewRow] = useState(/** @type {any} */ (null));
-  const [projectCode, setProjectCode] = useState("");
-
-  const load = useCallback(
-    async (opts = /** @type {{ silent?: boolean }} */ ({})) => {
-      const silent = Boolean(opts.silent);
-      if (silent) setRefetching(true);
-      else setLoading(true);
-      try {
-        const qp = new URLSearchParams({
-          page: String(page + 1),
-          pageSize: String(rowsPerPage),
-        });
-        const res = await fetch(
-          `/api/projects/${projectId}/org-users?${qp.toString()}`,
-          {
-            credentials: "include",
-          },
-        );
-        const data = await res.json().catch(() => ({}));
-        if (!res.ok) {
-          showToast({
-            message:
-              typeof data.error === "string"
-                ? data.error
-                : "Could not load user accounts.",
-            severity: "error",
-          });
-          return;
-        }
-        setRows(Array.isArray(data.users) ? data.users : []);
-        setRoles(
-          Array.isArray(data.assignableRoles) ? data.assignableRoles : [],
-        );
-        setDepartments(
-          Array.isArray(data.assignableDepartments)
-            ? data.assignableDepartments
-            : [],
-        );
-        setTotal(Number(data.total) || 0);
-        setProjectCode(typeof data.projectCode === "string" ? data.projectCode : "");
-      } finally {
-        if (silent) setRefetching(false);
-        else setLoading(false);
-      }
-    },
-    [page, projectId, rowsPerPage, showToast],
-  );
-
-  useEffect(() => {
-    void load();
-  }, [load]);
 
   async function createUser() {
     const validated = validateProjectOrgUserInput(createForm);
@@ -194,8 +180,8 @@ export function ProjectOrgUsersPanel({ projectId }) {
           : "User account created.",
         severity: "success",
       });
+      createDraft.clearDraft();
       setOpenCreate(false);
-      setCreateForm(emptyForm());
       setCreateErrors({});
       await load({ silent: true });
     } finally {
@@ -205,13 +191,22 @@ export function ProjectOrgUsersPanel({ projectId }) {
 
   function openEdit(row) {
     setEditRow(row);
-    setEditForm({
-      firstName: row.firstName || "",
-      lastName: row.lastName || "",
-      projectOrgRoleId: row.role?.id || "",
-      departmentId: row.department?.id || "",
-      subunitId: row.subunit?.id || "",
-    });
+    setEditErrors({});
+  }
+
+  async function closeCreate() {
+    if (createBusy) return;
+    if (createDraft.isDirty && !(await confirm(discardConfirmOptions()))) return;
+    createDraft.clearDraft();
+    setOpenCreate(false);
+    setCreateErrors({});
+  }
+
+  async function closeEdit() {
+    if (editBusy) return;
+    if (editDraft.isDirty && !(await confirm(discardConfirmOptions()))) return;
+    editDraft.clearDraft();
+    setEditRow(null);
     setEditErrors({});
   }
 
@@ -253,6 +248,7 @@ export function ProjectOrgUsersPanel({ projectId }) {
         return;
       }
       showToast({ message: "User account updated.", severity: "success" });
+      editDraft.clearDraft();
       setEditRow(null);
       setEditErrors({});
       await load({ silent: true });
@@ -273,7 +269,7 @@ export function ProjectOrgUsersPanel({ projectId }) {
         },
       );
       const data = await res.json().catch(() => ({}));
-      if (!res.ok) {
+      if (!deleteSucceeded(res)) {
         showToast({
           message:
             typeof data.error === "string"
@@ -314,12 +310,6 @@ export function ProjectOrgUsersPanel({ projectId }) {
           }
           onClick={() => {
             setCreateErrors({});
-            setCreateForm({
-              ...emptyForm(),
-              projectOrgRoleId: roles[0]?.id || "",
-              departmentId: departments[0]?.id || "",
-              subunitId: "",
-            });
             setOpenCreate(true);
           }}
           className="w-full sm:w-auto"
@@ -512,11 +502,7 @@ export function ProjectOrgUsersPanel({ projectId }) {
         roles={roles}
         departments={departments}
         projectCode={projectCode}
-        onClose={() => {
-          if (createBusy) return;
-          setOpenCreate(false);
-          setCreateErrors({});
-        }}
+        onClose={() => void closeCreate()}
         onChange={(patch) => setCreateForm((p) => ({ ...p, ...patch }))}
         onClearError={(key) =>
           setCreateErrors((prev) => {
@@ -539,11 +525,7 @@ export function ProjectOrgUsersPanel({ projectId }) {
         departments={departments}
         savedUser={editRow}
         projectCode={projectCode}
-        onClose={() => {
-          if (editBusy) return;
-          setEditRow(null);
-          setEditErrors({});
-        }}
+        onClose={() => void closeEdit()}
         onChange={(patch) => setEditForm((p) => ({ ...p, ...patch }))}
         onClearError={(key) =>
           setEditErrors((prev) => {

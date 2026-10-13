@@ -19,9 +19,10 @@ import { ROLE } from "@/lib/roles";
 import { adminDialogPaperSx } from "@/lib/admin-mui-surfaces";
 import { BRAND_PAGE_LEAD_CLASS } from "@/lib/brand-ui";
 import { useServerSyncedCountdown } from "@/hooks/use-server-synced-countdown";
+import { startVisibleInterval } from "@/lib/visible-interval";
 
-const POLL_MS = 10_000;
-const MEMBER_POLL_MS = 15_000;
+const POLL_MS = 30_000;
+const MEMBER_POLL_MS = 30_000;
 const EXPIRY_RETRY_MS = 2_000;
 const URGENT_SECONDS = 5 * 60;
 
@@ -220,8 +221,7 @@ export function ActiveOrgContextBanner() {
     if (!enabled) return undefined;
     finishedRef.current = false;
     void poll();
-    const id = window.setInterval(() => void poll(), POLL_MS);
-    return () => window.clearInterval(id);
+    return startVisibleInterval(() => void poll(), POLL_MS);
   }, [enabled, poll]);
 
   const remaining = tickLeft ?? timer?.remainingSeconds;
@@ -378,8 +378,7 @@ export function AttemptOrgMemberBanner({ enabled = true }) {
 
   useEffect(() => {
     if (!active || !state || locked) return undefined;
-    const id = window.setInterval(() => void poll(), MEMBER_POLL_MS);
-    return () => window.clearInterval(id);
+    return startVisibleInterval(() => void poll(), MEMBER_POLL_MS);
   }, [active, state, locked, poll]);
 
   const timer = state?.timer || null;

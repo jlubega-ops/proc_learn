@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useMemo, useState } from "react";
 import Link from "next/link";
 import Box from "@mui/material/Box";
 import Button from "@mui/material/Button";
@@ -22,6 +22,8 @@ import ArrowUpwardRounded from "@mui/icons-material/ArrowUpwardRounded";
 import RefreshRounded from "@mui/icons-material/RefreshRounded";
 import SaveRounded from "@mui/icons-material/SaveRounded";
 import { useToast } from "@/components/providers/toast-provider";
+import { useApi } from "@/hooks/use-api";
+import { revalidateApi } from "@/lib/api-client-cache";
 import {
   adminCenteredLoadingBoxSx,
   adminLoadingSpinnerSx,
@@ -81,45 +83,34 @@ function normalizeSiblingOrders(units) {
  */
 export function OrganisationStructurePanel({ projectId, readOnly = false, departmentsHref }) {
   const { showToast } = useToast();
-  const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
-  const [units, setUnits] = useState(/** @type {any[]} */ ([]));
-  const [savedSignature, setSavedSignature] = useState("");
+  const [draftUnits, setDraftUnits] = useState(/** @type {any[] | null} */ (null));
 
   const deptLink =
     departmentsHref ||
     (projectId ? `/projects/${projectId}/org-admin/departments` : "/organisation/org-admin/departments");
 
-  const load = useCallback(async () => {
-    setLoading(true);
-    try {
-      const res = await fetch(
-        `/api/projects/${encodeURIComponent(projectId)}/org-departments?view=structure`,
-        { credentials: "include" },
-      );
-      const json = await res.json().catch(() => ({}));
-      if (!res.ok) {
-        showToast({
-          message:
-            typeof json.error === "string" ? json.error : "Could not load organisation structure.",
-          severity: "error",
-        });
-        setUnits([]);
-        setSavedSignature("");
-        return;
-      }
-      const list = Array.isArray(json.units) ? json.units : [];
-      const normalized = normalizeSiblingOrders(list);
-      setUnits(normalized);
-      setSavedSignature(structureSignature(normalized));
-    } finally {
-      setLoading(false);
-    }
-  }, [projectId, showToast]);
+  const { data, loading, reload, mutate } = useApi(
+    `/api/projects/${encodeURIComponent(projectId)}/org-departments?view=structure`,
+    { errorMessage: "Could not load organisation structure." },
+  );
+  const serverUnits = useMemo(
+    () => normalizeSiblingOrders(Array.isArray(data?.units) ? data.units : []),
+    [data],
+  );
+  const units = draftUnits ?? serverUnits;
+  const savedSignature = useMemo(() => structureSignature(serverUnits), [serverUnits]);
 
-  useEffect(() => {
-    void load();
-  }, [load]);
+  /** @param {(prev: any[]) => any[]} update */
+  const setUnits = useCallback(
+    (update) => setDraftUnits((prev) => update(prev ?? serverUnits)),
+    [serverUnits],
+  );
+
+  const load = useCallback(async () => {
+    setDraftUnits(null);
+    await reload();
+  }, [reload]);
 
   const dirty = useMemo(
     () => structureSignature(units) !== savedSignature,
@@ -225,9 +216,9 @@ export function OrganisationStructurePanel({ projectId, readOnly = false, depart
         return;
       }
       const list = Array.isArray(json.units) ? json.units : [];
-      const normalized = normalizeSiblingOrders(list);
-      setUnits(normalized);
-      setSavedSignature(structureSignature(normalized));
+      await mutate({ ...data, units: list }, { revalidate: false });
+      setDraftUnits(null);
+      void revalidateApi(`/api/projects/${encodeURIComponent(projectId)}/org-`);
       showToast({ message: "Organisation structure saved.", severity: "success" });
     } catch {
       showToast({ message: "Could not save structure.", severity: "error" });

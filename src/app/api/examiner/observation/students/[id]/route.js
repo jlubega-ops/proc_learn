@@ -5,6 +5,8 @@ import { getExaminerStudentObservation } from "@/lib/academic/examiner-observati
 import { writeAuditLog, AuditEvent } from "@/lib/audit-log";
 import { prisma } from "@/lib/prisma";
 import { countExplorerSections } from "@/lib/academic/examiner-org-explorer";
+import { resolveEffectiveProcessCodes } from "@/lib/academic/programme-processes";
+import { formatRoleLabel } from "@/lib/roles";
 
 export const runtime = "nodejs";
 
@@ -31,13 +33,19 @@ export async function GET(request, context) {
     const data = await getExaminerStudentObservation(id, { academicYearId, lite });
     if (lite && data.organisation?.projectId) {
       const projectId = data.organisation.projectId;
-      const [counts, project] = await Promise.all([
+      const [counts, project, availableProcessCodes] = await Promise.all([
         countExplorerSections(prisma, projectId),
         prisma.project.findUnique({ where: { id: projectId }, select: { createdAt: true } }),
+        resolveEffectiveProcessCodes(prisma, projectId).catch(() => null),
       ]);
       data.counts = counts;
+      data.availableProcessCodes = availableProcessCodes;
       data.organisation.createdAt = project?.createdAt || null;
     }
+    data.printedBy = {
+      name: `${actor.firstName || ""} ${actor.lastName || ""}`.trim() || actor.email,
+      role: formatRoleLabel(active),
+    };
 
     await writeAuditLog({
       eventType: AuditEvent.EXAMINER_STUDENT_OBSERVED,

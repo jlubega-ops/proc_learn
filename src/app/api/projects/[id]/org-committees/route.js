@@ -3,6 +3,8 @@ import { OrgCommitteeType, Role } from "@prisma/client";
 import { getSessionUser, sessionActiveRole } from "@/lib/api/get-session-user";
 import { writeAuditLog, AuditEvent } from "@/lib/audit-log";
 import { prisma } from "@/lib/prisma";
+import { cachedRead } from "@/lib/server-cache";
+import { cachedJson } from "@/lib/api/cached-json";
 import { authorizeProjectOrgAdmin } from "@/lib/projects/workspace-access";
 import { authorizeProjectOrgRead } from "@/lib/projects/project-api-auth";
 import { ORG_PERMISSION } from "@/lib/projects/org-role-permissions";
@@ -44,7 +46,7 @@ function serializeCommittee(row) {
   };
 }
 
-export async function GET(_request, context) {
+export async function GET(request, context) {
   const params = await context.params;
   const projectId = String(params?.id || "").trim();
   if (!projectId) return NextResponse.json({ error: "Invalid project id." }, { status: 400 });
@@ -60,27 +62,37 @@ export async function GET(_request, context) {
     );
   }
 
-  const rows = await prisma.projectOrgCommittee.findMany({
-    where: { projectId },
-    orderBy: [{ name: "asc" }],
-    include: {
-      members: {
-        where: { status: "ACTIVE" },
-        include: {
-          orgUser: {
-            select: { id: true, firstName: true, lastName: true, email: true },
+  const committees = await cachedRead(`org-committees:${projectId}:list`, COMMITTEE_MODELS, async () => {
+    const rows = await prisma.projectOrgCommittee.findMany({
+      where: { projectId },
+      orderBy: [{ name: "asc" }],
+      include: {
+        members: {
+          where: { status: "ACTIVE" },
+          include: {
+            orgUser: {
+              select: { id: true, firstName: true, lastName: true, email: true },
+            },
           },
         },
       },
-    },
+    });
+    return rows.map(serializeCommittee);
   });
 
-  return NextResponse.json({
-    committees: rows.map(serializeCommittee),
-    total: rows.length,
+  return cachedJson(request, {
+    committees,
+    total: committees.length,
     canManage: auth.type === "platform" && !auth.readOnly,
   });
 }
+
+const COMMITTEE_MODELS = [
+  "ProjectOrgCommittee",
+  "ProjectOrgCommitteeMember",
+  "ProjectOrgUser",
+  "Project:delete",
+];
 
 export async function POST(request, context) {
   const user = await getSessionUser();

@@ -37,10 +37,11 @@ export async function GET(request, context) {
 
   const rows = await prisma.auditLog.findMany({
     where: {
+      projectId,
       eventType: eventType ? eventType : { startsWith: ORG_EVENT_PREFIX },
     },
     orderBy: { createdAt: "desc" },
-    take: 800,
+    take: 2000,
   });
 
   const filtered = rows.filter((row) => {

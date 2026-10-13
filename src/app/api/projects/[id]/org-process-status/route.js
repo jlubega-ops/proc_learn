@@ -18,9 +18,9 @@ export async function GET(_request, context) {
     );
   }
 
-  const { active, names } = await loadProcessActivation(prisma, projectId);
+  const { active, frozen, allowed, names } = await loadProcessActivation(prisma, projectId);
   return NextResponse.json(
-    { active: [...active], names },
+    { active: [...active], frozen: [...frozen], allowed, names },
     { headers: { "Cache-Control": "private, no-store" } },
   );
 }

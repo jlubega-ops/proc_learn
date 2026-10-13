@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Box from "@mui/material/Box";
 import Button from "@mui/material/Button";
 import CircularProgress from "@mui/material/CircularProgress";
@@ -17,6 +17,7 @@ import Autocomplete from "@mui/material/Autocomplete";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useToast } from "@/components/providers/toast-provider";
+import { discardConfirmOptions, useConfirm } from "@/components/providers/confirm-provider";
 import { OrgLineItemsTable } from "@/components/projects/org-line-items-table";
 import { ActiveFinancialYearSelect } from "@/components/projects/active-financial-year-select";
 import {
@@ -51,6 +52,7 @@ import {
   validateLineText,
 } from "@/lib/projects/line-item-options";
 import { usePersistedFormDraft } from "@/hooks/use-persisted-form-draft";
+import { useApi } from "@/hooks/use-api";
 import { useProcessActivation } from "@/hooks/use-process-activation";
 import { ProcessGateTooltip } from "@/components/projects/process-gate";
 import { PROCESS_FLOW_CODES } from "@/lib/projects/process-catalogue";
@@ -101,13 +103,29 @@ function emptyItem() {
  */
 export function OrgProcurementPlanCreateForm({ projectId }) {
   const { showToast } = useToast();
+  const confirm = useConfirm();
   const router = useRouter();
   const listHref = `/projects/${projectId}/procurement-plans`;
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
-  const [years, setYears] = useState(/** @type {any[]} */ ([]));
-  const [fyEmptyMessage, setFyEmptyMessage] = useState(/** @type {string | null} */ (null));
-  const [periods, setPeriods] = useState(/** @type {any[]} */ ([]));
+  const { data: fyData, reload: reloadYears } = useApi(
+    `/api/projects/${projectId}/org-financial-years?selectable=1`,
+    { silentErrors: true },
+  );
+  const { data: periodsData } = useApi(
+    `/api/projects/${projectId}/org-planning-periods?selectable=1`,
+    { silentErrors: true },
+  );
+  const fyDataRef = useRef(fyData);
+  useEffect(() => {
+    fyDataRef.current = fyData;
+  }, [fyData]);
+  const years = useMemo(
+    () => (Array.isArray(fyData?.financialYears) ? fyData.financialYears : []),
+    [fyData],
+  );
+  const fyEmptyMessage = typeof fyData?.message === "string" ? fyData.message : null;
+  const periods = Array.isArray(periodsData?.planningPeriods) ? periodsData.planningPeriods : [];
   const [budgetLines, setBudgetLines] = useState(/** @type {any[]} */ ([]));
   const [existingRefs, setExistingRefs] = useState(/** @type {string[]} */ ([]));
   const [actorDepartment, setActorDepartment] = useState(
@@ -172,21 +190,14 @@ export function OrgProcurementPlanCreateForm({ projectId }) {
   const load = useCallback(async () => {
     setLoading(true);
     try {
-      const [pRes, yRes, perRes, bRes] = await Promise.all([
+      const [pRes, yData, bRes] = await Promise.all([
         fetch(`/api/projects/${projectId}/procurement-plans`, { credentials: "include" }),
-        fetch(`/api/projects/${projectId}/org-financial-years?selectable=1`, {
-          credentials: "include",
-        }),
-        fetch(`/api/projects/${projectId}/org-planning-periods?selectable=1`, {
-          credentials: "include",
-        }),
+        fyDataRef.current ? Promise.resolve(fyDataRef.current) : reloadYears(),
         fetch(`/api/projects/${projectId}/budgets?selectable=1`, {
           credentials: "include",
         }),
       ]);
       const pData = await pRes.json().catch(() => ({}));
-      const yData = await yRes.json().catch(() => ({}));
-      const perData = await perRes.json().catch(() => ({}));
       const bData = await bRes.json().catch(() => ({}));
       if (!pRes.ok) {
         showToast({
@@ -204,10 +215,7 @@ export function OrgProcurementPlanCreateForm({ projectId }) {
       const plans = Array.isArray(pData.plans) ? pData.plans : [];
       const refs = plans.map((p) => p.planReference).filter(Boolean);
       setExistingRefs(refs);
-      const nextYears = Array.isArray(yData.financialYears) ? yData.financialYears : [];
-      setYears(nextYears);
-      setFyEmptyMessage(typeof yData.message === "string" ? yData.message : null);
-      setPeriods(Array.isArray(perData.planningPeriods) ? perData.planningPeriods : []);
+      const nextYears = Array.isArray(yData?.financialYears) ? yData.financialYears : [];
       setBudgetLines(Array.isArray(bData.budgetLines) ? bData.budgetLines : []);
       const firstFyId = nextYears[0]?.id || "";
       const firstFyLabel = nextYears[0]?.label || "";
@@ -229,7 +237,7 @@ export function OrgProcurementPlanCreateForm({ projectId }) {
     } finally {
       setLoading(false);
     }
-  }, [projectId, showToast]);
+  }, [projectId, reloadYears, showToast]);
 
   useEffect(() => {
     void load();
@@ -380,6 +388,25 @@ export function OrgProcurementPlanCreateForm({ projectId }) {
     );
   }
 
+  const blankItem = emptyItem();
+  const hasEntry =
+    Boolean(String(form.title || "").trim() || String(form.emergencyJustification || "").trim()) ||
+    form.items.length > 1 ||
+    form.items.some((item) =>
+      Object.keys(blankItem).some(
+        (k) => String(item?.[k] ?? "") !== String(blankItem[/** @type {keyof typeof blankItem} */ (k)]),
+      ),
+    );
+
+  /** @param {import("react").MouseEvent} e */
+  const leaveForm = async (e) => {
+    if (!hasEntry) return;
+    e.preventDefault();
+    if (!(await confirm(discardConfirmOptions()))) return;
+    await clearDraft();
+    router.push(listHref);
+  };
+
   if (!canCreate) {
     return (
       <Paper variant="outlined" sx={{ p: 2, ...adminOutlinedTableContainerSx }}>
@@ -399,6 +426,7 @@ export function OrgProcurementPlanCreateForm({ projectId }) {
         <Button
           component={Link}
           href={listHref}
+          onClick={(e) => void leaveForm(e)}
           startIcon={<ArrowBackRounded />}
           variant="outlined"
           size="small"

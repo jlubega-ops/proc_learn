@@ -1,10 +1,11 @@
 import { Role } from "@prisma/client";
 
 /**
+ * Student accounts (create, edit, suspend, import, resend activation): active system admin only.
  * @param {string | null | undefined} activeRole
  */
 export function canManageStudents(activeRole) {
-  return activeRole === Role.SYSTEM_ADMIN || activeRole === Role.EXAMINER;
+  return activeRole === Role.SYSTEM_ADMIN;
 }
 
 /**

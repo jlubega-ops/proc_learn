@@ -7,7 +7,7 @@ export const runtime = "nodejs";
 
 /**
  * Examiner Scenario A roster — defaults to current Academic Year.
- * Query: q, academicYearId, campus, participation=all|students|demo
+ * Query: q, academicYearId, campus, programmeId, participation=all|students|demo
  */
 export async function GET(request) {
   const actor = await getSessionUser();
@@ -20,6 +20,7 @@ export async function GET(request) {
   const q = searchParams.get("q") || "";
   const academicYearId = searchParams.get("academicYearId") || null;
   const campus = searchParams.get("campus") || "";
+  const programmeId = searchParams.get("programmeId") || null;
   const page = searchParams.get("page") || "1";
   const pageSize = searchParams.get("pageSize") || "20";
   const participationRaw = (searchParams.get("participation") || "all").trim();
@@ -30,6 +31,7 @@ export async function GET(request) {
     q,
     academicYearId,
     campus,
+    programmeId,
     participation,
     page: Number(page),
     pageSize: Number(pageSize),
