@@ -37,6 +37,8 @@ import {
   clickableTableRowProps,
   stopRowClick,
 } from "@/lib/projects/clickable-table-row";
+import { OrgAutosavedDraftBanner } from "@/components/projects/org-autosaved-draft-banner";
+import { ORG_AUTOSAVE_FORM_KEYS } from "@/lib/projects/org-form-drafts";
 
 /**
  * @param {{ projectId: string }} p
@@ -50,6 +52,10 @@ export function OrgProcurementPlansPanel({ projectId }) {
   const [plans, setPlans] = useState(/** @type {any[]} */ ([]));
   const [canCreate, setCanCreate] = useState(false);
   const [hasApprovedBudget, setHasApprovedBudget] = useState(false);
+  const [autosaveDraft, setAutosaveDraft] = useState(
+    /** @type {{ formKey: string } | null} */ (null),
+  );
+  const createHref = `/projects/${projectId}/procurement-plans/new`;
   const processes = useProcessActivation(projectId);
   const allPlanningOff =
     !processes.isActive(PROCESS_FLOW_CODES.PROCUREMENT_PLANNING) &&
@@ -128,6 +134,15 @@ export function OrgProcurementPlansPanel({ projectId }) {
 
   return (
     <div className="space-y-3">
+      {canCreate ? (
+        <OrgAutosavedDraftBanner
+          projectId={projectId}
+          formKey={ORG_AUTOSAVE_FORM_KEYS.PROCUREMENT_PLAN_NEW}
+          continueHref={createHref}
+          noun="procurement plan"
+          onChange={setAutosaveDraft}
+        />
+      ) : null}
       <div className="flex flex-wrap items-center justify-end gap-2">
         <Button
           startIcon={<RefreshRounded />}
@@ -150,7 +165,7 @@ export function OrgProcurementPlansPanel({ projectId }) {
           >
             <Button
               component={Link}
-              href={`/projects/${projectId}/procurement-plans/new`}
+              href={createHref}
               variant="contained"
               startIcon={<AddRounded />}
               className="w-full sm:w-auto"
@@ -159,11 +174,13 @@ export function OrgProcurementPlansPanel({ projectId }) {
                   ? "An approved budget is required first."
                   : allPlanningOff
                     ? undefined
-                    : "Create a new procurement plan"
+                    : autosaveDraft
+                      ? "Continue your auto-saved plan"
+                      : "Create a new procurement plan"
               }
               disabled={allPlanningOff || !hasApprovedBudget}
             >
-              Create new
+              {autosaveDraft ? "Continue draft" : "Create new"}
             </Button>
           </ProcessGateTooltip>
         ) : null}
@@ -173,23 +190,29 @@ export function OrgProcurementPlansPanel({ projectId }) {
         <div className="space-y-3 rounded-xl border border-[color:var(--border-subtle)] bg-[color:var(--surface-elevated)] p-4">
           {canCreate && hasApprovedBudget ? (
             <>
-              <Typography sx={adminMutedTextSx}>No procurement plans yet.</Typography>
-              <ProcessGateTooltip
-                inactive={allPlanningOff}
-                title={processes.inactiveTitle(PROCESS_FLOW_CODES.PROCUREMENT_PLANNING)}
-              >
-                <Button
-                  component={Link}
-                  href={`/projects/${projectId}/procurement-plans/new`}
-                  variant="contained"
-                  startIcon={<AddRounded />}
-                  disabled={allPlanningOff}
-                  className="cursor-pointer disabled:cursor-not-allowed"
-                  title="Submit a plan for the approved budget"
+              <Typography sx={adminMutedTextSx}>
+                {autosaveDraft
+                  ? "No submitted plans yet. Continue your auto-saved draft above."
+                  : "No procurement plans yet."}
+              </Typography>
+              {!autosaveDraft ? (
+                <ProcessGateTooltip
+                  inactive={allPlanningOff}
+                  title={processes.inactiveTitle(PROCESS_FLOW_CODES.PROCUREMENT_PLANNING)}
                 >
-                  Submit plan
-                </Button>
-              </ProcessGateTooltip>
+                  <Button
+                    component={Link}
+                    href={createHref}
+                    variant="contained"
+                    startIcon={<AddRounded />}
+                    disabled={allPlanningOff}
+                    className="cursor-pointer disabled:cursor-not-allowed"
+                    title="Submit a plan for the approved budget"
+                  >
+                    Submit plan
+                  </Button>
+                </ProcessGateTooltip>
+              ) : null}
             </>
           ) : canCreate ? (
             <Typography sx={adminMutedTextSx}>No approved budget yet.</Typography>

@@ -46,6 +46,8 @@ import {
   clickableTableRowProps,
   stopRowClick,
 } from "@/lib/projects/clickable-table-row";
+import { OrgAutosavedDraftBanner } from "@/components/projects/org-autosaved-draft-banner";
+import { ORG_AUTOSAVE_FORM_KEYS } from "@/lib/projects/org-form-drafts";
 
 /**
  * Department budget list (create on /budgets/new). `readOnly` (Organization Administrator) hides
@@ -63,6 +65,10 @@ export function OrgDepartmentBudgetsPanel({ projectId, readOnly = false, detailH
   const [canCreate, setCanCreate] = useState(false);
   const [deleteTarget, setDeleteTarget] = useState(/** @type {any} */ (null));
   const [deleteBusy, setDeleteBusy] = useState(false);
+  const [autosaveDraft, setAutosaveDraft] = useState(
+    /** @type {{ formKey: string } | null} */ (null),
+  );
+  const createHref = `/projects/${projectId}/budgets/new`;
   const processes = useProcessActivation(projectId);
   const budgetingOff = !processes.isActive(PROCESS_FLOW_CODES.BUDGETING);
 
@@ -148,6 +154,15 @@ export function OrgDepartmentBudgetsPanel({ projectId, readOnly = false, detailH
 
   return (
     <div className="space-y-3">
+      {canCreate ? (
+        <OrgAutosavedDraftBanner
+          projectId={projectId}
+          formKey={ORG_AUTOSAVE_FORM_KEYS.BUDGET_NEW}
+          continueHref={createHref}
+          noun="budget"
+          onChange={setAutosaveDraft}
+        />
+      ) : null}
       <div className="flex flex-wrap items-center justify-end gap-2">
         <Button
           startIcon={<RefreshRounded />}
@@ -166,21 +181,31 @@ export function OrgDepartmentBudgetsPanel({ projectId, readOnly = false, detailH
           >
             <Button
               component={Link}
-              href={`/projects/${projectId}/budgets/new`}
+              href={createHref}
               variant="contained"
               startIcon={<AddRounded />}
               className="w-full sm:w-auto"
-              title={budgetingOff ? undefined : "Create a new department budget"}
+              title={
+                budgetingOff
+                  ? undefined
+                  : autosaveDraft
+                    ? "Continue your auto-saved budget"
+                    : "Create a new department budget"
+              }
               disabled={budgetingOff}
             >
-              Create new
+              {autosaveDraft ? "Continue draft" : "Create new"}
             </Button>
           </ProcessGateTooltip>
         ) : null}
       </div>
 
       {budgets.length === 0 ? (
-        <Typography sx={adminMutedTextSx}>No budgets yet.</Typography>
+        <Typography sx={adminMutedTextSx}>
+          {autosaveDraft
+            ? "No submitted budgets yet. Continue your auto-saved draft above."
+            : "No budgets yet."}
+        </Typography>
       ) : (
         <TableContainer component={Paper} variant="outlined" sx={adminOutlinedTableContainerSx}>
           <Table size="small" sx={adminTableSx}>

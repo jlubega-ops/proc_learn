@@ -39,6 +39,86 @@ export function measureFormDraftPayload(payload) {
 }
 
 /**
+ * Create-form keys that use hybrid autosave (crash / cross-device resume).
+ * Distinct from business-table DRAFT rows created via “Save draft”.
+ */
+export const ORG_AUTOSAVE_FORM_KEYS = {
+  BUDGET_NEW: "budget:new",
+  PROCUREMENT_PLAN_NEW: "procurement-plan:new",
+  REQUISITION_NEW: "requisition:new",
+};
+
+/**
+ * @param {unknown} payload
+ * @returns {{ title: string; reference: string; hasContent: boolean }}
+ */
+export function summarizeFormDraftPayload(payload) {
+  const p = payload && typeof payload === "object" && !Array.isArray(payload) ? payload : {};
+  const title = String(/** @type {any} */ (p).title || "").trim();
+  const reference = String(
+    /** @type {any} */ (p).planReference ||
+      /** @type {any} */ (p).budgetReference ||
+      /** @type {any} */ (p).requisitionReference ||
+      "",
+  ).trim();
+  const lines = Array.isArray(/** @type {any} */ (p).lines) ? /** @type {any} */ (p).lines : [];
+  const items = Array.isArray(/** @type {any} */ (p).items) ? /** @type {any} */ (p).items : [];
+  const lineHasText = [...lines, ...items].some((row) => {
+    if (!row || typeof row !== "object") return false;
+    return Boolean(
+      String(row.itemName || "").trim() ||
+        String(row.description || "").trim() ||
+        String(row.lineItem || "").trim(),
+    );
+  });
+  const description = String(/** @type {any} */ (p).description || "").trim();
+  // Ignore auto-generated references alone — only surface drafts the user started filling.
+  const hasContent = Boolean(title || description || lineHasText);
+  return { title, reference, hasContent };
+}
+
+/**
+ * @param {import("@prisma/client").PrismaClient} prisma
+ * @param {{
+ *   projectId: string;
+ *   actorScope: string;
+ *   formKeys?: string[] | null;
+ * }} opts
+ */
+export async function listFormDrafts(prisma, opts) {
+  const keys = Array.isArray(opts.formKeys)
+    ? opts.formKeys.map((k) => normalizeFormDraftKey(k)).filter(Boolean)
+    : [];
+  const rows = await prisma.projectOrgFormDraft.findMany({
+    where: {
+      projectId: opts.projectId,
+      actorScope: opts.actorScope,
+      ...(keys.length ? { formKey: { in: keys } } : {}),
+    },
+    orderBy: { updatedAt: "desc" },
+    select: {
+      formKey: true,
+      payload: true,
+      payloadBytes: true,
+      updatedAt: true,
+    },
+  });
+  return rows
+    .map((row) => {
+      const summary = summarizeFormDraftPayload(row.payload);
+      return {
+        formKey: row.formKey,
+        updatedAt: row.updatedAt,
+        payloadBytes: row.payloadBytes,
+        title: summary.title,
+        reference: summary.reference,
+        hasContent: summary.hasContent,
+      };
+    })
+    .filter((d) => d.hasContent);
+}
+
+/**
  * @param {import("@prisma/client").PrismaClient} prisma
  * @param {{
  *   projectId: string;

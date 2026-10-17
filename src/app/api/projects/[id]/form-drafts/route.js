@@ -5,6 +5,7 @@ import {
   deleteFormDraft,
   formDraftActorScope,
   getFormDraft,
+  listFormDrafts,
   normalizeFormDraftKey,
   upsertFormDraft,
 } from "@/lib/projects/org-form-drafts";
@@ -39,14 +40,34 @@ export async function GET(request, context) {
   const projectId = String(params?.id || "").trim();
   if (!projectId) return NextResponse.json({ error: "Invalid project id." }, { status: 400 });
 
-  const formKey = normalizeFormDraftKey(new URL(request.url).searchParams.get("formKey"));
-  if (!formKey) {
-    return NextResponse.json({ error: "A valid formKey is required." }, { status: 400 });
-  }
+  const url = new URL(request.url);
+  const formKeyParam = url.searchParams.get("formKey");
+  const keysParam = url.searchParams.get("keys");
 
   const actor = await authorizeDraftActor(projectId);
   if (!actor.ok) {
     return NextResponse.json({ error: actor.error }, { status: actor.status });
+  }
+
+  // List own autosave drafts (no full payload) — used by list pages.
+  if (!formKeyParam) {
+    const formKeys = keysParam
+      ? keysParam
+          .split(",")
+          .map((k) => normalizeFormDraftKey(k))
+          .filter(Boolean)
+      : null;
+    const drafts = await listFormDrafts(prisma, {
+      projectId,
+      actorScope: actor.actorScope,
+      formKeys,
+    });
+    return NextResponse.json({ drafts });
+  }
+
+  const formKey = normalizeFormDraftKey(formKeyParam);
+  if (!formKey) {
+    return NextResponse.json({ error: "A valid formKey is required." }, { status: 400 });
   }
 
   const draft = await getFormDraft(prisma, {

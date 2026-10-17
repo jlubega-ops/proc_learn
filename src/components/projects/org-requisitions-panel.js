@@ -42,6 +42,8 @@ import {
   clickableTableRowProps,
   stopRowClick,
 } from "@/lib/projects/clickable-table-row";
+import { OrgAutosavedDraftBanner } from "@/components/projects/org-autosaved-draft-banner";
+import { ORG_AUTOSAVE_FORM_KEYS } from "@/lib/projects/org-form-drafts";
 
 /**
  * @param {{ projectId: string }} p
@@ -57,6 +59,10 @@ export function OrgRequisitionsPanel({ projectId }) {
   const [canCreate, setCanCreate] = useState(false);
   const [hasApprovedPlan, setHasApprovedPlan] = useState(false);
   const [deleteTarget, setDeleteTarget] = useState(/** @type {any | null} */ (null));
+  const [autosaveDraft, setAutosaveDraft] = useState(
+    /** @type {{ formKey: string } | null} */ (null),
+  );
+  const createHref = `/projects/${projectId}/requisitions/new`;
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -127,6 +133,15 @@ export function OrgRequisitionsPanel({ projectId }) {
 
   return (
     <div className="space-y-3">
+      {canCreate ? (
+        <OrgAutosavedDraftBanner
+          projectId={projectId}
+          formKey={ORG_AUTOSAVE_FORM_KEYS.REQUISITION_NEW}
+          continueHref={createHref}
+          noun="requisition"
+          onChange={setAutosaveDraft}
+        />
+      ) : null}
       <div className="flex flex-wrap items-center justify-end gap-2">
         <Button
           startIcon={<RefreshRounded />}
@@ -149,7 +164,7 @@ export function OrgRequisitionsPanel({ projectId }) {
           >
             <Button
               component={Link}
-              href={`/projects/${projectId}/requisitions/new`}
+              href={createHref}
               variant="contained"
               startIcon={<AddRounded />}
               className="w-full sm:w-auto"
@@ -158,11 +173,13 @@ export function OrgRequisitionsPanel({ projectId }) {
                   ? "An approved procurement plan is required first."
                   : requisitionOff
                     ? undefined
-                    : "Create a new requisition"
+                    : autosaveDraft
+                      ? "Continue your auto-saved requisition"
+                      : "Create a new requisition"
               }
               disabled={requisitionOff || !hasApprovedPlan}
             >
-              Create new
+              {autosaveDraft ? "Continue draft" : "Create new"}
             </Button>
           </ProcessGateTooltip>
         ) : null}
@@ -172,23 +189,29 @@ export function OrgRequisitionsPanel({ projectId }) {
         <div className="space-y-3 rounded-xl border border-[color:var(--border-subtle)] bg-[color:var(--surface-elevated)] p-4">
           {canCreate && hasApprovedPlan ? (
             <>
-              <Typography sx={adminMutedTextSx}>No requisitions yet.</Typography>
-              <ProcessGateTooltip
-                inactive={requisitionOff}
-                title={processes.inactiveTitle(PROCESS_FLOW_CODES.PROCUREMENT_REQUISITION)}
-              >
-                <Button
-                  component={Link}
-                  href={`/projects/${projectId}/requisitions/new`}
-                  variant="contained"
-                  startIcon={<AddRounded />}
-                  disabled={requisitionOff}
-                  className="cursor-pointer disabled:cursor-not-allowed"
-                  title="Submit a requisition for the approved plan"
+              <Typography sx={adminMutedTextSx}>
+                {autosaveDraft
+                  ? "No submitted requisitions yet. Continue your auto-saved draft above."
+                  : "No requisitions yet."}
+              </Typography>
+              {!autosaveDraft ? (
+                <ProcessGateTooltip
+                  inactive={requisitionOff}
+                  title={processes.inactiveTitle(PROCESS_FLOW_CODES.PROCUREMENT_REQUISITION)}
                 >
-                  Submit requisition
-                </Button>
-              </ProcessGateTooltip>
+                  <Button
+                    component={Link}
+                    href={createHref}
+                    variant="contained"
+                    startIcon={<AddRounded />}
+                    disabled={requisitionOff}
+                    className="cursor-pointer disabled:cursor-not-allowed"
+                    title="Submit a requisition for the approved plan"
+                  >
+                    Submit requisition
+                  </Button>
+                </ProcessGateTooltip>
+              ) : null}
             </>
           ) : canCreate ? (
             <Typography sx={adminMutedTextSx}>No approved plan yet.</Typography>
