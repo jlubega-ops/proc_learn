@@ -15,7 +15,11 @@ import {
   startWorkflowFromTrigger,
 } from "@/lib/projects/workflow-engine";
 import { TxAbort, runInTx, withTxAbort } from "@/lib/db-tx";
-import { ORG_REF_DOC, nextOrgDocumentReference } from "@/lib/projects/org-reference";
+import {
+  ORG_REF_DOC,
+  loadProjectOrgCode,
+  nextOrgDocumentReference,
+} from "@/lib/projects/org-reference";
 import { validateLineText } from "@/lib/projects/line-item-options";
 import {
   resolveCurrentOrgSlate,
@@ -374,19 +378,31 @@ export async function createBudgetWithLines(prisma, opts) {
   }
 
   if (!budgetReference && fy && !fieldErrors.financialYearId) {
+    const orgCode = await loadProjectOrgCode(prisma, opts.projectId);
     const existing = await prisma.projectOrgBudget.findMany({
       where: { projectId: opts.projectId, budgetReference: { not: null } },
       select: { budgetReference: true },
     });
-    budgetReference = nextOrgDocumentReference(
-      existing.map((r) => r.budgetReference).filter(Boolean),
-      {
+    /** @type {string[]} */
+    const taken = existing.map((r) => r.budgetReference).filter(Boolean);
+    for (let attempt = 0; attempt < 12; attempt += 1) {
+      const candidate = nextOrgDocumentReference(taken, {
+        orgCode,
         deptCode: dept?.code,
         deptName: dept?.name,
         docType: ORG_REF_DOC.BUDGET,
         fyLabel: fy.label,
-      },
-    );
+      });
+      const clash = await prisma.projectOrgBudget.findFirst({
+        where: { projectId: opts.projectId, budgetReference: candidate },
+        select: { id: true },
+      });
+      if (!clash) {
+        budgetReference = candidate;
+        break;
+      }
+      taken.push(candidate);
+    }
   }
 
   if (budgetReference) {

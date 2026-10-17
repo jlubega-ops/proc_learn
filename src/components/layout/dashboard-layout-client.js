@@ -8,10 +8,11 @@ import DarkModeRounded from "@mui/icons-material/DarkModeRounded";
 import LightModeRounded from "@mui/icons-material/LightModeRounded";
 import LoginRounded from "@mui/icons-material/LoginRounded";
 import MenuRounded from "@mui/icons-material/MenuRounded";
+import MenuOpenRounded from "@mui/icons-material/MenuOpenRounded";
+import Tooltip from "@mui/material/Tooltip";
 import { APP_NAME, COPYRIGHT_YEAR, ORG_NAME } from "@/lib/appConfig";
 import { useAppTheme } from "@/components/providers/theme-provider";
 import { useAuthSession } from "@/components/providers/auth-session-provider";
-import { sidebarNavForContext } from "@/lib/nav-config";
 import { formatRoleLabel } from "@/lib/roles";
 import { NavbarUserMenu } from "@/components/layout/navbar-user-menu";
 import { NotificationBellMenu } from "@/components/layout/notification-bell-menu";
@@ -25,8 +26,9 @@ import { ActiveCommitteeContextBanner } from "@/components/layout/active-committ
 import { StudentModeBanner } from "@/components/academic/student-mode-banner";
 import { getDashboardPageMeta } from "@/lib/dashboard-page-meta";
 import { DASHBOARD_MAIN_INNER_CLASS } from "@/lib/dashboard-content-width";
+import { OrgOpsShortcutStrip } from "@/components/projects/org-ops-shortcut-strip";
+import { navItemIsActive as sharedNavItemIsActive, sidebarNavForContext } from "@/lib/nav-config";
 import { PROJECT_ORG_ENTRY_ROLE_NAME } from "@/lib/project-org-role";
-import { PROCUREMENT_STAGE_PAGES } from "@/lib/projects/procurement-stage-pages";
 import { ORG_PERMISSION } from "@/lib/projects/org-role-permissions";
 import { usePendingTaskCounts } from "@/hooks/use-pending-task-counts";
 import { useStudentAcademicCounts } from "@/hooks/use-student-academic-counts";
@@ -42,6 +44,29 @@ const primaryIconSx = brandIconSx;
 const childNavIconSx = { fontSize: 20, color: "var(--brand-blue)" };
 const navFocusClass =
   "focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary";
+
+const SIDEBAR_OPEN_STORAGE_KEY = "proc-learn:sidebar-open";
+
+/** @returns {boolean} */
+function readStoredSidebarOpen() {
+  if (typeof window === "undefined") return true;
+  try {
+    return window.localStorage.getItem(SIDEBAR_OPEN_STORAGE_KEY) !== "0";
+  } catch {
+    return true;
+  }
+}
+
+/**
+ * @param {boolean} open
+ */
+function persistSidebarOpen(open) {
+  try {
+    window.localStorage.setItem(SIDEBAR_OPEN_STORAGE_KEY, open ? "1" : "0");
+  } catch {
+    // ignore
+  }
+}
 
 /**
  * @param {string} pathname
@@ -69,40 +94,7 @@ function isAttemptWorldPath(pathname) {
  * @param {string} href
  */
 function navItemIsActive(navPathname, searchParams, href) {
-  const q = href.indexOf("?");
-  const base = q === -1 ? href : href.slice(0, q);
-  const query = q === -1 ? "" : href.slice(q + 1);
-
-  if (base === "/profile") {
-    if (navPathname !== "/profile") return false;
-    const wantTab = new URLSearchParams(query).get("tab") || "details";
-    const curTab = searchParams.get("tab") || "details";
-    return wantTab === curTab;
-  }
-
-  if (href === "/admin") {
-    return navPathname === "/admin";
-  }
-
-  // Organisation home / Overview must not stay active under /organisation/org-admin/*
-  if (base === "/organisation" || base === "/organisation/") {
-    return navPathname === "/organisation" || navPathname === "/organisation/";
-  }
-
-  // Dashboard home is exact-match only
-  if (base === "/") {
-    return navPathname === "/" || navPathname === "";
-  }
-
-  // "All procurements" stays active on a procurement's detail page but not on the stage sub-pages.
-  if (/\/procurements$/.test(base) && navPathname.startsWith(`${base}/`)) {
-    const next = navPathname.slice(base.length + 1).split("/")[0];
-    return !Object.hasOwn(PROCUREMENT_STAGE_PAGES, next);
-  }
-
-  if (navPathname === base) return true;
-  if (base !== "/" && navPathname.startsWith(`${base}/`)) return true;
-  return false;
+  return sharedNavItemIsActive(navPathname, searchParams, href);
 }
 
 /** @param {{ count?: number; noun?: string }} p */
@@ -385,9 +377,46 @@ export default function DashboardLayoutClient({ children }) {
   const pathname = usePathname();
   const router = useRouter();
   const [drawerOpen, setDrawerOpen] = useState(false);
+  /** Desktop sidebar visibility (persisted). Mobile uses drawerOpen only. */
+  const [desktopSidebarOpen, setDesktopSidebarOpen] = useState(true);
+  const [isMdUp, setIsMdUp] = useState(false);
   // Layout shell: sidebar + header + main + footer (single root).
   const { mode, toggleMode } = useAppTheme();
   const { session, loading: authLoading } = useAuthSession();
+
+  useEffect(() => {
+    setDesktopSidebarOpen(readStoredSidebarOpen());
+  }, []);
+
+  useEffect(() => {
+    const mq = window.matchMedia("(min-width: 768px)");
+    const sync = () => setIsMdUp(mq.matches);
+    sync();
+    mq.addEventListener("change", sync);
+    return () => mq.removeEventListener("change", sync);
+  }, []);
+
+  function setDesktopSidebar(open) {
+    setDesktopSidebarOpen(open);
+    persistSidebarOpen(open);
+  }
+
+  function toggleSidebar() {
+    if (isMdUp) {
+      setDesktopSidebar(!desktopSidebarOpen);
+      return;
+    }
+    setDrawerOpen((o) => !o);
+  }
+
+  const sidebarExpanded = isMdUp ? desktopSidebarOpen : drawerOpen;
+  const sidebarToggleLabel = isMdUp
+    ? desktopSidebarOpen
+      ? "Hide sidebar"
+      : "Show sidebar"
+    : drawerOpen
+      ? "Close menu"
+      : "Open menu";
   const activeRole = session?.activeRole ?? "STUDENT";
   const isOrgSession = session?.sessionType === "org";
   const orgProjectId = isOrgSession ? String(session?.projectId || "") : "";
@@ -501,13 +530,18 @@ export default function DashboardLayoutClient({ children }) {
       />
       <aside
         id="app-sidebar"
-        className={`fixed inset-y-0 left-0 z-50 flex h-dvh w-64 max-w-[85vw] flex-col border-r border-[color:var(--border-subtle)] bg-[color:var(--surface-sidebar)] shadow-xl transition-transform dark:shadow-none md:sticky md:top-0 md:h-screen md:translate-x-0 md:shadow-none ${
-          drawerOpen ? "translate-x-0" : "-translate-x-full md:translate-x-0"
+        className={`fixed inset-y-0 left-0 z-50 flex h-dvh w-64 max-w-[85vw] flex-col border-r border-[color:var(--border-subtle)] bg-[color:var(--surface-sidebar)] shadow-xl transition-[transform,width,margin] duration-200 dark:shadow-none md:sticky md:top-0 md:h-screen md:shadow-none ${
+          drawerOpen ? "translate-x-0" : "-translate-x-full"
+        } ${
+          desktopSidebarOpen
+            ? "md:w-64 md:translate-x-0"
+            : "md:pointer-events-none md:w-0 md:translate-x-0 md:overflow-hidden md:border-0"
         }`}
         aria-label="Main navigation"
+        aria-hidden={!sidebarExpanded}
       >
         <div className={BRAND_TRICOLOR_STRIPE_CLASS} aria-hidden />
-        <div className="flex shrink-0 items-center gap-3 border-b border-[color:var(--border-subtle)] bg-gradient-to-r from-[color-mix(in_oklab,var(--brand-blue)_6%,var(--surface-sidebar))] to-[color:var(--surface-sidebar)] px-4 py-4">
+        <div className="flex shrink-0 items-center gap-2 border-b border-[color:var(--border-subtle)] bg-gradient-to-r from-[color-mix(in_oklab,var(--brand-blue)_6%,var(--surface-sidebar))] to-[color:var(--surface-sidebar)] px-3 py-3 md:px-4 md:py-4">
           <div className="relative h-10 w-10 shrink-0 overflow-hidden rounded-md bg-white">
             <BrandLogoImage
               alt={`${ORG_NAME} logo`}
@@ -517,7 +551,7 @@ export default function DashboardLayoutClient({ children }) {
               priority
             />
           </div>
-          <div className="min-w-0">
+          <div className="min-w-0 flex-1">
             <p className="truncate text-base font-extrabold tracking-tight text-primary">
               {APP_NAME}
             </p>
@@ -525,6 +559,28 @@ export default function DashboardLayoutClient({ children }) {
               {ORG_NAME}
             </p>
           </div>
+          <Tooltip title="Hide sidebar">
+            <button
+              type="button"
+              className="hidden h-9 w-9 shrink-0 cursor-pointer items-center justify-center rounded-lg text-primary transition hover:bg-[color:var(--nav-active-bg)] md:inline-flex"
+              aria-label="Hide sidebar"
+              aria-controls="app-sidebar"
+              aria-expanded={desktopSidebarOpen}
+              onClick={() => setDesktopSidebar(false)}
+            >
+              <MenuOpenRounded aria-hidden sx={brandIconSx} />
+            </button>
+          </Tooltip>
+          <Tooltip title="Close menu">
+            <button
+              type="button"
+              className="inline-flex h-9 w-9 shrink-0 cursor-pointer items-center justify-center rounded-lg text-primary transition hover:bg-[color:var(--nav-active-bg)] md:hidden"
+              aria-label="Close menu"
+              onClick={() => setDrawerOpen(false)}
+            >
+              <MenuOpenRounded aria-hidden sx={brandIconSx} />
+            </button>
+          </Tooltip>
         </div>
 
         <nav
@@ -571,16 +627,22 @@ export default function DashboardLayoutClient({ children }) {
         <header className="sticky top-0 z-30 border-b border-[color:var(--border-subtle)] bg-[color:var(--surface-elevated)]/90 backdrop-blur-md">
           <div className={BRAND_TRICOLOR_STRIPE_CLASS} aria-hidden />
           <div className="flex h-14 items-center gap-3 px-3 md:px-6">
-          <button
-            type="button"
-            className="inline-flex h-10 w-10 items-center justify-center rounded-lg text-primary transition hover:bg-[color:var(--nav-active-bg)] md:hidden"
-            title="Open navigation menu"
-            aria-controls="app-sidebar"
-            aria-expanded={drawerOpen}
-            onClick={() => setDrawerOpen((o) => !o)}
-          >
-            <MenuRounded aria-hidden sx={brandIconSx} />
-          </button>
+          <Tooltip title={sidebarToggleLabel}>
+            <button
+              type="button"
+              className="inline-flex h-10 w-10 cursor-pointer items-center justify-center rounded-lg text-primary transition hover:bg-[color:var(--nav-active-bg)]"
+              aria-controls="app-sidebar"
+              aria-expanded={sidebarExpanded}
+              aria-label={sidebarToggleLabel}
+              onClick={() => toggleSidebar()}
+            >
+              {sidebarExpanded ? (
+                <MenuOpenRounded aria-hidden sx={brandIconSx} />
+              ) : (
+                <MenuRounded aria-hidden sx={brandIconSx} />
+              )}
+            </button>
+          </Tooltip>
           <div className="min-w-0 flex-1">
             {isStudentOrgWorld ? (
               <div className="flex min-w-0 items-center gap-3">
@@ -703,6 +765,14 @@ export default function DashboardLayoutClient({ children }) {
             <StudentModeBanner />
             <JoinAcademicYearPrompt />
             <JoinPracticeProjectPrompt />
+            {isOrgSession && orgProjectId ? (
+              <OrgOpsShortcutStrip
+                projectId={orgProjectId}
+                permissions={orgPermissions}
+                roleName={orgRoleName}
+                activeCommittee={session?.activeCommittee || null}
+              />
+            ) : null}
             {children}
           </div>
         </main>

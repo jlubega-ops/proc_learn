@@ -167,25 +167,25 @@ export const SIDEBAR_SECTIONS = [
   },
   {
     id: "project-settings",
-    label: "Project setup",
+    label: NAV_LABELS.systemSetup,
     links: [
       {
         href: "/project-settings/roles",
-        label: "Project roles",
-        title: "Organisation roles for student project workspaces",
+        label: NAV_LABELS.procurementRoles,
+        title: "Roles used in organisation workspaces",
         Icon: BadgeRounded,
         anyOf: [ROLE.SYSTEM_ADMIN, ROLE.EXAMINER],
       },
       {
         href: "/project-settings/process-flow",
-        label: "Process flow",
-        title: "Organisation process flows for student project workspaces",
+        label: NAV_LABELS.processFlow,
+        title: "Process flows used in organisation workspaces",
         Icon: AccountTreeRounded,
         anyOf: [ROLE.SYSTEM_ADMIN, ROLE.EXAMINER],
       },
       {
         href: "/project-settings/programme-processes",
-        label: "Programme processes",
+        label: NAV_LABELS.programmeProcesses,
         title: "Processes each programme may use per academic year",
         Icon: TuneRounded,
         anyOf: [ROLE.SYSTEM_ADMIN, ROLE.EXAMINER],
@@ -849,6 +849,80 @@ export function sidebarNavForContext(activeRole, pathname, options = {}) {
   }
 
   return sidebarNavForActiveRole(activeRole);
+}
+
+/**
+ * Compact top shortcut links for organisation members (ops + procurement stages).
+ * Skips Dashboard, Providers, PO processes, and org-admin workspace links.
+ *
+ * @param {string} projectId
+ * @param {string[]} [permissions]
+ * @param {{ roleName?: string | null; activeCommittee?: { id?: string; name?: string; committeeType?: string } | null }} [options]
+ * @returns {NavLinkItem[]}
+ */
+export function orgOpsShortcutLinks(projectId, permissions = [], options = {}) {
+  const sections = sidebarNavForOrgMember(projectId, permissions, options);
+  const base = `/projects/${projectId}`;
+  /** @type {NavLinkItem[]} */
+  const out = [];
+  for (const section of sections) {
+    for (const link of section.links || []) {
+      if (!link?.href) continue;
+      if (link.href === base || link.href === `${base}/`) continue;
+      if (link.href.includes("/org-admin")) continue;
+      if (link.href.includes("/providers")) continue;
+      if (link.href.includes("/procurement-processes")) continue;
+      if (Array.isArray(link.children) && link.children.length) {
+        for (const child of link.children) {
+          if (child?.href) out.push(child);
+        }
+        continue;
+      }
+      out.push(link);
+    }
+  }
+  return out;
+}
+
+/**
+ * Whether a nav href is active for the current pathname (shared by sidebar + ops strip).
+ * @param {string} navPathname
+ * @param {URLSearchParams | { get: (k: string) => string | null }} searchParams
+ * @param {string} href
+ */
+export function navItemIsActive(navPathname, searchParams, href) {
+  const q = href.indexOf("?");
+  const base = q === -1 ? href : href.slice(0, q);
+  const query = q === -1 ? "" : href.slice(q + 1);
+  const path = String(navPathname || "");
+
+  if (base === "/profile") {
+    if (path !== "/profile") return false;
+    const wantTab = new URLSearchParams(query).get("tab") || "details";
+    const curTab = searchParams.get("tab") || "details";
+    return wantTab === curTab;
+  }
+
+  if (href === "/admin") {
+    return path === "/admin";
+  }
+
+  if (base === "/organisation" || base === "/organisation/") {
+    return path === "/organisation" || path === "/organisation/";
+  }
+
+  if (base === "/") {
+    return path === "/" || path === "";
+  }
+
+  if (/\/procurements$/.test(base) && path.startsWith(`${base}/`)) {
+    const next = path.slice(base.length + 1).split("/")[0];
+    return !Object.hasOwn(PROCUREMENT_STAGE_PAGES, next);
+  }
+
+  if (path === base) return true;
+  if (base !== "/" && path.startsWith(`${base}/`)) return true;
+  return false;
 }
 
 /**

@@ -50,6 +50,7 @@ const STEP_ACTION_LABELS = [
   [/^create procurement requisition/i, "Submit requisition"],
   [/^review requisition/i, "Endorse requisition and forward"],
   [/^verify procurement plan/i, "Confirm item is in plan and forward"],
+  [/^verify funding availability and approve requisition/i, "Confirm funds and approve requisition"],
   [/^verify funding/i, "Confirm funds available and forward"],
   [/^approve requisition/i, "Approve requisition and forward"],
   [/^approve procurement method/i, "Approve procurement method"],

@@ -5,6 +5,7 @@ import { getProjectWorkspacePageContext } from "@/lib/projects/project-page-cont
 import {
   ensureProjectOrgAdminRole,
   isProjectOrgAdminRole,
+  isWorkflowOnlyOrgRole,
   PROJECT_ORG_ENTRY_ROLE_NAME,
 } from "@/lib/project-org-role";
 
@@ -29,9 +30,11 @@ export default async function ProjectRolesPage({ params }) {
 
   await ensureProjectOrgAdminRole(prisma);
 
-  const roles = await prisma.projectOrgRole.findMany({
-    orderBy: [{ sortOrder: "asc" }, { name: "asc" }],
-  });
+  const roles = (
+    await prisma.projectOrgRole.findMany({
+      orderBy: [{ sortOrder: "asc" }, { name: "asc" }],
+    })
+  ).filter((role) => !isWorkflowOnlyOrgRole(role.name));
 
   return (
     <div className="w-full space-y-4">
@@ -49,8 +52,8 @@ export default async function ProjectRolesPage({ params }) {
           ) : (
             <>
               You entered <span className="font-semibold">{project.name}</span> as{" "}
-              <span className="font-semibold text-primary">{PROJECT_ORG_ENTRY_ROLE_NAME}</span>. This
-              page is view-only — roles are managed by system admin.
+              <span className="font-semibold text-primary">{PROJECT_ORG_ENTRY_ROLE_NAME}</span>. View
+              only — managed under System setup.
             </>
           )}
         </p>

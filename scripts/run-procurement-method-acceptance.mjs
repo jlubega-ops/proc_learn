@@ -96,8 +96,7 @@ async function driveToApproved(prismaClient, users, ctx, title) {
   for (const [user, needle, decision] of [
     [users.Mary, "Review", OrgWorkflowDecision.APPROVE],
     [users.Peter, "Plan", OrgWorkflowDecision.VERIFY],
-    [users.David, "Funding", OrgWorkflowDecision.VERIFY],
-    [users.Sarah, "Approve Requisition", OrgWorkflowDecision.APPROVE],
+    [users.Sarah, "Funding Availability and Approve", OrgWorkflowDecision.APPROVE],
   ]) {
     const task = await pendingTask(user.id, needle);
     if (!task) return { ok: false, error: `Missing task for ${user.firstName}: ${needle}` };

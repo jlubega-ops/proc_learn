@@ -90,8 +90,7 @@ async function driveToApproved(users, ctx, title) {
   const steps = [
     [users.Mary, "Review", OrgWorkflowDecision.APPROVE, "HOD ok"],
     [users.Peter, "plan", OrgWorkflowDecision.VERIFY, "Plan verified"],
-    [users.David, "funding", OrgWorkflowDecision.VERIFY, "Funding ok"],
-    [users.Sarah, "Approve Requisition", OrgWorkflowDecision.APPROVE, "AO approved"],
+    [users.Sarah, "Funding Availability and Approve", OrgWorkflowDecision.APPROVE, "AO approved"],
   ];
   for (const [user, needle, decision, comment] of steps) {
     const task = await pendingTask(user.id, needle);

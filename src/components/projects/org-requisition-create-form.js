@@ -122,6 +122,7 @@ export function OrgRequisitionCreateForm({ projectId, requisitionId = "" }) {
   );
   const [actorDisplayName, setActorDisplayName] = useState("");
   const [existingRefs, setExistingRefs] = useState(/** @type {string[]} */ ([]));
+  const [orgCode, setOrgCode] = useState("");
   const [meta, setMeta] = useState({
     years: [],
     plans: [],
@@ -282,17 +283,19 @@ export function OrgRequisitionCreateForm({ projectId, requisitionId = "" }) {
     setFieldErrors({});
   }
 
-  function applyReferenceForFy(financialYearId, yearsList, dept, refs) {
+  function applyReferenceForFy(financialYearId, yearsList, dept, refs, code) {
     const list = yearsList || meta.years;
     const department = dept !== undefined ? dept : actorDepartment;
     const refList = refs !== undefined ? refs : existingRefs;
+    const org = code !== undefined ? code : orgCode;
     const fy = list.find((y) => y.id === financialYearId);
-    if (!fy?.label || !department) return;
+    if (!fy?.label && !org && !department) return;
     return nextOrgDocumentReference(refList, {
-      deptCode: department.code,
-      deptName: department.name,
+      orgCode: org,
+      deptCode: department?.code,
+      deptName: department?.name,
       docType: ORG_REF_DOC.REQUISITION,
-      fyLabel: fy.label,
+      fyLabel: fy?.label,
     });
   }
 
@@ -330,6 +333,8 @@ export function OrgRequisitionCreateForm({ projectId, requisitionId = "" }) {
         (Array.isArray(bData.budgetLines) && bData.budgetLines[0]?.department) ||
         null;
       setActorDepartment(dept);
+      const code = typeof rData.orgCode === "string" ? rData.orgCode : "";
+      setOrgCode(code);
       const actorName =
         typeof rData.actorDisplayName === "string" ? rData.actorDisplayName.trim() : "";
       setActorDisplayName(actorName);
@@ -434,10 +439,11 @@ export function OrgRequisitionCreateForm({ projectId, requisitionId = "" }) {
         const firstFyId = nextYears[0]?.id || "";
         const firstFyLabel = nextYears[0]?.label || "";
         const autoRef =
-          firstFyLabel && dept
+          firstFyLabel || code || dept
             ? nextOrgDocumentReference(refs, {
-                deptCode: dept.code,
-                deptName: dept.name,
+                orgCode: code,
+                deptCode: dept?.code,
+                deptName: dept?.name,
                 docType: ORG_REF_DOC.REQUISITION,
                 fyLabel: firstFyLabel,
               })

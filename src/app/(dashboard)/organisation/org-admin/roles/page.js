@@ -2,6 +2,7 @@ import { prisma } from "@/lib/prisma";
 import {
   ensureProjectOrgAdminRole,
   isProjectOrgAdminRole,
+  isWorkflowOnlyOrgRole,
   PROJECT_ORG_ENTRY_ROLE_NAME,
 } from "@/lib/project-org-role";
 import { requireStudentOrganisation } from "@/lib/projects/require-student-organisation";
@@ -25,16 +26,18 @@ export default async function OrganisationRolesPage() {
   }
 
   await ensureProjectOrgAdminRole(prisma);
-  const roles = await prisma.projectOrgRole.findMany({
-    orderBy: [{ sortOrder: "asc" }, { name: "asc" }],
-  });
+  const roles = (
+    await prisma.projectOrgRole.findMany({
+      orderBy: [{ sortOrder: "asc" }, { name: "asc" }],
+    })
+  ).filter((role) => !isWorkflowOnlyOrgRole(role.name));
   const title = project.organizationName || project.name;
 
   return (
     <div className={BRAND_PAGE_SHELL_CLASS}>
       <DashboardPageIntro
         title="Roles & Permissions"
-        description={`You entered ${title} as ${PROJECT_ORG_ENTRY_ROLE_NAME}. This page is view-only — roles are managed by system admin under Project settings.`}
+        description={`You entered ${title} as ${PROJECT_ORG_ENTRY_ROLE_NAME}. View only — managed under System setup.`}
       />
 
       <div className={`overflow-x-auto ${BRAND_CARD_CLASS}`}>

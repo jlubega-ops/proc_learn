@@ -185,8 +185,7 @@ async function main() {
   for (const [user, needle, decision] of [
     [users.Mary, "Review", OrgWorkflowDecision.APPROVE],
     [users.Peter, "Plan", OrgWorkflowDecision.VERIFY],
-    [users.David, "Funding", OrgWorkflowDecision.VERIFY],
-    [users.Sarah, "Approve Requisition", OrgWorkflowDecision.APPROVE],
+    [users.Sarah, "Funding Availability and Approve", OrgWorkflowDecision.APPROVE],
   ]) {
     const t = await pendingTask(user.id, needle);
     assert(Boolean(t), `task ${needle}`);

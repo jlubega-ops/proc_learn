@@ -12,22 +12,126 @@ export const PLAN_SHEET_TYPE = {
   CONSULTANCY: "CONSULTANCY",
 };
 
+/** @deprecated Prefer CIRCULAR_SHEET_OPTIONS — kept for older plan rows. */
 export const PLAN_SHEET_TYPE_LABELS = {
   GOODS_WORKS_NON_CONSULTANCY: "Goods, works and non-consultancy services",
   CONSULTANCY: "Consultancy services",
 };
 
-/** Teaching labels mapped later to Micro / Quotation / Tender. */
+/**
+ * Circular 1/2024 requirement types — each selectable independently on a plan item.
+ * @type {string[]}
+ */
+export const CIRCULAR_SHEET_OPTIONS = [
+  "Goods",
+  "Works",
+  "Non-consultancy services",
+  "Consultancy services",
+];
+
+/** @type {Record<string, string>} */
+export const CIRCULAR_SHEET_LEGACY_MAP = {
+  "Supplies (Goods)": "Goods",
+  Supplies: "Goods",
+  GOODS: "Goods",
+  WORKS: "Works",
+  "Non-consultancy": "Non-consultancy services",
+  "Non consultancy services": "Non-consultancy services",
+  Consultancy: "Consultancy services",
+  CONSULTANCY: "Consultancy services",
+  GOODS_WORKS_NON_CONSULTANCY: "Goods",
+  "Goods, works and non-consultancy services": "Goods",
+};
+
+/** Expected procurement period within the financial year (plan item). */
+export const EXPECTED_PROCUREMENT_PERIOD_OPTIONS = ["Q1", "Q2", "Q3", "Q4"];
+
+/**
+ * @param {unknown} value
+ * @returns {string}
+ */
+export function normalizeCircularSheet(value) {
+  const t = String(value || "").trim();
+  if (!t) return "";
+  if (CIRCULAR_SHEET_OPTIONS.includes(t)) return t;
+  return CIRCULAR_SHEET_LEGACY_MAP[t] || t;
+}
+
+/**
+ * Engine sheet (consultancy vs goods/works/non-consultancy milestone columns).
+ * @param {unknown} value circular sheet label or legacy PLAN_SHEET_TYPE
+ * @returns {string}
+ */
+export function normalizePlanSheetType(value) {
+  const circular = normalizeCircularSheet(value);
+  if (circular === "Consultancy services" || String(value || "").trim() === PLAN_SHEET_TYPE.CONSULTANCY) {
+    return PLAN_SHEET_TYPE.CONSULTANCY;
+  }
+  return PLAN_SHEET_TYPE.GOODS_WORKS_NON_CONSULTANCY;
+}
+
+/**
+ * Plan method options — aligned with the three execution methods the app supports
+ * (MICRO / QUOTATION / TENDER). PPDA Circular labels that map to Tender (open/restricted
+ * bidding) and Direct→Micro are normalised via {@link normalizePlanMethod}.
+ */
 export const PPDA_PLAN_METHOD_OPTIONS = [
   "Micro procurement",
-  "Request for quotations",
-  "Open domestic bidding",
-  "Open international bidding",
-  "Restricted domestic bidding",
-  "Restricted international bidding",
-  "Direct procurement",
-  "Other",
+  "Quotation",
+  "Tender",
 ];
+
+/** @type {Record<string, string>} */
+export const PPDA_PLAN_METHOD_LEGACY_MAP = {
+  "Request for quotations": "Quotation",
+  "Open domestic bidding": "Tender",
+  "Open international bidding": "Tender",
+  "Restricted domestic bidding": "Tender",
+  "Restricted international bidding": "Tender",
+  "Direct procurement": "Micro procurement",
+  Other: "Tender",
+  MICRO: "Micro procurement",
+  QUOTATION: "Quotation",
+  TENDER: "Tender",
+};
+
+/**
+ * @param {unknown} value
+ * @returns {string}
+ */
+export function normalizePlanMethod(value) {
+  const t = String(value || "").trim();
+  if (!t) return "";
+  if (PPDA_PLAN_METHOD_OPTIONS.includes(t)) return t;
+  return PPDA_PLAN_METHOD_LEGACY_MAP[t] || t;
+}
+
+/**
+ * PPDA Procurement Planning Regulations 2023 — categories of requirement
+ * (same independent options as Circular sheet).
+ * @type {string[]}
+ */
+export const PPDA_PLAN_CATEGORY_OPTIONS = CIRCULAR_SHEET_OPTIONS;
+
+/**
+ * @param {string | null | undefined} [_sheetType]
+ * @returns {string[]}
+ */
+export function categoriesForSheet() {
+  return CIRCULAR_SHEET_OPTIONS;
+}
+
+/**
+ * @param {string | null | undefined} sheetType
+ * @returns {string}
+ */
+export function defaultCategoryForSheet(sheetType) {
+  const circular = normalizeCircularSheet(sheetType);
+  if (circular && CIRCULAR_SHEET_OPTIONS.includes(circular)) return circular;
+  return normalizePlanSheetType(sheetType) === PLAN_SHEET_TYPE.CONSULTANCY
+    ? "Consultancy services"
+    : "Goods";
+}
 
 export const PPDA_CONTRACT_TYPE_OPTIONS = [
   "Lump sum",
@@ -75,16 +179,18 @@ function dateOrNull(v) {
  * @param {string} sheetType
  */
 export function normalizeCircularPlanItemFields(raw, sheetType) {
-  const sheet =
-    sheetType === PLAN_SHEET_TYPE.CONSULTANCY
-      ? PLAN_SHEET_TYPE.CONSULTANCY
-      : PLAN_SHEET_TYPE.GOODS_WORKS_NON_CONSULTANCY;
+  const circularSheet =
+    normalizeCircularSheet(raw?.circularSheet || raw?.category || raw?.sheetType || sheetType) ||
+    defaultCategoryForSheet(sheetType);
+  const sheet = normalizePlanSheetType(circularSheet || sheetType);
   const isConsultancy = sheet === PLAN_SHEET_TYPE.CONSULTANCY;
 
   return {
+    sheetType: sheet,
+    circularSheet,
     currency: trimOrNull(raw?.currency) || "UGX",
     sourceOfFunding: trimOrNull(raw?.sourceOfFunding) || DEFAULT_FUNDING_SOURCE,
-    plannedProcurementMethod: trimOrNull(raw?.plannedProcurementMethod),
+    plannedProcurementMethod: normalizePlanMethod(raw?.plannedProcurementMethod) || null,
     contractType: trimOrNull(raw?.contractType),
     prequalification: isConsultancy ? null : trimOrNull(raw?.prequalification),
     applyReservationScheme: trimOrNull(raw?.applyReservationScheme),
@@ -113,6 +219,50 @@ export function normalizeCircularPlanItemFields(raw, sheetType) {
       ? dateOrNull(raw?.proposalAwardNotificationDate)
       : null,
   };
+}
+
+/**
+ * Soft chronological checks for Circular plan milestone dates (PDE estimates;
+ * Cap. 205 advertising periods apply at solicitation, not at planning).
+ *
+ * @param {Record<string, unknown>} item
+ * @param {string} sheetType
+ * @param {string} prefix e.g. `items.0`
+ * @returns {Record<string, string>}
+ */
+export function validatePlanMilestoneOrder(item, sheetType, prefix) {
+  /** @type {Record<string, string>} */
+  const errors = {};
+  const isConsultancy =
+    normalizePlanSheetType(item?.sheetType || sheetType) === PLAN_SHEET_TYPE.CONSULTANCY;
+  /** @type {[string, string][]} */
+  const chain = isConsultancy
+    ? [
+        ["eoiInvitationDate", "eoiClosingOpeningDate"],
+        ["eoiClosingOpeningDate", "eoiShortlistApprovalDate"],
+        ["eoiShortlistApprovalDate", "proposalNotificationDate"],
+        ["proposalNotificationDate", "proposalDeadlineDate"],
+        ["proposalDeadlineDate", "proposalOpeningDate"],
+        ["proposalOpeningDate", "proposalEvalApprovalDate"],
+        ["proposalEvalApprovalDate", "proposalAwardNotificationDate"],
+        ["proposalAwardNotificationDate", "contractSigningDate"],
+        ["contractSigningDate", "completionDate"],
+      ]
+    : [
+        ["bidInvitationDate", "bidClosingOpeningDate"],
+        ["bidClosingOpeningDate", "evaluationReportApprovalDate"],
+        ["evaluationReportApprovalDate", "awardNotificationDate"],
+        ["awardNotificationDate", "contractSigningDate"],
+        ["contractSigningDate", "completionDate"],
+      ];
+  for (const [a, b] of chain) {
+    const da = dateOrNull(item?.[a]);
+    const db = dateOrNull(item?.[b]);
+    if (da && db && db < da) {
+      errors[`${prefix}.${b}`] = "Cannot be before the previous milestone.";
+    }
+  }
+  return errors;
 }
 
 /**

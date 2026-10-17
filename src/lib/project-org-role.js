@@ -87,6 +87,31 @@ export function isWorkflowOnlyOrgRole(name) {
   return WORKFLOW_ONLY_ORG_ROLE_NAMES.has(String(name || "").trim());
 }
 
+/** Names for Prisma `notIn` filters (assignable / catalogue UI). */
+export const WORKFLOW_ONLY_ORG_ROLE_NAME_LIST = [...WORKFLOW_ONLY_ORG_ROLE_NAMES];
+
+/**
+ * Block create / edit / delete of committee routing roles in the project-roles UI.
+ * @param {{ name: string; isActive?: boolean; fieldErrors?: Record<string, string> }}
+ */
+export function workflowOnlyOrgRoleGuardError({ name, isActive, fieldErrors = {} }) {
+  if (!isWorkflowOnlyOrgRole(name)) return null;
+  if (isActive === false) {
+    return {
+      error: "Committee routing roles must stay active for procurement workflows.",
+      fieldErrors: {
+        ...fieldErrors,
+        isActive: "This role is used by workflow steps and cannot be deactivated.",
+      },
+    };
+  }
+  return {
+    error:
+      "Contracts, Evaluation and Inspection committees are seating groups, not login roles. Manage them under Committees.",
+    fieldErrors,
+  };
+}
+
 /**
  * @param {unknown} name
  */

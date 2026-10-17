@@ -86,8 +86,7 @@ async function driveQuotation(users, ctx) {
   for (const [u, needle, decision] of [
     [users.Mary, "Review", OrgWorkflowDecision.APPROVE],
     [users.Peter, "plan", OrgWorkflowDecision.VERIFY],
-    [users.David, "funding", OrgWorkflowDecision.VERIFY],
-    [users.Sarah, "Approve Requisition", OrgWorkflowDecision.APPROVE],
+    [users.Sarah, "Funding Availability and Approve", OrgWorkflowDecision.APPROVE],
   ]) {
     const t = await pendingTask(u.id, needle);
     if (!t) return { ok: false, error: `Missing ${needle}` };

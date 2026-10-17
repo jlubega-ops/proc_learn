@@ -11,7 +11,11 @@ import {
 import { prepareWorkflowTriggers, startWorkflowFromTrigger } from "@/lib/projects/workflow-engine";
 import { TxAbort, isTxClient, runInTx, withTxAbort } from "@/lib/db-tx";
 import { assertMethodProcessesActive } from "@/lib/projects/process-activation";
-import { financialYearRefToken } from "@/lib/projects/org-reference";
+import {
+  ORG_REF_DOC,
+  loadProjectOrgCode,
+  nextOrgDocumentReference,
+} from "@/lib/projects/org-reference";
 import { serializePurchaseInstruction } from "@/lib/projects/purchase-instructions";
 import { serializeSolicitation, serializeOffer } from "@/lib/projects/solicitations";
 import {
@@ -379,21 +383,29 @@ export function serializeProcurement(row, opts = {}) {
  * @param {string} fyLabel
  */
 async function nextProcurementNumber(prisma, projectId, fyLabel) {
-  const year = financialYearRefToken(fyLabel);
-  const prefix = `PROC-${year}-`;
+  const orgCode = await loadProjectOrgCode(prisma, projectId);
   const existing = await prisma.projectOrgProcurement.findMany({
-    where: {
-      projectId,
-      procurementNumber: { startsWith: prefix },
-    },
+    where: { projectId },
     select: { procurementNumber: true },
   });
-  let max = 0;
-  for (const row of existing) {
-    const m = String(row.procurementNumber || "").match(/-(\d+)$/);
-    if (m) max = Math.max(max, Number(m[1]) || 0);
+  /** @type {string[]} */
+  const taken = existing.map((r) => r.procurementNumber).filter(Boolean);
+  for (let attempt = 0; attempt < 12; attempt += 1) {
+    const candidate = nextOrgDocumentReference(taken, {
+      orgCode,
+      docType: ORG_REF_DOC.PROCUREMENT,
+      fyLabel,
+    });
+    if (!taken.some((t) => String(t).toUpperCase() === candidate.toUpperCase())) {
+      return candidate;
+    }
+    taken.push(candidate);
   }
-  return `${prefix}${String(max + 1).padStart(4, "0")}`;
+  return nextOrgDocumentReference(taken, {
+    orgCode,
+    docType: ORG_REF_DOC.PROCUREMENT,
+    fyLabel,
+  });
 }
 
 /**

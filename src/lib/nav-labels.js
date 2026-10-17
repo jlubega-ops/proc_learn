@@ -28,4 +28,9 @@ export const NAV_LABELS = Object.freeze({
   committees: "Committees",
   activityLogs: "Activity Logs",
   settings: "Settings",
+  /** Platform catalogue (not examiner assessment projects). */
+  systemSetup: "System setup",
+  procurementRoles: "Procurement Roles",
+  processFlow: "Process flow",
+  programmeProcesses: "Programme processes",
 });

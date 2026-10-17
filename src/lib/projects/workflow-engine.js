@@ -28,6 +28,7 @@ import {
   notifyOrgUsers,
   OrgNotificationType,
 } from "@/lib/projects/org-notifications";
+import { createNextProcessHandoff } from "@/lib/projects/next-process-handoffs";
 
 /**
  * @param {import("@prisma/client").PrismaClient} prisma
@@ -245,8 +246,8 @@ export async function createTasksForStep(prisma, opts) {
         projectId: opts.projectId,
         recipients: eligible,
         type: OrgNotificationType.WORKFLOW_TASK,
-        title: "New organisation task",
-        body: `${title} — assigned to ${roleName}. Open My Tasks to action.`,
+        title: "Next step ready",
+        body: `${title} is ready for your action. Open My Tasks to continue.`,
         linkUrl: `/projects/${opts.projectId}/tasks`,
         relatedEntityType: "workflow_instance",
         relatedEntityId: opts.instanceId,
@@ -1463,12 +1464,56 @@ export async function completeWorkflowTask(prisma, opts) {
         instance.budget?.createdByOrgUserId ||
         instance.procurement?.officerOrgUserId ||
         null;
-      if (creatorId && creatorId !== opts.actorOrgUserId) {
-        const isFinalApprove =
-          (instance.budget && newBudgetStatus === OrgBudgetStatus.APPROVED) ||
-          (instance.procurementPlan &&
-            newPlanStatus === OrgProcurementPlanStatus.APPROVED) ||
-          (instance.requisition && newReqStatus === OrgRequisitionStatus.APPROVED);
+      const budgetJustApproved =
+        Boolean(instance.budget) &&
+        newBudgetStatus === OrgBudgetStatus.APPROVED &&
+        previousStatus !== OrgBudgetStatus.APPROVED;
+      const planJustApproved =
+        Boolean(instance.procurementPlan) &&
+        newPlanStatus === OrgProcurementPlanStatus.APPROVED &&
+        previousStatus !== OrgProcurementPlanStatus.APPROVED;
+      const reqJustApproved =
+        Boolean(instance.requisition) &&
+        newReqStatus === OrgRequisitionStatus.APPROVED &&
+        previousStatus !== OrgRequisitionStatus.APPROVED;
+      const isFinalApprove = budgetJustApproved || planJustApproved || reqJustApproved;
+
+      // Budget/plan final approve: department handoff (My Tasks + notify) covers the creator.
+      // Other advances / requisition approve: notify the creator only.
+      if (budgetJustApproved || planJustApproved) {
+        try {
+          if (budgetJustApproved) {
+            await createNextProcessHandoff(prisma, {
+              projectId: task.projectId,
+              instanceId: instance.id,
+              departmentId: instance.budget?.departmentId || instance.budget?.department?.id || null,
+              recordLabel: instance.budget?.title || "Approved budget",
+              kind: "SUBMIT_PLAN",
+              excludeOrgUserId: opts.actorOrgUserId,
+              includeOrgUserId: creatorId,
+              relatedEntityType: "budget",
+              relatedEntityId: instance.budget.id,
+            });
+          } else {
+            await createNextProcessHandoff(prisma, {
+              projectId: task.projectId,
+              instanceId: instance.id,
+              departmentId:
+                instance.procurementPlan?.departmentId ||
+                instance.procurementPlan?.department?.id ||
+                null,
+              recordLabel: instance.procurementPlan?.title || "Approved plan",
+              kind: "SUBMIT_REQUISITION",
+              excludeOrgUserId: opts.actorOrgUserId,
+              includeOrgUserId: creatorId,
+              relatedEntityType: "procurement_plan",
+              relatedEntityId: instance.procurementPlan.id,
+            });
+          }
+        } catch {
+          // Non-fatal
+        }
+      } else if (creatorId && creatorId !== opts.actorOrgUserId) {
         try {
           const creator = await prisma.projectOrgUser.findUnique({
             where: { id: creatorId },
@@ -1481,11 +1526,15 @@ export async function completeWorkflowTask(prisma, opts) {
               type: isFinalApprove
                 ? OrgNotificationType.WORKFLOW_APPROVED
                 : OrgNotificationType.WORKFLOW_DECISION,
-              title: isFinalApprove ? "Approved" : "Workflow update",
-              body: isFinalApprove
-                ? `${task.title} was approved by ${opts.actorRoleName || "Accounting Officer"}.`
-                : `${task.title}: ${opts.actorRoleName || "Reviewer"} recorded ${decision}. Status is now ${newEntityStatus}.`,
-              linkUrl: `/projects/${task.projectId}/tasks`,
+              title: reqJustApproved ? "Requisition approved" : isFinalApprove ? "Approved" : "Workflow update",
+              body: reqJustApproved
+                ? `${instance.requisition?.title || "Requisition"} is approved. Procurement method selection is next.`
+                : isFinalApprove
+                  ? `${task.title} was approved by ${opts.actorRoleName || "Accounting Officer"}.`
+                  : `${task.title}: ${opts.actorRoleName || "Reviewer"} recorded ${decision}. Status is now ${newEntityStatus}.`,
+              linkUrl: reqJustApproved
+                ? `/projects/${task.projectId}/requisitions/${instance.requisition.id}`
+                : `/projects/${task.projectId}/tasks`,
               relatedEntityType: instance.entityType,
               relatedEntityId: instance.entityId,
             });

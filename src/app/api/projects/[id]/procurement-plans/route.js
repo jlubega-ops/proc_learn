@@ -81,6 +81,24 @@ export async function GET(request, context) {
     actorDepartment = dept;
   }
 
+  let hasApprovedBudget = false;
+  if (auth.type === "org" && auth.orgUser?.departmentId) {
+    const { OrgBudgetStatus } = await import("@prisma/client");
+    const approved = await prisma.projectOrgBudget.count({
+      where: {
+        projectId,
+        departmentId: auth.orgUser.departmentId,
+        status: OrgBudgetStatus.APPROVED,
+      },
+    });
+    hasApprovedBudget = approved > 0;
+  }
+
+  const projectMeta = await prisma.project.findUnique({
+    where: { id: projectId },
+    select: { projectCode: true },
+  });
+
   return NextResponse.json({
     plans: plans.map((row) => {
       const ctx = ctxMap.get(row.id) || {};
@@ -93,7 +111,9 @@ export async function GET(request, context) {
     }),
     total: plans.length,
     canCreate: auth.type === "org" && Boolean(auth.orgUser?.departmentId),
+    hasApprovedBudget,
     actorDepartment,
+    orgCode: projectMeta?.projectCode || null,
   });
 }
 

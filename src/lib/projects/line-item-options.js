@@ -66,3 +66,12 @@ export function unitOptionsFor(current) {
   const v = String(current || "").trim();
   return v && !UNITS_OF_MEASURE.includes(v) ? [v, ...UNITS_OF_MEASURE] : UNITS_OF_MEASURE;
 }
+
+/**
+ * Funding source options including a legacy value that is not in the list.
+ * @param {string | null | undefined} current
+ */
+export function fundingSourcesFor(current) {
+  const v = String(current || "").trim();
+  return v && !FUNDING_SOURCES.includes(v) ? [v, ...FUNDING_SOURCES] : FUNDING_SOURCES;
+}

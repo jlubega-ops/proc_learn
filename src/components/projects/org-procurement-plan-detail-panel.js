@@ -55,6 +55,54 @@ function planItemFunding(row) {
   return row.circularFields?.sourceOfFunding || "—";
 }
 
+/** @param {any} row */
+function planItemMethod(row) {
+  return row.circularFields?.plannedProcurementMethod || null;
+}
+
+/** @param {any} row */
+function planItemContractType(row) {
+  return row.circularFields?.contractType || null;
+}
+
+/**
+ * Milestone dates for print — omit blanks.
+ * @param {any} item
+ * @param {number} index
+ */
+function planItemMilestonePrintSection(item, index) {
+  const cf = item?.circularFields || {};
+  /** @type {{ label: string; key: string }[]} */
+  const candidates = [
+    { label: "Bid invitation date", key: "bidInvitationDate" },
+    { label: "Bid closing / opening", key: "bidClosingOpeningDate" },
+    { label: "Eval report approval", key: "evaluationReportApprovalDate" },
+    { label: "Award notification", key: "awardNotificationDate" },
+    { label: "EOI invitation", key: "eoiInvitationDate" },
+    { label: "EOI closing / opening", key: "eoiClosingOpeningDate" },
+    { label: "Shortlist approval", key: "eoiShortlistApprovalDate" },
+    { label: "Proposal notification", key: "proposalNotificationDate" },
+    { label: "Proposal deadline", key: "proposalDeadlineDate" },
+    { label: "Proposal opening", key: "proposalOpeningDate" },
+    { label: "Proposal eval approval", key: "proposalEvalApprovalDate" },
+    { label: "Proposal award notification", key: "proposalAwardNotificationDate" },
+    { label: "Contract signing", key: "contractSigningDate" },
+    { label: "Completion date", key: "completionDate" },
+  ];
+  const fields = candidates
+    .filter((c) => cf[c.key])
+    .map((c) => ({
+      label: c.label,
+      value: formatPrintDate(cf[c.key]),
+    }));
+  if (!fields.length) return null;
+  return {
+    type: "fields",
+    title: `Item ${index + 1} milestones: ${item.title || "Plan item"}`,
+    fields,
+  };
+}
+
 const PLAN_ITEM_COLUMNS = [
   {
     id: "index",
@@ -65,8 +113,8 @@ const PLAN_ITEM_COLUMNS = [
   { id: "title", label: "Title" },
   {
     id: "category",
-    label: "Category",
-    render: (row) => row.category || "—",
+    label: "Circular sheet",
+    render: (row) => row.circularFields?.circularSheet || row.category || "—",
   },
   {
     id: "quantity",
@@ -86,6 +134,11 @@ const PLAN_ITEM_COLUMNS = [
     render: planItemFunding,
   },
   {
+    id: "method",
+    label: "Method",
+    render: (row) => planItemMethod(row) || "—",
+  },
+  {
     id: "budgetLine",
     label: "Budget line",
     render: (row) => (row.budgetLine?.code ? row.budgetLine.code : "—"),
@@ -99,7 +152,8 @@ function planPrintSections(plan) {
   const currency = plan.items?.[0]?.circularFields?.currency || DEFAULT_CURRENCY;
   const dept = plan.department;
   const period = plan.planningPeriod;
-  return [
+  /** @type {any[]} */
+  const sections = [
     {
       type: "fields",
       title: "Section A: Plan details",
@@ -115,7 +169,6 @@ function planPrintSections(plan) {
         ...(plan.emergencyJustification
           ? [{ label: "Emergency justification", value: plan.emergencyJustification, full: true }]
           : []),
-        { label: "Circular sheet", value: SHEET_LABELS[plan.sheetType] || plan.sheetType },
         {
           label: "Planning period",
           value:
@@ -151,12 +204,15 @@ function planPrintSections(plan) {
       columns: [
         { id: "no", label: "No.", width: "5%" },
         { id: "item", label: "Item" },
-        { id: "category", label: "Category" },
+        { id: "sheet", label: "Circular sheet" },
         { id: "quantity", label: "Qty", align: "right" },
         { id: "unit", label: "Unit" },
         { id: "unitPrice", label: `Unit price (${currency})`, align: "right" },
         { id: "total", label: `Total (${currency})`, align: "right" },
         { id: "funding", label: "Source of funding" },
+        { id: "method", label: "Procurement method" },
+        { id: "contractType", label: "Contract type" },
+        { id: "completion", label: "Completion date" },
         { id: "budgetLine", label: "Budget line" },
         { id: "period", label: "Period" },
       ],
@@ -166,12 +222,22 @@ function planPrintSections(plan) {
         cells: {
           no: `${idx + 1}.`,
           item: item.title || "—",
-          category: item.category || "—",
+          sheet:
+            item.circularFields?.circularSheet ||
+            item.category ||
+            SHEET_LABELS[item.circularFields?.sheetType] ||
+            SHEET_LABELS[plan.sheetType] ||
+            "—",
           quantity: formatMoneyAmount(item.quantity) || "—",
           unit: item.unitOfMeasure || "—",
           unitPrice: formatMoneyAmount(item.estimatedUnitPrice) || "—",
           total: formatMoneyAmount(item.estimatedTotal) || "—",
           funding: planItemFunding(item),
+          method: planItemMethod(item) || "—",
+          contractType: planItemContractType(item) || "—",
+          completion: item.circularFields?.completionDate
+            ? formatPrintDate(item.circularFields.completionDate)
+            : "—",
           budgetLine: item.budgetLine?.code || "—",
           period: item.expectedProcurementPeriod || "—",
         },
@@ -180,6 +246,13 @@ function planPrintSections(plan) {
       footer: { label: "Grand total", value: formatMoneyUGX(plan.totals?.estimatedTotal) },
     },
   ];
+
+  for (let i = 0; i < (plan.items || []).length; i += 1) {
+    const milestone = planItemMilestonePrintSection(plan.items[i], i);
+    if (milestone) sections.push(milestone);
+  }
+
+  return sections;
 }
 
 /**

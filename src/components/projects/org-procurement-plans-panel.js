@@ -49,6 +49,7 @@ export function OrgProcurementPlansPanel({ projectId }) {
   const [busy, setBusy] = useState(false);
   const [plans, setPlans] = useState(/** @type {any[]} */ ([]));
   const [canCreate, setCanCreate] = useState(false);
+  const [hasApprovedBudget, setHasApprovedBudget] = useState(false);
   const processes = useProcessActivation(projectId);
   const allPlanningOff =
     !processes.isActive(PROCESS_FLOW_CODES.PROCUREMENT_PLANNING) &&
@@ -75,6 +76,7 @@ export function OrgProcurementPlansPanel({ projectId }) {
       }
       setPlans(Array.isArray(pData.plans) ? pData.plans : []);
       setCanCreate(Boolean(pData.canCreate));
+      setHasApprovedBudget(Boolean(pData.hasApprovedBudget));
     } finally {
       setLoading(false);
     }
@@ -138,8 +140,12 @@ export function OrgProcurementPlansPanel({ projectId }) {
         </Button>
         {canCreate ? (
           <ProcessGateTooltip
-            inactive={allPlanningOff}
-            title={processes.inactiveTitle(PROCESS_FLOW_CODES.PROCUREMENT_PLANNING)}
+            inactive={allPlanningOff || !hasApprovedBudget}
+            title={
+              !hasApprovedBudget
+                ? "An approved budget is required first."
+                : processes.inactiveTitle(PROCESS_FLOW_CODES.PROCUREMENT_PLANNING)
+            }
             className="w-full sm:w-auto"
           >
             <Button
@@ -148,8 +154,14 @@ export function OrgProcurementPlansPanel({ projectId }) {
               variant="contained"
               startIcon={<AddRounded />}
               className="w-full sm:w-auto"
-              title={allPlanningOff ? undefined : "Create a new procurement plan"}
-              disabled={allPlanningOff}
+              title={
+                !hasApprovedBudget
+                  ? "An approved budget is required first."
+                  : allPlanningOff
+                    ? undefined
+                    : "Create a new procurement plan"
+              }
+              disabled={allPlanningOff || !hasApprovedBudget}
             >
               Create new
             </Button>
@@ -158,7 +170,33 @@ export function OrgProcurementPlansPanel({ projectId }) {
       </div>
 
       {plans.length === 0 ? (
-        <Typography sx={adminMutedTextSx}>No procurement plans yet.</Typography>
+        <div className="space-y-3 rounded-xl border border-[color:var(--border-subtle)] bg-[color:var(--surface-elevated)] p-4">
+          {canCreate && hasApprovedBudget ? (
+            <>
+              <Typography sx={adminMutedTextSx}>No procurement plans yet.</Typography>
+              <ProcessGateTooltip
+                inactive={allPlanningOff}
+                title={processes.inactiveTitle(PROCESS_FLOW_CODES.PROCUREMENT_PLANNING)}
+              >
+                <Button
+                  component={Link}
+                  href={`/projects/${projectId}/procurement-plans/new`}
+                  variant="contained"
+                  startIcon={<AddRounded />}
+                  disabled={allPlanningOff}
+                  className="cursor-pointer disabled:cursor-not-allowed"
+                  title="Submit a plan for the approved budget"
+                >
+                  Submit plan
+                </Button>
+              </ProcessGateTooltip>
+            </>
+          ) : canCreate ? (
+            <Typography sx={adminMutedTextSx}>No approved budget yet.</Typography>
+          ) : (
+            <Typography sx={adminMutedTextSx}>No procurement plans yet.</Typography>
+          )}
+        </div>
       ) : (
         <TableContainer component={Paper} variant="outlined" sx={adminOutlinedTableContainerSx}>
           <Table size="small" sx={adminTableSx}>

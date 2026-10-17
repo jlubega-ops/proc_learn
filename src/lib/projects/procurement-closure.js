@@ -146,6 +146,25 @@ export async function closeProcurement(prisma, opts) {
     },
   });
 
+  try {
+    const { completeNextProcessHandoffs, findProcurementWorkflowInstance } = await import(
+      "@/lib/projects/next-process-handoffs"
+    );
+    const instance = await findProcurementWorkflowInstance(prisma, {
+      projectId: opts.projectId,
+      procurementId: opts.procurementId,
+      includeCompleted: true,
+    });
+    await completeNextProcessHandoffs(prisma, {
+      projectId: opts.projectId,
+      kind: "CLOSE_PROCUREMENT",
+      instanceId: instance?.id || null,
+      relatedEntityId: opts.procurementId,
+    });
+  } catch {
+    // Non-fatal
+  }
+
   const requesterId = await prisma.projectOrgProcurement.findUnique({
     where: { id: opts.procurementId },
     select: { requisition: { select: { requesterOrgUserId: true } } },

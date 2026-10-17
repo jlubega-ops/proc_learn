@@ -24,15 +24,17 @@ import {
   startWorkflowFromTrigger,
 } from "@/lib/projects/workflow-engine";
 import { TxAbort, runInTx, withTxAbort } from "@/lib/db-tx";
-import { ORG_REF_DOC, nextOrgDocumentReference } from "@/lib/projects/org-reference";
+import {
+  ORG_REF_DOC,
+  loadProjectOrgCode,
+  nextOrgDocumentReference,
+} from "@/lib/projects/org-reference";
 import {
   resolveCurrentOrgSlate,
   resolveSlateIdForOrgCreate,
   withAcademicAuditMeta,
 } from "@/lib/academic/org-academic-slate";
 import { presentOrgWorkflowStatus } from "@/lib/projects/workflow-status-presentation";
-import { validateLineText } from "@/lib/projects/line-item-options";
-
 /**
  * @param {unknown} value
  */
@@ -227,10 +229,24 @@ async function validateAndBuildPlanItems(prisma, projectId, itemsIn, financialYe
 
   if (!Array.isArray(itemsIn) || itemsIn.length === 0) {
     fieldErrors.items = "Add at least one plan item.";
-    return { fieldErrors, itemRows, total };
+    return { fieldErrors, itemRows, total, sheetType: sheetType || "GOODS_WORKS_NON_CONSULTANCY" };
   }
 
-  const { normalizeCircularPlanItemFields } = await import("@/lib/projects/ppda-forms");
+  const {
+    normalizeCircularPlanItemFields,
+    normalizePlanMethod,
+    normalizePlanSheetType,
+    CIRCULAR_SHEET_OPTIONS,
+    normalizeCircularSheet,
+    PPDA_CONTRACT_TYPE_OPTIONS,
+    EXPECTED_PROCUREMENT_PERIOD_OPTIONS,
+    PLAN_SHEET_TYPE,
+    validatePlanMilestoneOrder,
+  } = await import("@/lib/projects/ppda-forms");
+  const { FUNDING_SOURCES, UNITS_OF_MEASURE } = await import("@/lib/projects/line-item-options");
+  const { checkMethodValueCeiling, planMethodToEnum } = await import(
+    "@/lib/projects/procurement-thresholds"
+  );
 
   for (let idx = 0; idx < itemsIn.length; idx += 1) {
     const raw = itemsIn[idx];
@@ -240,9 +256,12 @@ async function validateAndBuildPlanItems(prisma, projectId, itemsIn, financialYe
     const uom =
       typeof raw?.unitOfMeasure === "string" && raw.unitOfMeasure.trim()
         ? raw.unitOfMeasure.trim()
-        : "Unit";
+        : "";
     const budgetLineId =
       typeof raw?.budgetLineId === "string" ? raw.budgetLineId.trim() || null : null;
+    const category =
+      normalizeCircularSheet(raw?.category || raw?.circularSheet || raw?.sheetType) || null;
+    const itemSheet = normalizePlanSheetType(category || raw?.sheetType || sheetType);
 
     if (!title || !qty || !unitPrice) {
       fieldErrors[`items.${idx}`] = "Each item needs title, quantity, and unit price.";
@@ -253,6 +272,10 @@ async function validateAndBuildPlanItems(prisma, projectId, itemsIn, financialYe
       }
       if (!title) fieldErrors[`items.${idx}.title`] = "Enter an item title.";
       continue;
+    }
+
+    if (!uom) {
+      fieldErrors[`items.${idx}.unitOfMeasure`] = "Choose a unit.";
     }
 
     if (!budgetLineId) {
@@ -286,9 +309,48 @@ async function validateAndBuildPlanItems(prisma, projectId, itemsIn, financialYe
         `Planned amount exceeds remaining budget on ${budgetLine.code} (${available.toFixed(2)}).`;
     }
 
-    const circularFields = normalizeCircularPlanItemFields(raw, sheetType);
-    const fundingErr = validateLineText(circularFields.sourceOfFunding, "Source of funding");
-    if (fundingErr) fieldErrors[`items.${idx}.sourceOfFunding`] = fundingErr;
+    const circularFields = normalizeCircularPlanItemFields(
+      { ...raw, sheetType: itemSheet },
+      itemSheet,
+    );
+    if (!FUNDING_SOURCES.includes(String(circularFields.sourceOfFunding || "").trim())) {
+      fieldErrors[`items.${idx}.sourceOfFunding`] = "Choose a source of funding.";
+    }
+    if (!normalizePlanMethod(circularFields.plannedProcurementMethod)) {
+      fieldErrors[`items.${idx}.plannedProcurementMethod`] = "Choose a procurement method.";
+    } else {
+      const ceiling = checkMethodValueCeiling(
+        planMethodToEnum(circularFields.plannedProcurementMethod),
+        Number(lineTotal),
+      );
+      if (!ceiling.ok) {
+        fieldErrors[`items.${idx}.plannedProcurementMethod`] = ceiling.error;
+      }
+    }
+    if (!circularFields.contractType) {
+      fieldErrors[`items.${idx}.contractType`] = "Choose a contract type.";
+    } else if (!PPDA_CONTRACT_TYPE_OPTIONS.includes(circularFields.contractType)) {
+      fieldErrors[`items.${idx}.contractType`] = "Choose a valid contract type.";
+    }
+    if (!circularFields.completionDate) {
+      fieldErrors[`items.${idx}.completionDate`] = "Enter a completion date.";
+    }
+    if (!category) {
+      fieldErrors[`items.${idx}.category`] = "Choose a Circular sheet type.";
+    } else if (!CIRCULAR_SHEET_OPTIONS.includes(category)) {
+      fieldErrors[`items.${idx}.category`] = "Choose a valid Circular sheet type.";
+    }
+    if (uom && !UNITS_OF_MEASURE.includes(uom) && uom !== "Unit") {
+      fieldErrors[`items.${idx}.unitOfMeasure`] = "Choose a unit.";
+    }
+    const period =
+      typeof raw?.expectedProcurementPeriod === "string"
+        ? raw.expectedProcurementPeriod.trim() || null
+        : null;
+    if (period && !EXPECTED_PROCUREMENT_PERIOD_OPTIONS.includes(period)) {
+      fieldErrors[`items.${idx}.expectedProcurementPeriod`] = "Choose a valid period.";
+    }
+    Object.assign(fieldErrors, validatePlanMilestoneOrder(raw, itemSheet, `items.${idx}`));
 
     itemRows.push({
       itemNumber: idx + 1,
@@ -296,16 +358,13 @@ async function validateAndBuildPlanItems(prisma, projectId, itemsIn, financialYe
       description: typeof raw?.description === "string" ? raw.description.trim() || null : null,
       specification:
         typeof raw?.specification === "string" ? raw.specification.trim() || null : null,
-      category: typeof raw?.category === "string" ? raw.category.trim() || null : null,
+      category,
       quantity: qty,
-      unitOfMeasure: uom,
+      unitOfMeasure: uom || "Lot",
       estimatedUnitPrice: unitPrice,
       estimatedTotal: lineTotal,
       budgetLineId: budgetLine?.id || null,
-      expectedProcurementPeriod:
-        typeof raw?.expectedProcurementPeriod === "string"
-          ? raw.expectedProcurementPeriod.trim() || null
-          : null,
+      expectedProcurementPeriod: period,
       priority: typeof raw?.priority === "string" ? raw.priority.trim() || "Normal" : "Normal",
       justification:
         typeof raw?.justification === "string" ? raw.justification.trim() || null : null,
@@ -318,7 +377,14 @@ async function validateAndBuildPlanItems(prisma, projectId, itemsIn, financialYe
     fieldErrors.items = "Add at least one valid plan item.";
   }
 
-  return { fieldErrors, itemRows, total };
+  const allConsultancy =
+    itemRows.length > 0 &&
+    itemRows.every((r) => r.circularFields?.sheetType === PLAN_SHEET_TYPE.CONSULTANCY);
+  const derivedSheetType = allConsultancy
+    ? PLAN_SHEET_TYPE.CONSULTANCY
+    : PLAN_SHEET_TYPE.GOODS_WORKS_NON_CONSULTANCY;
+
+  return { fieldErrors, itemRows, total, sheetType: derivedSheetType };
 }
 
 /**
@@ -342,9 +408,6 @@ export async function createOrUpdateProcurementPlanDraft(prisma, opts) {
   const financialYearId = typeof b.financialYearId === "string" ? b.financialYearId.trim() : "";
   const planningPeriodId =
     typeof b.planningPeriodId === "string" ? b.planningPeriodId.trim() || null : null;
-  const sheetTypeRaw = typeof b.sheetType === "string" ? b.sheetType.trim() : "";
-  const sheetType =
-    sheetTypeRaw === "CONSULTANCY" ? "CONSULTANCY" : "GOODS_WORKS_NON_CONSULTANCY";
   const isEmergency = Boolean(b.isEmergency);
   const emergencyJustification = isEmergency
     ? String(b.emergencyJustification ?? "").trim() || null
@@ -407,22 +470,38 @@ export async function createOrUpdateProcurementPlanDraft(prisma, opts) {
     fieldErrors.planningPeriodId = "Choose a planning period.";
   }
 
-  if (!planReference && fy && dept) {
+  const orgCode = await loadProjectOrgCode(prisma, opts.projectId);
+  if (!planReference && fy) {
     const existing = await prisma.projectOrgProcurementPlan.findMany({
       where: { projectId: opts.projectId, planReference: { not: null } },
       select: { planReference: true },
     });
-    planReference = nextOrgDocumentReference(
-      existing.map((r) => r.planReference).filter(Boolean),
-      {
-        deptCode: dept.code,
-        deptName: dept.name,
+    /** @type {string[]} */
+    const taken = existing.map((r) => r.planReference).filter(Boolean);
+    for (let attempt = 0; attempt < 12; attempt += 1) {
+      const candidate = nextOrgDocumentReference(taken, {
+        orgCode,
+        deptCode: dept?.code,
+        deptName: dept?.name,
         docType: isEmergency
           ? ORG_REF_DOC.EMERGENCY_PROCUREMENT_PLAN
           : ORG_REF_DOC.PROCUREMENT_PLAN,
         fyLabel: fy.label,
-      },
-    );
+      });
+      const clash = await prisma.projectOrgProcurementPlan.findFirst({
+        where: {
+          projectId: opts.projectId,
+          planReference: candidate,
+          ...(opts.planId ? { id: { not: opts.planId } } : {}),
+        },
+        select: { id: true },
+      });
+      if (!clash) {
+        planReference = candidate;
+        break;
+      }
+      taken.push(candidate);
+    }
   }
 
   if (planReference) {
@@ -442,9 +521,10 @@ export async function createOrUpdateProcurementPlanDraft(prisma, opts) {
     opts.projectId,
     Array.isArray(b.items) ? b.items : [],
     financialYearId,
-    sheetType,
+    "GOODS_WORKS_NON_CONSULTANCY",
   );
   Object.assign(fieldErrors, built.fieldErrors);
+  const sheetType = built.sheetType || "GOODS_WORKS_NON_CONSULTANCY";
 
   if (Object.keys(fieldErrors).length) {
     return { ok: false, fieldErrors, error: "Please fix the highlighted fields." };
@@ -633,6 +713,17 @@ export async function submitProcurementPlan(prisma, opts) {
   );
   if (!outcome.ok) return outcome;
   const { started, updated } = outcome;
+
+  try {
+    const { completeNextProcessHandoffs } = await import("@/lib/projects/next-process-handoffs");
+    await completeNextProcessHandoffs(prisma, {
+      projectId: opts.projectId,
+      kind: "SUBMIT_PLAN",
+      departmentId: row.departmentId,
+    });
+  } catch {
+    // Non-fatal
+  }
 
   await writeAuditLog({
     eventType: AuditEvent.PROJECT_ORG_PROCUREMENT_PLAN_SUBMITTED,

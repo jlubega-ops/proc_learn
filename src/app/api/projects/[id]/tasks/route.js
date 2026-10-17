@@ -31,6 +31,7 @@ import {
   partitionTasksForActingMode,
   committeeModeWorkspaceHint,
 } from "@/lib/projects/committee-context";
+import { nextStepDetailHref } from "@/lib/projects/next-process-handoffs";
 
 export const runtime = "nodejs";
 
@@ -127,20 +128,22 @@ export async function GET(_request, context) {
       createdAt: t.createdAt,
       instanceId: t.instanceId,
       entityType: t.instance?.entityType || null,
-      detailHref: procurement
-        ? procurementStageHref(
-            projectId,
-            procurement.id,
-            procurementTaskStage(t.title),
-            procurement.procurementMethod,
-          )
-        : budget
-          ? `/projects/${projectId}/budgets/${budget.id}`
-          : plan
-            ? `/projects/${projectId}/procurement-plans/${plan.id}`
-            : req
-              ? `/projects/${projectId}/requisitions/${req.id}`
-              : null,
+      detailHref:
+        nextStepDetailHref(projectId, t.title, procurement?.id || null) ||
+        (procurement
+          ? procurementStageHref(
+              projectId,
+              procurement.id,
+              procurementTaskStage(t.title),
+              procurement.procurementMethod,
+            )
+          : budget
+            ? `/projects/${projectId}/budgets/${budget.id}`
+            : plan
+              ? `/projects/${projectId}/procurement-plans/${plan.id}`
+              : req
+                ? `/projects/${projectId}/requisitions/${req.id}`
+                : null),
       requisition: req ? serializeRequisition(req) : null,
       procurementPlan: plan ? serializeProcurementPlan(plan) : null,
       budget: budget ? serializeBudget(budget) : null,

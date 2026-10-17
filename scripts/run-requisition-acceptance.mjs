@@ -294,39 +294,25 @@ async function main() {
     comment: "Plan quantity and value available.",
   });
   assert(r.ok, "Peter VERIFY plan", r.error);
-  const davidTask = await pendingTask(david.id, "Funding");
-  assert(Boolean(davidTask), "Head PDU funding task created");
+  const sarahTask = await pendingTask(sarah.id, "Funding Availability and Approve");
+  assert(Boolean(sarahTask), "AO funding + approval task created");
 
-  // David VERIFY funding
-  console.log("\n=== Head PDU funding ===");
+  // Sarah confirms funds and approves
+  console.log("\n=== AO verify funds and approve ===");
   const fundEv = await buildRequisitionVerificationEvidence(
     prisma,
-    davidTask.instance.requisition,
+    sarahTask.instance.requisition,
   );
   assert(fundEv?.funding?.sufficient === true, "funding sufficient from persisted budget");
-  r = await actOnRequisitionTask(prisma, {
-    taskId: davidTask.id,
-    actorOrgUserId: david.id,
-    actorRoleName: david.projectOrgRole.name,
-    actorDepartmentId: david.departmentId,
-    decision: OrgWorkflowDecision.VERIFY,
-    comment: "Funds available on ICT-CAPEX-01.",
-  });
-  assert(r.ok, "David VERIFY funding", r.error);
-  const sarahTask = await pendingTask(sarah.id, "Approve");
-  assert(Boolean(sarahTask), "AO approval task created");
-
-  // Sarah APPROVE
-  console.log("\n=== AO approve ===");
   r = await actOnRequisitionTask(prisma, {
     taskId: sarahTask.id,
     actorOrgUserId: sarah.id,
     actorRoleName: sarah.projectOrgRole.name,
     actorDepartmentId: sarah.departmentId,
     decision: OrgWorkflowDecision.APPROVE,
-    comment: "Approved for procurement method selection.",
+    comment: "Funds available; approved for procurement method selection.",
   });
-  assert(r.ok, "Sarah APPROVE", r.error);
+  assert(r.ok, "Sarah APPROVE (funds + requisition)", r.error);
   assert(r.requisitionStatus === OrgRequisitionStatus.APPROVED, "REQUISITION = APPROVED");
   const budgetAfter = await prisma.projectOrgBudgetLine.findUnique({ where: { id: budget.id } });
   assert(Number(budgetAfter.committedAmount) === 35000000, "budget committed on AO approve", String(budgetAfter.committedAmount));

@@ -54,6 +54,8 @@ export function OrgRequisitionsPanel({ projectId }) {
   const processes = useProcessActivation(projectId);
   const requisitionOff = !processes.isActive(PROCESS_FLOW_CODES.PROCUREMENT_REQUISITION);
   const [rows, setRows] = useState(/** @type {any[]} */ ([]));
+  const [canCreate, setCanCreate] = useState(false);
+  const [hasApprovedPlan, setHasApprovedPlan] = useState(false);
   const [deleteTarget, setDeleteTarget] = useState(/** @type {any | null} */ (null));
 
   const load = useCallback(async () => {
@@ -71,6 +73,8 @@ export function OrgRequisitionsPanel({ projectId }) {
         return;
       }
       setRows(Array.isArray(rData.requisitions) ? rData.requisitions : []);
+      setCanCreate(Boolean(rData.canCreate));
+      setHasApprovedPlan(Boolean(rData.hasApprovedPlan));
     } finally {
       setLoading(false);
     }
@@ -133,27 +137,65 @@ export function OrgRequisitionsPanel({ projectId }) {
         >
           Refresh
         </Button>
-        <ProcessGateTooltip
-          inactive={requisitionOff}
-          title={processes.inactiveTitle(PROCESS_FLOW_CODES.PROCUREMENT_REQUISITION)}
-          className="w-full sm:w-auto"
-        >
-          <Button
-            component={Link}
-            href={`/projects/${projectId}/requisitions/new`}
-            variant="contained"
-            startIcon={<AddRounded />}
+        {canCreate ? (
+          <ProcessGateTooltip
+            inactive={requisitionOff || !hasApprovedPlan}
+            title={
+              !hasApprovedPlan
+                ? "An approved procurement plan is required first."
+                : processes.inactiveTitle(PROCESS_FLOW_CODES.PROCUREMENT_REQUISITION)
+            }
             className="w-full sm:w-auto"
-            title={requisitionOff ? undefined : "Create a new requisition"}
-            disabled={requisitionOff}
           >
-            Create new
-          </Button>
-        </ProcessGateTooltip>
+            <Button
+              component={Link}
+              href={`/projects/${projectId}/requisitions/new`}
+              variant="contained"
+              startIcon={<AddRounded />}
+              className="w-full sm:w-auto"
+              title={
+                !hasApprovedPlan
+                  ? "An approved procurement plan is required first."
+                  : requisitionOff
+                    ? undefined
+                    : "Create a new requisition"
+              }
+              disabled={requisitionOff || !hasApprovedPlan}
+            >
+              Create new
+            </Button>
+          </ProcessGateTooltip>
+        ) : null}
       </div>
 
       {rows.length === 0 ? (
-        <Typography sx={adminMutedTextSx}>No requisitions yet.</Typography>
+        <div className="space-y-3 rounded-xl border border-[color:var(--border-subtle)] bg-[color:var(--surface-elevated)] p-4">
+          {canCreate && hasApprovedPlan ? (
+            <>
+              <Typography sx={adminMutedTextSx}>No requisitions yet.</Typography>
+              <ProcessGateTooltip
+                inactive={requisitionOff}
+                title={processes.inactiveTitle(PROCESS_FLOW_CODES.PROCUREMENT_REQUISITION)}
+              >
+                <Button
+                  component={Link}
+                  href={`/projects/${projectId}/requisitions/new`}
+                  variant="contained"
+                  startIcon={<AddRounded />}
+                  disabled={requisitionOff}
+                  className="cursor-pointer disabled:cursor-not-allowed"
+                  title="Submit a requisition for the approved plan"
+                >
+                  Submit requisition
+                </Button>
+              </ProcessGateTooltip>
+            </>
+          ) : canCreate ? (
+            <Typography sx={adminMutedTextSx}>No approved plan yet.</Typography>
+          ) : (
+            <Typography sx={adminMutedTextSx}>No requisitions yet.</Typography>
+          )}
+        </div>
       ) : (
         <TableContainer component={Paper} variant="outlined" sx={adminOutlinedTableContainerSx}>
           <Table size="small" sx={adminTableSx}>

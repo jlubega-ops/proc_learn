@@ -131,6 +131,11 @@ export async function GET(request, context) {
     actorDepartment = dept;
   }
 
+  const projectMeta = await prisma.project.findUnique({
+    where: { id: projectId },
+    select: { projectCode: true },
+  });
+
   return NextResponse.json({
     budgets: budgets.map((row) => {
       const ctx = stageMap.get(row.id) || {};
@@ -145,6 +150,7 @@ export async function GET(request, context) {
     canCreate: auth.ok && auth.type === "org" && canPrepareBudget(roleName),
     canSubmit: auth.ok && auth.type === "org" && canPrepareBudget(roleName),
     actorDepartment,
+    orgCode: projectMeta?.projectCode || null,
   });
 }
 

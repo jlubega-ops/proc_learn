@@ -78,6 +78,7 @@ export function OrgBudgetCreateForm({ projectId, budgetId = "" }) {
     /** @type {{ id?: string; name?: string; code?: string | null } | null} */ (null),
   );
   const [existingRefs, setExistingRefs] = useState(/** @type {string[]} */ ([]));
+  const [orgCode, setOrgCode] = useState("");
   const { data: fyData, reload: reloadYears } = useApi(
     `/api/projects/${projectId}/org-financial-years?selectable=1`,
     { silentErrors: true },
@@ -154,6 +155,8 @@ export function OrgBudgetCreateForm({ projectId, budgetId = "" }) {
       setCanCreate(Boolean(bData.canCreate));
       const dept = bData.actorDepartment || null;
       setActorDepartment(dept);
+      const code = typeof bData.orgCode === "string" ? bData.orgCode : "";
+      setOrgCode(code);
       const budgets = Array.isArray(bData.budgets) ? bData.budgets : [];
       const refs = budgets.map((b) => b.budgetReference).filter(Boolean);
       setExistingRefs(refs);
@@ -213,10 +216,11 @@ export function OrgBudgetCreateForm({ projectId, budgetId = "" }) {
       const firstFyId = nextYears[0]?.id || "";
       const firstFyLabel = nextYears[0]?.label || "";
       const autoRef =
-        firstFyLabel && dept
+        firstFyLabel || code || dept
           ? nextOrgDocumentReference(refs, {
-              deptCode: dept.code,
-              deptName: dept.name,
+              orgCode: code,
+              deptCode: dept?.code,
+              deptName: dept?.name,
               docType: ORG_REF_DOC.BUDGET,
               fyLabel: firstFyLabel,
             })
@@ -239,12 +243,13 @@ export function OrgBudgetCreateForm({ projectId, budgetId = "" }) {
   function applyReferenceForFy(financialYearId) {
     if (isEdit) return;
     const fy = years.find((y) => y.id === financialYearId);
-    if (!fy?.label || !actorDepartment) return;
+    if (!fy?.label && !orgCode && !actorDepartment) return;
     const next = nextOrgDocumentReference(existingRefs, {
-      deptCode: actorDepartment.code,
-      deptName: actorDepartment.name,
+      orgCode,
+      deptCode: actorDepartment?.code,
+      deptName: actorDepartment?.name,
       docType: ORG_REF_DOC.BUDGET,
-      fyLabel: fy.label,
+      fyLabel: fy?.label,
     });
     setForm((f) => ({ ...f, budgetReference: next }));
   }

@@ -89,6 +89,24 @@ export async function GET(request, context) {
         )
       : rows.map(() => ({ canEdit: false, canDelete: false }));
 
+  let hasApprovedPlan = false;
+  if (auth.type === "org" && auth.orgUser?.departmentId) {
+    const { OrgProcurementPlanStatus } = await import("@prisma/client");
+    const approved = await prisma.projectOrgProcurementPlan.count({
+      where: {
+        projectId,
+        departmentId: auth.orgUser.departmentId,
+        status: OrgProcurementPlanStatus.APPROVED,
+      },
+    });
+    hasApprovedPlan = approved > 0;
+  }
+
+  const projectMeta = await prisma.project.findUnique({
+    where: { id: projectId },
+    select: { projectCode: true },
+  });
+
   return NextResponse.json({
     requisitions: rows.map((row, index) => {
       const ctx = ctxMap.get(row.id) || {};
@@ -110,6 +128,7 @@ export async function GET(request, context) {
       ["User Department Officer", "User Department"].includes(
         auth.orgUser.projectOrgRole?.name || "",
       ),
+    hasApprovedPlan,
     actorDepartment,
     actorDisplayName:
       auth.type === "org"
@@ -118,6 +137,7 @@ export async function GET(request, context) {
     actorRoleName: auth.type === "org" ? auth.orgUser.projectOrgRole?.name || null : null,
     defaultDeliveryLocation,
     voteCode: auth.type === "org" ? await loadProjectVoteCode(prisma, projectId) : "",
+    orgCode: projectMeta?.projectCode || null,
   });
 }
 

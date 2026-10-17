@@ -27,7 +27,7 @@ export const PAGE_RULES = [
   { pattern: /^\/students\/[^/]+\/observe(\/.*)?$/, roles: [SA, EX], label: "Observe student" },
   { pattern: /^\/academic\/(participation|results)(\/.*)?$/, roles: [SA, EX], label: "Monitoring" },
   { pattern: /^\/projects(\/.*)?$/, roles: [SA, EX], label: "Projects" },
-  { pattern: /^\/project-settings(\/.*)?$/, roles: [SA, EX], label: "Project setup" },
+  { pattern: /^\/project-settings(\/.*)?$/, roles: [SA, EX], label: "System setup" },
   { pattern: /^\/cases(\/.*)?$/, roles: [SA, EX], label: "Projects (legacy)" },
   { pattern: /^\/courses(\/.*)?$/, roles: [SA, EX], label: "Courses (legacy)" },
 

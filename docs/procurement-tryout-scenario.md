@@ -322,8 +322,7 @@ Each track starts with the same **Procurement Requisition Process** (7 steps). T
 | 1 | Amina — UDO | Org | Create Procurement Requisition (+ **Form 5 Part I** on the same form) | Submit |
 | 2 | Robert — HOD | Org | Review Requisition | **Endorse requisition and forward** |
 | 3 | Joan — PO | Org | Verify Procurement Plan Availability | **Confirm item is in plan and forward** |
-| 4 | Michael — Head PDU | Org | Verify Funding Availability | **Confirm funds available and forward** |
-| 5 | Lydia — AO | Org | Approve Requisition (commits funds on the budget line) | **Approve requisition and forward** |
+| 4 | Lydia — AO | Org | Verify Funding Availability and Approve Requisition (commits funds on the budget line) | **Confirm funds and approve requisition** |
 | 6 | Joan — PO | Org | Recommend Procurement Method (**Form 5 Part II**) | **Recommend method** |
 | 7 | Grace or Patrick | **Contracts Committee** | Approve Procurement Method (Contracts Committee) | **Approve procurement method** |
 
@@ -532,7 +531,7 @@ Run **Phase 5**: Joan recommends **MICRO**, selects **Twin Lakes Power Solutions
 | Structure, FY, processes, users, committees | Organization Administrator | — |
 | Budget / plan / requisition create (+ Form 5 Part I), record delivery | Amina (UDO) | Org |
 | Department endorse, accept Micro delivery, certify Quotation delivery | Robert (HOD) | Org |
-| Plan consolidation, funding check, review documents & evaluation report, award recommendation | Michael (Head PDU) | Org |
+| Plan consolidation, review documents & evaluation report, award recommendation | Michael (Head PDU) | Org |
 | Form 5 Part II, PI, RFQ / tender, offers, communicate award, issue LPO, confirm supplier acceptance | Joan (PO) | Org |
 | Review consolidated plan / award recommendation, prepare LPO / contract, verify invoices, close | Patrick (Contracts Officer) | Org |
 | Budget consolidation, receive invoices (Quotation / Tender), record payments | Esther (Finance) | Org |
@@ -625,10 +624,9 @@ One continuous chain from an empty organisation to a closed procurement. Each ar
 1. User Department **creates the requisition** (+ Form 5 Part I) →
 2. Head User Department **endorses** →
 3. Procurement Officer **confirms the item is in the plan** →
-4. Head PDU **confirms funds** →
-5. Accounting Officer **approves** (funds committed) →
-6. Procurement Officer **recommends the method** (Form 5 Part II; supplier for Micro, shortlist for Quotation) →
-7. **Contracts Committee approves the method** → the procurement case is created.
+4. Accounting Officer **confirms funds and approves** (funds committed) →
+5. Procurement Officer **recommends the method** (Form 5 Part II; supplier for Micro, shortlist for Quotation) →
+6. **Contracts Committee approves the method** → the procurement case is created.
 
 ### Stage 5a — Micro
 

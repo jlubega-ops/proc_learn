@@ -79,29 +79,29 @@ export function getDashboardPageMeta(pathname, activeRole) {
     return { title: "Organisation", subtitle: "My Organisation" };
   }
   if (pathname.includes("/org-admin/organisation-structure"))
-    return { title: NAV_LABELS.organisationStructure, subtitle: "Project system administration" };
+    return { title: NAV_LABELS.organisationStructure, subtitle: "Organisation administration" };
   if (pathname.includes("/org-admin/financial-years"))
-    return { title: NAV_LABELS.financialYears, subtitle: "Project system administration" };
+    return { title: NAV_LABELS.financialYears, subtitle: "Organisation administration" };
   if (pathname.includes("/org-admin/planning-period"))
-    return { title: NAV_LABELS.planningPeriods, subtitle: "Project system administration" };
+    return { title: NAV_LABELS.planningPeriods, subtitle: "Organisation administration" };
   if (pathname.includes("/org-admin/process-workflow"))
-    return { title: NAV_LABELS.processWorkflows, subtitle: "Project system administration" };
+    return { title: NAV_LABELS.processWorkflows, subtitle: "Organisation administration" };
   if (pathname.includes("/org-admin/users"))
-    return { title: NAV_LABELS.users, subtitle: "Project system administration" };
+    return { title: NAV_LABELS.users, subtitle: "Organisation administration" };
   if (pathname.includes("/org-admin/departments"))
-    return { title: NAV_LABELS.departments, subtitle: "Project system administration" };
+    return { title: NAV_LABELS.departments, subtitle: "Organisation administration" };
   if (pathname.includes("/org-admin/roles"))
-    return { title: NAV_LABELS.roles, subtitle: "Project system administration" };
+    return { title: NAV_LABELS.roles, subtitle: "Organisation administration" };
   if (pathname.includes("/org-admin/budgets"))
-    return { title: NAV_LABELS.budgets, subtitle: "Project system administration" };
+    return { title: NAV_LABELS.budgets, subtitle: "Organisation administration" };
   if (pathname.includes("/org-admin/committees"))
-    return { title: NAV_LABELS.committees, subtitle: "Project system administration" };
+    return { title: NAV_LABELS.committees, subtitle: "Organisation administration" };
   if (pathname.includes("/org-admin/providers"))
-    return { title: NAV_LABELS.providers, subtitle: "Project system administration" };
+    return { title: NAV_LABELS.providers, subtitle: "Organisation administration" };
   if (pathname.includes("/org-admin/audit-logs"))
-    return { title: NAV_LABELS.activityLogs, subtitle: "Project system administration" };
+    return { title: NAV_LABELS.activityLogs, subtitle: "Organisation administration" };
   if (pathname.includes("/org-admin/settings"))
-    return { title: NAV_LABELS.settings, subtitle: "Project system administration" };
+    return { title: NAV_LABELS.settings, subtitle: "Organisation administration" };
   if (pathname.includes("/my-account"))
     return { title: "My account", subtitle: "Organisation user account" };
   if (pathname === "/projects" || pathname === "/projects/") {
@@ -115,13 +115,13 @@ export function getDashboardPageMeta(pathname, activeRole) {
   if (pathname.startsWith("/profile"))
     return { title: "Profile", subtitle: "Your account" };
   if (pathname.startsWith("/project-settings/process-flow"))
-    return { title: "Process flow", subtitle: "Organisation process flows for student workspaces" };
+    return { title: NAV_LABELS.processFlow, subtitle: "Process flows for organisation workspaces" };
   if (pathname.startsWith("/project-settings/programme-processes"))
-    return { title: "Programme processes", subtitle: "Processes per programme and academic year" };
+    return { title: NAV_LABELS.programmeProcesses, subtitle: "Processes per programme and academic year" };
   if (pathname.startsWith("/project-settings/roles"))
-    return { title: "Project roles", subtitle: "Organisation roles for student workspaces" };
+    return { title: NAV_LABELS.procurementRoles, subtitle: "Roles for organisation workspaces" };
   if (pathname.startsWith("/project-settings"))
-    return { title: "Project settings", subtitle: "Configure student project behaviour" };
+    return { title: NAV_LABELS.systemSetup, subtitle: "Organisation defaults" };
   if (pathname.startsWith("/admin/academic-setup"))
     return { title: "Academic setup", subtitle: "Academic years and courses" };
   if (pathname.startsWith("/admin/activity"))

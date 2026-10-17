@@ -407,7 +407,7 @@ export const BASELINE_PROCESS_TEMPLATES = [
     code: PROCESS_FLOW_CODES.PROCUREMENT_REQUISITION,
     name: "Procurement Requisition Process",
     description:
-      "Create and approve a procurement requisition with plan and funding verification.",
+      "Create and approve a procurement requisition with plan verification, then Accounting Officer funding check and approval.",
     triggerKey: WORKFLOW_TRIGGERS.REQUISITION_SUBMITTED,
     steps: [
       {
@@ -429,14 +429,9 @@ export const BASELINE_PROCESS_TEMPLATES = [
         actionKey: "VERIFY",
       },
       {
+        // Former steps 4 (Head PDU funding) + 5 (AO approve) — step 5 number is retired.
         stepNumber: 4,
-        taskDescription: "Verify Funding Availability",
-        roleName: "Head PDU",
-        actionKey: "VERIFY",
-      },
-      {
-        stepNumber: 5,
-        taskDescription: "Approve Requisition",
+        taskDescription: "Verify Funding Availability and Approve Requisition",
         roleName: "Accounting Officer",
         actionKey: "APPROVE",
       },

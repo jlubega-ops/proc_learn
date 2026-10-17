@@ -272,21 +272,52 @@ export async function markPaymentPaid(prisma, opts) {
         where: { id: row.procurementId },
         data: { status: OrgProcurementStatus.READY_FOR_CLOSURE },
       });
-      const officer = await prisma.projectOrgProcurement.findUnique({
-        where: { id: row.procurementId },
-        select: { officer: { select: { id: true, linkedUserId: true } } },
-      });
-      if (officer?.officer) {
-        await notifyOrgUsers(prisma, {
-          projectId: opts.projectId,
-          recipients: [officer.officer],
-          type: OrgNotificationType.WORKFLOW_APPROVED,
-          title: "Ready for closure",
-          body: "Payment is complete. This procurement is ready to be closed.",
-          linkUrl: `/projects/${opts.projectId}/procurements/${row.procurementId}`,
-          relatedEntityType: "procurement",
-          relatedEntityId: row.procurementId,
+      try {
+        const { createNextProcessHandoff, findProcurementWorkflowInstance } = await import(
+          "@/lib/projects/next-process-handoffs"
+        );
+        const proc = await prisma.projectOrgProcurement.findUnique({
+          where: { id: row.procurementId },
+          select: {
+            id: true,
+            title: true,
+            procurementNumber: true,
+            officerOrgUserId: true,
+            officer: { select: { id: true, linkedUserId: true } },
+          },
         });
+        const instance = await findProcurementWorkflowInstance(prisma, {
+          projectId: opts.projectId,
+          procurementId: row.procurementId,
+        });
+        if (instance && proc) {
+          const label = proc.procurementNumber
+            ? `${proc.procurementNumber}: ${proc.title || "Procurement"}`
+            : proc.title || "Procurement";
+          await createNextProcessHandoff(prisma, {
+            projectId: opts.projectId,
+            instanceId: instance.id,
+            recordLabel: label,
+            kind: "CLOSE_PROCUREMENT",
+            excludeOrgUserId: opts.actorOrgUserId,
+            includeOrgUserId: proc.officerOrgUserId || proc.officer?.id || null,
+            relatedEntityType: "procurement",
+            relatedEntityId: row.procurementId,
+          });
+        } else if (proc?.officer) {
+          await notifyOrgUsers(prisma, {
+            projectId: opts.projectId,
+            recipients: [proc.officer],
+            type: OrgNotificationType.WORKFLOW_APPROVED,
+            title: "Ready for closure",
+            body: "Payment is complete. This procurement is ready to be closed.",
+            linkUrl: `/projects/${opts.projectId}/procurements/closures/${row.procurementId}`,
+            relatedEntityType: "procurement",
+            relatedEntityId: row.procurementId,
+          });
+        }
+      } catch {
+        // Non-fatal
       }
     }
   }

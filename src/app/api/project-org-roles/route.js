@@ -9,6 +9,9 @@ import { validateProjectOrgRoleInput } from "@/lib/validation/project-org-role";
 import {
   ensureProjectOrgAdminRole,
   isProjectOrgAdminRole,
+  isWorkflowOnlyOrgRole,
+  WORKFLOW_ONLY_ORG_ROLE_NAME_LIST,
+  workflowOnlyOrgRoleGuardError,
 } from "@/lib/project-org-role";
 
 export const runtime = "nodejs";
@@ -39,10 +42,14 @@ export async function GET(request) {
   const skip = (page - 1) * pageSize;
   const includeInactive = activeRole === Role.SYSTEM_ADMIN;
 
-  const where = includeInactive ? {} : { isActive: true };
+  // Hide committee routing roles from the catalogue UI — they are seating groups, not login roles.
+  const where = {
+    ...(includeInactive ? {} : { isActive: true }),
+    name: { notIn: WORKFLOW_ONLY_ORG_ROLE_NAME_LIST },
+  };
 
   const payload = await cachedRead(
-    `project-org-roles:${includeInactive ? "all" : "active"}:${page}:${pageSize}`,
+    `project-org-roles:${includeInactive ? "all" : "active"}:no-workflow:${page}:${pageSize}`,
     ["ProjectOrgRole"],
     async () => {
       const [total, roles] = await Promise.all([
@@ -98,6 +105,19 @@ export async function POST(request) {
         fieldErrors: { name: "Admin is a required role and cannot be created again." },
       },
       { status: 409 },
+    );
+  }
+
+  if (isWorkflowOnlyOrgRole(validated.data.name)) {
+    const blocked = workflowOnlyOrgRoleGuardError({ name: validated.data.name });
+    return NextResponse.json(
+      {
+        error: blocked.error,
+        fieldErrors: {
+          name: "Use Committees to seat members — this is not a login role.",
+        },
+      },
+      { status: 400 },
     );
   }
 

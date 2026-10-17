@@ -19,7 +19,11 @@ import {
   prepareWorkflowTriggers,
 } from "@/lib/projects/workflow-engine";
 import { TxAbort, okOrAbort, runInTx, withTxAbort } from "@/lib/db-tx";
-import { ORG_REF_DOC, nextOrgDocumentReference } from "@/lib/projects/org-reference";
+import {
+  ORG_REF_DOC,
+  loadProjectOrgCode,
+  nextOrgDocumentReference,
+} from "@/lib/projects/org-reference";
 import { resolveSlateIdForOrgCreate } from "@/lib/academic/org-academic-slate";
 import { presentOrgWorkflowStatus } from "@/lib/projects/workflow-status-presentation";
 
@@ -397,20 +401,36 @@ export async function createOrUpdateRequisitionDraft(prisma, opts) {
       })
     : null;
 
-  if (!requisitionReference && fy && dept) {
+  if (!requisitionReference && fy) {
+    const orgCode = await loadProjectOrgCode(prisma, opts.projectId);
     const existing = await prisma.projectOrgRequisition.findMany({
       where: { projectId: opts.projectId, requisitionReference: { not: null } },
       select: { requisitionReference: true },
     });
-    requisitionReference = nextOrgDocumentReference(
-      existing.map((r) => r.requisitionReference).filter(Boolean),
-      {
-        deptCode: dept.code,
-        deptName: dept.name,
+    /** @type {string[]} */
+    const taken = existing.map((r) => r.requisitionReference).filter(Boolean);
+    for (let attempt = 0; attempt < 12; attempt += 1) {
+      const candidate = nextOrgDocumentReference(taken, {
+        orgCode,
+        deptCode: dept?.code,
+        deptName: dept?.name,
         docType: ORG_REF_DOC.REQUISITION,
         fyLabel: fy.label,
-      },
-    );
+      });
+      const clash = await prisma.projectOrgRequisition.findFirst({
+        where: {
+          projectId: opts.projectId,
+          requisitionReference: candidate,
+          ...(opts.requisitionId ? { id: { not: opts.requisitionId } } : {}),
+        },
+        select: { id: true },
+      });
+      if (!clash) {
+        requisitionReference = candidate;
+        break;
+      }
+      taken.push(candidate);
+    }
   }
 
   if (requisitionReference) {
@@ -916,6 +936,17 @@ export async function submitRequisition(prisma, opts) {
   );
   if (!outcome.ok) return outcome;
   const { started, updated } = outcome;
+
+  try {
+    const { completeNextProcessHandoffs } = await import("@/lib/projects/next-process-handoffs");
+    await completeNextProcessHandoffs(prisma, {
+      projectId: opts.projectId,
+      kind: "SUBMIT_REQUISITION",
+      departmentId: row.departmentId,
+    });
+  } catch {
+    // Non-fatal
+  }
 
   await writeAuditLog({
     eventType: AuditEvent.PROJECT_ORG_REQUISITION_SUBMITTED,

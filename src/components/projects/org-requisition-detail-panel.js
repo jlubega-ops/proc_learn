@@ -145,7 +145,10 @@ function requisitionDetailFields(row, history) {
 
 const ENDORSE_STEP_RE = /^review requisition/i;
 const PLAN_STEP_RE = /^verify procurement plan/i;
-const FUNDING_STEP_RE = /^verify funding/i;
+/** Legacy Head PDU-only funding step (before AO combined verify-and-approve). */
+const FUNDING_STEP_RE = /^verify funding availability(?!\s+and approve)/i;
+/** Accounting Officer combined funding check + requisition approval. */
+const AO_APPROVE_STEP_RE = /^verify funding availability and approve requisition|^approve requisition/i;
 
 /**
  * Latest forward decision on a requisition step, e.g. who verified funding.
@@ -817,7 +820,7 @@ export function OrgRequisitionDetailPanel({ projectId, requisitionId }) {
         ? "Form 5 Part II submitted. Contracts Committee must approve the method."
         : data.nextProcessStarted
           ? "Method approved. Procurement process started."
-          : isPositiveWorkflowDecision(decision) && /^approve requisition/i.test(pendingTask.title || "")
+          : isPositiveWorkflowDecision(decision) && AO_APPROVE_STEP_RE.test(pendingTask.title || "")
             ? "Requisition approved. Pending method selection by Procurement Officer."
             : "Decision recorded.";
       showToast({ message: msg, severity: "success" });

@@ -6,7 +6,9 @@ import { prisma } from "@/lib/prisma";
 import { validateProjectOrgRolePatch } from "@/lib/validation/project-org-role";
 import {
   isProjectOrgAdminRole,
+  isWorkflowOnlyOrgRole,
   projectOrgAdminRoleGuardError,
+  workflowOnlyOrgRoleGuardError,
 } from "@/lib/project-org-role";
 import {
   IN_USE_MESSAGE,
@@ -59,6 +61,17 @@ export async function PATCH(request, context) {
     }
   }
 
+  if (isWorkflowOnlyOrgRole(existing.name)) {
+    const blocked = workflowOnlyOrgRoleGuardError({
+      name: existing.name,
+      isActive: body?.isActive,
+    });
+    return NextResponse.json(
+      { error: blocked.error, fieldErrors: blocked.fieldErrors },
+      { status: 400 },
+    );
+  }
+
   const validated = validateProjectOrgRolePatch(body);
   if (!validated.ok) {
     return NextResponse.json(
@@ -102,6 +115,11 @@ export async function DELETE(_request, context) {
 
   if (isProjectOrgAdminRole(existing.name)) {
     const blocked = projectOrgAdminRoleGuardError({ name: existing.name });
+    return NextResponse.json({ error: blocked.error }, { status: 400 });
+  }
+
+  if (isWorkflowOnlyOrgRole(existing.name)) {
+    const blocked = workflowOnlyOrgRoleGuardError({ name: existing.name });
     return NextResponse.json({ error: blocked.error }, { status: 400 });
   }
 

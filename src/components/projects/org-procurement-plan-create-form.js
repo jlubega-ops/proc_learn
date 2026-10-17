@@ -13,7 +13,6 @@ import Typography from "@mui/material/Typography";
 import AddRounded from "@mui/icons-material/AddRounded";
 import ArrowBackRounded from "@mui/icons-material/ArrowBackRounded";
 import DeleteOutlineRounded from "@mui/icons-material/DeleteOutlineRounded";
-import Autocomplete from "@mui/material/Autocomplete";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useToast } from "@/components/providers/toast-provider";
@@ -37,33 +36,47 @@ import {
 } from "@/lib/money";
 import { ORG_REF_DOC, nextOrgDocumentReference } from "@/lib/projects/org-reference";
 import {
+  CIRCULAR_SHEET_OPTIONS,
+  EXPECTED_PROCUREMENT_PERIOD_OPTIONS,
   PLAN_SHEET_TYPE,
-  PLAN_SHEET_TYPE_LABELS,
   PPDA_CONTRACT_TYPE_OPTIONS,
   PPDA_PLAN_METHOD_OPTIONS,
   PPDA_RESERVATION_SCHEME_OPTIONS,
   PPDA_YES_NO,
+  defaultCategoryForSheet,
   normalizeCircularPlanItemFields,
+  normalizeCircularSheet,
+  normalizePlanMethod,
+  normalizePlanSheetType,
+  validatePlanMilestoneOrder,
 } from "@/lib/projects/ppda-forms";
 import {
   DEFAULT_FUNDING_SOURCE,
+  DEFAULT_UNIT_OF_MEASURE,
   FUNDING_SOURCES,
-  LINE_TEXT_MAX,
-  validateLineText,
+  fundingSourcesFor,
+  unitOptionsFor,
 } from "@/lib/projects/line-item-options";
+import {
+  planMethodOptionState,
+  suggestPlanMethodLabel,
+} from "@/lib/projects/procurement-thresholds";
 import { usePersistedFormDraft } from "@/hooks/use-persisted-form-draft";
 import { useApi } from "@/hooks/use-api";
 import { useProcessActivation } from "@/hooks/use-process-activation";
 import { ProcessGateTooltip } from "@/components/projects/process-gate";
 import { PROCESS_FLOW_CODES } from "@/lib/projects/process-catalogue";
 
-function emptyItem() {
+function emptyItem(circularSheet = "Goods") {
+  const circular = normalizeCircularSheet(circularSheet) || "Goods";
+  const sheet = normalizePlanSheetType(circular);
   return {
     title: "",
     description: "",
-    category: "ICT Equipment",
+    sheetType: sheet,
+    category: circular,
     quantity: "10",
-    unitOfMeasure: "Unit",
+    unitOfMeasure: DEFAULT_UNIT_OF_MEASURE,
     estimatedUnitPrice: "",
     budgetLineId: "",
     expectedProcurementPeriod: "Q1",
@@ -128,6 +141,7 @@ export function OrgProcurementPlanCreateForm({ projectId }) {
   const periods = Array.isArray(periodsData?.planningPeriods) ? periodsData.planningPeriods : [];
   const [budgetLines, setBudgetLines] = useState(/** @type {any[]} */ ([]));
   const [existingRefs, setExistingRefs] = useState(/** @type {string[]} */ ([]));
+  const [orgCode, setOrgCode] = useState("");
   const [actorDepartment, setActorDepartment] = useState(
     /** @type {{ id?: string; name?: string; code?: string | null } | null} */ (null),
   );
@@ -138,13 +152,11 @@ export function OrgProcurementPlanCreateForm({ projectId }) {
     planReference: "",
     financialYearId: "",
     planningPeriodId: "",
-    sheetType: PLAN_SHEET_TYPE.GOODS_WORKS_NON_CONSULTANCY,
     isEmergency: false,
     emergencyJustification: "",
     items: [emptyItem()],
   });
   const [metaReady, setMetaReady] = useState(false);
-  const isConsultancy = form.sheetType === PLAN_SHEET_TYPE.CONSULTANCY;
   const isEmergency = Boolean(form.isEmergency);
   const processes = useProcessActivation(projectId);
   const annualOff = !processes.isActive(PROCESS_FLOW_CODES.PROCUREMENT_PLANNING);
@@ -167,10 +179,21 @@ export function OrgProcurementPlanCreateForm({ projectId }) {
           items:
             Array.isArray(/** @type {any} */ (payload).items) &&
             /** @type {any} */ (payload).items.length
-              ? /** @type {any} */ (payload).items.map((item) => ({
-                  ...item,
-                  sourceOfFunding: item?.sourceOfFunding || DEFAULT_FUNDING_SOURCE,
-                }))
+              ? /** @type {any} */ (payload).items.map((item) => {
+                  const circular =
+                    normalizeCircularSheet(item?.category || item?.circularSheet || item?.sheetType) ||
+                    "Goods";
+                  const sheet = normalizePlanSheetType(circular);
+                  return {
+                    ...item,
+                    sheetType: sheet,
+                    sourceOfFunding: item?.sourceOfFunding || DEFAULT_FUNDING_SOURCE,
+                    unitOfMeasure: item?.unitOfMeasure || DEFAULT_UNIT_OF_MEASURE,
+                    category: circular,
+                    plannedProcurementMethod: normalizePlanMethod(item?.plannedProcurementMethod),
+                    expectedProcurementPeriod: item?.expectedProcurementPeriod || "Q1",
+                  };
+                })
               : prev.items,
         }));
       }
@@ -212,6 +235,8 @@ export function OrgProcurementPlanCreateForm({ projectId }) {
         (Array.isArray(bData.budgetLines) && bData.budgetLines[0]?.department) ||
         null;
       setActorDepartment(dept);
+      const code = typeof pData.orgCode === "string" ? pData.orgCode : "";
+      setOrgCode(code);
       const plans = Array.isArray(pData.plans) ? pData.plans : [];
       const refs = plans.map((p) => p.planReference).filter(Boolean);
       setExistingRefs(refs);
@@ -220,10 +245,11 @@ export function OrgProcurementPlanCreateForm({ projectId }) {
       const firstFyId = nextYears[0]?.id || "";
       const firstFyLabel = nextYears[0]?.label || "";
       const autoRef =
-        firstFyLabel && dept
+        firstFyLabel || code || dept
           ? nextOrgDocumentReference(refs, {
-              deptCode: dept.code,
-              deptName: dept.name,
+              orgCode: code,
+              deptCode: dept?.code,
+              deptName: dept?.name,
               docType: ORG_REF_DOC.PROCUREMENT_PLAN,
               fyLabel: firstFyLabel,
             })
@@ -245,14 +271,15 @@ export function OrgProcurementPlanCreateForm({ projectId }) {
 
   function applyReferenceForFy(financialYearId) {
     const fy = years.find((y) => y.id === financialYearId);
-    if (!fy?.label || !actorDepartment) return;
+    if (!fy?.label && !orgCode && !actorDepartment) return;
     const next = nextOrgDocumentReference(existingRefs, {
-      deptCode: actorDepartment.code,
-      deptName: actorDepartment.name,
+      orgCode,
+      deptCode: actorDepartment?.code,
+      deptName: actorDepartment?.name,
       docType: form.isEmergency
         ? ORG_REF_DOC.EMERGENCY_PROCUREMENT_PLAN
         : ORG_REF_DOC.PROCUREMENT_PLAN,
-      fyLabel: fy.label,
+      fyLabel: fy?.label,
     });
     setForm((f) => ({ ...f, planReference: next }));
   }
@@ -260,7 +287,28 @@ export function OrgProcurementPlanCreateForm({ projectId }) {
   function updateItem(idx, patch) {
     setForm((f) => ({
       ...f,
-      items: f.items.map((item, i) => (i === idx ? { ...item, ...patch } : item)),
+      items: f.items.map((item, i) => {
+        if (i !== idx) return item;
+        const next = { ...item, ...patch };
+        if ("category" in patch || "circularSheet" in patch || "sheetType" in patch) {
+          const circular =
+            normalizeCircularSheet(next.category || next.circularSheet || next.sheetType) ||
+            defaultCategoryForSheet(PLAN_SHEET_TYPE.GOODS_WORKS_NON_CONSULTANCY);
+          next.category = circular;
+          next.sheetType = normalizePlanSheetType(circular);
+        }
+        if ("quantity" in patch || "estimatedUnitPrice" in patch) {
+          const total = computeLineTotal(next.quantity, next.estimatedUnitPrice);
+          const current = normalizePlanMethod(next.plannedProcurementMethod);
+          const microState = planMethodOptionState("Micro procurement", total);
+          if (current === "Micro procurement" && !microState.enabled) {
+            next.plannedProcurementMethod = suggestPlanMethodLabel(total) || "Quotation";
+          } else if (!current) {
+            next.plannedProcurementMethod = suggestPlanMethodLabel(total);
+          }
+        }
+        return next;
+      }),
     }));
     setFieldErrors((fe) => {
       const n = { ...fe };
@@ -300,19 +348,54 @@ export function OrgProcurementPlanCreateForm({ projectId }) {
         : "Choose a planning period.";
     }
     form.items.forEach((item, idx) => {
+      const circular = normalizeCircularSheet(item.category);
+      const itemSheet = normalizePlanSheetType(circular || item.sheetType);
       if (!item.title.trim()) errors[`items.${idx}.title`] = "Enter an item title.";
-      if (!item.category.trim()) errors[`items.${idx}.category`] = "Enter a category.";
+      if (!circular) errors[`items.${idx}.category`] = "Choose a Circular sheet type.";
+      else if (!CIRCULAR_SHEET_OPTIONS.includes(circular)) {
+        errors[`items.${idx}.category`] = "Choose a valid Circular sheet type.";
+      }
+      if (!String(item.unitOfMeasure || "").trim()) {
+        errors[`items.${idx}.unitOfMeasure`] = "Choose a unit.";
+      }
       const qtyErr = validatePositiveNumber(item.quantity, "Quantity");
       if (qtyErr) errors[`items.${idx}.quantity`] = qtyErr;
       const priceErr = validatePositiveMoney(item.estimatedUnitPrice, "Unit price");
       if (priceErr) errors[`items.${idx}.estimatedUnitPrice`] = priceErr;
-      const fundingErr = validateLineText(item.sourceOfFunding, "Source of funding");
-      if (fundingErr) errors[`items.${idx}.sourceOfFunding`] = fundingErr;
+      if (!FUNDING_SOURCES.includes(String(item.sourceOfFunding || "").trim())) {
+        errors[`items.${idx}.sourceOfFunding`] = "Choose a source of funding.";
+      }
+      const method = normalizePlanMethod(item.plannedProcurementMethod);
+      if (!method) {
+        errors[`items.${idx}.plannedProcurementMethod`] = "Choose a procurement method.";
+      } else {
+        const total = computeLineTotal(item.quantity, item.estimatedUnitPrice);
+        const state = planMethodOptionState(method, total);
+        if (!state.enabled) {
+          errors[`items.${idx}.plannedProcurementMethod`] =
+            state.reason || "This method is not allowed for the estimated amount.";
+        }
+      }
+      if (!String(item.contractType || "").trim()) {
+        errors[`items.${idx}.contractType`] = "Choose a contract type.";
+      } else if (!PPDA_CONTRACT_TYPE_OPTIONS.includes(item.contractType)) {
+        errors[`items.${idx}.contractType`] = "Choose a valid contract type.";
+      }
+      if (!String(item.completionDate || "").trim()) {
+        errors[`items.${idx}.completionDate`] = "Enter a completion date.";
+      }
+      if (
+        item.expectedProcurementPeriod &&
+        !EXPECTED_PROCUREMENT_PERIOD_OPTIONS.includes(item.expectedProcurementPeriod)
+      ) {
+        errors[`items.${idx}.expectedProcurementPeriod`] = "Choose a valid period.";
+      }
       if (!item.budgetLineId) {
         errors[`items.${idx}.budgetLineId`] = budgetLinesEmpty
           ? "No approved budget lines for this financial year. An approved department budget must exist first."
           : "Choose a budget line.";
       }
+      Object.assign(errors, validatePlanMilestoneOrder(item, itemSheet, `items.${idx}`));
     });
     return errors;
   }
@@ -330,13 +413,16 @@ export function OrgProcurementPlanCreateForm({ projectId }) {
       const payload = {
         ...form,
         planReference: form.planReference.trim(),
-        sheetType: form.sheetType,
-        items: form.items.map((item) => ({
-          ...item,
-          quantity: parseMoneyInput(item.quantity),
-          estimatedUnitPrice: parseMoneyInput(item.estimatedUnitPrice),
-          ...normalizeCircularPlanItemFields(item, form.sheetType),
-        })),
+        items: form.items.map((item) => {
+          const itemSheet = normalizePlanSheetType(item.sheetType);
+          return {
+            ...item,
+            sheetType: itemSheet,
+            quantity: parseMoneyInput(item.quantity),
+            estimatedUnitPrice: parseMoneyInput(item.estimatedUnitPrice),
+            ...normalizeCircularPlanItemFields(item, itemSheet),
+          };
+        }),
       };
       const res = await fetch(`/api/projects/${projectId}/procurement-plans`, {
         method: "POST",
@@ -454,14 +540,15 @@ export function OrgProcurementPlanCreateForm({ projectId }) {
             setForm((f) => {
               const fy = years.find((y) => y.id === f.financialYearId);
               let planReference = f.planReference;
-              if (fy?.label && actorDepartment) {
+              if (fy?.label || orgCode || actorDepartment) {
                 planReference = nextOrgDocumentReference(existingRefs, {
-                  deptCode: actorDepartment.code,
-                  deptName: actorDepartment.name,
+                  orgCode,
+                  deptCode: actorDepartment?.code,
+                  deptName: actorDepartment?.name,
                   docType: nextEmergency
                     ? ORG_REF_DOC.EMERGENCY_PROCUREMENT_PLAN
                     : ORG_REF_DOC.PROCUREMENT_PLAN,
-                  fyLabel: fy.label,
+                  fyLabel: fy?.label,
                 });
               }
               return {
@@ -548,10 +635,23 @@ export function OrgProcurementPlanCreateForm({ projectId }) {
           error={Boolean(fieldErrors.planReference)}
           helperText={
             fieldErrors.planReference ||
-            "Auto-generated as DEPT-PP-YYYY-SEQ; you may edit"
+            "Auto-generated as ORGCODE-PP-YEAR-RANDOM; you may edit"
           }
           sx={themedTextFieldSx}
-          placeholder="ICT-PP-2026-001"
+          placeholder="NSI-PP-2026-7K2M9Q4A"
+        />
+        <TextField
+          label="Department"
+          value={
+            actorDepartment
+              ? `${actorDepartment.name || ""}${actorDepartment.code ? ` (${actorDepartment.code})` : ""}`
+              : "—"
+          }
+          fullWidth
+          disabled
+          helperText="From your organisation user account"
+          sx={themedTextFieldSx}
+          slotProps={{ input: { readOnly: true } }}
         />
         <ActiveFinancialYearSelect
           value={form.financialYearId}
@@ -613,32 +713,17 @@ export function OrgProcurementPlanCreateForm({ projectId }) {
             </MenuItem>
           ) : null}
         </TextField>
-        <TextField
-          select
-          label="Circular 1/2024 sheet"
-          value={form.sheetType}
-          onChange={(e) => setForm((f) => ({ ...f, sheetType: e.target.value }))}
-          fullWidth
-          helperText="Choose Goods/Works/Non-consultancy or Consultancy columns."
-          sx={themedTextFieldSx}
-          className="sm:col-span-2"
-        >
-          {Object.entries(PLAN_SHEET_TYPE_LABELS).map(([value, label]) => (
-            <MenuItem key={value} value={value}>
-              {label}
-            </MenuItem>
-          ))}
-        </TextField>
-
         <div className="sm:col-span-2 space-y-3">
           <Typography variant="subtitle2" sx={{ fontWeight: 600 }}>
             Plan items
           </Typography>
-          <Typography variant="body2" sx={adminMutedTextSx}>
-            Fill Circular No. 1/2024 fields per item (teaching). Optional download is a reference
-            HTML copy — submit stays in-app.
-          </Typography>
-          {form.items.map((item, idx) => (
+          {form.items.map((item, idx) => {
+            const circular =
+              normalizeCircularSheet(item.category) || item.category || "Goods";
+            const itemSheet = normalizePlanSheetType(circular);
+            const isConsultancy = itemSheet === PLAN_SHEET_TYPE.CONSULTANCY;
+            const lineTotal = computeLineTotal(item.quantity, item.estimatedUnitPrice);
+            return (
             <div
               key={idx}
               className="grid gap-2 rounded-lg border border-[color:var(--border-subtle)] p-3 sm:grid-cols-2"
@@ -671,14 +756,21 @@ export function OrgProcurementPlanCreateForm({ projectId }) {
                 sx={themedTextFieldSx}
               />
               <TextField
-                label="Category"
-                value={item.category}
+                select
+                label="Circular 1/2024 sheet"
+                value={circular}
                 onChange={(e) => updateItem(idx, { category: e.target.value })}
                 fullWidth
                 error={Boolean(fieldErrors[`items.${idx}.category`])}
                 helperText={fieldErrors[`items.${idx}.category`] || undefined}
                 sx={themedTextFieldSx}
-              />
+              >
+                {CIRCULAR_SHEET_OPTIONS.map((v) => (
+                  <MenuItem key={v} value={v}>
+                    {v}
+                  </MenuItem>
+                ))}
+              </TextField>
               <TextField
                 label="Quantity"
                 value={item.quantity}
@@ -692,6 +784,22 @@ export function OrgProcurementPlanCreateForm({ projectId }) {
                 helperText={fieldErrors[`items.${idx}.quantity`] || undefined}
                 sx={themedTextFieldSx}
               />
+              <TextField
+                select
+                label="Unit of measure"
+                value={item.unitOfMeasure}
+                onChange={(e) => updateItem(idx, { unitOfMeasure: e.target.value })}
+                fullWidth
+                error={Boolean(fieldErrors[`items.${idx}.unitOfMeasure`])}
+                helperText={fieldErrors[`items.${idx}.unitOfMeasure`] || undefined}
+                sx={themedTextFieldSx}
+              >
+                {unitOptionsFor(item.unitOfMeasure).map((v) => (
+                  <MenuItem key={v} value={v}>
+                    {v}
+                  </MenuItem>
+                ))}
+              </TextField>
               <TextField
                 label="Estimated unit price (UGX)"
                 value={item.estimatedUnitPrice}
@@ -732,12 +840,22 @@ export function OrgProcurementPlanCreateForm({ projectId }) {
                 ) : null}
               </TextField>
               <TextField
+                select
                 label="Expected period"
-                value={item.expectedProcurementPeriod}
+                value={item.expectedProcurementPeriod || ""}
                 onChange={(e) => updateItem(idx, { expectedProcurementPeriod: e.target.value })}
                 fullWidth
+                error={Boolean(fieldErrors[`items.${idx}.expectedProcurementPeriod`])}
+                helperText={fieldErrors[`items.${idx}.expectedProcurementPeriod`] || undefined}
                 sx={themedTextFieldSx}
-              />
+              >
+                <MenuItem value="">Select…</MenuItem>
+                {EXPECTED_PROCUREMENT_PERIOD_OPTIONS.map((v) => (
+                  <MenuItem key={v} value={v}>
+                    {v}
+                  </MenuItem>
+                ))}
+              </TextField>
               <TextField
                 label="Description / specification"
                 value={item.description}
@@ -750,40 +868,17 @@ export function OrgProcurementPlanCreateForm({ projectId }) {
               <Typography variant="subtitle2" sx={{ fontWeight: 600 }} className="sm:col-span-2">
                 Circular 1/2024 fields
               </Typography>
-              <Autocomplete
-                freeSolo
-                options={FUNDING_SOURCES}
-                value={item.sourceOfFunding || ""}
-                inputValue={item.sourceOfFunding || ""}
-                onChange={(_e, value) =>
-                  updateItem(idx, { sourceOfFunding: typeof value === "string" ? value : "" })
-                }
-                onInputChange={(_e, value) => updateItem(idx, { sourceOfFunding: value })}
-                renderInput={(params) => (
-                  <TextField
-                    {...params}
-                    label="Source of funding"
-                    fullWidth
-                    error={Boolean(fieldErrors[`items.${idx}.sourceOfFunding`])}
-                    helperText={fieldErrors[`items.${idx}.sourceOfFunding`] || ""}
-                    sx={themedTextFieldSx}
-                    slotProps={{
-                      ...params.slotProps,
-                      htmlInput: { ...params.slotProps?.htmlInput, maxLength: LINE_TEXT_MAX },
-                    }}
-                  />
-                )}
-              />
               <TextField
                 select
-                label="Planned procurement method"
-                value={item.plannedProcurementMethod}
-                onChange={(e) => updateItem(idx, { plannedProcurementMethod: e.target.value })}
+                label="Source of funding"
+                value={item.sourceOfFunding || ""}
+                onChange={(e) => updateItem(idx, { sourceOfFunding: e.target.value })}
                 fullWidth
+                error={Boolean(fieldErrors[`items.${idx}.sourceOfFunding`])}
+                helperText={fieldErrors[`items.${idx}.sourceOfFunding`] || undefined}
                 sx={themedTextFieldSx}
               >
-                <MenuItem value="">Select…</MenuItem>
-                {PPDA_PLAN_METHOD_OPTIONS.map((v) => (
+                {fundingSourcesFor(item.sourceOfFunding).map((v) => (
                   <MenuItem key={v} value={v}>
                     {v}
                   </MenuItem>
@@ -791,10 +886,34 @@ export function OrgProcurementPlanCreateForm({ projectId }) {
               </TextField>
               <TextField
                 select
+                label="Planned procurement method"
+                value={normalizePlanMethod(item.plannedProcurementMethod) || item.plannedProcurementMethod || ""}
+                onChange={(e) => updateItem(idx, { plannedProcurementMethod: e.target.value })}
+                fullWidth
+                error={Boolean(fieldErrors[`items.${idx}.plannedProcurementMethod`])}
+                helperText={fieldErrors[`items.${idx}.plannedProcurementMethod`] || undefined}
+                sx={themedTextFieldSx}
+              >
+                <MenuItem value="">Select…</MenuItem>
+                {PPDA_PLAN_METHOD_OPTIONS.map((v) => {
+                  const state = planMethodOptionState(v, lineTotal);
+                  return (
+                    <MenuItem key={v} value={v} disabled={!state.enabled}>
+                      {v}
+                      {state.recommended ? " (recommended)" : ""}
+                      {!state.enabled && state.reason ? ` — ${state.reason}` : ""}
+                    </MenuItem>
+                  );
+                })}
+              </TextField>
+              <TextField
+                select
                 label="Contract type"
                 value={item.contractType}
                 onChange={(e) => updateItem(idx, { contractType: e.target.value })}
                 fullWidth
+                error={Boolean(fieldErrors[`items.${idx}.contractType`])}
+                helperText={fieldErrors[`items.${idx}.contractType`] || undefined}
                 sx={themedTextFieldSx}
               >
                 <MenuItem value="">Select…</MenuItem>
@@ -894,6 +1013,8 @@ export function OrgProcurementPlanCreateForm({ projectId }) {
                     value={item.bidInvitationDate}
                     onChange={(e) => updateItem(idx, { bidInvitationDate: e.target.value })}
                     fullWidth
+                    error={Boolean(fieldErrors[`items.${idx}.bidInvitationDate`])}
+                    helperText={fieldErrors[`items.${idx}.bidInvitationDate`] || undefined}
                     slotProps={{ inputLabel: { shrink: true } }}
                     sx={themedTextFieldSx}
                   />
@@ -903,6 +1024,8 @@ export function OrgProcurementPlanCreateForm({ projectId }) {
                     value={item.bidClosingOpeningDate}
                     onChange={(e) => updateItem(idx, { bidClosingOpeningDate: e.target.value })}
                     fullWidth
+                    error={Boolean(fieldErrors[`items.${idx}.bidClosingOpeningDate`])}
+                    helperText={fieldErrors[`items.${idx}.bidClosingOpeningDate`] || undefined}
                     slotProps={{ inputLabel: { shrink: true } }}
                     sx={themedTextFieldSx}
                   />
@@ -914,6 +1037,10 @@ export function OrgProcurementPlanCreateForm({ projectId }) {
                       updateItem(idx, { evaluationReportApprovalDate: e.target.value })
                     }
                     fullWidth
+                    error={Boolean(fieldErrors[`items.${idx}.evaluationReportApprovalDate`])}
+                    helperText={
+                      fieldErrors[`items.${idx}.evaluationReportApprovalDate`] || undefined
+                    }
                     slotProps={{ inputLabel: { shrink: true } }}
                     sx={themedTextFieldSx}
                   />
@@ -923,6 +1050,8 @@ export function OrgProcurementPlanCreateForm({ projectId }) {
                     value={item.awardNotificationDate}
                     onChange={(e) => updateItem(idx, { awardNotificationDate: e.target.value })}
                     fullWidth
+                    error={Boolean(fieldErrors[`items.${idx}.awardNotificationDate`])}
+                    helperText={fieldErrors[`items.${idx}.awardNotificationDate`] || undefined}
                     slotProps={{ inputLabel: { shrink: true } }}
                     sx={themedTextFieldSx}
                   />
@@ -1011,6 +1140,8 @@ export function OrgProcurementPlanCreateForm({ projectId }) {
                 value={item.contractSigningDate}
                 onChange={(e) => updateItem(idx, { contractSigningDate: e.target.value })}
                 fullWidth
+                error={Boolean(fieldErrors[`items.${idx}.contractSigningDate`])}
+                helperText={fieldErrors[`items.${idx}.contractSigningDate`] || undefined}
                 slotProps={{ inputLabel: { shrink: true } }}
                 sx={themedTextFieldSx}
               />
@@ -1020,11 +1151,15 @@ export function OrgProcurementPlanCreateForm({ projectId }) {
                 value={item.completionDate}
                 onChange={(e) => updateItem(idx, { completionDate: e.target.value })}
                 fullWidth
+                required
+                error={Boolean(fieldErrors[`items.${idx}.completionDate`])}
+                helperText={fieldErrors[`items.${idx}.completionDate`] || undefined}
                 slotProps={{ inputLabel: { shrink: true } }}
                 sx={themedTextFieldSx}
               />
             </div>
-          ))}
+            );
+          })}
           <Button
             type="button"
             variant="outlined"
