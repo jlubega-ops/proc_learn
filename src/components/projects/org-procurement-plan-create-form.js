@@ -59,12 +59,19 @@ import {
 } from "@/lib/projects/line-item-options";
 import {
   planMethodOptionState,
+  planMethodToEnum,
   suggestPlanMethodLabel,
   suggestTenderSubtype,
   tenderSubtypeOptionState,
   TENDER_SUBTYPE_OPTIONS,
   normalizeTenderSubtype,
 } from "@/lib/projects/procurement-thresholds";
+import {
+  buildGoodsWorksTimetable,
+  minimumBiddingWorkingDays,
+  evaluationWorkingDays,
+  validateGoodsWorksTimetableMinimums,
+} from "@/lib/projects/procurement-timetable";
 import { usePersistedFormDraft } from "@/hooks/use-persisted-form-draft";
 import { useApi } from "@/hooks/use-api";
 import { useProcessActivation } from "@/hooks/use-process-activation";
@@ -102,6 +109,7 @@ function emptyItem(circularSheet = "Goods") {
     bidInvitationDate: "",
     bidClosingOpeningDate: "",
     evaluationReportApprovalDate: "",
+    awardDecisionDate: "",
     awardNotificationDate: "",
     contractSigningDate: "",
     completionDate: "",
@@ -134,6 +142,21 @@ export function OrgProcurementPlanCreateForm({ projectId }) {
     `/api/projects/${projectId}/org-planning-periods?selectable=1`,
     { silentErrors: true },
   );
+  const { data: holidaysData } = useApi(`/api/meta/public-holidays`, {
+    silentErrors: true,
+  });
+  const holidayDatesKey = Array.isArray(holidaysData?.dates)
+    ? holidaysData.dates.join(",")
+    : "";
+  const holidaySet = useMemo(() => {
+    if (!holidayDatesKey) return null;
+    return new Set(holidayDatesKey.split(","));
+  }, [holidayDatesKey]);
+  const holidaySetRef = useRef(holidaySet);
+  useEffect(() => {
+    holidaySetRef.current = holidaySet;
+  }, [holidaySet]);
+  const holidaysAppliedOnceRef = useRef(false);
   const fyDataRef = useRef(fyData);
   useEffect(() => {
     fyDataRef.current = fyData;
@@ -275,6 +298,37 @@ export function OrgProcurementPlanCreateForm({ projectId }) {
     void load();
   }, [load]);
 
+  // When holiday data first arrives, refresh derived timetable dates (weekends-only until then).
+  useEffect(() => {
+    if (!holidaySet?.size || holidaysAppliedOnceRef.current) return;
+    holidaysAppliedOnceRef.current = true;
+    setForm((f) => ({
+      ...f,
+      items: f.items.map((item) => {
+        const sheetNow = normalizePlanSheetType(item.category || item.sheetType);
+        if (sheetNow === PLAN_SHEET_TYPE.CONSULTANCY) return item;
+        if (!planMethodToEnum(item.plannedProcurementMethod)) return item;
+        if (!String(item.bidInvitationDate || "").trim()) return item;
+        const built = buildGoodsWorksTimetable({
+          bidInvitationDate: item.bidInvitationDate,
+          plannedProcurementMethod: item.plannedProcurementMethod,
+          tenderSubtype: item.tenderSubtype,
+          category: item.category || item.circularSheet,
+          holidays: holidaySet,
+        });
+        if (!built) return item;
+        return {
+          ...item,
+          bidClosingOpeningDate: built.bidClosingOpeningDate,
+          evaluationReportApprovalDate: built.evaluationReportApprovalDate,
+          awardDecisionDate: built.awardDecisionDate,
+          awardNotificationDate: built.awardNotificationDate,
+          contractSigningDate: built.contractSigningDate,
+        };
+      }),
+    }));
+  }, [holidaySet]);
+
   function applyReferenceForFy(financialYearId) {
     const fy = years.find((y) => y.id === financialYearId);
     if (!fy?.label && !orgCode && !actorDepartment) return;
@@ -345,6 +399,30 @@ export function OrgProcurementPlanCreateForm({ projectId }) {
               suggestTenderSubtype(total, cat);
           } else {
             next.tenderSubtype = "";
+          }
+        }
+        const sheetNow = normalizePlanSheetType(next.category || next.sheetType);
+        const timetableDrivers =
+          "plannedProcurementMethod" in patch ||
+          "tenderSubtype" in patch ||
+          "category" in patch ||
+          "circularSheet" in patch ||
+          "bidInvitationDate" in patch;
+        if (timetableDrivers && sheetNow !== PLAN_SHEET_TYPE.CONSULTANCY) {
+          const built = buildGoodsWorksTimetable({
+            bidInvitationDate: next.bidInvitationDate,
+            plannedProcurementMethod: next.plannedProcurementMethod,
+            tenderSubtype: next.tenderSubtype,
+            category: next.category || next.circularSheet,
+            holidays: holidaySetRef.current,
+          });
+          if (built) {
+            next.bidInvitationDate = built.bidInvitationDate;
+            next.bidClosingOpeningDate = built.bidClosingOpeningDate;
+            next.evaluationReportApprovalDate = built.evaluationReportApprovalDate;
+            next.awardDecisionDate = built.awardDecisionDate;
+            next.awardNotificationDate = built.awardNotificationDate;
+            next.contractSigningDate = built.contractSigningDate;
           }
         }
         return next;
@@ -426,6 +504,20 @@ export function OrgProcurementPlanCreateForm({ projectId }) {
                 subState.reason || "This bidding type is not allowed for the amount.";
             }
           }
+        }
+        if (itemSheet !== PLAN_SHEET_TYPE.CONSULTANCY && method) {
+          Object.assign(
+            errors,
+            validateGoodsWorksTimetableMinimums(
+              {
+                ...item,
+                plannedProcurementMethod: method,
+                category: circular,
+              },
+              `items.${idx}`,
+              holidaySetRef.current,
+            ),
+          );
         }
       }
       if (!String(item.contractType || "").trim()) {
@@ -1093,7 +1185,10 @@ export function OrgProcurementPlanCreateForm({ projectId }) {
                     onChange={(e) => updateItem(idx, { bidInvitationDate: e.target.value })}
                     fullWidth
                     error={Boolean(fieldErrors[`items.${idx}.bidInvitationDate`])}
-                    helperText={fieldErrors[`items.${idx}.bidInvitationDate`] || undefined}
+                    helperText={
+                      fieldErrors[`items.${idx}.bidInvitationDate`] ||
+                      "Suggested: next working day after plan approval"
+                    }
                     slotProps={{ inputLabel: { shrink: true } }}
                     sx={themedTextFieldSx}
                   />
@@ -1104,7 +1199,18 @@ export function OrgProcurementPlanCreateForm({ projectId }) {
                     onChange={(e) => updateItem(idx, { bidClosingOpeningDate: e.target.value })}
                     fullWidth
                     error={Boolean(fieldErrors[`items.${idx}.bidClosingOpeningDate`])}
-                    helperText={fieldErrors[`items.${idx}.bidClosingOpeningDate`] || undefined}
+                    helperText={
+                      fieldErrors[`items.${idx}.bidClosingOpeningDate`] ||
+                      (() => {
+                        const n = minimumBiddingWorkingDays(
+                          item.plannedProcurementMethod,
+                          item.tenderSubtype,
+                        );
+                        return n > 0
+                          ? `Min ${n} working days after invitation`
+                          : "No prescribed minimum (micro / direct)";
+                      })()
+                    }
                     slotProps={{ inputLabel: { shrink: true } }}
                     sx={themedTextFieldSx}
                   />
@@ -1118,19 +1224,37 @@ export function OrgProcurementPlanCreateForm({ projectId }) {
                     fullWidth
                     error={Boolean(fieldErrors[`items.${idx}.evaluationReportApprovalDate`])}
                     helperText={
-                      fieldErrors[`items.${idx}.evaluationReportApprovalDate`] || undefined
+                      fieldErrors[`items.${idx}.evaluationReportApprovalDate`] ||
+                      `${evaluationWorkingDays(item.category)} working days after opening`
                     }
                     slotProps={{ inputLabel: { shrink: true } }}
                     sx={themedTextFieldSx}
                   />
                   <TextField
-                    label="Award notification"
+                    label="Award decision"
+                    type="date"
+                    value={item.awardDecisionDate || ""}
+                    onChange={(e) => updateItem(idx, { awardDecisionDate: e.target.value })}
+                    fullWidth
+                    error={Boolean(fieldErrors[`items.${idx}.awardDecisionDate`])}
+                    helperText={
+                      fieldErrors[`items.${idx}.awardDecisionDate`] ||
+                      "5 working days after evaluation report"
+                    }
+                    slotProps={{ inputLabel: { shrink: true } }}
+                    sx={themedTextFieldSx}
+                  />
+                  <TextField
+                    label="BEB / award notice"
                     type="date"
                     value={item.awardNotificationDate}
                     onChange={(e) => updateItem(idx, { awardNotificationDate: e.target.value })}
                     fullWidth
                     error={Boolean(fieldErrors[`items.${idx}.awardNotificationDate`])}
-                    helperText={fieldErrors[`items.${idx}.awardNotificationDate`] || undefined}
+                    helperText={
+                      fieldErrors[`items.${idx}.awardNotificationDate`] ||
+                      "5 working days after award decision"
+                    }
                     slotProps={{ inputLabel: { shrink: true } }}
                     sx={themedTextFieldSx}
                   />
@@ -1220,7 +1344,14 @@ export function OrgProcurementPlanCreateForm({ projectId }) {
                 onChange={(e) => updateItem(idx, { contractSigningDate: e.target.value })}
                 fullWidth
                 error={Boolean(fieldErrors[`items.${idx}.contractSigningDate`])}
-                helperText={fieldErrors[`items.${idx}.contractSigningDate`] || undefined}
+                helperText={
+                  fieldErrors[`items.${idx}.contractSigningDate`] ||
+                  (!isConsultancy
+                    ? planMethodToEnum(item.plannedProcurementMethod) === "TENDER"
+                      ? "After 10-day standstill from BEB + 3 working days"
+                      : "3 working days after BEB (standstill exempt)"
+                    : undefined)
+                }
                 slotProps={{ inputLabel: { shrink: true } }}
                 sx={themedTextFieldSx}
               />

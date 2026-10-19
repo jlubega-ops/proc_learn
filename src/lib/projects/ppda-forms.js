@@ -224,6 +224,7 @@ export function normalizeCircularPlanItemFields(raw, sheetType) {
     evaluationReportApprovalDate: isConsultancy
       ? null
       : dateOrNull(raw?.evaluationReportApprovalDate),
+    awardDecisionDate: isConsultancy ? null : dateOrNull(raw?.awardDecisionDate),
     awardNotificationDate: isConsultancy ? null : dateOrNull(raw?.awardNotificationDate),
     contractSigningDate: dateOrNull(raw?.contractSigningDate),
     completionDate: dateOrNull(raw?.completionDate),
@@ -270,7 +271,8 @@ export function validatePlanMilestoneOrder(item, sheetType, prefix) {
     : [
         ["bidInvitationDate", "bidClosingOpeningDate"],
         ["bidClosingOpeningDate", "evaluationReportApprovalDate"],
-        ["evaluationReportApprovalDate", "awardNotificationDate"],
+        ["evaluationReportApprovalDate", "awardDecisionDate"],
+        ["awardDecisionDate", "awardNotificationDate"],
         ["awardNotificationDate", "contractSigningDate"],
         ["contractSigningDate", "completionDate"],
       ];
@@ -279,6 +281,15 @@ export function validatePlanMilestoneOrder(item, sheetType, prefix) {
     const db = dateOrNull(item?.[b]);
     if (da && db && db < da) {
       errors[`${prefix}.${b}`] = "Cannot be before the previous milestone.";
+    }
+  }
+  // When awardDecisionDate is blank, still require BEB after eval.
+  if (!isConsultancy) {
+    const evalD = dateOrNull(item?.evaluationReportApprovalDate);
+    const beb = dateOrNull(item?.awardNotificationDate);
+    const awardD = dateOrNull(item?.awardDecisionDate);
+    if (evalD && beb && !awardD && beb < evalD) {
+      errors[`${prefix}.awardNotificationDate`] = "Cannot be before the previous milestone.";
     }
   }
   return errors;
@@ -699,7 +710,8 @@ ${
 <tr><th>Proposal deadline</th><td>${escapeHtml(cf.proposalDeadlineDate)}</td><th>Proposal opening</th><td>${escapeHtml(cf.proposalOpeningDate)}</td></tr>
 <tr><th>Eval approval</th><td>${escapeHtml(cf.proposalEvalApprovalDate)}</td><th>Award notification</th><td>${escapeHtml(cf.proposalAwardNotificationDate)}</td></tr>`
     : `<tr><th>Bid invitation</th><td>${escapeHtml(cf.bidInvitationDate)}</td><th>Bid closing/opening</th><td>${escapeHtml(cf.bidClosingOpeningDate)}</td></tr>
-<tr><th>Eval report approval</th><td>${escapeHtml(cf.evaluationReportApprovalDate)}</td><th>Award notification</th><td>${escapeHtml(cf.awardNotificationDate)}</td></tr>`
+<tr><th>Eval report approval</th><td>${escapeHtml(cf.evaluationReportApprovalDate)}</td><th>Award decision</th><td>${escapeHtml(cf.awardDecisionDate)}</td></tr>
+<tr><th>BEB / award notice</th><td>${escapeHtml(cf.awardNotificationDate)}</td><th></th><td></td></tr>`
 }
 <tr><th>Contract signing</th><td>${escapeHtml(cf.contractSigningDate)}</td><th>Completion</th><td>${escapeHtml(cf.completionDate)}</td></tr>
 </table>`;

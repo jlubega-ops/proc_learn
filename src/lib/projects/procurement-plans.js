@@ -247,6 +247,25 @@ async function validateAndBuildPlanItems(prisma, projectId, itemsIn, financialYe
   const { checkMethodValueCeiling, planMethodToEnum } = await import(
     "@/lib/projects/procurement-thresholds"
   );
+  const { loadUgandaPublicHolidaySet, holidayYearsAround } = await import(
+    "@/lib/projects/uganda-public-holidays"
+  );
+  const holidayYears = new Set(holidayYearsAround(null));
+  for (const raw of itemsIn) {
+    for (const key of [
+      "bidInvitationDate",
+      "bidClosingOpeningDate",
+      "evaluationReportApprovalDate",
+      "awardDecisionDate",
+      "awardNotificationDate",
+      "contractSigningDate",
+    ]) {
+      const d = typeof raw?.[key] === "string" ? raw[key].trim() : "";
+      if (/^\d{4}-\d{2}-\d{2}$/.test(d)) holidayYears.add(Number(d.slice(0, 4)));
+    }
+  }
+  const holidayLoad = await loadUgandaPublicHolidaySet([...holidayYears]);
+  const holidays = holidayLoad.dates.size ? holidayLoad.dates : null;
 
   for (let idx = 0; idx < itemsIn.length; idx += 1) {
     const raw = itemsIn[idx];
@@ -357,7 +376,32 @@ async function validateAndBuildPlanItems(prisma, projectId, itemsIn, financialYe
     if (period && !EXPECTED_PROCUREMENT_PERIOD_OPTIONS.includes(period)) {
       fieldErrors[`items.${idx}.expectedProcurementPeriod`] = "Choose a valid period.";
     }
-    Object.assign(fieldErrors, validatePlanMilestoneOrder(raw, itemSheet, `items.${idx}`));
+    Object.assign(
+      fieldErrors,
+      validatePlanMilestoneOrder(
+        { ...raw, ...circularFields },
+        itemSheet,
+        `items.${idx}`,
+      ),
+    );
+    if (itemSheet !== PLAN_SHEET_TYPE.CONSULTANCY) {
+      const { validateGoodsWorksTimetableMinimums } = await import(
+        "@/lib/projects/procurement-timetable"
+      );
+      Object.assign(
+        fieldErrors,
+        validateGoodsWorksTimetableMinimums(
+          {
+            ...raw,
+            ...circularFields,
+            plannedProcurementMethod: circularFields.plannedProcurementMethod,
+            category: category || circularFields.circularSheet,
+          },
+          `items.${idx}`,
+          holidays,
+        ),
+      );
+    }
 
     itemRows.push({
       itemNumber: idx + 1,
