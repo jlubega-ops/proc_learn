@@ -11,8 +11,16 @@ import Paper from "@mui/material/Paper";
 import TextField from "@mui/material/TextField";
 import Typography from "@mui/material/Typography";
 import ArrowBackRounded from "@mui/icons-material/ArrowBackRounded";
+import DeleteOutlineRounded from "@mui/icons-material/DeleteOutlineRounded";
+import EditRounded from "@mui/icons-material/EditRounded";
 import RefreshRounded from "@mui/icons-material/RefreshRounded";
 import SendRounded from "@mui/icons-material/SendRounded";
+import Dialog from "@mui/material/Dialog";
+import DialogActions from "@mui/material/DialogActions";
+import DialogContent from "@mui/material/DialogContent";
+import DialogContentText from "@mui/material/DialogContentText";
+import DialogTitle from "@mui/material/DialogTitle";
+import { useRouter } from "next/navigation";
 import {
   PrintButton,
   PrintDocument,
@@ -31,6 +39,7 @@ import { ProcessGateTooltip } from "@/components/projects/process-gate";
 import { PROCESS_FLOW_CODES } from "@/lib/projects/process-catalogue";
 import {
   adminCenteredLoadingBoxSx,
+  adminDialogPaperSx,
   adminLoadingSpinnerSx,
   adminMutedTextSx,
   adminOutlinedTableContainerSx,
@@ -304,12 +313,16 @@ function PlanDetailsGrid({ plan }) {
 export function OrgProcurementPlanDetailPanel({ projectId, planId }) {
   const { showToast } = useToast();
   const confirm = useConfirm();
+  const router = useRouter();
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
   const [plan, setPlan] = useState(/** @type {any} */ (null));
   const [pendingTask, setPendingTask] = useState(/** @type {any} */ (null));
   const [history, setHistory] = useState(/** @type {any[]} */ ([]));
   const [canSubmit, setCanSubmit] = useState(false);
+  const [canEdit, setCanEdit] = useState(false);
+  const [canDelete, setCanDelete] = useState(false);
+  const [deleteOpen, setDeleteOpen] = useState(false);
   const [organisation, setOrganisation] = useState(/** @type {any} */ (null));
   const [printedBy, setPrintedBy] = useState(/** @type {any} */ (null));
   const [decision, setDecision] = useState("APPROVE");
@@ -348,6 +361,8 @@ export function OrgProcurementPlanDetailPanel({ projectId, planId }) {
       setPendingTask(data.pendingTask || null);
       setHistory(Array.isArray(data.workflowHistory) ? data.workflowHistory : []);
       setCanSubmit(Boolean(data.canSubmit));
+      setCanEdit(Boolean(data.canEdit));
+      setCanDelete(Boolean(data.canDelete));
       setOrganisation(data.organisation || null);
       setPrintedBy(data.printedBy || null);
       const key = String(data.pendingTask?.actionKey || "").toUpperCase();
@@ -382,6 +397,29 @@ export function OrgProcurementPlanDetailPanel({ projectId, planId }) {
       }
       showToast({ message: "Procurement plan submitted for review.", severity: "success" });
       await load();
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function deletePlan() {
+    setBusy(true);
+    try {
+      const res = await fetch(`/api/projects/${projectId}/procurement-plans/${planId}`, {
+        method: "DELETE",
+        credentials: "include",
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        showToast({
+          message: typeof data.error === "string" ? data.error : "Could not delete plan.",
+          severity: "error",
+        });
+        return;
+      }
+      showToast({ message: "Procurement plan deleted.", severity: "success" });
+      setDeleteOpen(false);
+      router.push(`/projects/${projectId}/procurement-plans`);
     } finally {
       setBusy(false);
     }
@@ -514,8 +552,29 @@ export function OrgProcurementPlanDetailPanel({ projectId, planId }) {
           />
         </div>
 
-        {canSubmit && (plan.status === "DRAFT" || plan.status === "RETURNED") ? (
-          <div className="mt-4">
+        <div className="mt-4 flex flex-wrap gap-2">
+          {canEdit ? (
+            <Button
+              component={Link}
+              href={`/projects/${projectId}/procurement-plans/${planId}/edit`}
+              variant="outlined"
+              startIcon={<EditRounded />}
+            >
+              Edit
+            </Button>
+          ) : null}
+          {canDelete ? (
+            <Button
+              variant="outlined"
+              color="error"
+              startIcon={<DeleteOutlineRounded />}
+              disabled={busy}
+              onClick={() => setDeleteOpen(true)}
+            >
+              Delete
+            </Button>
+          ) : null}
+          {canSubmit && (plan.status === "DRAFT" || plan.status === "RETURNED") ? (
             <ProcessGateTooltip inactive={planProcessOff} title={processes.inactiveTitle(planCode)}>
               <Button
                 variant="contained"
@@ -526,8 +585,8 @@ export function OrgProcurementPlanDetailPanel({ projectId, planId }) {
                 Submit for review
               </Button>
             </ProcessGateTooltip>
-          </div>
-        ) : null}
+          ) : null}
+        </div>
       </Paper>
 
       {pendingTask ? (
@@ -585,6 +644,32 @@ export function OrgProcurementPlanDetailPanel({ projectId, planId }) {
       ) : null}
 
       <WorkflowHistoryPanel history={history} showStatusChange />
+
+      <Dialog
+        open={deleteOpen}
+        onClose={() => !busy && setDeleteOpen(false)}
+        slotProps={{ paper: { sx: adminDialogPaperSx } }}
+      >
+        <DialogTitle>Delete plan?</DialogTitle>
+        <DialogContent>
+          <DialogContentText>
+            This permanently removes &ldquo;{plan.title}&rdquo;. Only drafts can be deleted.
+          </DialogContentText>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setDeleteOpen(false)} disabled={busy}>
+            Cancel
+          </Button>
+          <Button
+            color="error"
+            variant="contained"
+            onClick={() => void deletePlan()}
+            disabled={busy}
+          >
+            {busy ? <CircularProgress size={22} color="inherit" /> : "Delete"}
+          </Button>
+        </DialogActions>
+      </Dialog>
     </div>
   );
 }

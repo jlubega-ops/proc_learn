@@ -7,6 +7,7 @@ import {
   budgetInclude,
   deleteDraftBudget,
   getBudgetWorkflowStage,
+  getCreatorBudgetMutationFlags,
   serializeBudget,
   submitBudget,
   updateDraftBudget,
@@ -162,12 +163,16 @@ export async function GET(_request, context) {
       canPrepareBudget(role) &&
       (row.status === "DRAFT" || row.status === "RETURNED") &&
       isCreator;
-    canEditDraft =
-      canPrepareBudget(role) &&
-      (row.status === "DRAFT" || row.status === "RETURNED") &&
-      isCreator;
-    canDeleteDraft =
-      canPrepareBudget(role) && row.status === "DRAFT" && isCreator;
+    if (canPrepareBudget(role)) {
+      const flags = await getCreatorBudgetMutationFlags(prisma, {
+        projectId,
+        budget: row,
+        actorOrgUserId: orgUserId,
+        actorDepartmentId: auth.orgUser.departmentId,
+      });
+      canEditDraft = flags.canEdit;
+      canDeleteDraft = flags.canDelete;
+    }
 
     const task = await prisma.projectOrgWorkflowTask.findFirst({
       where: {

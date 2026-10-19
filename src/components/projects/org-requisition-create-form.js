@@ -881,8 +881,7 @@ export function OrgRequisitionCreateForm({ projectId, requisitionId = "" }) {
       </Typography>
       {saveOnly ? (
         <Typography variant="caption" sx={{ ...adminMutedTextSx, display: "block", mb: 2 }}>
-          Still awaiting Head of User Department review — you can update details or delete from the
-          requisition page until HOD acts.
+          Still awaiting Head of User Department review — you can update details until HOD acts.
         </Typography>
       ) : (
         <Typography variant="caption" sx={{ ...adminMutedTextSx, display: "block", mb: 2 }}>

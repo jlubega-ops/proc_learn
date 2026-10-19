@@ -172,7 +172,7 @@ export function OrgBudgetCreateForm({ projectId, budgetId = "" }) {
           setCanCreate(false);
           return;
         }
-        if (!dData.canEditDraft) {
+        if (!dData.canEditDraft && !dData.canEdit) {
           showToast({
             message: "This budget can no longer be edited.",
             severity: "error",

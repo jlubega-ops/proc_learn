@@ -35,6 +35,47 @@ import {
   withAcademicAuditMeta,
 } from "@/lib/academic/org-academic-slate";
 import { presentOrgWorkflowStatus } from "@/lib/projects/workflow-status-presentation";
+import {
+  cancelOpenWorkflowForEntity,
+  getCreatorEntityMutationFlags,
+  isEntityAwaitingHodReview,
+} from "@/lib/projects/org-creator-mutations";
+
+/**
+ * Creator may edit/delete draft, returned, or submitted plans still waiting on HOD.
+ * @param {import("@prisma/client").PrismaClient} prisma
+ * @param {{
+ *   projectId: string;
+ *   plan: { id: string; status: string; createdByOrgUserId: string | null };
+ *   actorOrgUserId: string;
+ * }} opts
+ */
+export async function getCreatorProcurementPlanMutationFlags(prisma, opts) {
+  return getCreatorEntityMutationFlags(prisma, {
+    projectId: opts.projectId,
+    entityField: "procurementPlanId",
+    entityId: opts.plan.id,
+    status: opts.plan.status,
+    creatorOrgUserId: opts.plan.createdByOrgUserId,
+    actorOrgUserId: opts.actorOrgUserId,
+    draftStatus: OrgProcurementPlanStatus.DRAFT,
+    editableStatuses: [OrgProcurementPlanStatus.DRAFT, OrgProcurementPlanStatus.RETURNED],
+    submittedStatus: OrgProcurementPlanStatus.SUBMITTED,
+  });
+}
+
+/**
+ * @param {import("@prisma/client").PrismaClient} prisma
+ * @param {{ projectId: string; planId: string }} opts
+ */
+export async function isProcurementPlanAwaitingHodReview(prisma, opts) {
+  return isEntityAwaitingHodReview(prisma, {
+    projectId: opts.projectId,
+    entityField: "procurementPlanId",
+    entityId: opts.planId,
+  });
+}
+
 /**
  * @param {unknown} value
  */
@@ -588,14 +629,28 @@ export async function createOrUpdateProcurementPlanDraft(prisma, opts) {
         id: opts.planId,
         projectId: opts.projectId,
         createdByOrgUserId: opts.actorOrgUserId,
-        status: {
-          in: [OrgProcurementPlanStatus.DRAFT, OrgProcurementPlanStatus.RETURNED],
-        },
       },
     });
     if (!existing) {
       return { ok: false, error: "Plan not found or cannot be edited.", status: 404 };
     }
+    const flags = await getCreatorProcurementPlanMutationFlags(prisma, {
+      projectId: opts.projectId,
+      plan: existing,
+      actorOrgUserId: opts.actorOrgUserId,
+    });
+    if (!flags.canEdit) {
+      return {
+        ok: false,
+        error:
+          "You can only edit this plan while it is a draft, returned, or still awaiting Head of User Department review.",
+        status: 400,
+      };
+    }
+    const nextStatus =
+      existing.status === OrgProcurementPlanStatus.SUBMITTED && flags.awaitingHodReview
+        ? OrgProcurementPlanStatus.SUBMITTED
+        : OrgProcurementPlanStatus.DRAFT;
     row = await prisma.projectOrgProcurementPlan.update({
       where: { id: existing.id },
       data: {
@@ -607,7 +662,7 @@ export async function createOrUpdateProcurementPlanDraft(prisma, opts) {
         financialYearId,
         planningPeriodId: planningPeriod?.id || null,
         departmentId: opts.departmentId,
-        status: OrgProcurementPlanStatus.DRAFT,
+        status: nextStatus,
         items: { deleteMany: {}, create: built.itemRows },
       },
       include: procurementPlanInclude,
@@ -655,6 +710,95 @@ export async function createOrUpdateProcurementPlanDraft(prisma, opts) {
   });
 
   return { ok: true, plan: serializeProcurementPlan(row) };
+}
+
+/**
+ * Creator deletes a draft/returned plan, or withdraws one still awaiting HOD review.
+ * @param {import("@prisma/client").PrismaClient} prisma
+ * @param {{
+ *   projectId: string;
+ *   planId: string;
+ *   actorOrgUserId: string;
+ *   actorRoleName?: string | null;
+ * }} opts
+ */
+export async function deleteProcurementPlanByCreator(prisma, opts) {
+  const existing = await prisma.projectOrgProcurementPlan.findFirst({
+    where: { id: opts.planId, projectId: opts.projectId },
+    select: {
+      id: true,
+      title: true,
+      status: true,
+      createdByOrgUserId: true,
+      planReference: true,
+      isConsolidated: true,
+      consolidatedIntoPlanId: true,
+    },
+  });
+  if (!existing) return { ok: false, error: "Plan not found.", status: 404 };
+
+  const flags = await getCreatorProcurementPlanMutationFlags(prisma, {
+    projectId: opts.projectId,
+    plan: existing,
+    actorOrgUserId: opts.actorOrgUserId,
+  });
+  if (!flags.canDelete) {
+    return {
+      ok: false,
+      error:
+        "You can only delete this plan while it is still a draft.",
+      status: 400,
+    };
+  }
+
+  if (existing.isConsolidated || existing.consolidatedIntoPlanId) {
+    return {
+      ok: false,
+      error: "This plan has been consolidated and cannot be deleted.",
+      status: 400,
+    };
+  }
+
+  const linkedReq = await prisma.projectOrgRequisition.findFirst({
+    where: {
+      projectId: opts.projectId,
+      procurementPlanId: existing.id,
+    },
+    select: { id: true },
+  });
+  if (linkedReq) {
+    return {
+      ok: false,
+      error: "This plan already has requisitions and cannot be deleted.",
+      status: 400,
+    };
+  }
+
+  await runInTx(prisma, async (tx) => {
+    await cancelOpenWorkflowForEntity(tx, {
+      projectId: opts.projectId,
+      entityField: "procurementPlanId",
+      entityId: existing.id,
+    });
+    await tx.projectOrgProcurementPlan.delete({ where: { id: existing.id } });
+  });
+
+  await writeAuditLog({
+    eventType: AuditEvent.PROJECT_ORG_PROCUREMENT_PLAN_DELETED,
+    actorUserId: null,
+    meta: {
+      projectId: opts.projectId,
+      planId: existing.id,
+      title: existing.title,
+      planReference: existing.planReference,
+      previousStatus: existing.status,
+      actorOrgUserId: opts.actorOrgUserId,
+      actorRoleName: opts.actorRoleName || null,
+      awaitingHodReview: flags.awaitingHodReview,
+    },
+  });
+
+  return { ok: true };
 }
 
 /**

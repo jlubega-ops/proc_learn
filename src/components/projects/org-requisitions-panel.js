@@ -320,11 +320,8 @@ export function OrgRequisitionsPanel({ projectId }) {
         <DialogTitle>Delete requisition?</DialogTitle>
         <DialogContent>
           <Typography variant="body2">
-            This removes <strong>{deleteTarget?.title || "this requisition"}</strong>
-            {deleteTarget?.status === "SUBMITTED"
-              ? " and cancels the pending Head of User Department review."
-              : "."}{" "}
-            This cannot be undone.
+            This removes <strong>{deleteTarget?.title || "this requisition"}</strong>. Only drafts
+            can be deleted. This cannot be undone.
           </Typography>
         </DialogContent>
         <DialogActions>

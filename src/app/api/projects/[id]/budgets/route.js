@@ -6,6 +6,7 @@ import { isDepartmentScopedRole } from "@/lib/projects/workflow-engine";
 import {
   budgetInclude,
   createBudgetWithLines,
+  getCreatorBudgetMutationFlags,
   listSelectableBudgetLines,
   mapBudgetWorkflowStages,
   serializeBudget,
@@ -136,16 +137,34 @@ export async function GET(request, context) {
     select: { projectCode: true },
   });
 
-  return NextResponse.json({
-    budgets: budgets.map((row) => {
+  const actorOrgUserId =
+    auth.ok && auth.type === "org" ? auth.orgUser.id : null;
+  const actorDepartmentId =
+    auth.ok && auth.type === "org" ? auth.orgUser.departmentId : null;
+  const budgetsOut = await Promise.all(
+    budgets.map(async (row) => {
       const ctx = stageMap.get(row.id) || {};
-      return serializeBudget({
+      const serialized = serializeBudget({
         ...row,
         workflowStage: ctx.workflowStage || null,
         lastDecision: ctx.lastDecision || null,
         viewerHasPendingAction: Boolean(ctx.viewerHasPendingAction),
       });
+      if (!actorOrgUserId || !canPrepareBudget(roleName)) {
+        return { ...serialized, canEdit: false, canDelete: false, awaitingHodReview: false };
+      }
+      const flags = await getCreatorBudgetMutationFlags(prisma, {
+        projectId,
+        budget: row,
+        actorOrgUserId,
+        actorDepartmentId,
+      });
+      return { ...serialized, ...flags };
     }),
+  );
+
+  return NextResponse.json({
+    budgets: budgetsOut,
     total: budgets.length,
     canCreate: auth.ok && auth.type === "org" && canPrepareBudget(roleName),
     canSubmit: auth.ok && auth.type === "org" && canPrepareBudget(roleName),

@@ -443,7 +443,7 @@ export function OrgBudgetDetailPanel({ projectId, budgetId, listHref, readOnly =
               variant="outlined"
               startIcon={<EditRounded />}
             >
-              Edit draft
+              Edit
             </Button>
           ) : null}
           {canDeleteDraft ? (
@@ -454,7 +454,7 @@ export function OrgBudgetDetailPanel({ projectId, budgetId, listHref, readOnly =
               disabled={busy}
               onClick={() => setDeleteOpen(true)}
             >
-              Delete draft
+              Delete
             </Button>
           ) : null}
           {canSubmit && (budget.status === "DRAFT" || budget.status === "RETURNED") ? (
@@ -536,11 +536,10 @@ export function OrgBudgetDetailPanel({ projectId, budgetId, listHref, readOnly =
         onClose={() => !busy && setDeleteOpen(false)}
         slotProps={{ paper: { sx: adminDialogPaperSx } }}
       >
-        <DialogTitle>Delete draft budget?</DialogTitle>
+        <DialogTitle>Delete budget?</DialogTitle>
         <DialogContent>
           <DialogContentText>
-            This permanently removes &ldquo;{budget.title}&rdquo;. Only unsubmitted drafts can be
-            deleted.
+            This permanently removes &ldquo;{budget.title}&rdquo;. Only drafts can be deleted.
           </DialogContentText>
         </DialogContent>
         <DialogActions>

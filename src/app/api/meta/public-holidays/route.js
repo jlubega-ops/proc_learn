@@ -26,8 +26,18 @@ export async function GET(request) {
     ? yearsParam
         .split(",")
         .map((y) => Number(y.trim()))
-        .filter((y) => Number.isFinite(y))
+        .filter((y) => Number.isFinite(y) && y >= 1990 && y <= 2100)
     : holidayYearsAround(around || null);
+
+  // Cap fan-out so an authenticated caller cannot trigger hundreds of upstream fetches.
+  const uniqueYears = [...new Set(years)];
+  if (uniqueYears.length > 6) {
+    return NextResponse.json(
+      { error: "Too many years requested." },
+      { status: 400 },
+    );
+  }
+  years = uniqueYears.length ? uniqueYears : holidayYearsAround(around || null);
 
   const loaded = await loadUgandaPublicHolidaySet(years);
   return NextResponse.json({

@@ -73,13 +73,8 @@ export async function POST(request) {
       userAgent,
       meta: { email, outcome: "suspended_no_mail" },
     });
-    return NextResponse.json(
-      {
-        error:
-          "This account has been suspended. Password reset is not available. Please contact support if you think this is a mistake.",
-      },
-      { status: 403 },
-    );
+    // Same public response as unknown emails — do not reveal suspension here.
+    return NextResponse.json({ ok: true, message: PUBLIC_MESSAGE });
   }
 
   if (!user) {

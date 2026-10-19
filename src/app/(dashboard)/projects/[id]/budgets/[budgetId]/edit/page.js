@@ -18,7 +18,7 @@ export default async function ProjectBudgetEditPage({ params }) {
     <div className={BRAND_PAGE_SHELL_CLASS}>
       <DashboardPageIntro
         title="Edit department budget"
-        description="Update this draft before submitting it for review. Reference and financial year stay fixed."
+        description="Update while draft, returned, or still awaiting Head of User Department review."
       />
       <OrgBudgetCreateForm projectId={projectId} budgetId={budgetId} />
     </div>

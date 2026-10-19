@@ -6,6 +6,7 @@ import { ORG_PERMISSION } from "@/lib/projects/org-role-permissions";
 import { isDepartmentScopedRole } from "@/lib/projects/workflow-engine";
 import {
   createOrUpdateProcurementPlanDraft,
+  getCreatorProcurementPlanMutationFlags,
   procurementPlanInclude,
   serializeProcurementPlan,
   submitProcurementPlan,
@@ -99,16 +100,30 @@ export async function GET(request, context) {
     select: { projectCode: true },
   });
 
-  return NextResponse.json({
-    plans: plans.map((row) => {
+  const actorOrgUserId = auth.type === "org" ? auth.orgUser.id : null;
+  const plansOut = await Promise.all(
+    plans.map(async (row) => {
       const ctx = ctxMap.get(row.id) || {};
-      return serializeProcurementPlan({
+      const serialized = serializeProcurementPlan({
         ...row,
         workflowStage: ctx.workflowStage || null,
         lastDecision: ctx.lastDecision || null,
         viewerHasPendingAction: Boolean(ctx.viewerHasPendingAction),
       });
+      if (!actorOrgUserId) {
+        return { ...serialized, canEdit: false, canDelete: false, awaitingHodReview: false };
+      }
+      const flags = await getCreatorProcurementPlanMutationFlags(prisma, {
+        projectId,
+        plan: row,
+        actorOrgUserId,
+      });
+      return { ...serialized, ...flags };
     }),
+  );
+
+  return NextResponse.json({
+    plans: plansOut,
     total: plans.length,
     canCreate: auth.type === "org" && Boolean(auth.orgUser?.departmentId),
     hasApprovedBudget,

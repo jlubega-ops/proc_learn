@@ -5,6 +5,8 @@ import { authorizeProjectApiAccess } from "@/lib/projects/project-api-auth";
 import { ORG_PERMISSION } from "@/lib/projects/org-role-permissions";
 import {
   actOnProcurementPlanTask,
+  deleteProcurementPlanByCreator,
+  getCreatorProcurementPlanMutationFlags,
   procurementPlanInclude,
   serializeProcurementPlan,
   submitProcurementPlan,
@@ -77,6 +79,9 @@ export async function GET(_request, context) {
   /** @type {any[]} */
   let workflowHistory = [];
   let canSubmit = false;
+  let canEdit = false;
+  let canDelete = false;
+  let awaitingHodReview = false;
   /** @type {any} */
   let workflowStage = null;
   /** @type {any} */
@@ -144,6 +149,14 @@ export async function GET(_request, context) {
   if (auth.type === "org") {
     const orgUserId = auth.orgUser.id;
     const role = auth.orgUser.projectOrgRole?.name || "";
+    const flags = await getCreatorProcurementPlanMutationFlags(prisma, {
+      projectId,
+      plan: row,
+      actorOrgUserId: orgUserId,
+    });
+    canEdit = flags.canEdit;
+    canDelete = flags.canDelete;
+    awaitingHodReview = flags.awaitingHodReview;
     canSubmit =
       (role === "User Department Officer" || role === "User Department") &&
       (row.status === "DRAFT" || row.status === "RETURNED") &&
@@ -186,7 +199,48 @@ export async function GET(_request, context) {
     organisation,
     printedBy: printedByFromAuth(auth),
     canSubmit,
+    canEdit,
+    canDelete,
+    awaitingHodReview,
   });
+}
+
+export async function DELETE(_request, context) {
+  const params = await context.params;
+  const projectId = String(params?.id || "").trim();
+  const planId = String(params?.planId || "").trim();
+  if (!projectId || !planId) {
+    return NextResponse.json({ error: "Invalid request." }, { status: 400 });
+  }
+
+  const auth = await authorizeProjectApiAccess(prisma, {
+    projectId,
+    orgPermission: ORG_PERMISSION.VIEW_PROCUREMENT_PLANS,
+  });
+  if (!auth.ok || auth.type !== "org") {
+    return NextResponse.json(
+      { error: auth.ok ? "Forbidden." : "Not found." },
+      { status: auth.ok ? 403 : auth.status || 404 },
+    );
+  }
+  const roleName = auth.orgUser.projectOrgRole?.name || "";
+  if (roleName !== "User Department Officer" && roleName !== "User Department") {
+    return NextResponse.json({ error: "Forbidden." }, { status: 403 });
+  }
+
+  const result = await deleteProcurementPlanByCreator(prisma, {
+    projectId,
+    planId,
+    actorOrgUserId: auth.orgUser.id,
+    actorRoleName: roleName,
+  });
+  if (!result.ok) {
+    return NextResponse.json(
+      { error: result.error },
+      { status: result.status || 400 },
+    );
+  }
+  return NextResponse.json({ ok: true });
 }
 
 export async function PATCH(request, context) {

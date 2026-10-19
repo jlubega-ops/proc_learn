@@ -26,8 +26,11 @@ import {
 } from "@/lib/projects/org-reference";
 import { resolveSlateIdForOrgCreate } from "@/lib/academic/org-academic-slate";
 import { presentOrgWorkflowStatus } from "@/lib/projects/workflow-status-presentation";
-
-const HOD_ROLE_NAMES = new Set(["Head User Department", "Head of User Department"]);
+import {
+  cancelOpenWorkflowForEntity,
+  getCreatorEntityMutationFlags,
+  isEntityAwaitingHodReview,
+} from "@/lib/projects/org-creator-mutations";
 
 /**
  * True while the open workflow step is still HOD review (HOD has not acted yet).
@@ -35,22 +38,11 @@ const HOD_ROLE_NAMES = new Set(["Head User Department", "Head of User Department
  * @param {{ projectId: string; requisitionId: string }} opts
  */
 export async function isRequisitionAwaitingHodReview(prisma, opts) {
-  const openTask = await prisma.projectOrgWorkflowTask.findFirst({
-    where: {
-      projectId: opts.projectId,
-      status: { in: [OrgWorkflowTaskStatus.PENDING, OrgWorkflowTaskStatus.IN_PROGRESS] },
-      instance: {
-        requisitionId: opts.requisitionId,
-        status: {
-          in: [OrgWorkflowInstanceStatus.ACTIVE, OrgWorkflowInstanceStatus.IN_PROGRESS],
-        },
-      },
-    },
-    orderBy: [{ stepNumber: "asc" }, { createdAt: "asc" }],
-    select: { requiredRoleName: true, stepNumber: true },
+  return isEntityAwaitingHodReview(prisma, {
+    projectId: opts.projectId,
+    entityField: "requisitionId",
+    entityId: opts.requisitionId,
   });
-  if (!openTask) return false;
-  return HOD_ROLE_NAMES.has(String(openTask.requiredRoleName || "").trim());
 }
 
 /**
@@ -63,34 +55,17 @@ export async function isRequisitionAwaitingHodReview(prisma, opts) {
  * }} opts
  */
 export async function getRequesterRequisitionMutationFlags(prisma, opts) {
-  const { requisition, actorOrgUserId } = opts;
-  const isRequester = requisition.requesterOrgUserId === actorOrgUserId;
-  if (!isRequester) {
-    return { canEdit: false, canDelete: false, awaitingHodReview: false };
-  }
-
-  const status = String(requisition.status || "");
-  if (status === OrgRequisitionStatus.DRAFT || status === OrgRequisitionStatus.RETURNED) {
-    return {
-      canEdit: true,
-      canDelete: true,
-      awaitingHodReview: false,
-    };
-  }
-
-  if (status === OrgRequisitionStatus.SUBMITTED) {
-    const awaitingHodReview = await isRequisitionAwaitingHodReview(prisma, {
-      projectId: opts.projectId,
-      requisitionId: requisition.id,
-    });
-    return {
-      canEdit: awaitingHodReview,
-      canDelete: awaitingHodReview,
-      awaitingHodReview,
-    };
-  }
-
-  return { canEdit: false, canDelete: false, awaitingHodReview: false };
+  return getCreatorEntityMutationFlags(prisma, {
+    projectId: opts.projectId,
+    entityField: "requisitionId",
+    entityId: opts.requisition.id,
+    status: opts.requisition.status,
+    creatorOrgUserId: opts.requisition.requesterOrgUserId,
+    actorOrgUserId: opts.actorOrgUserId,
+    draftStatus: OrgRequisitionStatus.DRAFT,
+    editableStatuses: [OrgRequisitionStatus.DRAFT, OrgRequisitionStatus.RETURNED],
+    submittedStatus: OrgRequisitionStatus.SUBMITTED,
+  });
 }
 
 /**
@@ -747,7 +722,7 @@ export async function deleteRequisitionByRequester(prisma, opts) {
     return {
       ok: false,
       error:
-        "You can only delete this requisition while it is a draft, returned, or still awaiting Head of User Department review.",
+        "You can only delete this requisition while it is still a draft.",
       status: 400,
     };
   }
@@ -765,30 +740,10 @@ export async function deleteRequisitionByRequester(prisma, opts) {
   }
 
   await runInTx(prisma, async (tx) => {
-    await tx.projectOrgWorkflowTask.updateMany({
-      where: {
-        projectId: opts.projectId,
-        status: { in: [OrgWorkflowTaskStatus.PENDING, OrgWorkflowTaskStatus.IN_PROGRESS] },
-        instance: { requisitionId: existing.id },
-      },
-      data: { status: OrgWorkflowTaskStatus.CANCELLED },
-    });
-    await tx.projectOrgWorkflowInstance.updateMany({
-      where: {
-        projectId: opts.projectId,
-        requisitionId: existing.id,
-        status: {
-          in: [
-            OrgWorkflowInstanceStatus.ACTIVE,
-            OrgWorkflowInstanceStatus.IN_PROGRESS,
-            OrgWorkflowInstanceStatus.SUSPENDED,
-          ],
-        },
-      },
-      data: {
-        status: OrgWorkflowInstanceStatus.CANCELLED,
-        completedAt: new Date(),
-      },
+    await cancelOpenWorkflowForEntity(tx, {
+      projectId: opts.projectId,
+      entityField: "requisitionId",
+      entityId: existing.id,
     });
     await tx.projectOrgRequisition.delete({ where: { id: existing.id } });
   });

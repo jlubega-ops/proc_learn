@@ -16,9 +16,16 @@ import TableRow from "@mui/material/TableRow";
 import Tooltip from "@mui/material/Tooltip";
 import Typography from "@mui/material/Typography";
 import AddRounded from "@mui/icons-material/AddRounded";
+import DeleteOutlineRounded from "@mui/icons-material/DeleteOutlineRounded";
+import EditRounded from "@mui/icons-material/EditRounded";
 import RefreshRounded from "@mui/icons-material/RefreshRounded";
 import SendRounded from "@mui/icons-material/SendRounded";
 import VisibilityRounded from "@mui/icons-material/VisibilityRounded";
+import Dialog from "@mui/material/Dialog";
+import DialogActions from "@mui/material/DialogActions";
+import DialogContent from "@mui/material/DialogContent";
+import DialogContentText from "@mui/material/DialogContentText";
+import DialogTitle from "@mui/material/DialogTitle";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useToast } from "@/components/providers/toast-provider";
@@ -28,6 +35,7 @@ import { ProcessGateTooltip } from "@/components/projects/process-gate";
 import { PROCESS_FLOW_CODES } from "@/lib/projects/process-catalogue";
 import {
   adminCenteredLoadingBoxSx,
+  adminDialogPaperSx,
   adminLoadingSpinnerSx,
   adminMutedTextSx,
   adminOutlinedTableContainerSx,
@@ -51,6 +59,8 @@ export function OrgProcurementPlansPanel({ projectId }) {
   const [busy, setBusy] = useState(false);
   const [plans, setPlans] = useState(/** @type {any[]} */ ([]));
   const [canCreate, setCanCreate] = useState(false);
+  const [deleteTarget, setDeleteTarget] = useState(/** @type {any} */ (null));
+  const [deleteBusy, setDeleteBusy] = useState(false);
   const [hasApprovedBudget, setHasApprovedBudget] = useState(false);
   const [autosaveDraft, setAutosaveDraft] = useState(
     /** @type {{ formKey: string } | null} */ (null),
@@ -114,6 +124,30 @@ export function OrgProcurementPlansPanel({ projectId }) {
       await load();
     } finally {
       setBusy(false);
+    }
+  }
+
+  async function confirmDelete() {
+    if (!deleteTarget?.id) return;
+    setDeleteBusy(true);
+    try {
+      const res = await fetch(
+        `/api/projects/${projectId}/procurement-plans/${deleteTarget.id}`,
+        { method: "DELETE", credentials: "include" },
+      );
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        showToast({
+          message: typeof data.error === "string" ? data.error : "Could not delete plan.",
+          severity: "error",
+        });
+        return;
+      }
+      showToast({ message: "Procurement plan deleted.", severity: "success" });
+      setDeleteTarget(null);
+      await load();
+    } finally {
+      setDeleteBusy(false);
     }
   }
 
@@ -290,6 +324,32 @@ export function OrgProcurementPlansPanel({ projectId }) {
                             <VisibilityRounded fontSize="small" />
                           </IconButton>
                         </Tooltip>
+                        {p.canEdit ? (
+                          <Tooltip title="Edit plan">
+                            <IconButton
+                              component={Link}
+                              href={`/projects/${projectId}/procurement-plans/${p.id}/edit`}
+                              size="small"
+                              color="primary"
+                              aria-label={`Edit plan ${p.title}`}
+                            >
+                              <EditRounded fontSize="small" />
+                            </IconButton>
+                          </Tooltip>
+                        ) : null}
+                        {p.canDelete ? (
+                          <Tooltip title="Delete plan">
+                            <IconButton
+                              size="small"
+                              color="error"
+                              aria-label={`Delete plan ${p.title}`}
+                              disabled={busy || deleteBusy}
+                              onClick={() => setDeleteTarget(p)}
+                            >
+                              <DeleteOutlineRounded fontSize="small" />
+                            </IconButton>
+                          </Tooltip>
+                        ) : null}
                         {canCreate && ["DRAFT", "RETURNED"].includes(p.status) ? (
                           <Tooltip
                             title={
@@ -324,6 +384,33 @@ export function OrgProcurementPlansPanel({ projectId }) {
           </Table>
         </TableContainer>
       )}
+
+      <Dialog
+        open={Boolean(deleteTarget)}
+        onClose={() => !deleteBusy && setDeleteTarget(null)}
+        slotProps={{ paper: { sx: adminDialogPaperSx } }}
+      >
+        <DialogTitle>Delete plan?</DialogTitle>
+        <DialogContent>
+          <DialogContentText>
+            This permanently removes &ldquo;{deleteTarget?.title || "this plan"}&rdquo;. Only
+            drafts can be deleted.
+          </DialogContentText>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setDeleteTarget(null)} disabled={deleteBusy}>
+            Cancel
+          </Button>
+          <Button
+            color="error"
+            variant="contained"
+            onClick={() => void confirmDelete()}
+            disabled={deleteBusy}
+          >
+            {deleteBusy ? <CircularProgress size={22} color="inherit" /> : "Delete"}
+          </Button>
+        </DialogActions>
+      </Dialog>
     </div>
   );
 }

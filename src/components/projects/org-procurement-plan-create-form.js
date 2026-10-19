@@ -125,15 +125,71 @@ function emptyItem(circularSheet = "Goods") {
 }
 
 /**
- * @param {{ projectId: string }} p
+ * @param {any} item
  */
-export function OrgProcurementPlanCreateForm({ projectId }) {
+function formItemFromApi(item) {
+  const cf = item?.circularFields && typeof item.circularFields === "object" ? item.circularFields : {};
+  const circular =
+    normalizeCircularSheet(item?.category || cf.circularSheet || item?.sheetType || cf.sheetType) ||
+    "Goods";
+  const base = emptyItem(circular);
+  return {
+    ...base,
+    title: item?.title || "",
+    description: item?.description || "",
+    quantity: item?.quantity != null ? String(item.quantity) : base.quantity,
+    unitOfMeasure: item?.unitOfMeasure || base.unitOfMeasure,
+    estimatedUnitPrice:
+      item?.estimatedUnitPrice != null ? String(item.estimatedUnitPrice) : "",
+    budgetLineId: item?.budgetLineId || "",
+    expectedProcurementPeriod: item?.expectedProcurementPeriod || "Q1",
+    priority: item?.priority || "Normal",
+    justification: item?.justification || "",
+    currency: cf.currency || "UGX",
+    sourceOfFunding: cf.sourceOfFunding || DEFAULT_FUNDING_SOURCE,
+    plannedProcurementMethod: normalizePlanMethod(cf.plannedProcurementMethod) || "",
+    tenderSubtype: normalizeTenderSubtype(cf.tenderSubtype) || "",
+    contractType: cf.contractType || "",
+    prequalification: cf.prequalification || "",
+    applyReservationScheme: cf.applyReservationScheme || "",
+    reservationSchemeDetail: cf.reservationSchemeDetail || "",
+    multiYearCurrentCost: cf.multiYearCurrentCost || "",
+    multiYearCompletionYears: cf.multiYearCompletionYears || "",
+    multiYearPaidUpSum: cf.multiYearPaidUpSum || "",
+    multiYearPendingSum: cf.multiYearPendingSum || "",
+    multiYearPendingTime: cf.multiYearPendingTime || "",
+    bidInvitationDate: cf.bidInvitationDate || "",
+    bidClosingOpeningDate: cf.bidClosingOpeningDate || "",
+    evaluationReportApprovalDate: cf.evaluationReportApprovalDate || "",
+    awardDecisionDate: cf.awardDecisionDate || "",
+    awardNotificationDate: cf.awardNotificationDate || "",
+    contractSigningDate: cf.contractSigningDate || "",
+    completionDate: cf.completionDate || "",
+    eoiInvitationDate: cf.eoiInvitationDate || "",
+    eoiClosingOpeningDate: cf.eoiClosingOpeningDate || "",
+    eoiShortlistApprovalDate: cf.eoiShortlistApprovalDate || "",
+    proposalNotificationDate: cf.proposalNotificationDate || "",
+    proposalDeadlineDate: cf.proposalDeadlineDate || "",
+    proposalOpeningDate: cf.proposalOpeningDate || "",
+    proposalEvalApprovalDate: cf.proposalEvalApprovalDate || "",
+    proposalAwardNotificationDate: cf.proposalAwardNotificationDate || "",
+  };
+}
+
+/**
+ * @param {{ projectId: string; planId?: string }} p
+ */
+export function OrgProcurementPlanCreateForm({ projectId, planId = "" }) {
   const { showToast } = useToast();
   const confirm = useConfirm();
   const router = useRouter();
+  const isEdit = Boolean(String(planId || "").trim());
   const listHref = `/projects/${projectId}/procurement-plans`;
+  const detailHref = isEdit ? `/projects/${projectId}/procurement-plans/${planId}` : listHref;
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
+  const [awaitingHodReview, setAwaitingHodReview] = useState(false);
+  const [existingStatus, setExistingStatus] = useState("");
   const { data: fyData, reload: reloadYears } = useApi(
     `/api/projects/${projectId}/org-financial-years?selectable=1`,
     { silentErrors: true },
@@ -195,11 +251,12 @@ export function OrgProcurementPlanCreateForm({ projectId }) {
   const selectedTypeOff = isEmergency ? emergencyOff : annualOff;
 
   const { serverSyncState, clearDraft } = usePersistedFormDraft({
-    formKey: "procurement-plan:new",
+    formKey: isEdit ? `procurement-plan:edit:${planId}` : "procurement-plan:new",
     values: form,
     projectId,
-    enabled: metaReady && canCreate,
+    enabled: metaReady && canCreate && !isEdit,
     onHydrated: (payload) => {
+      if (isEdit) return;
       if (payload && typeof payload === "object" && !Array.isArray(payload)) {
         setForm((prev) => ({
           ...prev,
@@ -242,12 +299,17 @@ export function OrgProcurementPlanCreateForm({ projectId }) {
   const load = useCallback(async () => {
     setLoading(true);
     try {
-      const [pRes, yData, bRes] = await Promise.all([
+      const [pRes, yData, bRes, detailRes] = await Promise.all([
         fetch(`/api/projects/${projectId}/procurement-plans`, { credentials: "include" }),
         fyDataRef.current ? Promise.resolve(fyDataRef.current) : reloadYears(),
         fetch(`/api/projects/${projectId}/budgets?selectable=1`, {
           credentials: "include",
         }),
+        isEdit
+          ? fetch(`/api/projects/${projectId}/procurement-plans/${planId}`, {
+              credentials: "include",
+            })
+          : Promise.resolve(null),
       ]);
       const pData = await pRes.json().catch(() => ({}));
       const bData = await bRes.json().catch(() => ({}));
@@ -271,6 +333,44 @@ export function OrgProcurementPlanCreateForm({ projectId }) {
       setExistingRefs(refs);
       const nextYears = Array.isArray(yData?.financialYears) ? yData.financialYears : [];
       setBudgetLines(Array.isArray(bData.budgetLines) ? bData.budgetLines : []);
+
+      if (isEdit && detailRes) {
+        const dData = await detailRes.json().catch(() => ({}));
+        if (!detailRes.ok) {
+          showToast({
+            message: typeof dData.error === "string" ? dData.error : "Could not load plan.",
+            severity: "error",
+          });
+          router.replace(listHref);
+          return;
+        }
+        if (!dData.canEdit) {
+          showToast({
+            message: "This plan can no longer be edited.",
+            severity: "error",
+          });
+          router.replace(detailHref);
+          return;
+        }
+        const plan = dData.plan || {};
+        setAwaitingHodReview(Boolean(dData.awaitingHodReview));
+        setExistingStatus(String(plan.status || ""));
+        setForm({
+          title: plan.title || "",
+          planReference: plan.planReference || "",
+          financialYearId: plan.financialYear?.id || plan.financialYearId || "",
+          planningPeriodId: plan.planningPeriod?.id || plan.planningPeriodId || "",
+          isEmergency: Boolean(plan.isEmergency),
+          emergencyJustification: plan.emergencyJustification || "",
+          items:
+            Array.isArray(plan.items) && plan.items.length
+              ? plan.items.map(formItemFromApi)
+              : [emptyItem()],
+        });
+        setMetaReady(true);
+        return;
+      }
+
       const firstFyId = nextYears[0]?.id || "";
       const firstFyLabel = nextYears[0]?.label || "";
       const autoRef =
@@ -292,7 +392,16 @@ export function OrgProcurementPlanCreateForm({ projectId }) {
     } finally {
       setLoading(false);
     }
-  }, [projectId, reloadYears, showToast]);
+  }, [
+    projectId,
+    planId,
+    isEdit,
+    reloadYears,
+    showToast,
+    router,
+    listHref,
+    detailHref,
+  ]);
 
   useEffect(() => {
     void load();
@@ -556,6 +665,7 @@ export function OrgProcurementPlanCreateForm({ projectId }) {
     try {
       const payload = {
         ...form,
+        planId: isEdit ? planId : undefined,
         planReference: form.planReference.trim(),
         items: form.items.map((item) => {
           const itemSheet = normalizePlanSheetType(item.sheetType);
@@ -585,9 +695,12 @@ export function OrgProcurementPlanCreateForm({ projectId }) {
         });
         return;
       }
-      await clearDraft();
-      showToast({ message: "Procurement plan draft saved.", severity: "success" });
-      router.push(listHref);
+      if (!isEdit) await clearDraft();
+      showToast({
+        message: isEdit ? "Procurement plan updated." : "Procurement plan draft saved.",
+        severity: "success",
+      });
+      router.push(isEdit ? detailHref : listHref);
     } finally {
       setBusy(false);
     }
@@ -630,7 +743,7 @@ export function OrgProcurementPlanCreateForm({ projectId }) {
 
   /** @param {import("react").MouseEvent} e */
   const leaveForm = async (e) => {
-    if (!hasEntry) return;
+    if (!hasEntry || isEdit) return;
     e.preventDefault();
     if (!(await confirm(discardConfirmOptions()))) return;
     await clearDraft();
@@ -655,25 +768,35 @@ export function OrgProcurementPlanCreateForm({ projectId }) {
       <div className="mb-3">
         <Button
           component={Link}
-          href={listHref}
+          href={isEdit ? detailHref : listHref}
           onClick={(e) => void leaveForm(e)}
           startIcon={<ArrowBackRounded />}
           variant="outlined"
           size="small"
         >
-          Back to list
+          {isEdit ? "Back to plan" : "Back to list"}
         </Button>
       </div>
       <Typography variant="subtitle1" sx={{ fontWeight: 600, mb: 0.5 }}>
-        Prepare procurement plan
+        {isEdit ? "Edit procurement plan" : "Prepare procurement plan"}
       </Typography>
-      <Typography variant="caption" sx={{ ...adminMutedTextSx, display: "block", mb: 2 }}>
-        {serverSyncState === "saving"
-          ? "Saving draft…"
-          : serverSyncState === "saved"
-            ? "Draft saved — you can continue on another device"
-            : "Autosaves as you type (local + server, not every keystroke)"}
-      </Typography>
+      {!isEdit ? (
+        <Typography variant="caption" sx={{ ...adminMutedTextSx, display: "block", mb: 2 }}>
+          {serverSyncState === "saving"
+            ? "Saving draft…"
+            : serverSyncState === "saved"
+              ? "Draft saved — you can continue on another device"
+              : "Autosaves as you type (local + server, not every keystroke)"}
+        </Typography>
+      ) : awaitingHodReview || existingStatus === "SUBMITTED" ? (
+        <Typography variant="caption" sx={{ ...adminMutedTextSx, display: "block", mb: 2 }}>
+          Still awaiting Head of User Department — you may update.
+        </Typography>
+      ) : (
+        <Typography variant="caption" sx={{ ...adminMutedTextSx, display: "block", mb: 2 }}>
+          Update this plan, then submit again if it was returned.
+        </Typography>
+      )}
       <form className="grid gap-3 sm:grid-cols-2" onSubmit={saveDraft} noValidate>
         <TextField
           select
@@ -1403,7 +1526,7 @@ export function OrgProcurementPlanCreateForm({ projectId }) {
             title={processes.inactiveTitle(selectedPlanCode)}
           >
             <Button type="submit" variant="contained" disabled={busy || selectedTypeOff}>
-              {busy ? "Saving…" : "Save draft"}
+              {busy ? "Saving…" : isEdit ? "Save changes" : "Save draft"}
             </Button>
           </ProcessGateTooltip>
         </div>

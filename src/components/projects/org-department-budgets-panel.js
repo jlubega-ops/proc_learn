@@ -223,8 +223,8 @@ export function OrgDepartmentBudgetsPanel({ projectId, readOnly = false, detailH
             </TableHead>
             <TableBody>
               {budgets.map((b) => {
-                const canEdit = canCreate && (b.status === "DRAFT" || b.status === "RETURNED");
-                const canDelete = canCreate && b.status === "DRAFT";
+                const canEdit = Boolean(b.canEdit);
+                const canDelete = Boolean(b.canDelete);
                 const detailHref = `${detailBase}/${b.id}`;
                 return (
                   <TableRow
@@ -276,7 +276,7 @@ export function OrgDepartmentBudgetsPanel({ projectId, readOnly = false, detailH
                           </IconButton>
                         </Tooltip>
                         {canEdit ? (
-                          <Tooltip title="Edit draft">
+                          <Tooltip title="Edit budget">
                             <IconButton
                               component={Link}
                               href={`/projects/${projectId}/budgets/${b.id}/edit`}
@@ -289,7 +289,7 @@ export function OrgDepartmentBudgetsPanel({ projectId, readOnly = false, detailH
                           </Tooltip>
                         ) : null}
                         {canDelete ? (
-                          <Tooltip title="Delete draft">
+                          <Tooltip title="Delete budget">
                             <IconButton
                               size="small"
                               color="error"
@@ -341,11 +341,11 @@ export function OrgDepartmentBudgetsPanel({ projectId, readOnly = false, detailH
         onClose={() => !deleteBusy && setDeleteTarget(null)}
         slotProps={{ paper: { sx: adminDialogPaperSx } }}
       >
-        <DialogTitle>Delete draft budget?</DialogTitle>
+        <DialogTitle>Delete budget?</DialogTitle>
         <DialogContent>
           <DialogContentText>
-            This permanently removes &ldquo;{deleteTarget?.title || "this draft"}&rdquo;. Only
-            unsubmitted drafts can be deleted.
+            This permanently removes &ldquo;{deleteTarget?.title || "this budget"}&rdquo;. Only
+            drafts can be deleted.
           </DialogContentText>
         </DialogContent>
         <DialogActions>

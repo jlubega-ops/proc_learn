@@ -27,6 +27,10 @@ import {
   withAcademicAuditMeta,
 } from "@/lib/academic/org-academic-slate";
 import { presentOrgWorkflowStatus } from "@/lib/projects/workflow-status-presentation";
+import {
+  cancelOpenWorkflowForEntity,
+  getCreatorEntityMutationFlags,
+} from "@/lib/projects/org-creator-mutations";
 
 /**
  * @param {unknown} value
@@ -550,13 +554,17 @@ export async function updateDraftBudget(prisma, opts) {
     include: { lines: true },
   });
   if (!existing) return { ok: false, error: "Budget not found.", status: 404 };
-  if (!actsAsBudgetCreator(existing, opts)) {
-    return { ok: false, error: "Only the budget creator can edit this draft.", status: 403 };
-  }
-  if (![OrgBudgetStatus.DRAFT, OrgBudgetStatus.RETURNED].includes(existing.status)) {
+  const flags = await getCreatorBudgetMutationFlags(prisma, {
+    projectId: opts.projectId,
+    budget: existing,
+    actorOrgUserId: opts.actorOrgUserId,
+    actorDepartmentId: opts.actorDepartmentId,
+  });
+  if (!flags.canEdit) {
     return {
       ok: false,
-      error: "Only draft or returned budgets can be edited.",
+      error:
+        "You can only edit this budget while it is a draft, returned, or still awaiting Head of User Department review.",
       status: 400,
     };
   }
@@ -655,6 +663,11 @@ export async function updateDraftBudget(prisma, opts) {
     }
   }
 
+  const nextStatus =
+    existing.status === OrgBudgetStatus.SUBMITTED && flags.awaitingHodReview
+      ? OrgBudgetStatus.SUBMITTED
+      : OrgBudgetStatus.DRAFT;
+
   const updated = await runInTx(prisma, async (tx) => {
     await tx.projectOrgBudgetLine.deleteMany({ where: { budgetId: existing.id } });
     return tx.projectOrgBudget.update({
@@ -662,6 +675,7 @@ export async function updateDraftBudget(prisma, opts) {
       data: {
         title,
         description,
+        status: nextStatus,
         lines: { create: lineRows },
       },
       include: budgetInclude,
@@ -675,7 +689,8 @@ export async function updateDraftBudget(prisma, opts) {
       projectId: opts.projectId,
       budgetId: existing.id,
       actorOrgUserId: opts.actorOrgUserId,
-      status: existing.status,
+      status: nextStatus,
+      awaitingHodReview: flags.awaitingHodReview,
       lineCount: lineRows.length,
     },
   });
@@ -684,12 +699,13 @@ export async function updateDraftBudget(prisma, opts) {
 }
 
 /**
- * Delete a draft budget that has never been submitted.
+ * Creator deletes a draft/returned budget, or withdraws one still awaiting HOD review.
  * @param {import("@prisma/client").PrismaClient} prisma
  * @param {{
  *   projectId: string;
  *   budgetId: string;
  *   actorOrgUserId: string;
+ *   actorDepartmentId?: string | null;
  * }} opts
  */
 export async function deleteDraftBudget(prisma, opts) {
@@ -704,29 +720,36 @@ export async function deleteDraftBudget(prisma, opts) {
     },
   });
   if (!existing) return { ok: false, error: "Budget not found.", status: 404 };
-  if (!actsAsBudgetCreator(existing, opts)) {
-    return { ok: false, error: "Only the budget creator can delete this draft.", status: 403 };
-  }
-  if (existing.status !== OrgBudgetStatus.DRAFT) {
+  const flags = await getCreatorBudgetMutationFlags(prisma, {
+    projectId: opts.projectId,
+    budget: existing,
+    actorOrgUserId: opts.actorOrgUserId,
+    actorDepartmentId: opts.actorDepartmentId,
+  });
+  if (!flags.canDelete) {
     return {
       ok: false,
-      error: "Only draft budgets that have not been submitted can be deleted.",
+      error:
+        "You can only delete this budget while it is still a draft.",
       status: 400,
     };
   }
 
-  await prisma.$transaction([
-    prisma.projectOrgWorkflowInstance.deleteMany({
-      where: { projectId: opts.projectId, budgetId: existing.id },
-    }),
-    prisma.projectOrgBudget.delete({ where: { id: existing.id } }),
-  ]);
+  await runInTx(prisma, async (tx) => {
+    await cancelOpenWorkflowForEntity(tx, {
+      projectId: opts.projectId,
+      entityField: "budgetId",
+      entityId: existing.id,
+    });
+    await tx.projectOrgBudget.delete({ where: { id: existing.id } });
+  });
 
   await writeAuditLog({
     eventType: AuditEvent.PROJECT_ORG_BUDGET_DELETED,
     actorUserId: null,
     meta: {
       projectId: opts.projectId,
+      awaitingHodReview: flags.awaitingHodReview,
       budgetId: existing.id,
       title: existing.title,
       actorOrgUserId: opts.actorOrgUserId,
@@ -830,18 +853,54 @@ function actsAsBudgetCreator(row, opts) {
   return Boolean(opts.actorDepartmentId && row.departmentId === opts.actorDepartmentId);
 }
 
+/**
+ * Creator may edit/delete draft, returned, or submitted budgets still waiting on HOD.
+ * @param {import("@prisma/client").PrismaClient} prisma
+ * @param {{
+ *   projectId: string;
+ *   budget: {
+ *     id: string;
+ *     status: string;
+ *     createdByOrgUserId?: string | null;
+ *     departmentId?: string | null;
+ *   };
+ *   actorOrgUserId: string;
+ *   actorDepartmentId?: string | null;
+ * }} opts
+ */
+export async function getCreatorBudgetMutationFlags(prisma, opts) {
+  if (!actsAsBudgetCreator(opts.budget, opts)) {
+    return { canEdit: false, canDelete: false, awaitingHodReview: false };
+  }
+  return getCreatorEntityMutationFlags(prisma, {
+    projectId: opts.projectId,
+    entityField: "budgetId",
+    entityId: opts.budget.id,
+    status: opts.budget.status,
+    creatorOrgUserId: opts.budget.createdByOrgUserId || opts.actorOrgUserId,
+    actorOrgUserId: opts.actorOrgUserId,
+    draftStatus: OrgBudgetStatus.DRAFT,
+    editableStatuses: [OrgBudgetStatus.DRAFT, OrgBudgetStatus.RETURNED],
+    submittedStatus: OrgBudgetStatus.SUBMITTED,
+  });
+}
+
 export async function addBudgetLines(prisma, opts) {
   const row = await prisma.projectOrgBudget.findFirst({
     where: { id: opts.budgetId, projectId: opts.projectId },
   });
   if (!row) return { ok: false, error: "Budget not found.", status: 404 };
-  if (!actsAsBudgetCreator(row, opts)) {
-    return { ok: false, error: "Only the budget creator can add lines.", status: 403 };
-  }
-  if (![OrgBudgetStatus.DRAFT, OrgBudgetStatus.RETURNED].includes(row.status)) {
+  const flags = await getCreatorBudgetMutationFlags(prisma, {
+    projectId: opts.projectId,
+    budget: row,
+    actorOrgUserId: opts.actorOrgUserId,
+    actorDepartmentId: opts.actorDepartmentId,
+  });
+  if (!flags.canEdit) {
     return {
       ok: false,
-      error: "Only draft or returned budgets can gain new lines.",
+      error:
+        "You can only change lines while this budget is a draft, returned, or still awaiting Head of User Department review.",
       status: 400,
     };
   }
