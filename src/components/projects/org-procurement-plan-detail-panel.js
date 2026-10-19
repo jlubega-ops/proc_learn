@@ -57,7 +57,13 @@ function planItemFunding(row) {
 
 /** @param {any} row */
 function planItemMethod(row) {
-  return row.circularFields?.plannedProcurementMethod || null;
+  const method = row.circularFields?.plannedProcurementMethod || null;
+  const sub =
+    row.circularFields?.tenderSubtypeLabel ||
+    row.circularFields?.tenderSubtype ||
+    null;
+  if (method && sub) return `${method} (${sub})`;
+  return method;
 }
 
 /** @param {any} row */

@@ -72,7 +72,7 @@ In this build, emergency is a **planning path**, not a separate procurement meth
 | Method | Nothing special — the Procurement Officer recommends on Form 5 Part II and the Contracts Committee approves | Methods available: **Micro, Quotation, Tender** |
 | Providers | Usually **one** provider picked directly (Micro → purchase instruction). RFQ shortlist may drop to **2** for emergencies | Run validation, provider acceptance, delivery, invoice and payment are identical |
 
-**PPDA note for facilitators:** in real practice an emergency is usually handled by **Direct procurement**. The build has **no separate Direct procurement execution flow** yet, so use **Micro** with the one chosen provider.
+**PPDA note for facilitators (Guideline 1/2025):** thresholds depend on category (e.g. Supplies Micro ≤ **10M**, Works Micro ≤ **20M**; Quotation and Tender bands above that). Open/Restricted bidding are **Tender subtypes** (same Tender process). Emergency / sole-source **Direct** uses the **Micro** path with Direct justification (no separate Direct engine).
 
 ---
 

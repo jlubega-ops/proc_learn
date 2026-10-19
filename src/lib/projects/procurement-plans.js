@@ -322,9 +322,16 @@ async function validateAndBuildPlanItems(prisma, projectId, itemsIn, financialYe
       const ceiling = checkMethodValueCeiling(
         planMethodToEnum(circularFields.plannedProcurementMethod),
         Number(lineTotal),
+        { category: category || circularFields.circularSheet },
       );
       if (!ceiling.ok) {
         fieldErrors[`items.${idx}.plannedProcurementMethod`] = ceiling.error;
+      }
+      if (planMethodToEnum(circularFields.plannedProcurementMethod) === "TENDER") {
+        if (!circularFields.tenderSubtype) {
+          fieldErrors[`items.${idx}.tenderSubtype`] =
+            "Choose open or restricted bidding.";
+        }
       }
     }
     if (!circularFields.contractType) {

@@ -1060,7 +1060,12 @@ export async function actOnRequisitionTask(prisma, opts) {
       where: { id: taskPreview.instance.requisitionId },
       select: { category: true, estimatedTotalValue: true, procurementPlan: { select: { isEmergency: true } } },
     });
-    const { checkMethodValueCeiling, minRfqProviders } = await import("@/lib/projects/procurement-thresholds");
+    const {
+      checkMethodValueCeiling,
+      minRfqProviders,
+      microRequiresDirect,
+      normalizeTenderSubtype,
+    } = await import("@/lib/projects/procurement-thresholds");
     const isEmergency = Boolean(reqRow?.procurementPlan?.isEmergency);
     const minProviders = minRfqProviders(isEmergency);
     if (isEmergency && !String(form5Body.emergencyReasons || "").trim()) {
@@ -1071,7 +1076,50 @@ export async function actOnRequisitionTask(prisma, opts) {
         fieldErrors: { emergencyReasons: "Enter the reasons for the emergency." },
       };
     }
-    const ceiling = checkMethodValueCeiling(method, reqRow?.estimatedTotalValue);
+    const wantsDirect =
+      Boolean(form5Body.directProcurement) ||
+      String(form5Body.directProcurement || "").toLowerCase() === "true" ||
+      isEmergency;
+    const needsDirect =
+      method === "MICRO" &&
+      microRequiresDirect(reqRow?.estimatedTotalValue, reqRow?.category);
+    if (needsDirect && !wantsDirect) {
+      return {
+        ok: false,
+        error:
+          "This value is above the Micro threshold. Use Quotation or Tender, or mark Direct procurement with justification.",
+        status: 400,
+        fieldErrors: {
+          directProcurement: "Confirm Direct procurement, or choose another method.",
+        },
+      };
+    }
+    if (method === "MICRO" && wantsDirect && !isEmergency) {
+      const directNote =
+        String(form5Body.directJustification || form5Body.methodJustification || "").trim();
+      if (!directNote) {
+        return {
+          ok: false,
+          error: "Enter the legal basis for Direct procurement.",
+          status: 400,
+          fieldErrors: {
+            directJustification: "Enter why Direct procurement applies.",
+          },
+        };
+      }
+    }
+    if (method === "TENDER" && !normalizeTenderSubtype(form5Body.tenderSubtype)) {
+      return {
+        ok: false,
+        error: "Choose open or restricted bidding for Tender.",
+        status: 400,
+        fieldErrors: { tenderSubtype: "Choose open or restricted bidding." },
+      };
+    }
+    const ceiling = checkMethodValueCeiling(method, reqRow?.estimatedTotalValue, {
+      category: reqRow?.category,
+      allowDirectMicro: wantsDirect,
+    });
     if (!ceiling.ok) {
       return {
         ok: false,
@@ -1228,13 +1276,24 @@ export async function actOnRequisitionTask(prisma, opts) {
         procurementMethod: true,
         form5PartII: true,
         estimatedTotalValue: true,
+        category: true,
+        procurementPlan: { select: { isEmergency: true } },
       },
     });
     if (!req) {
       return { ok: false, error: "Requisition not found.", status: 404 };
     }
     const { checkMethodValueCeiling } = await import("@/lib/projects/procurement-thresholds");
-    const ceiling = checkMethodValueCeiling(req.procurementMethod, req.estimatedTotalValue);
+    const partII =
+      req.form5PartII && typeof req.form5PartII === "object"
+        ? /** @type {Record<string, unknown>} */ (req.form5PartII)
+        : {};
+    const allowDirect =
+      Boolean(partII.directProcurement) || Boolean(req.procurementPlan?.isEmergency);
+    const ceiling = checkMethodValueCeiling(req.procurementMethod, req.estimatedTotalValue, {
+      category: req.category,
+      allowDirectMicro: allowDirect,
+    });
     if (!ceiling.ok) {
       return {
         ok: false,

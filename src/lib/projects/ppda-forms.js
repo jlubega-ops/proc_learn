@@ -6,6 +6,10 @@
 import { downloadOrgDocumentPdf, pdfFieldValue } from "@/lib/projects/org-document-pdf";
 import { APP_BRAND_LABEL } from "@/lib/appConfig";
 import { DEFAULT_FUNDING_SOURCE } from "@/lib/projects/line-item-options";
+import {
+  normalizeTenderSubtype,
+  tenderSubtypeLabel,
+} from "@/lib/projects/procurement-thresholds";
 
 export const PLAN_SHEET_TYPE = {
   GOODS_WORKS_NON_CONSULTANCY: "GOODS_WORKS_NON_CONSULTANCY",
@@ -27,6 +31,7 @@ export const CIRCULAR_SHEET_OPTIONS = [
   "Works",
   "Non-consultancy services",
   "Consultancy services",
+  "Consultancy services (individual)",
 ];
 
 /** @type {Record<string, string>} */
@@ -39,6 +44,8 @@ export const CIRCULAR_SHEET_LEGACY_MAP = {
   "Non consultancy services": "Non-consultancy services",
   Consultancy: "Consultancy services",
   CONSULTANCY: "Consultancy services",
+  "Individual consultants": "Consultancy services (individual)",
+  "Consultancy (individual)": "Consultancy services (individual)",
   GOODS_WORKS_NON_CONSULTANCY: "Goods",
   "Goods, works and non-consultancy services": "Goods",
 };
@@ -64,7 +71,11 @@ export function normalizeCircularSheet(value) {
  */
 export function normalizePlanSheetType(value) {
   const circular = normalizeCircularSheet(value);
-  if (circular === "Consultancy services" || String(value || "").trim() === PLAN_SHEET_TYPE.CONSULTANCY) {
+  if (
+    circular === "Consultancy services" ||
+    circular === "Consultancy services (individual)" ||
+    String(value || "").trim() === PLAN_SHEET_TYPE.CONSULTANCY
+  ) {
     return PLAN_SHEET_TYPE.CONSULTANCY;
   }
   return PLAN_SHEET_TYPE.GOODS_WORKS_NON_CONSULTANCY;
@@ -191,6 +202,14 @@ export function normalizeCircularPlanItemFields(raw, sheetType) {
     currency: trimOrNull(raw?.currency) || "UGX",
     sourceOfFunding: trimOrNull(raw?.sourceOfFunding) || DEFAULT_FUNDING_SOURCE,
     plannedProcurementMethod: normalizePlanMethod(raw?.plannedProcurementMethod) || null,
+    tenderSubtype:
+      normalizePlanMethod(raw?.plannedProcurementMethod) === "Tender"
+        ? normalizeTenderSubtype(raw?.tenderSubtype) || null
+        : null,
+    tenderSubtypeLabel:
+      normalizePlanMethod(raw?.plannedProcurementMethod) === "Tender"
+        ? tenderSubtypeLabel(raw?.tenderSubtype) || null
+        : null,
     contractType: trimOrNull(raw?.contractType),
     prequalification: isConsultancy ? null : trimOrNull(raw?.prequalification),
     applyReservationScheme: trimOrNull(raw?.applyReservationScheme),
@@ -348,13 +367,30 @@ export function buildForm5PartI(requisition, body = {}) {
  * @param {{ method?: string | null }} ctx
  */
 export function buildForm5PartII(body = {}, ctx = {}) {
+  const method =
+    trimOrNull(body.recommendedMethod) || trimOrNull(ctx.method) || "";
+  const methodUpper = String(method).toUpperCase();
+  const isTender = methodUpper === "TENDER" || normalizePlanMethod(method) === "Tender";
+  const isMicro = methodUpper === "MICRO" || normalizePlanMethod(method) === "Micro procurement";
+  const directProcurement =
+    Boolean(body.directProcurement) ||
+    String(body.directProcurement || "").toLowerCase() === "true" ||
+    Boolean(ctx.directProcurement);
   return {
     dateSubmittedToCc: dateOrNull(body.dateSubmittedToCc) || "",
     ccMeetingReference: trimOrNull(body.ccMeetingReference) || "",
-    recommendedMethod:
-      trimOrNull(body.recommendedMethod) || trimOrNull(ctx.method) || "",
+    recommendedMethod: method,
     methodJustification: trimOrNull(body.methodJustification) || "",
     emergencyReasons: trimOrNull(body.emergencyReasons) || "",
+    /** Direct procurement (no threshold) executed on the Micro path. */
+    directProcurement: isMicro ? directProcurement : false,
+    directJustification: isMicro
+      ? trimOrNull(body.directJustification) || ""
+      : "",
+    tenderSubtype: isTender ? normalizeTenderSubtype(body.tenderSubtype) || "" : "",
+    tenderSubtypeLabel: isTender
+      ? tenderSubtypeLabel(body.tenderSubtype) || ""
+      : "",
     shortlistedProviders: trimOrNull(body.shortlistedProviders) || "",
     shortlistJustification: trimOrNull(body.shortlistJustification) || "",
     shortlist: Array.isArray(ctx.shortlist) ? ctx.shortlist : [],
@@ -641,7 +677,11 @@ export function circularPlanItemToHtml(item, sheetType) {
 <p><strong>Subject:</strong> ${escapeHtml(item?.title || "")}</p>
 <table>
 <tr><th>Currency</th><td>${escapeHtml(cf.currency)}</td><th>Source of funding</th><td>${escapeHtml(cf.sourceOfFunding)}</td></tr>
-<tr><th>Planned method</th><td>${escapeHtml(cf.plannedProcurementMethod)}</td><th>Contract type</th><td>${escapeHtml(cf.contractType)}</td></tr>
+<tr><th>Planned method</th><td>${escapeHtml(
+  cf.tenderSubtype
+    ? `${cf.plannedProcurementMethod} (${tenderSubtypeLabel(cf.tenderSubtype) || cf.tenderSubtype})`
+    : cf.plannedProcurementMethod,
+)}</td><th>Contract type</th><td>${escapeHtml(cf.contractType)}</td></tr>
 ${
   isConsultancy
     ? ""

@@ -6,6 +6,8 @@ import Box from "@mui/material/Box";
 import Button from "@mui/material/Button";
 import Chip from "@mui/material/Chip";
 import CircularProgress from "@mui/material/CircularProgress";
+import Checkbox from "@mui/material/Checkbox";
+import FormControlLabel from "@mui/material/FormControlLabel";
 import MenuItem from "@mui/material/MenuItem";
 import Paper from "@mui/material/Paper";
 import TextField from "@mui/material/TextField";
@@ -69,7 +71,15 @@ import {
   OrgProviderShortlistSummary,
 } from "@/components/projects/org-provider-selection";
 import Alert from "@mui/material/Alert";
-import { minRfqProviders } from "@/lib/projects/procurement-thresholds";
+import {
+  minRfqProviders,
+  microRequiresDirect,
+  normalizeTenderSubtype,
+  suggestTenderSubtype,
+  tenderSubtypeOptionState,
+  TENDER_SUBTYPE_OPTIONS,
+  planMethodOptionState,
+} from "@/lib/projects/procurement-thresholds";
 import { useProcessActivation } from "@/hooks/use-process-activation";
 import { processCodesForMethod } from "@/lib/projects/process-catalogue";
 
@@ -187,8 +197,19 @@ function methodRecommendationFields(row, cc = {}) {
     ...(cc.ccSecretaryName ? { ccSecretaryName: cc.ccSecretaryName } : {}),
   };
   const recommendedBy = [p.pduOfficerName, p.pduOfficerPosition].filter(Boolean).join(" · ");
+  const methodLabel = [
+    METHOD_LABELS[row.procurementMethod] || row.procurementMethod || null,
+    p.directProcurement ? "Direct" : null,
+    p.tenderSubtypeLabel ||
+      (normalizeTenderSubtype(p.tenderSubtype)
+        ? TENDER_SUBTYPE_OPTIONS.find((o) => o.value === normalizeTenderSubtype(p.tenderSubtype))
+            ?.label
+        : null),
+  ]
+    .filter(Boolean)
+    .join(" · ");
   return [
-    { label: "Recommended method", value: METHOD_LABELS[row.procurementMethod] || row.procurementMethod || null },
+    { label: "Recommended method", value: methodLabel || null },
     {
       label: "Recommended by",
       value: recommendedBy
@@ -197,6 +218,9 @@ function methodRecommendationFields(row, cc = {}) {
     },
     ...(row.isEmergency
       ? [{ label: "Emergency reasons", value: p.emergencyReasons || row.procurementPlan?.emergencyJustification || null, full: true }]
+      : []),
+    ...(p.directProcurement && p.directJustification
+      ? [{ label: "Direct procurement basis", value: p.directJustification, full: true }]
       : []),
     { label: "Method justification", value: p.methodJustification || null, full: true },
     { label: "Bidding document preparers", value: p.biddingDocumentPreparers || null },
@@ -479,11 +503,25 @@ function requisitionPrintSections(row, history) {
       fields: [
         {
           label: "Procurement method",
-          value: METHOD_LABELS[row.procurementMethod] || row.procurementMethod,
+          value: [
+            METHOD_LABELS[row.procurementMethod] || row.procurementMethod,
+            partII.directProcurement ? "Direct" : null,
+            partII.tenderSubtypeLabel ||
+              (normalizeTenderSubtype(partII.tenderSubtype)
+                ? TENDER_SUBTYPE_OPTIONS.find(
+                    (o) => o.value === normalizeTenderSubtype(partII.tenderSubtype),
+                  )?.label
+                : null),
+          ]
+            .filter(Boolean)
+            .join(" · "),
         },
         { label: "PDU officer", value: [partII.pduOfficerName, partII.pduOfficerPosition].filter(Boolean).join(", ") || null },
         ...(row.isEmergency
           ? [{ label: "Emergency reasons", value: partII.emergencyReasons || row.procurementPlan?.emergencyJustification, full: true }]
+          : []),
+        ...(partII.directProcurement && partII.directJustification
+          ? [{ label: "Direct procurement basis", value: partII.directJustification, full: true }]
           : []),
         { label: "Method justification", value: partII.methodJustification, full: true },
         { label: "Bidding document preparers", value: partII.biddingDocumentPreparers, full: true },
@@ -632,12 +670,30 @@ export function OrgRequisitionDetailPanel({ projectId, requisitionId }) {
   /** @param {string} m */
   const methodProcessOff = (m) => processCodesForMethod(m).some((c) => !processes.isActive(c));
 
+  const microDirectOnly = microRequiresDirect(row?.estimatedTotalValue, row?.category);
+  const wantsDirect =
+    Boolean(form5PartII.directProcurement) ||
+    String(form5PartII.directProcurement || "").toLowerCase() === "true" ||
+    Boolean(row?.isEmergency) ||
+    (procurementMethod === "MICRO" && microDirectOnly);
+
   const methodBlockReason = (() => {
     if (decision !== "SELECT_METHOD") return "";
     if (!procurementMethod) return "Choose a method.";
     if (methodProcessOff(procurementMethod)) return "A process this method needs is inactive.";
-    if (!methodAllowedForValue(procurementMethod, row?.estimatedTotalValue)) {
+    if (
+      !methodAllowedForValue(procurementMethod, row?.estimatedTotalValue, {
+        category: row?.category,
+        allowDirectMicro: wantsDirect,
+      })
+    ) {
       return "This value is above the limit for the chosen method.";
+    }
+    if (procurementMethod === "MICRO" && microDirectOnly && !wantsDirect) {
+      return "Above Micro threshold — mark Direct procurement or choose another method.";
+    }
+    if (procurementMethod === "TENDER" && !normalizeTenderSubtype(form5PartII.tenderSubtype)) {
+      return "Choose open or restricted bidding.";
     }
     if (procurementMethod === "QUOTATION" && !shortlistIds.length) {
       return `Shortlist ${providerWordPlural} first.`;
@@ -653,9 +709,42 @@ export function OrgRequisitionDetailPanel({ projectId, requisitionId }) {
   const changeMethod = (next) => {
     setProcurementMethod(next);
     setShortlistConfirmed(false);
-    setFieldErrors((e) => ({ ...e, shortlistedProviderIds: "", shortlistJustification: "" }));
-    if (next === "TENDER") setShortlistIds([]);
-    else if (next === "MICRO") setShortlistIds((ids) => ids.slice(0, 1));
+    setFieldErrors((e) => ({
+      ...e,
+      shortlistedProviderIds: "",
+      shortlistJustification: "",
+      tenderSubtype: "",
+      directProcurement: "",
+      directJustification: "",
+    }));
+    if (next === "TENDER") {
+      setShortlistIds([]);
+      setForm5PartII((f) => ({
+        ...f,
+        tenderSubtype:
+          normalizeTenderSubtype(f.tenderSubtype) ||
+          suggestTenderSubtype(row?.estimatedTotalValue, row?.category),
+        directProcurement: "",
+        directJustification: "",
+      }));
+    } else if (next === "MICRO") {
+      setShortlistIds((ids) => ids.slice(0, 1));
+      setForm5PartII((f) => ({
+        ...f,
+        tenderSubtype: "",
+        directProcurement:
+          microRequiresDirect(row?.estimatedTotalValue, row?.category) || row?.isEmergency
+            ? "true"
+            : f.directProcurement,
+      }));
+    } else {
+      setForm5PartII((f) => ({
+        ...f,
+        tenderSubtype: "",
+        directProcurement: "",
+        directJustification: "",
+      }));
+    }
   };
 
   const load = useCallback(async () => {
@@ -748,6 +837,24 @@ export function OrgRequisitionDetailPanel({ projectId, requisitionId }) {
       if (!String(form5PartII.methodJustification || "").trim()) {
         errs.methodJustification = "Enter the justification for the recommended method.";
       }
+      if (
+        procurementMethod === "MICRO" &&
+        microRequiresDirect(row?.estimatedTotalValue, row?.category) &&
+        !wantsDirect
+      ) {
+        errs.directProcurement = "Confirm Direct procurement, or choose another method.";
+      }
+      if (
+        procurementMethod === "MICRO" &&
+        wantsDirect &&
+        !row?.isEmergency &&
+        !String(form5PartII.directJustification || form5PartII.methodJustification || "").trim()
+      ) {
+        errs.directJustification = "Enter why Direct procurement applies.";
+      }
+      if (procurementMethod === "TENDER" && !normalizeTenderSubtype(form5PartII.tenderSubtype)) {
+        errs.tenderSubtype = "Choose open or restricted bidding.";
+      }
       const cost = String(form5PartII.biddingDocumentCost || "").replace(/,/g, "").trim();
       if (procurementMethod === "TENDER" && cost && !(Number(cost) >= 0)) {
         errs.biddingDocumentCost = "Enter an amount.";
@@ -792,6 +899,7 @@ export function OrgRequisitionDetailPanel({ projectId, requisitionId }) {
         payload.procurementMethod = procurementMethod;
         payload.form5 = {
           ...form5PartII,
+          directProcurement: wantsDirect,
           shortlistedProviderIds: procurementMethod === "TENDER" ? [] : shortlistIds,
         };
       }
@@ -1021,6 +1129,7 @@ export function OrgRequisitionDetailPanel({ projectId, requisitionId }) {
                 requisition={row}
                 selecting={decision === "SELECT_METHOD"}
                 selectedMethod={procurementMethod}
+                allowDirectMicro={wantsDirect}
               />
             </div>
           ) : null}
@@ -1037,7 +1146,14 @@ export function OrgRequisitionDetailPanel({ projectId, requisitionId }) {
               <div>
                 {row.procurementMethod === "TENDER" ? (
                   <Typography variant="body2" sx={adminMutedTextSx}>
-                    Open tender — advertised, no shortlist.
+                    {row.form5PartII?.tenderSubtypeLabel ||
+                      (normalizeTenderSubtype(row.form5PartII?.tenderSubtype)
+                        ? TENDER_SUBTYPE_OPTIONS.find(
+                            (o) => o.value === normalizeTenderSubtype(row.form5PartII?.tenderSubtype),
+                          )?.label
+                        : null) ||
+                      "Tender"}{" "}
+                    — advertised, no shortlist.
                   </Typography>
                 ) : Array.isArray(row.form5PartII?.shortlist) &&
                   row.form5PartII.shortlist.length ? (
@@ -1091,16 +1207,104 @@ export function OrgRequisitionDetailPanel({ projectId, requisitionId }) {
                     ["QUOTATION", "Quotation"],
                     ["TENDER", "Tender"],
                   ].map(([value, label]) => {
-                    const allowed = methodAllowedForValue(value, row.estimatedTotalValue);
+                    const state = planMethodOptionState(value, row.estimatedTotalValue, row.category, {
+                      allowDirectMicro: true,
+                    });
                     const inactive = methodProcessOff(value);
                     return (
-                      <MenuItem key={value} value={value} disabled={!allowed || inactive}>
+                      <MenuItem key={value} value={value} disabled={!state.enabled || inactive}>
                         {label}
-                        {inactive ? " — process inactive" : allowed ? "" : " — above limit"}
+                        {inactive
+                          ? " — process inactive"
+                          : state.directOnly
+                            ? " — Direct only"
+                            : state.recommended
+                              ? " (recommended)"
+                              : state.enabled
+                                ? ""
+                                : " — above limit"}
                       </MenuItem>
                     );
                   })}
                 </TextField>
+                {procurementMethod === "TENDER" ? (
+                  <TextField
+                    select
+                    label="Bidding type"
+                    value={normalizeTenderSubtype(form5PartII.tenderSubtype) || ""}
+                    onChange={(e) => {
+                      setForm5PartII((f) => ({ ...f, tenderSubtype: e.target.value }));
+                      setFieldErrors((fe) => ({ ...fe, tenderSubtype: "" }));
+                    }}
+                    fullWidth
+                    sx={themedTextFieldSx}
+                    error={Boolean(fieldErrors.tenderSubtype)}
+                    helperText={fieldErrors.tenderSubtype || "Open or restricted (same Tender process)"}
+                  >
+                    <MenuItem value="">Select…</MenuItem>
+                    {TENDER_SUBTYPE_OPTIONS.map((o) => {
+                      const state = tenderSubtypeOptionState(
+                        o.value,
+                        row.estimatedTotalValue,
+                        row.category,
+                      );
+                      return (
+                        <MenuItem key={o.value} value={o.value} disabled={!state.enabled}>
+                          {o.label}
+                          {state.recommended ? " (recommended)" : ""}
+                        </MenuItem>
+                      );
+                    })}
+                  </TextField>
+                ) : null}
+                {procurementMethod === "MICRO" ? (
+                  <div className="sm:col-span-2 space-y-2">
+                    <FormControlLabel
+                      control={
+                        <Checkbox
+                          checked={wantsDirect}
+                          disabled={Boolean(row.isEmergency) || microDirectOnly}
+                          onChange={(e) =>
+                            setForm5PartII((f) => ({
+                              ...f,
+                              directProcurement: e.target.checked ? "true" : "",
+                            }))
+                          }
+                        />
+                      }
+                      label={
+                        row.isEmergency
+                          ? "Direct procurement (emergency)"
+                          : microDirectOnly
+                            ? "Direct procurement (required above Micro threshold)"
+                            : "Treat as Direct procurement (no threshold)"
+                      }
+                    />
+                    {fieldErrors.directProcurement ? (
+                      <Typography variant="caption" color="error">
+                        {fieldErrors.directProcurement}
+                      </Typography>
+                    ) : null}
+                    {wantsDirect && !row.isEmergency ? (
+                      <TextField
+                        label="Direct procurement basis"
+                        value={form5PartII.directJustification || ""}
+                        onChange={(e) =>
+                          setForm5PartII((f) => ({ ...f, directJustification: e.target.value }))
+                        }
+                        fullWidth
+                        multiline
+                        minRows={2}
+                        sx={themedTextFieldSx}
+                        error={Boolean(fieldErrors.directJustification)}
+                        helperText={
+                          fieldErrors.directJustification ||
+                          "Legal conditions (e.g. sole source, qualifying emergency)"
+                        }
+                      />
+                    ) : null}
+                  </div>
+                ) : null}
                 {row.isEmergency ? (
                   <TextField
                     label="Emergency reasons"
@@ -1132,7 +1336,7 @@ export function OrgRequisitionDetailPanel({ projectId, requisitionId }) {
                 <div className="sm:col-span-2">
                   {procurementMethod === "TENDER" ? (
                     <Typography variant="body2" sx={adminMutedTextSx}>
-                      Open tender — advertised, no shortlist.
+                      Tender — advertised, no shortlist.
                     </Typography>
                   ) : procurementMethod === "MICRO" || procurementMethod === "QUOTATION" ? (
                     <OrgProviderSelection

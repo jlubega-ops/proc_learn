@@ -60,6 +60,10 @@ import {
 import {
   planMethodOptionState,
   suggestPlanMethodLabel,
+  suggestTenderSubtype,
+  tenderSubtypeOptionState,
+  TENDER_SUBTYPE_OPTIONS,
+  normalizeTenderSubtype,
 } from "@/lib/projects/procurement-thresholds";
 import { usePersistedFormDraft } from "@/hooks/use-persisted-form-draft";
 import { useApi } from "@/hooks/use-api";
@@ -85,6 +89,7 @@ function emptyItem(circularSheet = "Goods") {
     currency: "UGX",
     sourceOfFunding: DEFAULT_FUNDING_SOURCE,
     plannedProcurementMethod: "",
+    tenderSubtype: "",
     contractType: "",
     prequalification: "",
     applyReservationScheme: "",
@@ -191,6 +196,7 @@ export function OrgProcurementPlanCreateForm({ projectId }) {
                     unitOfMeasure: item?.unitOfMeasure || DEFAULT_UNIT_OF_MEASURE,
                     category: circular,
                     plannedProcurementMethod: normalizePlanMethod(item?.plannedProcurementMethod),
+                    tenderSubtype: normalizeTenderSubtype(item?.tenderSubtype) || "",
                     expectedProcurementPeriod: item?.expectedProcurementPeriod || "Q1",
                   };
                 })
@@ -297,14 +303,48 @@ export function OrgProcurementPlanCreateForm({ projectId }) {
           next.category = circular;
           next.sheetType = normalizePlanSheetType(circular);
         }
-        if ("quantity" in patch || "estimatedUnitPrice" in patch) {
+        if (
+          "quantity" in patch ||
+          "estimatedUnitPrice" in patch ||
+          "category" in patch ||
+          "circularSheet" in patch
+        ) {
           const total = computeLineTotal(next.quantity, next.estimatedUnitPrice);
+          const cat = next.category || next.circularSheet;
           const current = normalizePlanMethod(next.plannedProcurementMethod);
-          const microState = planMethodOptionState("Micro procurement", total);
+          const microState = planMethodOptionState("Micro procurement", total, cat);
+          const quotationState = planMethodOptionState("Quotation", total, cat);
           if (current === "Micro procurement" && !microState.enabled) {
-            next.plannedProcurementMethod = suggestPlanMethodLabel(total) || "Quotation";
+            next.plannedProcurementMethod =
+              suggestPlanMethodLabel(total, cat) || "Quotation";
+          } else if (current === "Quotation" && !quotationState.enabled) {
+            next.plannedProcurementMethod = "Tender";
           } else if (!current) {
-            next.plannedProcurementMethod = suggestPlanMethodLabel(total);
+            next.plannedProcurementMethod = suggestPlanMethodLabel(total, cat);
+          }
+          const methodNow = normalizePlanMethod(next.plannedProcurementMethod);
+          if (methodNow === "Tender") {
+            const sub = normalizeTenderSubtype(next.tenderSubtype);
+            const subState = sub
+              ? tenderSubtypeOptionState(sub, total, cat)
+              : { enabled: false };
+            if (!sub || !subState.enabled) {
+              next.tenderSubtype = suggestTenderSubtype(total, cat);
+            }
+          } else {
+            next.tenderSubtype = "";
+          }
+        }
+        if ("plannedProcurementMethod" in patch) {
+          const methodNow = normalizePlanMethod(next.plannedProcurementMethod);
+          const total = computeLineTotal(next.quantity, next.estimatedUnitPrice);
+          const cat = next.category || next.circularSheet;
+          if (methodNow === "Tender") {
+            next.tenderSubtype =
+              normalizeTenderSubtype(next.tenderSubtype) ||
+              suggestTenderSubtype(total, cat);
+          } else {
+            next.tenderSubtype = "";
           }
         }
         return next;
@@ -366,14 +406,26 @@ export function OrgProcurementPlanCreateForm({ projectId }) {
         errors[`items.${idx}.sourceOfFunding`] = "Choose a source of funding.";
       }
       const method = normalizePlanMethod(item.plannedProcurementMethod);
+      const total = computeLineTotal(item.quantity, item.estimatedUnitPrice);
       if (!method) {
         errors[`items.${idx}.plannedProcurementMethod`] = "Choose a procurement method.";
       } else {
-        const total = computeLineTotal(item.quantity, item.estimatedUnitPrice);
-        const state = planMethodOptionState(method, total);
+        const state = planMethodOptionState(method, total, circular);
         if (!state.enabled) {
           errors[`items.${idx}.plannedProcurementMethod`] =
             state.reason || "This method is not allowed for the estimated amount.";
+        }
+        if (method === "Tender") {
+          const sub = normalizeTenderSubtype(item.tenderSubtype);
+          if (!sub) {
+            errors[`items.${idx}.tenderSubtype`] = "Choose open or restricted bidding.";
+          } else {
+            const subState = tenderSubtypeOptionState(sub, total, circular);
+            if (!subState.enabled) {
+              errors[`items.${idx}.tenderSubtype`] =
+                subState.reason || "This bidding type is not allowed for the amount.";
+            }
+          }
         }
       }
       if (!String(item.contractType || "").trim()) {
@@ -896,7 +948,7 @@ export function OrgProcurementPlanCreateForm({ projectId }) {
               >
                 <MenuItem value="">Select…</MenuItem>
                 {PPDA_PLAN_METHOD_OPTIONS.map((v) => {
-                  const state = planMethodOptionState(v, lineTotal);
+                  const state = planMethodOptionState(v, lineTotal, item.category);
                   return (
                     <MenuItem key={v} value={v} disabled={!state.enabled}>
                       {v}
@@ -906,6 +958,33 @@ export function OrgProcurementPlanCreateForm({ projectId }) {
                   );
                 })}
               </TextField>
+              {normalizePlanMethod(item.plannedProcurementMethod) === "Tender" ? (
+                <TextField
+                  select
+                  label="Bidding type"
+                  value={normalizeTenderSubtype(item.tenderSubtype) || ""}
+                  onChange={(e) => updateItem(idx, { tenderSubtype: e.target.value })}
+                  fullWidth
+                  error={Boolean(fieldErrors[`items.${idx}.tenderSubtype`])}
+                  helperText={
+                    fieldErrors[`items.${idx}.tenderSubtype`] ||
+                    "PPDA open / restricted (same Tender process)"
+                  }
+                  sx={themedTextFieldSx}
+                >
+                  <MenuItem value="">Select…</MenuItem>
+                  {TENDER_SUBTYPE_OPTIONS.map((o) => {
+                    const state = tenderSubtypeOptionState(o.value, lineTotal, item.category);
+                    return (
+                      <MenuItem key={o.value} value={o.value} disabled={!state.enabled}>
+                        {o.label}
+                        {state.recommended ? " (recommended)" : ""}
+                        {!state.enabled && state.reason ? ` — ${state.reason}` : ""}
+                      </MenuItem>
+                    );
+                  })}
+                </TextField>
+              ) : null}
               <TextField
                 select
                 label="Contract type"
