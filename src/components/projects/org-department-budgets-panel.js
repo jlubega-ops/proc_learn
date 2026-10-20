@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useState } from "react";
 import Box from "@mui/material/Box";
 import Button from "@mui/material/Button";
 import Chip from "@mui/material/Chip";
@@ -39,6 +39,9 @@ import {
   adminTableSx,
 } from "@/lib/admin-mui-surfaces";
 import { formatMoneyAmount } from "@/lib/money";
+import { useApi } from "@/hooks/use-api";
+import { revalidateApi } from "@/lib/api-client-cache";
+import { notifyOrgTasksChanged } from "@/hooks/use-pending-task-counts";
 import { useProcessActivation } from "@/hooks/use-process-activation";
 import { ProcessGateTooltip } from "@/components/projects/process-gate";
 import { PROCESS_FLOW_CODES } from "@/lib/projects/process-catalogue";
@@ -59,10 +62,13 @@ export function OrgDepartmentBudgetsPanel({ projectId, readOnly = false, detailH
   const { showToast } = useToast();
   const confirm = useConfirm();
   const router = useRouter();
-  const [loading, setLoading] = useState(true);
+  const listUrl = `/api/projects/${projectId}/budgets`;
+  const { data, loading, refreshing, reload } = useApi(listUrl, {
+    errorMessage: "Could not load budgets.",
+  });
+  const budgets = Array.isArray(data?.budgets) ? data.budgets : [];
+  const canCreate = !readOnly && Boolean(data?.canCreate);
   const [busy, setBusy] = useState(false);
-  const [budgets, setBudgets] = useState(/** @type {any[]} */ ([]));
-  const [canCreate, setCanCreate] = useState(false);
   const [deleteTarget, setDeleteTarget] = useState(/** @type {any} */ (null));
   const [deleteBusy, setDeleteBusy] = useState(false);
   const [autosaveDraft, setAutosaveDraft] = useState(
@@ -73,27 +79,9 @@ export function OrgDepartmentBudgetsPanel({ projectId, readOnly = false, detailH
   const budgetingOff = !processes.isActive(PROCESS_FLOW_CODES.BUDGETING);
 
   const load = useCallback(async () => {
-    setLoading(true);
-    try {
-      const bRes = await fetch(`/api/projects/${projectId}/budgets`, { credentials: "include" });
-      const bData = await bRes.json().catch(() => ({}));
-      if (!bRes.ok) {
-        showToast({
-          message: typeof bData.error === "string" ? bData.error : "Could not load budgets.",
-          severity: "error",
-        });
-        return;
-      }
-      setBudgets(Array.isArray(bData.budgets) ? bData.budgets : []);
-      setCanCreate(!readOnly && Boolean(bData.canCreate));
-    } finally {
-      setLoading(false);
-    }
-  }, [projectId, showToast, readOnly]);
-
-  useEffect(() => {
-    void load();
-  }, [load]);
+    await reload();
+    void revalidateApi(listUrl);
+  }, [listUrl, reload]);
 
   async function submitBudget(budgetId) {
     if (!(await confirm(decisionConfirmOptions("SUBMIT", "this budget for review")))) return;
@@ -105,15 +93,16 @@ export function OrgDepartmentBudgetsPanel({ projectId, readOnly = false, detailH
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ action: "submit", budgetId }),
       });
-      const data = await res.json().catch(() => ({}));
+      const body = await res.json().catch(() => ({}));
       if (!res.ok) {
         showToast({
-          message: typeof data.error === "string" ? data.error : "Could not submit budget.",
+          message: typeof body.error === "string" ? body.error : "Could not submit budget.",
           severity: "error",
         });
         return;
       }
       showToast({ message: "Budget submitted for review.", severity: "success" });
+      notifyOrgTasksChanged(projectId);
       await load();
     } finally {
       setBusy(false);
@@ -128,16 +117,17 @@ export function OrgDepartmentBudgetsPanel({ projectId, readOnly = false, detailH
         method: "DELETE",
         credentials: "include",
       });
-      const data = await res.json().catch(() => ({}));
+      const body = await res.json().catch(() => ({}));
       if (!res.ok) {
         showToast({
-          message: typeof data.error === "string" ? data.error : "Could not delete budget.",
+          message: typeof body.error === "string" ? body.error : "Could not delete budget.",
           severity: "error",
         });
         return;
       }
       showToast({ message: "Draft budget deleted.", severity: "success" });
       setDeleteTarget(null);
+      notifyOrgTasksChanged(projectId);
       await load();
     } finally {
       setDeleteBusy(false);
@@ -165,9 +155,10 @@ export function OrgDepartmentBudgetsPanel({ projectId, readOnly = false, detailH
       ) : null}
       <div className="flex flex-wrap items-center justify-end gap-2">
         <Button
-          startIcon={<RefreshRounded />}
+          startIcon={refreshing ? <CircularProgress size={16} /> : <RefreshRounded />}
           variant="outlined"
-          onClick={() => load()}
+          onClick={() => void load()}
+          disabled={refreshing}
           className="w-full sm:w-auto"
           title="Refresh budgets"
         >

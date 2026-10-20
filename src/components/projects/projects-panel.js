@@ -41,6 +41,7 @@ import AutorenewRounded from "@mui/icons-material/AutorenewRounded";
 import SettingsRounded from "@mui/icons-material/SettingsRounded";
 import dynamic from "next/dynamic";
 import { useRouter, usePathname, useSearchParams } from "next/navigation";
+import { hardNavigate } from "@/lib/auth/hard-navigate";
 import { format, isValid, parseISO } from "date-fns";
 import { useToast } from "@/components/providers/toast-provider";
 import { useAuthSession } from "@/components/providers/auth-session-provider";
@@ -729,9 +730,9 @@ export function ProjectsPanel() {
         true,
         asOrg ? "Entering organization…" : "Opening project…",
       );
-      router.push(href);
+      hardNavigate(href, { history: "push" });
     },
-    [isStudent, pathname, router, setSessionBlocking],
+    [isStudent, pathname, setSessionBlocking],
   );
 
   const handleProjectOpen = (row) => {

@@ -933,7 +933,7 @@ export function OrgRequisitionDetailPanel({ projectId, requisitionId }) {
             : "Decision recorded.";
       showToast({ message: msg, severity: "success" });
       decisionDraft.clearDraft();
-      notifyOrgTasksChanged();
+      notifyOrgTasksChanged(projectId);
       await load();
     } finally {
       setBusy(false);
@@ -959,6 +959,7 @@ export function OrgRequisitionDetailPanel({ projectId, requisitionId }) {
       }
       setDeleteOpen(false);
       showToast({ message: "Requisition deleted.", severity: "success" });
+      notifyOrgTasksChanged(projectId);
       router.push(`/projects/${projectId}/requisitions`);
     } finally {
       setBusy(false);

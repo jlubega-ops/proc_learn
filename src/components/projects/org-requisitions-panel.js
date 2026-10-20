@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useState } from "react";
 import Box from "@mui/material/Box";
 import Button from "@mui/material/Button";
 import Chip from "@mui/material/Chip";
@@ -27,6 +27,9 @@ import DialogTitle from "@mui/material/DialogTitle";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useToast } from "@/components/providers/toast-provider";
+import { useApi } from "@/hooks/use-api";
+import { revalidateApi } from "@/lib/api-client-cache";
+import { notifyOrgTasksChanged } from "@/hooks/use-pending-task-counts";
 import { useProcessActivation } from "@/hooks/use-process-activation";
 import { ProcessGateTooltip } from "@/components/projects/process-gate";
 import { PROCESS_FLOW_CODES } from "@/lib/projects/process-catalogue";
@@ -51,13 +54,16 @@ import { ORG_AUTOSAVE_FORM_KEYS } from "@/lib/projects/org-form-drafts";
 export function OrgRequisitionsPanel({ projectId }) {
   const { showToast } = useToast();
   const router = useRouter();
-  const [loading, setLoading] = useState(true);
+  const listUrl = `/api/projects/${projectId}/requisitions`;
+  const { data, loading, refreshing, reload } = useApi(listUrl, {
+    errorMessage: "Could not load requisitions.",
+  });
+  const rows = Array.isArray(data?.requisitions) ? data.requisitions : [];
+  const canCreate = Boolean(data?.canCreate);
+  const hasApprovedPlan = Boolean(data?.hasApprovedPlan);
   const [busy, setBusy] = useState(false);
   const processes = useProcessActivation(projectId);
   const requisitionOff = !processes.isActive(PROCESS_FLOW_CODES.PROCUREMENT_REQUISITION);
-  const [rows, setRows] = useState(/** @type {any[]} */ ([]));
-  const [canCreate, setCanCreate] = useState(false);
-  const [hasApprovedPlan, setHasApprovedPlan] = useState(false);
   const [deleteTarget, setDeleteTarget] = useState(/** @type {any | null} */ (null));
   const [autosaveDraft, setAutosaveDraft] = useState(
     /** @type {{ formKey: string } | null} */ (null),
@@ -65,30 +71,9 @@ export function OrgRequisitionsPanel({ projectId }) {
   const createHref = `/projects/${projectId}/requisitions/new`;
 
   const load = useCallback(async () => {
-    setLoading(true);
-    try {
-      const rRes = await fetch(`/api/projects/${projectId}/requisitions`, {
-        credentials: "include",
-      });
-      const rData = await rRes.json().catch(() => ({}));
-      if (!rRes.ok) {
-        showToast({
-          message: typeof rData.error === "string" ? rData.error : "Could not load requisitions.",
-          severity: "error",
-        });
-        return;
-      }
-      setRows(Array.isArray(rData.requisitions) ? rData.requisitions : []);
-      setCanCreate(Boolean(rData.canCreate));
-      setHasApprovedPlan(Boolean(rData.hasApprovedPlan));
-    } finally {
-      setLoading(false);
-    }
-  }, [projectId, showToast]);
-
-  useEffect(() => {
-    void load();
-  }, [load]);
+    await reload();
+    void revalidateApi(listUrl);
+  }, [listUrl, reload]);
 
   async function deleteRequisition() {
     if (!deleteTarget?.id) return;
@@ -100,16 +85,17 @@ export function OrgRequisitionsPanel({ projectId }) {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ action: "delete" }),
       });
-      const data = await res.json().catch(() => ({}));
+      const body = await res.json().catch(() => ({}));
       if (!res.ok) {
         showToast({
-          message: typeof data.error === "string" ? data.error : "Could not delete requisition.",
+          message: typeof body.error === "string" ? body.error : "Could not delete requisition.",
           severity: "error",
         });
         return;
       }
       setDeleteTarget(null);
       showToast({ message: "Requisition deleted.", severity: "success" });
+      notifyOrgTasksChanged(projectId);
       await load();
     } finally {
       setBusy(false);
@@ -144,9 +130,10 @@ export function OrgRequisitionsPanel({ projectId }) {
       ) : null}
       <div className="flex flex-wrap items-center justify-end gap-2">
         <Button
-          startIcon={<RefreshRounded />}
+          startIcon={refreshing ? <CircularProgress size={16} /> : <RefreshRounded />}
           variant="outlined"
-          onClick={() => load()}
+          onClick={() => void load()}
+          disabled={refreshing}
           className="w-full sm:w-auto"
           title="Refresh requisitions"
         >

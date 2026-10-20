@@ -15,6 +15,7 @@ import TableBody from "@mui/material/TableBody";
 import TableCell from "@mui/material/TableCell";
 import TableContainer from "@mui/material/TableContainer";
 import TableHead from "@mui/material/TableHead";
+import TablePagination from "@mui/material/TablePagination";
 import TableRow from "@mui/material/TableRow";
 import Typography from "@mui/material/Typography";
 import {
@@ -27,44 +28,48 @@ import {
   adminTableSx,
 } from "@/lib/admin-mui-surfaces";
 import { useToast } from "@/components/providers/toast-provider";
+import { useApi } from "@/hooks/use-api";
+import { revalidateApi } from "@/lib/api-client-cache";
 
 const primaryAccent = "#008bd0";
+const API_BASE = "/api/user/notifications";
 
 export function NotificationsPanel() {
   const { showToast } = useToast();
-  const [items, setItems] = useState(/** @type {any[]} */ ([]));
-  const [loading, setLoading] = useState(true);
-  const [refetching, setRefetching] = useState(false);
+  const [page, setPage] = useState(0);
+  const [rowsPerPage, setRowsPerPage] = useState(20);
   const [markSelectedBusy, setMarkSelectedBusy] = useState(false);
   const [markAllBusy, setMarkAllBusy] = useState(false);
-  const [refreshBusy, setRefreshBusy] = useState(false);
   const [selected, setSelected] = useState(/** @type {Set<string>} */ (new Set()));
   const [detail, setDetail] = useState(/** @type {any | null} */ (null));
 
+  const listQuery = new URLSearchParams({
+    page: String(page + 1),
+    pageSize: String(rowsPerPage),
+  });
+  const listUrl = `${API_BASE}?${listQuery.toString()}`;
+  const { data, loading, refreshing, reload } = useApi(listUrl, {
+    errorMessage: "Could not load notifications.",
+  });
+  const items = Array.isArray(data?.notifications) ? data.notifications : [];
+  const total = Number(data?.total) || 0;
+
   const load = useCallback(
-    async (opts = /** @type {{ silent?: boolean }} */ ({})) => {
-      const silent = Boolean(opts.silent);
-      if (silent) setRefetching(true);
-      else setLoading(true);
-      try {
-        const res = await fetch("/api/user/notifications", { credentials: "include" });
-        const data = await res.json().catch(() => ({}));
-        if (!res.ok) {
-          setItems([]);
-          return;
-        }
-        setItems(Array.isArray(data.notifications) ? data.notifications : []);
-      } finally {
-        if (silent) setRefetching(false);
-        else setLoading(false);
-      }
+    async () => {
+      await reload();
+      void revalidateApi(API_BASE);
     },
-    [],
+    [reload],
   );
 
   useEffect(() => {
-    void load();
-  }, [load]);
+    setSelected(new Set());
+  }, [page, rowsPerPage]);
+
+  useEffect(() => {
+    const pageCount = Math.max(1, Math.ceil(total / rowsPerPage) || 1);
+    if (page > 0 && page >= pageCount) setPage(pageCount - 1);
+  }, [total, rowsPerPage, page]);
 
   function toggleOne(id) {
     setSelected((prev) => {
@@ -94,7 +99,7 @@ export function NotificationsPanel() {
     if (ids.length === 0) return;
     setMarkSelectedBusy(true);
     try {
-      const res = await fetch("/api/user/notifications", {
+      const res = await fetch(API_BASE, {
         method: "PATCH",
         credentials: "include",
         headers: { "Content-Type": "application/json" },
@@ -105,7 +110,7 @@ export function NotificationsPanel() {
         return;
       }
       setSelected(new Set());
-      await load({ silent: true });
+      await load();
     } finally {
       setMarkSelectedBusy(false);
     }
@@ -114,7 +119,7 @@ export function NotificationsPanel() {
   async function markAllRead() {
     setMarkAllBusy(true);
     try {
-      const res = await fetch("/api/user/notifications", {
+      const res = await fetch(API_BASE, {
         method: "PATCH",
         credentials: "include",
         headers: { "Content-Type": "application/json" },
@@ -125,7 +130,8 @@ export function NotificationsPanel() {
         return;
       }
       setSelected(new Set());
-      await load({ silent: true });
+      setPage(0);
+      await load();
     } finally {
       setMarkAllBusy(false);
     }
@@ -134,29 +140,19 @@ export function NotificationsPanel() {
   async function openDetail(n) {
     setDetail(n);
     if (!n.readAt) {
-      await fetch("/api/user/notifications", {
+      await fetch(API_BASE, {
         method: "PATCH",
         credentials: "include",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ markRead: true, id: n.id }),
       });
-      await load({ silent: true });
-    }
-  }
-
-  async function handleRefresh() {
-    setRefreshBusy(true);
-    try {
-      await load({ silent: true });
-    } finally {
-      setRefreshBusy(false);
+      await load();
     }
   }
 
   const selectedList = [...selected];
   const unreadOnPage = items.filter((n) => !n.readAt);
-  const blockOtherActions =
-    markSelectedBusy || markAllBusy || refreshBusy || refetching;
+  const blockOtherActions = markSelectedBusy || markAllBusy || refreshing;
 
   if (loading) {
     return (
@@ -169,16 +165,13 @@ export function NotificationsPanel() {
   return (
     <div className="space-y-4">
       <Typography variant="body2" sx={adminMutedTextSx}>
-        Notifications are scoped to your <strong style={{ color: "var(--foreground)" }}>active role</strong>. Alerts
-        for another role reappear when you switch back to that role.
+        Scoped to your active role.
       </Typography>
       <div className="flex flex-wrap items-center gap-2">
         <Button
           size="small"
           variant="contained"
-          disabled={
-            selectedList.length === 0 || markAllBusy || refreshBusy || refetching
-          }
+          disabled={selectedList.length === 0 || markAllBusy || refreshing}
           onClick={() => void markIdsAsRead(selectedList)}
         >
           {markSelectedBusy ? <CircularProgress size={18} color="inherit" aria-hidden /> : "Mark selected as read"}
@@ -186,9 +179,7 @@ export function NotificationsPanel() {
         <Button
           size="small"
           variant="outlined"
-          disabled={
-            unreadOnPage.length === 0 || markSelectedBusy || refreshBusy || refetching
-          }
+          disabled={unreadOnPage.length === 0 || markSelectedBusy || refreshing}
           onClick={() => void markAllRead()}
         >
           {markAllBusy ? <CircularProgress size={18} color="inherit" aria-hidden /> : "Mark all as read"}
@@ -196,14 +187,14 @@ export function NotificationsPanel() {
         <Button
           size="small"
           variant="text"
-          disabled={markSelectedBusy || markAllBusy || refetching || refreshBusy}
-          onClick={() => void handleRefresh()}
+          disabled={markSelectedBusy || markAllBusy || refreshing}
+          onClick={() => void load()}
         >
-          {refreshBusy ? <CircularProgress size={18} color="inherit" aria-hidden /> : "Refresh"}
+          {refreshing ? <CircularProgress size={18} color="inherit" aria-hidden /> : "Refresh"}
         </Button>
       </div>
 
-      {items.length === 0 ? (
+      {total === 0 ? (
         <Typography sx={adminMutedTextSx}>No notifications yet.</Typography>
       ) : (
         <Box sx={{ position: "relative" }}>
@@ -288,7 +279,19 @@ export function NotificationsPanel() {
               </TableBody>
             </Table>
           </TableContainer>
-          {refetching ? (
+          <TablePagination
+            component="div"
+            count={total}
+            page={page}
+            onPageChange={(_e, next) => setPage(next)}
+            rowsPerPage={rowsPerPage}
+            onRowsPerPageChange={(e) => {
+              setRowsPerPage(Number(e.target.value));
+              setPage(0);
+            }}
+            rowsPerPageOptions={[10, 20, 50]}
+          />
+          {refreshing ? (
             <Box
               sx={adminTableRefetchOverlaySx}
               aria-busy="true"

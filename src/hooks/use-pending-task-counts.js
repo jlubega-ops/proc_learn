@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { usePathname } from "next/navigation";
+import { revalidateApi } from "@/lib/api-client-cache";
 import { startVisibleInterval } from "@/lib/visible-interval";
 
 const TASKS_CHANGED_EVENT = "proc-learn:org-tasks-changed";
@@ -12,9 +13,26 @@ const FRESH_MS = 10_000;
 /** @type {Map<string, { at: number; byHref: Record<string, number> }>} */
 const cache = new Map();
 
-/** Ask the sidebar to refresh pending-task badges (call after a task decision). */
-export function notifyOrgTasksChanged() {
+/**
+ * Ask the sidebar to refresh pending-task badges, and refresh cached org list GETs
+ * so budgets/plans/reqs/tasks are not stale after a decision (authz still on each request).
+ * @param {string} [projectId]
+ */
+export function notifyOrgTasksChanged(projectId) {
   if (typeof window !== "undefined") window.dispatchEvent(new Event(TASKS_CHANGED_EVENT));
+  if (typeof projectId === "string" && projectId) {
+    void revalidateApi(
+      `/api/projects/${projectId}/tasks`,
+      `/api/projects/${projectId}/budgets`,
+      `/api/projects/${projectId}/procurement-plans`,
+      `/api/projects/${projectId}/requisitions`,
+      `/api/projects/${projectId}/procurements`,
+      `/api/projects/${projectId}/budget-lines`,
+      "/api/projects/org-notifications",
+    );
+  } else {
+    void revalidateApi("/api/projects/org-notifications");
+  }
 }
 
 /**

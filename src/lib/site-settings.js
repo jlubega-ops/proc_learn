@@ -11,7 +11,8 @@ export const MAINTENANCE_LOGIN_MESSAGE =
   "Proc Learn is under maintenance. Only system admins can sign in right now.";
 
 const SETTINGS_KEY = "default";
-const SETTINGS_CACHE_MS = 5_000;
+/** Slightly longer cache — maintenance flag rarely flips; cuts proxy Prisma on every nav. */
+const SETTINGS_CACHE_MS = 30_000;
 const ACCESS_CACHE_MS = 30_000;
 
 const DEFAULT_SETTINGS = Object.freeze({

@@ -1,3 +1,4 @@
+import { cache } from "react";
 import { cookies } from "next/headers";
 import { getIronSession } from "iron-session";
 import { buildIronSessionOptions } from "@/lib/auth/session-options";
@@ -25,14 +26,15 @@ export async function getAppSession() {
 
 /**
  * Read-only session for Server Components / layouts (never writes cookies).
+ * Deduped per React request so layout + page share one cookie read.
  */
-export async function getReadableAppSession() {
+export const getReadableAppSession = cache(async function getReadableAppSession() {
   const session = await getAppSession();
   if (!session) return null;
   if (!session.userId && !session.orgUserId) return null;
   if (isSessionPastIdle(session)) return null;
   return session;
-}
+});
 
 /**
  * Route Handlers only — validates idle, may destroy or slide activity, writes cookies.

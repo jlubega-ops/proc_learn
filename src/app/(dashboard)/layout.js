@@ -1,6 +1,6 @@
 import { headers } from "next/headers";
 import { redirect } from "next/navigation";
-import { AuthSessionProvider } from "@/components/providers/auth-session-provider";
+import { AuthSessionHydrate } from "@/components/providers/auth-session-hydrate";
 import DashboardLayoutClient from "@/components/layout/dashboard-layout-client";
 import { safeNextPath } from "@/lib/auth/safe-next-path";
 import { getReadableAppSession } from "@/lib/auth/session";
@@ -33,9 +33,10 @@ export default async function DashboardLayout({ children }) {
     }
 
     return (
-      <AuthSessionProvider initialSession={payload}>
+      <>
+        <AuthSessionHydrate session={payload} />
         <DashboardLayoutClient>{children}</DashboardLayoutClient>
-      </AuthSessionProvider>
+      </>
     );
   }
 
@@ -49,8 +50,9 @@ export default async function DashboardLayout({ children }) {
   }
 
   return (
-    <AuthSessionProvider initialSession={payload}>
+    <>
+      <AuthSessionHydrate session={payload} />
       <DashboardLayoutClient>{children}</DashboardLayoutClient>
-    </AuthSessionProvider>
+    </>
   );
 }

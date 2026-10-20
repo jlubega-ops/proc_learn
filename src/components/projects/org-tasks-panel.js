@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback } from "react";
 import Box from "@mui/material/Box";
 import Button from "@mui/material/Button";
 import Chip from "@mui/material/Chip";
@@ -20,9 +20,9 @@ import VisibilityRounded from "@mui/icons-material/VisibilityRounded";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { format, isValid, parseISO } from "date-fns";
-import { useToast } from "@/components/providers/toast-provider";
-import { useAuthSession } from "@/components/providers/auth-session-provider";
 import { OPEN_COMMITTEE_CONTEXT_EVENT } from "@/components/layout/active-committee-context-banner";
+import { useApi } from "@/hooks/use-api";
+import { revalidateApi } from "@/lib/api-client-cache";
 import {
   adminCenteredLoadingBoxSx,
   adminLoadingSpinnerSx,
@@ -66,36 +66,19 @@ function entityLabel(task) {
  * @param {{ projectId: string }} p
  */
 export function OrgTasksPanel({ projectId }) {
-  const { showToast } = useToast();
-  const { session } = useAuthSession();
   const router = useRouter();
-  const [loading, setLoading] = useState(true);
-  const [tasks, setTasks] = useState(/** @type {any[]} */ ([]));
-  const [mode, setMode] = useState(/** @type {"org" | "committee"} */ ("org"));
-  const [hiddenCount, setHiddenCount] = useState(0);
-  const load = useCallback(async () => {
-    setLoading(true);
-    try {
-      const res = await fetch(`/api/projects/${projectId}/tasks`, { credentials: "include" });
-      const data = await res.json().catch(() => ({}));
-      if (!res.ok) {
-        showToast({
-          message: typeof data.error === "string" ? data.error : "Could not load tasks.",
-          severity: "error",
-        });
-        return;
-      }
-      setTasks(Array.isArray(data.tasks) ? data.tasks : []);
-      setMode(data.mode === "committee" ? "committee" : "org");
-      setHiddenCount(typeof data.hiddenCount === "number" ? data.hiddenCount : 0);
-    } finally {
-      setLoading(false);
-    }
-  }, [projectId, showToast]);
+  const listUrl = `/api/projects/${projectId}/tasks`;
+  const { data, loading, refreshing, reload } = useApi(listUrl, {
+    errorMessage: "Could not load tasks.",
+  });
+  const tasks = Array.isArray(data?.tasks) ? data.tasks : [];
+  const mode = data?.mode === "committee" ? "committee" : "org";
+  const hiddenCount = typeof data?.hiddenCount === "number" ? data.hiddenCount : 0;
 
-  useEffect(() => {
-    void load();
-  }, [load, session?.activeCommitteeId]);
+  const load = useCallback(async () => {
+    await reload();
+    void revalidateApi(listUrl);
+  }, [listUrl, reload]);
 
   function openCommitteeSwitch() {
     if (typeof window !== "undefined") {
@@ -132,9 +115,10 @@ export function OrgTasksPanel({ projectId }) {
 
       <div className="flex flex-wrap justify-end gap-2">
         <Button
-          startIcon={<RefreshRounded />}
+          startIcon={refreshing ? <CircularProgress size={16} /> : <RefreshRounded />}
           variant="outlined"
-          onClick={() => load()}
+          onClick={() => void load()}
+          disabled={refreshing}
           className="w-full sm:w-auto"
           title="Refresh tasks"
         >

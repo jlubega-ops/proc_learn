@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback } from "react";
 import Link from "next/link";
 import Box from "@mui/material/Box";
 import Button from "@mui/material/Button";
@@ -9,7 +9,8 @@ import CircularProgress from "@mui/material/CircularProgress";
 import Paper from "@mui/material/Paper";
 import Typography from "@mui/material/Typography";
 import RefreshRounded from "@mui/icons-material/RefreshRounded";
-import { useToast } from "@/components/providers/toast-provider";
+import { useApi } from "@/hooks/use-api";
+import { revalidateApi } from "@/lib/api-client-cache";
 import {
   adminCenteredLoadingBoxSx,
   adminLoadingSpinnerSx,
@@ -23,33 +24,16 @@ import {
  * @param {{ projectId: string }} p
  */
 export function OrgProcurementProcessesPanel({ projectId }) {
-  const { showToast } = useToast();
-  const [loading, setLoading] = useState(true);
-  const [rows, setRows] = useState(/** @type {any[]} */ ([]));
+  const listUrl = `/api/projects/${projectId}/procurements`;
+  const { data, loading, refreshing, reload } = useApi(listUrl, {
+    errorMessage: "Could not load procurements.",
+  });
+  const rows = Array.isArray(data?.procurements) ? data.procurements : [];
 
   const load = useCallback(async () => {
-    setLoading(true);
-    try {
-      const res = await fetch(`/api/projects/${projectId}/procurements`, {
-        credentials: "include",
-      });
-      const data = await res.json().catch(() => ({}));
-      if (!res.ok) {
-        showToast({
-          message: typeof data.error === "string" ? data.error : "Could not load procurements.",
-          severity: "error",
-        });
-        return;
-      }
-      setRows(Array.isArray(data.procurements) ? data.procurements : []);
-    } finally {
-      setLoading(false);
-    }
-  }, [projectId, showToast]);
-
-  useEffect(() => {
-    void load();
-  }, [load]);
+    await reload();
+    void revalidateApi(listUrl);
+  }, [listUrl, reload]);
 
   const processLabel = {
     MICRO: "Micro Procurement Process (started)",
@@ -68,7 +52,12 @@ export function OrgProcurementProcessesPanel({ projectId }) {
   return (
     <Paper variant="outlined" sx={{ p: 2, ...adminOutlinedTableContainerSx }}>
       <div className="mb-3 flex justify-end">
-        <Button startIcon={<RefreshRounded />} variant="outlined" onClick={() => load()}>
+        <Button
+          startIcon={refreshing ? <CircularProgress size={16} /> : <RefreshRounded />}
+          variant="outlined"
+          onClick={() => void load()}
+          disabled={refreshing}
+        >
           Refresh
         </Button>
       </div>

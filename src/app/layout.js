@@ -6,6 +6,7 @@ import { ThemeProvider } from "@/components/providers/theme-provider";
 import { MuiAppThemeProvider } from "@/components/providers/mui-app-theme-provider";
 import { ConnectionBanner } from "@/components/connection/connection-banner";
 import { ToastProvider } from "@/components/providers/toast-provider";
+import { PostAuthToastConsumer } from "@/components/providers/post-auth-toast-consumer";
 import { ConfirmProvider } from "@/components/providers/confirm-provider";
 import { SwrProvider } from "@/components/providers/swr-provider";
 import { SiteBrandingProvider } from "@/components/providers/site-branding-provider";
@@ -53,6 +54,7 @@ export default async function RootLayout({ children }) {
             <ThemeProvider>
               <MuiAppThemeProvider>
                 <ToastProvider>
+                  <PostAuthToastConsumer />
                   <ConfirmProvider>
                     <SwrProvider>
                       <ConnectionBanner />

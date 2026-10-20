@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback } from "react";
 import Link from "next/link";
 import Box from "@mui/material/Box";
 import Button from "@mui/material/Button";
@@ -20,7 +20,8 @@ import RefreshRounded from "@mui/icons-material/RefreshRounded";
 import VisibilityRounded from "@mui/icons-material/VisibilityRounded";
 import { format, isValid, parseISO } from "date-fns";
 import { useRouter } from "next/navigation";
-import { useToast } from "@/components/providers/toast-provider";
+import { useApi } from "@/hooks/use-api";
+import { revalidateApi } from "@/lib/api-client-cache";
 import {
   adminCenteredLoadingBoxSx,
   adminLoadingSpinnerSx,
@@ -38,36 +39,18 @@ import {
  * @param {{ projectId: string }} p
  */
 export function OrgProcurementsPanel({ projectId }) {
-  const { showToast } = useToast();
   const router = useRouter();
-  const [loading, setLoading] = useState(true);
-  const [rows, setRows] = useState(/** @type {any[]} */ ([]));
-  const [stats, setStats] = useState(/** @type {Record<string, number>} */ ({}));
+  const listUrl = `/api/projects/${projectId}/procurements`;
+  const { data, loading, refreshing, reload } = useApi(listUrl, {
+    errorMessage: "Could not load procurements.",
+  });
+  const rows = Array.isArray(data?.procurements) ? data.procurements : [];
+  const stats = data?.stats && typeof data.stats === "object" ? data.stats : {};
 
   const load = useCallback(async () => {
-    setLoading(true);
-    try {
-      const res = await fetch(`/api/projects/${projectId}/procurements`, {
-        credentials: "include",
-      });
-      const data = await res.json().catch(() => ({}));
-      if (!res.ok) {
-        showToast({
-          message: typeof data.error === "string" ? data.error : "Could not load procurements.",
-          severity: "error",
-        });
-        return;
-      }
-      setRows(Array.isArray(data.procurements) ? data.procurements : []);
-      setStats(data.stats && typeof data.stats === "object" ? data.stats : {});
-    } finally {
-      setLoading(false);
-    }
-  }, [projectId, showToast]);
-
-  useEffect(() => {
-    void load();
-  }, [load]);
+    await reload();
+    void revalidateApi(listUrl);
+  }, [listUrl, reload]);
 
   const statusColor = (s) => {
     if (s === "CLOSED") return "success";
@@ -113,7 +96,12 @@ export function OrgProcurementsPanel({ projectId }) {
             />
           ) : null}
         </div>
-        <Button startIcon={<RefreshRounded />} variant="outlined" onClick={() => load()}>
+        <Button
+          startIcon={refreshing ? <CircularProgress size={16} /> : <RefreshRounded />}
+          variant="outlined"
+          onClick={() => void load()}
+          disabled={refreshing}
+        >
           Refresh
         </Button>
       </div>

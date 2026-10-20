@@ -266,6 +266,7 @@ export function OrgBudgetDetailPanel({ projectId, budgetId, listHref, readOnly =
         return;
       }
       showToast({ message: "Budget submitted for review.", severity: "success" });
+      notifyOrgTasksChanged(projectId);
       await load();
     } finally {
       setBusy(false);
@@ -288,6 +289,7 @@ export function OrgBudgetDetailPanel({ projectId, budgetId, listHref, readOnly =
         return;
       }
       showToast({ message: "Draft budget deleted.", severity: "success" });
+      notifyOrgTasksChanged(projectId);
       router.push(backHref);
     } finally {
       setBusy(false);
@@ -320,7 +322,7 @@ export function OrgBudgetDetailPanel({ projectId, budgetId, listHref, readOnly =
       }
       showToast({ message: "Decision recorded.", severity: "success" });
       decisionDraft.clearDraft();
-      notifyOrgTasksChanged();
+      notifyOrgTasksChanged(projectId);
       await load();
     } finally {
       setBusy(false);

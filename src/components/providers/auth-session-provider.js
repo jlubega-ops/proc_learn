@@ -43,11 +43,33 @@ const SESSION_BLOCKING_MAX_MS = 10000;
  * @property {string} [reason]
  */
 
+const AUTH_PUBLIC_PATH_PREFIXES = [
+  "/login",
+  "/forgot-password",
+  "/reset-password",
+  "/activate",
+];
+
+/**
+ * @param {string | null | undefined} pathname
+ */
+function isAuthPublicPath(pathname) {
+  const p = String(pathname || "");
+  return AUTH_PUBLIC_PATH_PREFIXES.some(
+    (prefix) => p === prefix || p.startsWith(`${prefix}/`),
+  );
+}
+
 const AuthSessionContext = createContext({
   loading: true,
   /** @type {SessionPayload | null} */
   session: null,
   refresh: async () => {},
+  /**
+   * Apply a server-built session without an extra /api/auth/session round-trip.
+   * @param {SessionPayload | null} _session
+   */
+  hydrateSession: (_session) => {},
   signOut: async () => {},
   isSigningOut: false,
   /** Full-screen blocking overlay (logout, role switch, etc.) */
@@ -92,6 +114,7 @@ export function AuthSessionProvider({ children, initialSession = null }) {
   const [isSigningOut, setIsSigningOut] = useState(false);
   const signingOutRef = useRef(false);
   const blockTimerRef = useRef(/** @type {ReturnType<typeof setTimeout> | null} */ (null));
+  const hydratedFromServerRef = useRef(hasInitial);
   const pathname = usePathname();
 
   const clearBlockTimer = useCallback(() => {
@@ -152,6 +175,17 @@ export function AuthSessionProvider({ children, initialSession = null }) {
   }, []);
 
   /**
+   * @param {SessionPayload | null | undefined} next
+   */
+  const hydrateSession = useCallback((next) => {
+    if (signingOutRef.current) return;
+    if (!next || next.authenticated !== true) return;
+    hydratedFromServerRef.current = true;
+    setSession(next);
+    setLoading(false);
+  }, []);
+
+  /**
    * @param {{ redirectTo?: string; message?: string; toast?: { message: string; severity?: 'success' | 'error'; duration?: number } }} [opts]
    */
   const signOut = useCallback(async (opts = {}) => {
@@ -190,16 +224,35 @@ export function AuthSessionProvider({ children, initialSession = null }) {
   }, [clearBlockTimer]);
 
   useEffect(() => {
-    void refresh();
-  }, [refresh]);
+    if (hasInitial) {
+      setLoading(false);
+      return;
+    }
+    // Auth pages: do not block the form on session fetch; refresh quietly in the background.
+    if (isAuthPublicPath(pathname)) {
+      setLoading(false);
+      void refresh();
+      return;
+    }
+    // Allow AuthSessionHydrate (child) to apply the server session before we fetch.
+    const id = window.setTimeout(() => {
+      if (hydratedFromServerRef.current) {
+        setLoading(false);
+        return;
+      }
+      void refresh();
+    }, 0);
+    return () => window.clearTimeout(id);
+  }, [refresh, hasInitial, pathname]);
 
-  // Cached API data belongs to one identity; a role, org or student-view switch must not show the old one.
+  // Cached API data belongs to one identity; a role, org, committee or student-view switch must not show the old one.
   const identity = session?.authenticated
     ? [
         session.userId,
         session.orgUserId,
         session.activeRole,
         session.activeOrgProjectId,
+        session.activeCommitteeId,
         session.activeAttempt?.attemptId,
         session.studentView?.programmeId,
         session.studentView?.campus,
@@ -236,6 +289,7 @@ export function AuthSessionProvider({ children, initialSession = null }) {
       loading,
       session,
       refresh,
+      hydrateSession,
       signOut,
       isSigningOut,
       isRoleSwitching: blocking.active,
@@ -247,6 +301,7 @@ export function AuthSessionProvider({ children, initialSession = null }) {
       loading,
       session,
       refresh,
+      hydrateSession,
       signOut,
       isSigningOut,
       blocking.active,

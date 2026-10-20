@@ -1,7 +1,6 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
-import { useRouter } from "next/navigation";
 import Button from "@mui/material/Button";
 import CircularProgress from "@mui/material/CircularProgress";
 import Dialog from "@mui/material/Dialog";
@@ -13,6 +12,7 @@ import { useAuthSession } from "@/components/providers/auth-session-provider";
 import { useToast } from "@/components/providers/toast-provider";
 import { adminDialogPaperSx, adminMutedTextSx } from "@/lib/admin-mui-surfaces";
 import { ROLE } from "@/lib/roles";
+import { hardNavigate } from "@/lib/auth/hard-navigate";
 
 const DISMISS_KEY = "proc_learn_practice_join_dismissed";
 
@@ -20,8 +20,7 @@ const DISMISS_KEY = "proc_learn_practice_join_dismissed";
  * On student login: ask whether to join a published Practice project or stay in My Organisation.
  */
 export function JoinPracticeProjectPrompt() {
-  const router = useRouter();
-  const { session, loading, refresh } = useAuthSession();
+  const { session, loading } = useAuthSession();
   const { showToast } = useToast();
   const [open, setOpen] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -56,6 +55,7 @@ export function JoinPracticeProjectPrompt() {
 
   async function goPersonal() {
     setBusy(true);
+    let navigating = false;
     try {
       const res = await fetch("/api/student/active-org", {
         method: "POST",
@@ -72,17 +72,19 @@ export function JoinPracticeProjectPrompt() {
         return;
       }
       dismiss();
-      await refresh();
-      showToast({ message: "Opened your organisation.", severity: "success" });
-      router.replace("/");
+      navigating = true;
+      hardNavigate("/", {
+        toast: { message: "Opened your organisation.", severity: "success" },
+      });
     } finally {
-      setBusy(false);
+      if (!navigating) setBusy(false);
     }
   }
 
   async function joinPractice() {
     if (!prompt?.academicProjectId) return;
     setBusy(true);
+    let navigating = false;
     try {
       const res = await fetch("/api/student/active-org", {
         method: "POST",
@@ -102,11 +104,15 @@ export function JoinPracticeProjectPrompt() {
         return;
       }
       dismiss();
-      await refresh();
-      showToast({ message: "Joined the practice organisation.", severity: "success" });
-      router.replace(typeof data.redirectTo === "string" ? data.redirectTo : "/organisation");
+      navigating = true;
+      hardNavigate(
+        typeof data.redirectTo === "string" ? data.redirectTo : "/organisation",
+        {
+          toast: { message: "Joined the practice organisation.", severity: "success" },
+        },
+      );
     } finally {
-      setBusy(false);
+      if (!navigating) setBusy(false);
     }
   }
 

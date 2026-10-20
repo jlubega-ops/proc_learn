@@ -37,6 +37,7 @@ import {
 import { ORG_REF_DOC, nextOrgDocumentReference } from "@/lib/projects/org-reference";
 import { usePersistedFormDraft } from "@/hooks/use-persisted-form-draft";
 import { useApi } from "@/hooks/use-api";
+import { revalidateApi } from "@/lib/api-client-cache";
 import { useProcessActivation } from "@/hooks/use-process-activation";
 import { ProcessGateTooltip } from "@/components/projects/process-gate";
 import { PROCESS_FLOW_CODES } from "@/lib/projects/process-catalogue";
@@ -374,6 +375,7 @@ export function OrgBudgetCreateForm({ projectId, budgetId = "" }) {
         severity: "success",
       });
       if (!isEdit) await clearDraft();
+      void revalidateApi(`/api/projects/${projectId}/budgets`);
       router.push(isEdit ? `/projects/${projectId}/budgets/${budgetId}` : listHref);
     } finally {
       setBusy(false);

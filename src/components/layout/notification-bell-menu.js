@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import Badge from "@mui/material/Badge";
 import Box from "@mui/material/Box";
 import Button from "@mui/material/Button";
@@ -18,8 +18,10 @@ import Menu from "@mui/material/Menu";
 import Tooltip from "@mui/material/Tooltip";
 import Typography from "@mui/material/Typography";
 import NotificationsRounded from "@mui/icons-material/NotificationsRounded";
-import { usePathname } from "next/navigation";
 import { adminDialogPaperSx, adminMutedTextSx } from "@/lib/admin-mui-surfaces";
+
+/** Quiet badge refresh while the shell is open — not on every sidebar click. */
+const SUMMARY_POLL_MS = 60_000;
 
 /**
  * @param {{ apiBase?: string; viewAllHref?: string }} [props]
@@ -28,15 +30,15 @@ export function NotificationBellMenu({
   apiBase = "/api/user/notifications",
   viewAllHref = "/notifications",
 }) {
-  const pathname = usePathname();
   const [anchor, setAnchor] = useState(null);
   const [unreadCount, setUnreadCount] = useState(0);
   const [preview, setPreview] = useState(/** @type {any[]} */ ([]));
   const [loading, setLoading] = useState(false);
   const [dialogItem, setDialogItem] = useState(/** @type {any | null} */ (null));
+  const menuOpenRef = useRef(false);
 
-  const loadSummary = useCallback(async () => {
-    setLoading(true);
+  const loadSummary = useCallback(async ({ showSpinner = false } = {}) => {
+    if (showSpinner) setLoading(true);
     try {
       const res = await fetch(`${apiBase}?summary=1`, {
         credentials: "include",
@@ -50,20 +52,32 @@ export function NotificationBellMenu({
       setUnreadCount(typeof data.unreadCount === "number" ? data.unreadCount : 0);
       setPreview(Array.isArray(data.preview) ? data.preview : []);
     } finally {
-      setLoading(false);
+      if (showSpinner) setLoading(false);
     }
   }, [apiBase]);
 
+  // Mount + when apiBase changes (academic vs org inbox). Identity switches hard-nav / clear SWR.
   useEffect(() => {
-    void loadSummary();
-  }, [loadSummary, pathname]);
+    void loadSummary({ showSpinner: !menuOpenRef.current });
+  }, [loadSummary]);
+
+  useEffect(() => {
+    const id = window.setInterval(() => {
+      void loadSummary({ showSpinner: false });
+    }, SUMMARY_POLL_MS);
+    return () => window.clearInterval(id);
+  }, [loadSummary]);
 
   const openMenu = (e) => {
     setAnchor(e.currentTarget);
-    void loadSummary();
+    menuOpenRef.current = true;
+    void loadSummary({ showSpinner: true });
   };
 
-  const closeMenu = () => setAnchor(null);
+  const closeMenu = () => {
+    menuOpenRef.current = false;
+    setAnchor(null);
+  };
 
   function openDetail(n) {
     closeMenu();

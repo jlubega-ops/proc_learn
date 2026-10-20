@@ -19,6 +19,7 @@ import {
 import { BRAND_BTN_PRIMARY_CLASS } from "@/lib/brand-ui";
 import { adminDialogPaperSx } from "@/lib/admin-mui-surfaces";
 import { DEFAULT_POST_AUTH_PATH } from "@/lib/appConfig";
+import { hardNavigate } from "@/lib/auth/hard-navigate";
 
 /**
  * Persistent Student Mode strip: indicator, followed programme + return to Examiner/Admin.
@@ -86,6 +87,7 @@ export function StudentModeBanner() {
     if (!returnRole || busy) return;
     setBusy(true);
     setSessionBlocking(true, "Leaving Student Mode…");
+    let navigating = false;
     try {
       const res = await fetch("/api/user/active-role", {
         method: "POST",
@@ -102,16 +104,17 @@ export function StudentModeBanner() {
         });
         return;
       }
-      await refresh();
       const nextPath =
         typeof data.defaultPath === "string" && data.defaultPath.startsWith("/")
           ? data.defaultPath
           : DEFAULT_POST_AUTH_PATH;
-      router.replace(nextPath);
-      showToast({ message: "You left Student Mode.", severity: "success" });
+      navigating = true;
+      hardNavigate(nextPath, {
+        toast: { message: "You left Student Mode.", severity: "success" },
+      });
     } finally {
       setBusy(false);
-      setSessionBlocking(false);
+      if (!navigating) setSessionBlocking(false);
     }
   }
 

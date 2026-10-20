@@ -1,7 +1,6 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { useRouter } from "next/navigation";
 import Button from "@mui/material/Button";
 import Chip from "@mui/material/Chip";
 import CircularProgress from "@mui/material/CircularProgress";
@@ -20,6 +19,7 @@ import { adminDialogPaperSx } from "@/lib/admin-mui-surfaces";
 import { BRAND_PAGE_LEAD_CLASS } from "@/lib/brand-ui";
 import { useServerSyncedCountdown } from "@/hooks/use-server-synced-countdown";
 import { startVisibleInterval } from "@/lib/visible-interval";
+import { hardNavigate } from "@/lib/auth/hard-navigate";
 
 const POLL_MS = 30_000;
 const MEMBER_POLL_MS = 30_000;
@@ -166,8 +166,7 @@ function TimeUpDialog({ open }) {
  * server-synced countdown, Submit, and (practice only) Leave practice.
  */
 export function ActiveOrgContextBanner() {
-  const router = useRouter();
-  const { session, refresh } = useAuthSession();
+  const { session } = useAuthSession();
   const { showToast } = useToast();
   const confirm = useConfirm();
   const [busy, setBusy] = useState(/** @type {'' | 'submit' | 'leave'} */ (""));
@@ -191,11 +190,11 @@ export function ActiveOrgContextBanner() {
     async (message) => {
       if (finishedRef.current) return;
       finishedRef.current = true;
-      showToast({ message, severity: "success" });
-      await refresh();
-      router.replace(listHref);
+      hardNavigate(listHref, {
+        toast: { message, severity: "success" },
+      });
     },
-    [listHref, refresh, router, showToast],
+    [listHref],
   );
 
   const poll = useCallback(async () => {
@@ -276,9 +275,9 @@ export function ActiveOrgContextBanner() {
         });
         return;
       }
-      await refresh();
-      showToast({ message: "Back in your organisation.", severity: "success" });
-      router.replace("/");
+      hardNavigate("/", {
+        toast: { message: "Back in your organisation.", severity: "success" },
+      });
     } finally {
       setBusy("");
     }

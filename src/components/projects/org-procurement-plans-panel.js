@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useState } from "react";
 import Box from "@mui/material/Box";
 import Button from "@mui/material/Button";
 import Chip from "@mui/material/Chip";
@@ -30,6 +30,9 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useToast } from "@/components/providers/toast-provider";
 import { decisionConfirmOptions, useConfirm } from "@/components/providers/confirm-provider";
+import { useApi } from "@/hooks/use-api";
+import { revalidateApi } from "@/lib/api-client-cache";
+import { notifyOrgTasksChanged } from "@/hooks/use-pending-task-counts";
 import { useProcessActivation } from "@/hooks/use-process-activation";
 import { ProcessGateTooltip } from "@/components/projects/process-gate";
 import { PROCESS_FLOW_CODES } from "@/lib/projects/process-catalogue";
@@ -55,13 +58,16 @@ export function OrgProcurementPlansPanel({ projectId }) {
   const { showToast } = useToast();
   const confirm = useConfirm();
   const router = useRouter();
-  const [loading, setLoading] = useState(true);
+  const listUrl = `/api/projects/${projectId}/procurement-plans`;
+  const { data, loading, refreshing, reload } = useApi(listUrl, {
+    errorMessage: "Could not load plans.",
+  });
+  const plans = Array.isArray(data?.plans) ? data.plans : [];
+  const canCreate = Boolean(data?.canCreate);
+  const hasApprovedBudget = Boolean(data?.hasApprovedBudget);
   const [busy, setBusy] = useState(false);
-  const [plans, setPlans] = useState(/** @type {any[]} */ ([]));
-  const [canCreate, setCanCreate] = useState(false);
   const [deleteTarget, setDeleteTarget] = useState(/** @type {any} */ (null));
   const [deleteBusy, setDeleteBusy] = useState(false);
-  const [hasApprovedBudget, setHasApprovedBudget] = useState(false);
   const [autosaveDraft, setAutosaveDraft] = useState(
     /** @type {{ formKey: string } | null} */ (null),
   );
@@ -77,30 +83,9 @@ export function OrgProcurementPlansPanel({ projectId }) {
   const planProcessOff = (p) => !processes.isActive(planCode(p));
 
   const load = useCallback(async () => {
-    setLoading(true);
-    try {
-      const pRes = await fetch(`/api/projects/${projectId}/procurement-plans`, {
-        credentials: "include",
-      });
-      const pData = await pRes.json().catch(() => ({}));
-      if (!pRes.ok) {
-        showToast({
-          message: typeof pData.error === "string" ? pData.error : "Could not load plans.",
-          severity: "error",
-        });
-        return;
-      }
-      setPlans(Array.isArray(pData.plans) ? pData.plans : []);
-      setCanCreate(Boolean(pData.canCreate));
-      setHasApprovedBudget(Boolean(pData.hasApprovedBudget));
-    } finally {
-      setLoading(false);
-    }
-  }, [projectId, showToast]);
-
-  useEffect(() => {
-    void load();
-  }, [load]);
+    await reload();
+    void revalidateApi(listUrl);
+  }, [listUrl, reload]);
 
   async function submitPlan(planId) {
     if (!(await confirm(decisionConfirmOptions("SUBMIT", "this plan for review")))) return;
@@ -112,15 +97,16 @@ export function OrgProcurementPlansPanel({ projectId }) {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ action: "submit", planId }),
       });
-      const data = await res.json().catch(() => ({}));
+      const body = await res.json().catch(() => ({}));
       if (!res.ok) {
         showToast({
-          message: typeof data.error === "string" ? data.error : "Could not submit plan.",
+          message: typeof body.error === "string" ? body.error : "Could not submit plan.",
           severity: "error",
         });
         return;
       }
       showToast({ message: "Procurement plan submitted for review.", severity: "success" });
+      notifyOrgTasksChanged(projectId);
       await load();
     } finally {
       setBusy(false);
@@ -135,16 +121,17 @@ export function OrgProcurementPlansPanel({ projectId }) {
         `/api/projects/${projectId}/procurement-plans/${deleteTarget.id}`,
         { method: "DELETE", credentials: "include" },
       );
-      const data = await res.json().catch(() => ({}));
+      const body = await res.json().catch(() => ({}));
       if (!res.ok) {
         showToast({
-          message: typeof data.error === "string" ? data.error : "Could not delete plan.",
+          message: typeof body.error === "string" ? body.error : "Could not delete plan.",
           severity: "error",
         });
         return;
       }
       showToast({ message: "Procurement plan deleted.", severity: "success" });
       setDeleteTarget(null);
+      notifyOrgTasksChanged(projectId);
       await load();
     } finally {
       setDeleteBusy(false);
@@ -179,9 +166,10 @@ export function OrgProcurementPlansPanel({ projectId }) {
       ) : null}
       <div className="flex flex-wrap items-center justify-end gap-2">
         <Button
-          startIcon={<RefreshRounded />}
+          startIcon={refreshing ? <CircularProgress size={16} /> : <RefreshRounded />}
           variant="outlined"
-          onClick={() => load()}
+          onClick={() => void load()}
+          disabled={refreshing}
           className="w-full sm:w-auto"
           title="Refresh procurement plans"
         >

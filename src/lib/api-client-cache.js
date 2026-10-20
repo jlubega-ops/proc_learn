@@ -40,9 +40,9 @@ export function revalidateApi(...prefixes) {
   );
 }
 
-/** Drops all cached API data (screens still mounted re-fetch) — used when the identity, role or organisation changes. */
+/** Drops all cached API data and re-fetches mounted screens — used when identity, role, org or committee changes. */
 export function clearApiCache() {
-  return mutate(() => true, undefined);
+  return mutate(() => true, undefined, { revalidate: true });
 }
 
 /**

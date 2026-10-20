@@ -29,12 +29,28 @@ export async function GET(request) {
     return NextResponse.json({ unreadCount, preview });
   }
 
-  const items = await prisma.projectOrgNotification.findMany({
-    where: { recipientOrgUserId: orgUser.id },
-    orderBy: { createdAt: "desc" },
-    take: 200,
+  const page = Math.max(1, Number.parseInt(searchParams.get("page") || "1", 10) || 1);
+  const pageSizeRaw = Number.parseInt(searchParams.get("pageSize") || "20", 10) || 20;
+  const pageSize = Math.min(50, Math.max(5, pageSizeRaw));
+  const where = { recipientOrgUserId: orgUser.id };
+
+  const [total, items] = await Promise.all([
+    prisma.projectOrgNotification.count({ where }),
+    prisma.projectOrgNotification.findMany({
+      where,
+      orderBy: { createdAt: "desc" },
+      skip: (page - 1) * pageSize,
+      take: pageSize,
+    }),
+  ]);
+
+  return NextResponse.json({
+    notifications: items,
+    total,
+    page,
+    pageSize,
+    pageCount: Math.max(1, Math.ceil(total / pageSize)),
   });
-  return NextResponse.json({ notifications: items });
 }
 
 export async function PATCH(request) {

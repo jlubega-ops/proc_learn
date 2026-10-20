@@ -1,7 +1,8 @@
 "use client";
 
-import { useRouter, usePathname } from "next/navigation";
+import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { hardNavigate } from "@/lib/auth/hard-navigate";
 import Avatar from "@mui/material/Avatar";
 import Button from "@mui/material/Button";
 import CircularProgress from "@mui/material/CircularProgress";
@@ -62,7 +63,6 @@ function navbarUserInitials(displayName, email) {
 
 export function NavbarUserMenu() {
   const router = useRouter();
-  const pathname = usePathname();
   const { session, refresh, setSessionBlocking, signOut } = useAuthSession();
   const { showToast } = useToast();
   const [anchor, setAnchor] = useState(null);
@@ -174,7 +174,7 @@ export function NavbarUserMenu() {
     }
     setBusy(true);
     setSessionBlocking(true, "Switching your role…");
-    let keepOrganisationBlocking = false;
+    let navigating = false;
     try {
       const res = await fetch("/api/user/active-role", {
         method: "POST",
@@ -197,21 +197,20 @@ export function NavbarUserMenu() {
       }
       setRoleDialogOpen(false);
       closeMenu();
-      await refresh();
       const nextPath =
         typeof data.defaultPath === "string" && data.defaultPath.startsWith("/")
           ? data.defaultPath
           : DEFAULT_POST_AUTH_PATH;
       const openingOrganisation =
         nextPath === "/organisation" || nextPath.startsWith("/organisation/");
-      if (openingOrganisation && nextPath !== pathname) {
-        keepOrganisationBlocking = true;
+      if (openingOrganisation) {
         setSessionBlocking(true, "Opening your organisation…");
       }
-      router.replace(nextPath);
+      navigating = true;
+      hardNavigate(nextPath);
     } finally {
       setBusy(false);
-      if (!keepOrganisationBlocking) {
+      if (!navigating) {
         setSessionBlocking(false);
       }
     }

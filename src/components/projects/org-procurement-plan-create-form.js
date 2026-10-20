@@ -74,6 +74,7 @@ import {
 } from "@/lib/projects/procurement-timetable";
 import { usePersistedFormDraft } from "@/hooks/use-persisted-form-draft";
 import { useApi } from "@/hooks/use-api";
+import { revalidateApi } from "@/lib/api-client-cache";
 import { useProcessActivation } from "@/hooks/use-process-activation";
 import { ProcessGateTooltip } from "@/components/projects/process-gate";
 import { PROCESS_FLOW_CODES } from "@/lib/projects/process-catalogue";
@@ -700,6 +701,7 @@ export function OrgProcurementPlanCreateForm({ projectId, planId = "" }) {
         message: isEdit ? "Procurement plan updated." : "Procurement plan draft saved.",
         severity: "success",
       });
+      void revalidateApi(`/api/projects/${projectId}/procurement-plans`);
       router.push(isEdit ? detailHref : listHref);
     } finally {
       setBusy(false);

@@ -20,7 +20,7 @@ import {
   ORG_SHORT,
 } from "@/lib/appConfig";
 import { safeNextPath } from "@/lib/auth/safe-next-path";
-import { useAuthSession } from "@/components/providers/auth-session-provider";
+import { hardNavigate } from "@/lib/auth/hard-navigate";
 import {
   consumePostAuthToast,
   setClientSigningOutFlag,
@@ -97,7 +97,6 @@ export function LoginForm({
   signedOutReason = "",
 }) {
   const router = useRouter();
-  const { refresh } = useAuthSession();
   const { showToast } = useToast();
   const afterLoginPath = useMemo(
     () => safeNextPath(initialNext),
@@ -165,6 +164,7 @@ export function LoginForm({
     if (Object.keys(nextErrors).length > 0) return;
 
     setSubmitting(true);
+    let navigating = false;
     try {
       const res = await fetch("/api/auth/login", {
         method: "POST",
@@ -196,13 +196,6 @@ export function LoginForm({
         return;
       }
 
-      await refresh();
-      showToast({
-        message: "Signed in successfully.",
-        severity: "success",
-        duration: 2800,
-      });
-      await new Promise((r) => setTimeout(r, 450));
       const dest =
         data.mustChangePassword || data.redirectTo === "/setup-password"
           ? "/setup-password"
@@ -210,10 +203,17 @@ export function LoginForm({
               data.redirectTo.startsWith("/")
             ? data.redirectTo
             : afterLoginPath;
-      // Replace so /login is not left in history (prevents back ↔ organisation loops).
-      router.replace(dest);
+      // Full document load: cookie is already set; avoid soft-nav hang on session/layout RSC.
+      navigating = true;
+      hardNavigate(dest, {
+        toast: {
+          message: "Signed in successfully.",
+          severity: "success",
+          duration: 2800,
+        },
+      });
     } finally {
-      setSubmitting(false);
+      if (!navigating) setSubmitting(false);
     }
   }
 

@@ -45,6 +45,7 @@ import { ORG_REF_DOC, nextOrgDocumentReference } from "@/lib/projects/org-refere
 import { PPDA_YES_NO } from "@/lib/projects/ppda-forms";
 import { usePersistedFormDraft } from "@/hooks/use-persisted-form-draft";
 import { useApi } from "@/hooks/use-api";
+import { revalidateApi } from "@/lib/api-client-cache";
 import { useProcessActivation } from "@/hooks/use-process-activation";
 import { ProcessGateTooltip } from "@/components/projects/process-gate";
 import { PROCESS_FLOW_CODES } from "@/lib/projects/process-catalogue";
@@ -747,6 +748,7 @@ export function OrgRequisitionCreateForm({ projectId, requisitionId = "" }) {
         if (saveOnly) {
           await clearDraft();
           showToast({ message: "Requisition updated.", severity: "success" });
+          void revalidateApi(`/api/projects/${projectId}/requisitions`);
           router.push(detailHref);
           return;
         }
@@ -774,6 +776,10 @@ export function OrgRequisitionCreateForm({ projectId, requisitionId = "" }) {
         }
         await clearDraft();
         showToast({ message: "Requisition submitted.", severity: "success" });
+        void revalidateApi(
+          `/api/projects/${projectId}/requisitions`,
+          `/api/projects/${projectId}/tasks`,
+        );
         router.push(listHref);
         return;
       }
@@ -798,6 +804,10 @@ export function OrgRequisitionCreateForm({ projectId, requisitionId = "" }) {
       }
       await clearDraft();
       showToast({ message: "Requisition submitted.", severity: "success" });
+      void revalidateApi(
+        `/api/projects/${projectId}/requisitions`,
+        `/api/projects/${projectId}/tasks`,
+      );
       router.push(listHref);
     } finally {
       setBusy(false);

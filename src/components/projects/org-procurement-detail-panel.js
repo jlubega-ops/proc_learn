@@ -643,7 +643,7 @@ export function OrgProcurementDetailPanel({ projectId, procurementId, stage = nu
       }
       showToast({ message: successMessage, severity: "success" });
       taskDraft.clearDraft();
-      notifyOrgTasksChanged();
+      notifyOrgTasksChanged(projectId);
       await load();
       return true;
     } finally {
@@ -871,7 +871,7 @@ export function OrgProcurementDetailPanel({ projectId, procurementId, stage = nu
                 : "Decision recorded.";
       showToast({ message, severity: "success" });
       taskDraft.clearDraft();
-      notifyOrgTasksChanged();
+      notifyOrgTasksChanged(projectId);
       await load();
       await loadSuppliers();
     } finally {
@@ -1507,7 +1507,7 @@ export function OrgProcurementDetailPanel({ projectId, procurementId, stage = nu
           canDecide={on("recommendation") && Boolean(recommendation?.canDecide)}
           waitingForCommittee={Boolean(recommendation?.pending)}
           onDecided={async () => {
-            notifyOrgTasksChanged();
+            notifyOrgTasksChanged(projectId);
             await load();
           }}
         />
@@ -3305,7 +3305,7 @@ export function OrgProcurementDetailPanel({ projectId, procurementId, stage = nu
           currentShortlist={recommendation.currentShortlist || []}
           providers={suppliers}
           onSubmitted={async () => {
-            notifyOrgTasksChanged();
+            notifyOrgTasksChanged(projectId);
             await load();
           }}
         />

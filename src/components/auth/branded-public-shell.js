@@ -15,7 +15,8 @@ export function BrandedPublicShell({ children, className = "" }) {
             alt=""
             fill
             priority
-            className="scale-[1.02] object-cover blur-[1.5px]"
+            quality={45}
+            className="scale-[1.02] object-cover blur-[2px]"
             sizes="100vw"
           />
         </div>

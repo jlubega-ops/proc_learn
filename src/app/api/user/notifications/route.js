@@ -36,13 +36,28 @@ export async function GET(request) {
     return NextResponse.json({ unreadCount, preview });
   }
 
-  const items = await prisma.notification.findMany({
-    where: { userId: user.id, ...audience },
-    orderBy: { createdAt: "desc" },
-    take: 200,
-  });
+  const page = Math.max(1, Number.parseInt(searchParams.get("page") || "1", 10) || 1);
+  const pageSizeRaw = Number.parseInt(searchParams.get("pageSize") || "20", 10) || 20;
+  const pageSize = Math.min(50, Math.max(5, pageSizeRaw));
+  const where = { userId: user.id, ...audience };
 
-  return NextResponse.json({ notifications: items });
+  const [total, items] = await Promise.all([
+    prisma.notification.count({ where }),
+    prisma.notification.findMany({
+      where,
+      orderBy: { createdAt: "desc" },
+      skip: (page - 1) * pageSize,
+      take: pageSize,
+    }),
+  ]);
+
+  return NextResponse.json({
+    notifications: items,
+    total,
+    page,
+    pageSize,
+    pageCount: Math.max(1, Math.ceil(total / pageSize)),
+  });
 }
 
 export async function PATCH(request) {

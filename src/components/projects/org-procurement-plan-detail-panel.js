@@ -396,6 +396,7 @@ export function OrgProcurementPlanDetailPanel({ projectId, planId }) {
         return;
       }
       showToast({ message: "Procurement plan submitted for review.", severity: "success" });
+      notifyOrgTasksChanged(projectId);
       await load();
     } finally {
       setBusy(false);
@@ -419,6 +420,7 @@ export function OrgProcurementPlanDetailPanel({ projectId, planId }) {
       }
       showToast({ message: "Procurement plan deleted.", severity: "success" });
       setDeleteOpen(false);
+      notifyOrgTasksChanged(projectId);
       router.push(`/projects/${projectId}/procurement-plans`);
     } finally {
       setBusy(false);
@@ -446,7 +448,7 @@ export function OrgProcurementPlanDetailPanel({ projectId, planId }) {
       }
       showToast({ message: "Decision recorded.", severity: "success" });
       decisionDraft.clearDraft();
-      notifyOrgTasksChanged();
+      notifyOrgTasksChanged(projectId);
       await load();
     } finally {
       setBusy(false);

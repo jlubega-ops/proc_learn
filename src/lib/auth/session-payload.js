@@ -1,3 +1,4 @@
+import { cache } from "react";
 import { Role } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import {
@@ -25,10 +26,24 @@ import {
 import { serializeStudentView } from "@/lib/academic/student-view";
 
 /**
+ * Catalogue sync is throttled and not required to authorize this request.
+ * Run in the background so layout/session stays on the critical path.
+ */
+function scheduleCatalogueWarmup() {
+  void Promise.all([
+    ensureCoreProjectOrgRoles(prisma),
+    ensureBaselineProcessTemplates(prisma),
+  ]).catch(() => {});
+}
+
+/**
  * Build client session payload from DB (single source for active role + theme).
+ * Deduped per React request (layout + page share one build).
  * @param {string} userId
  */
-export async function buildSessionPayloadForUserId(userId) {
+export const buildSessionPayloadForUserId = cache(async function buildSessionPayloadForUserId(
+  userId,
+) {
   const user = await prisma.user.findUnique({
     where: { id: userId },
     include: {
@@ -103,8 +118,7 @@ export async function buildSessionPayloadForUserId(userId) {
 
   if (active === Role.STUDENT) {
     try {
-      await ensureCoreProjectOrgRoles(prisma);
-      await ensureBaselineProcessTemplates(prisma);
+      scheduleCatalogueWarmup();
       const resolved = await resolveStudentActiveOrganisation(prisma, user.id);
       const org = resolved?.org;
       const personal = resolved?.personal;
@@ -153,14 +167,14 @@ export async function buildSessionPayloadForUserId(userId) {
         }
       }
 
-      // Student Mode (staff): auto-ensure current AY / demo enrollment / slate.
+      // Student Mode (staff): warm demo context off the critical path.
       if (isStudentMode({ grantedRoles: g, activeRole: active })) {
         const participationType = resolveParticipationType({
           grantedRoles: g,
           activeRole: active,
         });
         if (participationType) {
-          await ensureDemoStudentModeContext(user.id, participationType);
+          void ensureDemoStudentModeContext(user.id, participationType).catch(() => {});
         }
       }
     } catch {
@@ -207,4 +221,4 @@ export async function buildSessionPayloadForUserId(userId) {
     activeAttempt,
     defaultPath,
   };
-}
+});

@@ -1,3 +1,4 @@
+import { cache } from "react";
 import { prisma } from "@/lib/prisma";
 import { orgUserPermissions } from "@/lib/projects/org-role-permissions";
 import { formatUserDisplayName } from "@/lib/user-display";
@@ -6,7 +7,9 @@ import { formatCommitteeSeatLabel } from "@/lib/projects/committee-context";
 /**
  * @param {string} orgUserId
  */
-export async function buildSessionPayloadForOrgUserId(orgUserId) {
+export const buildSessionPayloadForOrgUserId = cache(async function buildSessionPayloadForOrgUserId(
+  orgUserId,
+) {
   const orgUser = await prisma.projectOrgUser.findUnique({
     where: { id: orgUserId },
     include: {
@@ -76,4 +79,4 @@ export async function buildSessionPayloadForOrgUserId(orgUserId) {
     activeCommittee,
     redirectTo: `/projects/${orgUser.projectId}`,
   };
-}
+});
