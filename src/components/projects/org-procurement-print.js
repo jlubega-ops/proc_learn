@@ -30,10 +30,12 @@ import {
   latestStepSignOff,
   procurementMoneySummary,
 } from "@/lib/projects/invoice-match";
+import {
+  isMicroStyleMethod,
+  procurementMethodLabel,
+} from "@/lib/projects/procurement-methods";
 
 /** @typedef {import("@/components/print/print-document").PrintSection} PrintSection */
-
-const METHOD_LABELS = { MICRO: "Micro procurement", QUOTATION: "Request for quotations", TENDER: "Tender" };
 
 /** @param {unknown} v */
 function human(v) {
@@ -69,7 +71,7 @@ function detailFields(row) {
     { label: "Procurement no.", value: row.procurementNumber },
     {
       label: "Method",
-      value: `${METHOD_LABELS[row.procurementMethod] || row.procurementMethod || ""}${row.isEmergency ? " (emergency)" : ""}` || null,
+      value: `${procurementMethodLabel(row.procurementMethod) || ""}${row.isEmergency ? " (emergency)" : ""}` || null,
     },
     ...(row.emergencyJustification
       ? [{ label: "Emergency justification", value: row.emergencyJustification, full: true }]
@@ -703,7 +705,7 @@ function stageSections(key, row, piDoc) {
     case "award":
       return awardSections(title, row);
     case "contract": {
-      if (row.procurementMethod === "MICRO") {
+      if (isMicroStyleMethod(row.procurementMethod)) {
         if (!piDoc) return [{ type: "text", title, text: "Not issued." }];
         const { pi } = piDoc;
         return [

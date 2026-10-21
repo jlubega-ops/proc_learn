@@ -23,6 +23,11 @@ import {
   recommendationReasonLabel,
   recommendationReasons,
 } from "@/lib/projects/procurement-recommendation-options";
+import {
+  isMicroStyleMethod,
+  isQuotationMethod,
+  methodRequiresShortlist,
+} from "@/lib/projects/procurement-methods";
 import { minRfqProviders } from "@/lib/projects/procurement-thresholds";
 
 const CONTRACTS_COMMITTEE_ROLE = "Contracts Committee";
@@ -181,11 +186,13 @@ export async function recommendationStage(prisma, opts) {
     ? proc.requisition.form5PartII.shortlist
     : [];
   const currentProviderId =
-    proc.procurementMethod === "MICRO" && shortlist[0]?.id ? String(shortlist[0].id) : null;
+    isMicroStyleMethod(proc.procurementMethod) && shortlist[0]?.id
+      ? String(shortlist[0].id)
+      : null;
   const rfqIssued = (proc.solicitations || []).some((s) => !PRE_ISSUE_SOLICITATION.has(s.status));
   /** @type {{ id: string; name: string }[]} */
   const currentShortlist =
-    proc.procurementMethod === "QUOTATION"
+    isQuotationMethod(proc.procurementMethod) || methodRequiresShortlist(proc.procurementMethod)
       ? shortlist.filter((s) => s?.id).map((s) => ({ id: String(s.id), name: String(s.name || "") }))
       : [];
   /** @type {string[]} */

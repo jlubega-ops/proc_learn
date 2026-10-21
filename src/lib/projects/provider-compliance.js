@@ -75,7 +75,7 @@ export const QUALIFICATION_CONTEXT = {
   GENERAL: "GENERAL",
   MICRO: "MICRO",
   QUOTATION: "QUOTATION",
-  TENDER: "TENDER",
+  BIDDING: "BIDDING",
   OTHER: "OTHER",
 };
 
@@ -93,7 +93,7 @@ const REQUIRED_DOCS = {
   GENERAL: FULL_SET,
   MICRO: ["URSB_REGISTRATION", "TIN", "TRADING_LICENCE"],
   QUOTATION: FULL_SET,
-  TENDER: FULL_SET,
+  BIDDING: FULL_SET,
   OTHER: FULL_SET,
 };
 
@@ -167,6 +167,17 @@ export function validateProviderCompliance(raw) {
 export function qualificationContextForMethod(method) {
   const m = String(method || "").toUpperCase();
   if (Object.prototype.hasOwnProperty.call(REQUIRED_DOCS, m)) return m;
+  // Official methods map onto MICRO / QUOTATION / BIDDING document profiles.
+  if (m === "DIRECT") return QUALIFICATION_CONTEXT.MICRO;
+  if (
+    m === "OPEN_DOMESTIC" ||
+    m === "OPEN_INTERNATIONAL" ||
+    m === "RESTRICTED_DOMESTIC" ||
+    m === "RESTRICTED_INTERNATIONAL" ||
+    m === "TENDER"
+  ) {
+    return QUALIFICATION_CONTEXT.BIDDING;
+  }
   return QUALIFICATION_CONTEXT.GENERAL;
 }
 

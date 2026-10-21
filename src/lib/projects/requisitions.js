@@ -962,9 +962,10 @@ export function requisitionViewScopeWhere(orgUser) {
  * }} opts
  */
 export async function actOnRequisitionTask(prisma, opts) {
-  const methodOk =
-    opts.procurementMethod &&
-    Object.prototype.hasOwnProperty.call(OrgProcurementMethod, opts.procurementMethod);
+  const { normalizeProcurementMethod: normalizeMethodEarly } = await import(
+    "@/lib/projects/procurement-methods"
+  );
+  const methodOk = Boolean(normalizeMethodEarly(opts.procurementMethod));
 
   const taskPreview = await prisma.projectOrgWorkflowTask.findUnique({
     where: { id: opts.taskId },
@@ -1000,7 +1001,7 @@ export async function actOnRequisitionTask(prisma, opts) {
     if (!methodOk) {
       return {
         ok: false,
-        error: "Choose MICRO, QUOTATION, or TENDER.",
+        error: "Choose a procurement method.",
         status: 400,
         fieldErrors: { procurementMethod: "Choose a procurement method." },
       };
@@ -1009,7 +1010,7 @@ export async function actOnRequisitionTask(prisma, opts) {
     const { buildForm5PartII } = await import("@/lib/projects/ppda-forms");
     const { assessProviderSelection } = await import("@/lib/projects/providers");
     const form5Body = opts.form5 && typeof opts.form5 === "object" ? opts.form5 : {};
-    const method = String(opts.procurementMethod);
+    let method = String(opts.procurementMethod);
 
     const reqRow = await prisma.projectOrgRequisition.findUnique({
       where: { id: taskPreview.instance.requisitionId },
@@ -1019,7 +1020,6 @@ export async function actOnRequisitionTask(prisma, opts) {
       checkMethodValueCeiling,
       minRfqProviders,
       microRequiresDirect,
-      normalizeTenderSubtype,
     } = await import("@/lib/projects/procurement-thresholds");
     const isEmergency = Boolean(reqRow?.procurementPlan?.isEmergency);
     const minProviders = minRfqProviders(isEmergency);
@@ -1031,25 +1031,46 @@ export async function actOnRequisitionTask(prisma, opts) {
         fieldErrors: { emergencyReasons: "Enter the reasons for the emergency." },
       };
     }
-    const wantsDirect =
-      Boolean(form5Body.directProcurement) ||
-      String(form5Body.directProcurement || "").toLowerCase() === "true" ||
-      isEmergency;
+    const {
+      isBiddingMethod,
+      isMicroStyleMethod,
+      isQuotationMethod,
+      methodRequiresDirectGrounds,
+      methodRequiresShortlist,
+      methodUsesOpenAdvert,
+      normalizeProcurementMethod,
+    } = await import("@/lib/projects/procurement-methods");
+    const methodKey = normalizeProcurementMethod(method, {
+      directProcurement:
+        Boolean(form5Body.directProcurement) ||
+        String(form5Body.directProcurement || "").toLowerCase() === "true" ||
+        isEmergency,
+    });
+    if (!methodKey) {
+      return {
+        ok: false,
+        error: "Choose a procurement method.",
+        status: 400,
+        fieldErrors: { procurementMethod: "Choose a method." },
+      };
+    }
+    method = methodKey;
+    const wantsDirect = method === "DIRECT" || isEmergency;
     const needsDirect =
-      method === "MICRO" &&
+      (method === "MICRO" || method === "DIRECT") &&
       microRequiresDirect(reqRow?.estimatedTotalValue, reqRow?.category);
-    if (needsDirect && !wantsDirect) {
+    if (needsDirect && method !== "DIRECT" && !isEmergency) {
       return {
         ok: false,
         error:
-          "This value is above the Micro threshold. Use Quotation or Tender, or mark Direct procurement with justification.",
+          "This value is above the Micro threshold. Choose Quotation, a bidding method, or Direct procurement.",
         status: 400,
         fieldErrors: {
-          directProcurement: "Confirm Direct procurement, or choose another method.",
+          procurementMethod: "Choose another method, or Direct procurement.",
         },
       };
     }
-    if (method === "MICRO" && wantsDirect && !isEmergency) {
+    if (methodRequiresDirectGrounds(method) && !isEmergency) {
       const directNote =
         String(form5Body.directJustification || form5Body.methodJustification || "").trim();
       if (!directNote) {
@@ -1062,14 +1083,6 @@ export async function actOnRequisitionTask(prisma, opts) {
           },
         };
       }
-    }
-    if (method === "TENDER" && !normalizeTenderSubtype(form5Body.tenderSubtype)) {
-      return {
-        ok: false,
-        error: "Choose open or restricted bidding for Tender.",
-        status: 400,
-        fieldErrors: { tenderSubtype: "Choose open or restricted bidding." },
-      };
     }
     const ceiling = checkMethodValueCeiling(method, reqRow?.estimatedTotalValue, {
       category: reqRow?.category,
@@ -1091,7 +1104,7 @@ export async function actOnRequisitionTask(prisma, opts) {
     if (methodBlocked) {
       return { ...methodBlocked, fieldErrors: { procurementMethod: methodBlocked.error } };
     }
-    const rawIds = method === "TENDER" ? [] : form5Body.shortlistedProviderIds;
+    const rawIds = methodUsesOpenAdvert(method) ? [] : form5Body.shortlistedProviderIds;
     const assessed = await assessProviderSelection(prisma, {
       projectId: taskPreview.instance.projectId,
       providerIds: rawIds,
@@ -1102,24 +1115,24 @@ export async function actOnRequisitionTask(prisma, opts) {
       return { ...assessed, fieldErrors: { shortlistedProviderIds: assessed.error } };
     }
     const picked = assessed.providers;
-    if (method === "MICRO" && picked.length > 1) {
+    if (isMicroStyleMethod(method) && picked.length > 1) {
       return {
         ok: false,
-        error: "Micro procurement uses a single provider. Select only one.",
+        error: "This method uses a single provider. Select only one.",
         status: 400,
         fieldErrors: { shortlistedProviderIds: "Select only one provider." },
       };
     }
-    if (method === "QUOTATION" && picked.length === 0) {
+    if (methodRequiresShortlist(method) && picked.length === 0) {
       return {
         ok: false,
-        error: "Shortlist at least one provider for request for quotations.",
+        error: "Shortlist at least one provider for this method.",
         status: 400,
         fieldErrors: { shortlistedProviderIds: "Shortlist at least one provider." },
       };
     }
     if (
-      method === "QUOTATION" &&
+      isQuotationMethod(method) &&
       picked.length < minProviders &&
       !String(form5Body.shortlistJustification || "").trim()
     ) {
@@ -1135,7 +1148,7 @@ export async function actOnRequisitionTask(prisma, opts) {
     }
 
     const costRaw = String(form5Body.biddingDocumentCost ?? "").replace(/,/g, "").trim();
-    if (method === "TENDER" && costRaw && !(Number(costRaw) >= 0)) {
+    if (isBiddingMethod(method) && costRaw && !(Number(costRaw) >= 0)) {
       return {
         ok: false,
         error: "Enter a valid bidding document cost.",
@@ -1155,11 +1168,11 @@ export async function actOnRequisitionTask(prisma, opts) {
         pduOfficerName: actorName || form5Body.pduOfficerName,
         pduOfficerPosition: opts.actorRoleName || form5Body.pduOfficerPosition,
         dateSubmittedToCc: new Date().toISOString().slice(0, 10),
-        biddingDocumentCost: method === "TENDER" ? costRaw : "",
+        biddingDocumentCost: isBiddingMethod(method) ? costRaw : "",
         recommendedMethod: method,
         shortlistedProviders: picked.length
           ? picked.map((p) => p.name).join(", ")
-          : method === "TENDER"
+          : methodUsesOpenAdvert(method)
             ? "Open advertisement — no shortlist"
             : form5Body.shortlistedProviders,
       },

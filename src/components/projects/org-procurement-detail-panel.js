@@ -130,6 +130,15 @@ import TaskAltRounded from "@mui/icons-material/TaskAltRounded";
 import { useProcessActivation } from "@/hooks/use-process-activation";
 import { ProcessGateTooltip } from "@/components/projects/process-gate";
 import { PROCESS_FLOW_CODES, phaseProcessForTask } from "@/lib/projects/process-catalogue";
+import {
+  isBiddingMethod,
+  isCompetitiveMethod,
+  isMicroStyleMethod,
+  methodUsesContract,
+  methodUsesLpo,
+  methodUsesOpenAdvert,
+  procurementMethodLabel,
+} from "@/lib/projects/procurement-methods";
 
 const APPROVE_PAYMENT_STEP_RE = /^approve payment|^payment approval/i;
 const RECORD_PAYMENT_STEP_RE = /^record payment|^payment recording/i;
@@ -156,12 +165,6 @@ const SOLICITATION_STATUS_COLORS = {
   ADVERTISED: "info",
   OPEN: "info",
   CLOSED: "error",
-};
-
-const METHOD_LABELS = {
-  MICRO: "Micro Procurement",
-  QUOTATION: "Quotation",
-  TENDER: "Tender",
 };
 
 /** Receive, Close and Open quotations / bids — one officer step on screen. */
@@ -218,8 +221,10 @@ function procurementDetailFields(row, projectId, activeOrder) {
     { label: "Category", value: req?.category },
     { label: "Method approved on", value: dateOrNull(row.methodSelectedAt) },
     {
-      label: row.procurementMethod === "MICRO" ? "Approved provider" : "Shortlisted providers",
-      value: approvedProviders || (row.procurementMethod === "TENDER" ? "Open advertisement" : null),
+      label: isMicroStyleMethod(row.procurementMethod) ? "Approved provider" : "Shortlisted providers",
+      value:
+        approvedProviders ||
+        (methodUsesOpenAdvert(row.procurementMethod) ? "Open advertisement" : null),
       wide: true,
     },
     { label: "Plan item", value: row.procurementPlanItem?.title, wide: true },
@@ -522,7 +527,7 @@ export function OrgProcurementDetailPanel({ projectId, procurementId, stage = nu
   const on = (key) => stage === key;
   const isSectionStage = Boolean(stage) && stage !== "task" && stage !== "recommendation";
   const canViewStage = !isSectionStage || !sections || Boolean(sections[stage]?.view);
-  const printPi = Boolean(piDoc) && on("contract") && row?.procurementMethod === "MICRO" && canViewStage;
+  const printPi = Boolean(piDoc) && on("contract") && isMicroStyleMethod(row?.procurementMethod) && canViewStage;
   /** null = whole record (viewable stages only); undefined = nothing to print. */
   const printStage = !isSectionStage ? null : canViewStage ? stage : undefined;
   const showTaskCard =
@@ -540,21 +545,18 @@ export function OrgProcurementDetailPanel({ projectId, procurementId, stage = nu
   const providerWord = providerTerm(reqCategory);
   const providerWordPlural = providerTerm(reqCategory, { plural: true });
   const evalInTaskCard =
-    showTaskCard &&
-    Boolean(evalStep) &&
-    (row?.procurementMethod === "QUOTATION" || row?.procurementMethod === "TENDER");
+    showTaskCard && Boolean(evalStep) && isCompetitiveMethod(row?.procurementMethod);
   const evalReportStep = evalInTaskCard && evalStep === "report" && isPositiveDecision;
   const isApproveAwardTask = evalStep === "award" && /^approve award$/i.test(taskStep);
   const isPrepareContractTask = Boolean(pendingTask) && /^prepare contract$/i.test(taskStep);
   const taskPhaseCode = pendingTask ? phaseProcessForTask(taskTitle, row?.procurementMethod) : null;
   const taskPhaseOff = Boolean(taskPhaseCode) && !processes.isActive(taskPhaseCode);
   const taskPhaseOffTitle = taskPhaseCode ? processes.inactiveTitle(taskPhaseCode) : "";
-  const orderPhaseCode =
-    row?.procurementMethod === "TENDER"
-      ? PROCESS_FLOW_CODES.CONTRACT_PROCESS
-      : row?.procurementMethod === "QUOTATION"
-        ? PROCESS_FLOW_CODES.LPO_PROCESS
-        : null;
+  const orderPhaseCode = methodUsesContract(row?.procurementMethod)
+    ? PROCESS_FLOW_CODES.CONTRACT_PROCESS
+    : methodUsesLpo(row?.procurementMethod)
+      ? PROCESS_FLOW_CODES.LPO_PROCESS
+      : null;
   const orderOff = Boolean(orderPhaseCode) && !processes.isActive(orderPhaseCode);
   const orderOffTitle = orderPhaseCode ? processes.inactiveTitle(orderPhaseCode) : "";
   const invoiceOff = !processes.isActive(PROCESS_FLOW_CODES.INVOICE_PROCESS);
@@ -800,7 +802,7 @@ export function OrgProcurementDetailPanel({ projectId, procurementId, stage = nu
       !(await confirm(
         decisionConfirmOptions(decision, "this procurement", {
           actionLabel: isPrepareDocsTask
-            ? `Submit the ${row?.procurementMethod === "TENDER" ? "tender" : "RFQ"} document for review`
+            ? `Submit the ${isBiddingMethod(row?.procurementMethod) ? "tender" : "RFQ"} document for review`
             : isPositiveDecision
               ? stepActionLabel
               : "",
@@ -857,7 +859,7 @@ export function OrgProcurementDetailPanel({ projectId, procurementId, stage = nu
         return;
       }
       const message = isPrepareDocsTask
-        ? `${row?.procurementMethod === "TENDER" ? "Tender" : "RFQ"} document submitted for review.`
+        ? `${isBiddingMethod(row?.procurementMethod) ? "Tender" : "RFQ"} document submitted for review.`
         : evalReportStep
           ? "Evaluation report submitted."
         : isIssuePi && isPositiveDecision
@@ -867,7 +869,7 @@ export function OrgProcurementDetailPanel({ projectId, procurementId, stage = nu
             : isTenderAdvertise && isPositiveDecision
               ? "Tender advertised."
               : isReceive && isPositiveDecision
-                ? `${row?.procurementMethod === "TENDER" ? "Bids" : "Quotations"} opened and submitted.`
+                ? `${isBiddingMethod(row?.procurementMethod) ? "Bids" : "Quotations"} opened and submitted.`
                 : "Decision recorded.";
       showToast({ message, severity: "success" });
       taskDraft.clearDraft();
@@ -917,7 +919,8 @@ export function OrgProcurementDetailPanel({ projectId, procurementId, stage = nu
         : ["ACCEPTED", "ACTIVE"].includes(orderDocForTask.status)
           ? ""
           : `Waiting for the supplier to accept the ${row.contract ? "contract" : "LPO"}.`;
-  const offerWord = row.procurementMethod === "TENDER" ? "bids" : "quotations";
+  const bidding = isBiddingMethod(row.procurementMethod);
+  const offerWord = bidding ? "bids" : "quotations";
   const receivingOpen = isReceive && !latestSolicitation?.openedAt && submissionsOpen(latestSolicitation);
   const receiveBlocker = !isPositiveDecision
     ? ""
@@ -936,8 +939,8 @@ export function OrgProcurementDetailPanel({ projectId, procurementId, stage = nu
       : awaitingAwardAcceptance
         ? "Waiting for the supplier to accept the award."
         : orderAcceptanceBlocker;
-  const usesBidDocument = row.procurementMethod === "QUOTATION" || row.procurementMethod === "TENDER";
-  const bidDocWord = row.procurementMethod === "TENDER" ? "Tender document" : "RFQ document";
+  const usesBidDocument = isCompetitiveMethod(row.procurementMethod);
+  const bidDocWord = bidding ? "Tender document" : "RFQ document";
   const docInTaskCard =
     showTaskCard && (isPrepareDocsTask || isReviewDocsTask || ((isTenderAdvertise || isRfqIssue) && usesBidDocument));
   const baseDecisionOptions = workflowDecisionOptions(actionKey, { isProcurementStep: true })
@@ -1460,7 +1463,7 @@ export function OrgProcurementDetailPanel({ projectId, procurementId, stage = nu
                 size="small"
                 color="info"
                 variant="outlined"
-                label={METHOD_LABELS[row.procurementMethod] || row.procurementMethod}
+                label={procurementMethodLabel(row.procurementMethod)}
               />
             ) : null}
             <Chip size="small" color={row.statusColor || "info"} label={row.statusLabel || row.status} />
@@ -1570,7 +1573,7 @@ export function OrgProcurementDetailPanel({ projectId, procurementId, stage = nu
                 projectId={projectId}
                 taskId={pendingTask.id}
                 solicitation={latestSolicitation}
-                isTender={row.procurementMethod === "TENDER"}
+                isTender={bidding}
                 busy={busy}
                 setBusy={setBusy}
                 onChanged={load}
@@ -1581,7 +1584,7 @@ export function OrgProcurementDetailPanel({ projectId, procurementId, stage = nu
                 projectId={projectId}
                 taskId={pendingTask.id}
                 solicitation={latestSolicitation}
-                isTender={row.procurementMethod === "TENDER"}
+                isTender={bidding}
                 busy={busy}
                 setBusy={setBusy}
                 onChanged={async () => {
@@ -1625,7 +1628,7 @@ export function OrgProcurementDetailPanel({ projectId, procurementId, stage = nu
                 taskId={pendingTask.id}
                 decision={defaultWorkflowDecision(actionKey)}
                 clarifyAllowed={clarifyAllowed}
-                isTender={row.procurementMethod === "TENDER"}
+                isTender={bidding}
                 providerWord={providerWord}
                 providerWordPlural={providerWordPlural}
                 offers={offers}
@@ -1943,7 +1946,7 @@ export function OrgProcurementDetailPanel({ projectId, procurementId, stage = nu
 
       {on("evaluation") &&
       !evalInTaskCard &&
-      (row.procurementMethod === "QUOTATION" || row.procurementMethod === "TENDER") &&
+      isCompetitiveMethod(row.procurementMethod) &&
       (!sections || sections.evaluation?.view) ? (
         <OrgEvaluationPanel
           projectId={projectId}
@@ -1953,7 +1956,7 @@ export function OrgProcurementDetailPanel({ projectId, procurementId, stage = nu
         />
       ) : null}
 
-      {row.procurementMethod !== "MICRO" ? (
+      {!isMicroStyleMethod(row.procurementMethod) ? (
         <>
           {on("award") &&
           (row.award ? !awardInTaskCard || awardCancellable : !(evalInTaskCard && evalStep === "award")) ? (
@@ -2035,7 +2038,7 @@ export function OrgProcurementDetailPanel({ projectId, procurementId, stage = nu
           <ProcurementSectionGate access={sections?.contract}>
           <Paper variant="outlined" sx={{ p: 2, ...adminOutlinedTableContainerSx }}>
             <Typography variant="subtitle1" sx={{ fontWeight: 600, mb: 1 }}>
-              {row.procurementMethod === "TENDER" ? "Contract" : "Local purchase order"}
+              {methodUsesContract(row.procurementMethod) ? "Contract" : "Local purchase order"}
             </Typography>
             {orderOff ? (
               <Chip size="small" color="warning" label={orderOffTitle} sx={{ mb: 1 }} />
@@ -2120,7 +2123,7 @@ export function OrgProcurementDetailPanel({ projectId, procurementId, stage = nu
               </div>
             ) : (
               <div className="flex flex-wrap gap-2">
-                {row.procurementMethod === "QUOTATION" ? (
+                {methodUsesLpo(row.procurementMethod) ? (
                   <Button
                     size="small"
                     variant="contained"
@@ -2135,7 +2138,7 @@ export function OrgProcurementDetailPanel({ projectId, procurementId, stage = nu
                     Create LPO
                   </Button>
                 ) : null}
-                {row.procurementMethod === "TENDER" ? (
+                {methodUsesContract(row.procurementMethod) ? (
                   <Button
                     size="small"
                     variant="contained"

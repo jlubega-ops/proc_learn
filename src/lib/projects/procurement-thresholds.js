@@ -1,9 +1,14 @@
 /**
  * PPDA Guideline No. 1 of 2025 — method value bands (UGX) by requirement category.
- * Engine methods remain MICRO / QUOTATION / TENDER; open/restricted bidding are Tender subtypes.
- * A more competitive method may be used below a ceiling; a method may not be used above it
- * (except Direct procurement mapped to Micro with justification — no threshold).
+ * Seven independent methods (see procurement-methods.js). Direct has no upper threshold
+ * but requires documented legal grounds.
  */
+
+import {
+  isBiddingMethod,
+  normalizeProcurementMethod,
+  procurementMethodLabel,
+} from "@/lib/projects/procurement-methods";
 
 /** @deprecated Prefer {@link bandsForThresholdCategory} — supplies Micro max for older callers. */
 export const METHOD_VALUE_CEILINGS_UGX = {
@@ -83,100 +88,11 @@ function formatUgx(n) {
 
 /**
  * @param {string | null | undefined} method
- * @returns {"MICRO" | "QUOTATION" | "TENDER" | ""}
+ * @param {{ directProcurement?: boolean }} [opts]
+ * @returns {string} Official OrgProcurementMethod code or ""
  */
-export function planMethodToEnum(method) {
-  const t = String(method || "").trim().toLowerCase();
-  if (!t) return "";
-  if (t === "micro" || t.includes("micro")) return "MICRO";
-  if (t === "quotation" || t.includes("quotation") || t.includes("rfq")) return "QUOTATION";
-  if (t === "tender" || t.includes("bidding") || t.includes("tender")) return "TENDER";
-  return "";
-}
-
-/** Tender subtype labels (same Tender engine). */
-export const TENDER_SUBTYPE_OPTIONS = [
-  { value: "OPEN_DOMESTIC", label: "Open domestic bidding" },
-  { value: "OPEN_INTERNATIONAL", label: "Open international bidding" },
-  { value: "RESTRICTED_DOMESTIC", label: "Restricted domestic bidding" },
-  { value: "RESTRICTED_INTERNATIONAL", label: "Restricted international bidding" },
-];
-
-/** @type {Record<string, string>} */
-const TENDER_SUBTYPE_LEGACY = {
-  "Open domestic bidding": "OPEN_DOMESTIC",
-  "Open international bidding": "OPEN_INTERNATIONAL",
-  "Restricted domestic bidding": "RESTRICTED_DOMESTIC",
-  "Restricted international bidding": "RESTRICTED_INTERNATIONAL",
-  OPEN: "OPEN_DOMESTIC",
-  RESTRICTED: "RESTRICTED_DOMESTIC",
-};
-
-/**
- * @param {unknown} value
- * @returns {string}
- */
-export function normalizeTenderSubtype(value) {
-  const t = String(value || "").trim();
-  if (!t) return "";
-  if (TENDER_SUBTYPE_OPTIONS.some((o) => o.value === t)) return t;
-  return TENDER_SUBTYPE_LEGACY[t] || "";
-}
-
-/**
- * @param {string} value
- * @returns {string}
- */
-export function tenderSubtypeLabel(value) {
-  const key = normalizeTenderSubtype(value);
-  return TENDER_SUBTYPE_OPTIONS.find((o) => o.value === key)?.label || "";
-}
-
-/**
- * Suggest open vs restricted from value (domestic default).
- * @param {unknown} estimatedValue
- * @param {string | null | undefined} categoryOrCircular
- */
-export function suggestTenderSubtype(estimatedValue, categoryOrCircular) {
-  const value = Number(estimatedValue ?? 0);
-  const bands = bandsForThresholdCategory(categoryOrCircular);
-  if (!Number.isFinite(value) || value <= 0) return "RESTRICTED_DOMESTIC";
-  if (value > bands.restrictedMax) return "OPEN_DOMESTIC";
-  return "RESTRICTED_DOMESTIC";
-}
-
-/**
- * @param {string | null | undefined} subtype
- * @param {unknown} estimatedValue
- * @param {string | null | undefined} categoryOrCircular
- * @returns {{ enabled: boolean; reason: string | null; recommended: boolean }}
- */
-export function tenderSubtypeOptionState(subtype, estimatedValue, categoryOrCircular) {
-  const key = normalizeTenderSubtype(subtype);
-  const value = Number(estimatedValue ?? 0);
-  const finite = Number.isFinite(value) && value > 0;
-  const bands = bandsForThresholdCategory(categoryOrCircular);
-  const isOpen = key.startsWith("OPEN_");
-  const isRestricted = key.startsWith("RESTRICTED_");
-
-  if (isRestricted) {
-    const ok = !finite || value <= bands.restrictedMax;
-    return {
-      enabled: ok,
-      reason: ok
-        ? null
-        : `Restricted bidding is for values up to ${formatUgx(bands.restrictedMax)}. Use open bidding.`,
-      recommended: finite && value > bands.quotationMax && value <= bands.restrictedMax,
-    };
-  }
-  if (isOpen) {
-    return {
-      enabled: true,
-      reason: null,
-      recommended: finite && value > bands.restrictedMax,
-    };
-  }
-  return { enabled: true, reason: null, recommended: false };
+export function planMethodToEnum(method, opts = {}) {
+  return normalizeProcurementMethod(method, opts);
 }
 
 /**
@@ -193,31 +109,22 @@ export function planMethodOptionState(methodLabel, estimatedValue, categoryOrCir
   const value = Number(estimatedValue ?? 0);
   const finite = Number.isFinite(value) && value > 0;
   const bands = bandsForThresholdCategory(categoryOrCircular);
-  const allowDirect = Boolean(opts.allowDirectMicro);
 
   if (key === "MICRO") {
     const within = !finite || value <= bands.microMax;
-    if (within) {
-      return {
-        enabled: true,
-        reason: null,
-        recommended: finite && value <= bands.microMax,
-        directOnly: false,
-      };
-    }
-    if (allowDirect) {
-      return {
-        enabled: true,
-        reason: `Above Micro limit (${formatUgx(bands.microMax)}) — Direct procurement only.`,
-        recommended: false,
-        directOnly: true,
-      };
-    }
     return {
-      enabled: false,
-      reason: `Micro is limited to ${formatUgx(bands.microMax)} for this category.`,
-      recommended: false,
+      enabled: within,
+      reason: within ? null : `Micro is limited to ${formatUgx(bands.microMax)} for this category.`,
+      recommended: finite && value <= bands.microMax,
       directOnly: false,
+    };
+  }
+  if (key === "DIRECT") {
+    return {
+      enabled: true,
+      reason: null,
+      recommended: false,
+      directOnly: true,
     };
   }
   if (key === "QUOTATION") {
@@ -230,12 +137,25 @@ export function planMethodOptionState(methodLabel, estimatedValue, categoryOrCir
       recommended: finite && value > bands.microMax && value <= bands.quotationMax,
     };
   }
-  if (key === "TENDER") {
+  if (key === "RESTRICTED_DOMESTIC" || key === "RESTRICTED_INTERNATIONAL") {
+    const ok = !finite || value <= bands.restrictedMax;
+    return {
+      enabled: ok,
+      reason: ok
+        ? null
+        : `Restricted bidding is for values up to ${formatUgx(bands.restrictedMax)}. Use open bidding.`,
+      recommended: finite && value > bands.quotationMax && value <= bands.restrictedMax,
+    };
+  }
+  if (key === "OPEN_DOMESTIC" || key === "OPEN_INTERNATIONAL") {
     return {
       enabled: true,
       reason: null,
-      recommended: finite && value > bands.quotationMax,
+      recommended: finite && value > bands.restrictedMax,
     };
+  }
+  if (isBiddingMethod(key)) {
+    return { enabled: true, reason: null, recommended: finite && value > bands.quotationMax };
   }
   return { enabled: true, reason: null, recommended: false };
 }
@@ -250,9 +170,10 @@ export function suggestPlanMethodLabel(estimatedValue, categoryOrCircular) {
   const value = Number(estimatedValue ?? 0);
   if (!Number.isFinite(value) || value <= 0) return "";
   const bands = bandsForThresholdCategory(categoryOrCircular);
-  if (value <= bands.microMax) return "Micro procurement";
-  if (value <= bands.quotationMax) return "Quotation";
-  return "Tender";
+  if (value <= bands.microMax) return procurementMethodLabel("MICRO");
+  if (value <= bands.quotationMax) return procurementMethodLabel("QUOTATION");
+  if (value <= bands.restrictedMax) return procurementMethodLabel("RESTRICTED_DOMESTIC");
+  return procurementMethodLabel("OPEN_DOMESTIC");
 }
 
 /**
@@ -265,18 +186,18 @@ export function suggestPlanMethodLabel(estimatedValue, categoryOrCircular) {
  * @returns {{ ok: true } | { ok: false; error: string; ceiling: number }}
  */
 export function checkMethodValueCeiling(method, estimatedValue, opts = {}) {
-  const mapped = planMethodToEnum(method) || String(method || "").toUpperCase();
+  const mapped = planMethodToEnum(method, {
+    directProcurement: opts.allowDirectMicro || opts.directProcurement,
+  });
   const value = Number(estimatedValue ?? 0);
   const bands = bandsForThresholdCategory(opts.category);
-  const allowDirect = Boolean(opts.allowDirectMicro);
 
   if (mapped === "MICRO") {
     if (!Number.isFinite(value) || value <= bands.microMax) return { ok: true };
-    if (allowDirect) return { ok: true };
     return {
       ok: false,
       ceiling: bands.microMax,
-      error: `Micro procurement is limited to ${formatUgx(bands.microMax)} for this category. This value is ${formatUgx(value)} — use Quotation or Tender, or Direct procurement with justification.`,
+      error: `Micro Procurement is limited to ${formatUgx(bands.microMax)} for this category. This value is ${formatUgx(value)} — use Quotation, a bidding method, or Direct Procurement with justification.`,
     };
   }
   if (mapped === "QUOTATION") {
@@ -284,10 +205,18 @@ export function checkMethodValueCeiling(method, estimatedValue, opts = {}) {
     return {
       ok: false,
       ceiling: bands.quotationMax,
-      error: `Quotation is limited to ${formatUgx(bands.quotationMax)} for this category. This value is ${formatUgx(value)} — recommend Tender instead.`,
+      error: `Quotation Method is limited to ${formatUgx(bands.quotationMax)} for this category. This value is ${formatUgx(value)} — recommend restricted or open bidding.`,
     };
   }
-  // Tender (and unknown): no upper ceiling
+  if (mapped === "RESTRICTED_DOMESTIC" || mapped === "RESTRICTED_INTERNATIONAL") {
+    if (!Number.isFinite(value) || value <= bands.restrictedMax) return { ok: true };
+    return {
+      ok: false,
+      ceiling: bands.restrictedMax,
+      error: `Restricted bidding is limited to ${formatUgx(bands.restrictedMax)} for this category. This value is ${formatUgx(value)} — use open bidding.`,
+    };
+  }
+  // Open bidding, Direct, unknown: no upper ceiling (Direct still needs grounds elsewhere)
   return { ok: true };
 }
 

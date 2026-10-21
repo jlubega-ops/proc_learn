@@ -1,17 +1,14 @@
-import {
-  OrgPostQualificationStatus,
-  OrgProcurementMethod,
-  OrgEvaluationReportStatus,
-} from "@prisma/client";
+import { OrgPostQualificationStatus, OrgEvaluationReportStatus } from "@prisma/client";
 import { writeAuditLog, AuditEvent } from "@/lib/audit-log";
 import { notifyOrgUsers, OrgNotificationType } from "@/lib/projects/org-notifications";
 import { PROCESS_FLOW_CODES } from "@/lib/projects/process-catalogue";
 import { assertProcessActive } from "@/lib/projects/process-activation";
+import { isBiddingMethod } from "@/lib/projects/procurement-methods";
 
 /**
  * Post-qualification verifies a recommended supplier's registration, tax compliance,
- * and experience before award — required for TENDER (always) and for any procurement
- * explicitly flagged with `requiresPostQualification`.
+ * and experience before award — required for bidding methods by default, and for any
+ * procurement explicitly flagged with `requiresPostQualification`.
  */
 
 /**
@@ -40,7 +37,7 @@ export function serializePostQualificationReport(row) {
  */
 export function postQualificationRequired(procurement) {
   return Boolean(
-    procurement?.requiresPostQualification || procurement?.procurementMethod === OrgProcurementMethod.TENDER,
+    procurement?.requiresPostQualification || isBiddingMethod(procurement?.procurementMethod),
   );
 }
 

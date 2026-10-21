@@ -7,9 +7,14 @@ import { downloadOrgDocumentPdf, pdfFieldValue } from "@/lib/projects/org-docume
 import { APP_BRAND_LABEL } from "@/lib/appConfig";
 import { DEFAULT_FUNDING_SOURCE } from "@/lib/projects/line-item-options";
 import {
-  normalizeTenderSubtype,
-  tenderSubtypeLabel,
-} from "@/lib/projects/procurement-thresholds";
+  isBiddingMethod,
+  isMicroStyleMethod,
+  methodRequiresDirectGrounds,
+  normalizeProcurementMethod,
+  PROCUREMENT_METHOD_PLAN_OPTIONS,
+  procurementMethodDef,
+  procurementMethodLabel,
+} from "@/lib/projects/procurement-methods";
 
 export const PLAN_SHEET_TYPE = {
   GOODS_WORKS_NON_CONSULTANCY: "GOODS_WORKS_NON_CONSULTANCY",
@@ -82,39 +87,63 @@ export function normalizePlanSheetType(value) {
 }
 
 /**
- * Plan method options — aligned with the three execution methods the app supports
- * (MICRO / QUOTATION / TENDER). PPDA Circular labels that map to Tender (open/restricted
- * bidding) and Direct→Micro are normalised via {@link normalizePlanMethod}.
+ * Plan method options — seven independent official methods.
  */
-export const PPDA_PLAN_METHOD_OPTIONS = [
-  "Micro procurement",
-  "Quotation",
-  "Tender",
-];
+export const PPDA_PLAN_METHOD_OPTIONS = PROCUREMENT_METHOD_PLAN_OPTIONS;
 
 /** @type {Record<string, string>} */
 export const PPDA_PLAN_METHOD_LEGACY_MAP = {
-  "Request for quotations": "Quotation",
-  "Open domestic bidding": "Tender",
-  "Open international bidding": "Tender",
-  "Restricted domestic bidding": "Tender",
-  "Restricted international bidding": "Tender",
-  "Direct procurement": "Micro procurement",
-  Other: "Tender",
-  MICRO: "Micro procurement",
-  QUOTATION: "Quotation",
-  TENDER: "Tender",
+  "Micro procurement": "Micro Procurement",
+  Quotation: "Quotation Method",
+  Tender: "Open Domestic Bidding",
+  "Request for quotations": "Quotation Method",
+  "Open domestic bidding": "Open Domestic Bidding",
+  "Open international bidding": "Open International Bidding",
+  "Restricted domestic bidding": "Restricted Domestic Bidding",
+  "Restricted international bidding": "Restricted International Bidding",
+  "Direct procurement": "Direct Procurement",
+  Other: "Open Domestic Bidding",
+  MICRO: "Micro Procurement",
+  QUOTATION: "Quotation Method",
+  TENDER: "Open Domestic Bidding",
+  DIRECT: "Direct Procurement",
+  OPEN_DOMESTIC: "Open Domestic Bidding",
+  OPEN_INTERNATIONAL: "Open International Bidding",
+  RESTRICTED_DOMESTIC: "Restricted Domestic Bidding",
+  RESTRICTED_INTERNATIONAL: "Restricted International Bidding",
 };
 
 /**
  * @param {unknown} value
- * @returns {string}
+ * @param {{ directProcurement?: boolean }} [opts]
+ * @returns {string} Official plan label or ""
  */
-export function normalizePlanMethod(value) {
+export function normalizePlanMethod(value, opts = {}) {
+  const code = normalizeProcurementMethod(value, opts);
+  if (code) return procurementMethodLabel(code);
   const t = String(value || "").trim();
   if (!t) return "";
   if (PPDA_PLAN_METHOD_OPTIONS.includes(t)) return t;
-  return PPDA_PLAN_METHOD_LEGACY_MAP[t] || t;
+  const mapped = PPDA_PLAN_METHOD_LEGACY_MAP[t];
+  if (mapped) return mapped;
+  return t;
+}
+
+/**
+ * Plan label → enum code.
+ * @param {unknown} value
+ * @returns {string}
+ */
+export function planMethodToCode(value) {
+  return normalizeProcurementMethod(value) || "";
+}
+
+/**
+ * @param {unknown} value
+ * @returns {import("@/lib/projects/procurement-methods").ProcurementMethodDef | null}
+ */
+export function planMethodDef(value) {
+  return procurementMethodDef(normalizeProcurementMethod(value));
 }
 
 /**
@@ -196,20 +225,17 @@ export function normalizeCircularPlanItemFields(raw, sheetType) {
   const sheet = normalizePlanSheetType(circularSheet || sheetType);
   const isConsultancy = sheet === PLAN_SHEET_TYPE.CONSULTANCY;
 
+  const plannedProcurementMethod =
+    normalizePlanMethod(raw?.plannedProcurementMethod, {
+      directProcurement: Boolean(raw?.directProcurement),
+    }) || null;
+
   return {
     sheetType: sheet,
     circularSheet,
     currency: trimOrNull(raw?.currency) || "UGX",
     sourceOfFunding: trimOrNull(raw?.sourceOfFunding) || DEFAULT_FUNDING_SOURCE,
-    plannedProcurementMethod: normalizePlanMethod(raw?.plannedProcurementMethod) || null,
-    tenderSubtype:
-      normalizePlanMethod(raw?.plannedProcurementMethod) === "Tender"
-        ? normalizeTenderSubtype(raw?.tenderSubtype) || null
-        : null,
-    tenderSubtypeLabel:
-      normalizePlanMethod(raw?.plannedProcurementMethod) === "Tender"
-        ? tenderSubtypeLabel(raw?.tenderSubtype) || null
-        : null,
+    plannedProcurementMethod,
     contractType: trimOrNull(raw?.contractType),
     prequalification: isConsultancy ? null : trimOrNull(raw?.prequalification),
     applyReservationScheme: trimOrNull(raw?.applyReservationScheme),
@@ -378,29 +404,28 @@ export function buildForm5PartI(requisition, body = {}) {
  * @param {{ method?: string | null }} ctx
  */
 export function buildForm5PartII(body = {}, ctx = {}) {
-  const method =
+  const rawMethod =
     trimOrNull(body.recommendedMethod) || trimOrNull(ctx.method) || "";
-  const methodUpper = String(method).toUpperCase();
-  const isTender = methodUpper === "TENDER" || normalizePlanMethod(method) === "Tender";
-  const isMicro = methodUpper === "MICRO" || normalizePlanMethod(method) === "Micro procurement";
-  const directProcurement =
+  const directFlag =
     Boolean(body.directProcurement) ||
     String(body.directProcurement || "").toLowerCase() === "true" ||
     Boolean(ctx.directProcurement);
+  const method =
+    normalizeProcurementMethod(rawMethod, {
+      directProcurement: directFlag,
+    }) || rawMethod;
+  const bidding = isBiddingMethod(method);
+  const microStyle = isMicroStyleMethod(method);
+  const needsDirectGrounds = methodRequiresDirectGrounds(method) || (microStyle && directFlag);
   return {
     dateSubmittedToCc: dateOrNull(body.dateSubmittedToCc) || "",
     ccMeetingReference: trimOrNull(body.ccMeetingReference) || "",
     recommendedMethod: method,
     methodJustification: trimOrNull(body.methodJustification) || "",
     emergencyReasons: trimOrNull(body.emergencyReasons) || "",
-    /** Direct procurement (no threshold) executed on the Micro path. */
-    directProcurement: isMicro ? directProcurement : false,
-    directJustification: isMicro
+    directProcurement: method === "DIRECT" || (microStyle && directFlag),
+    directJustification: needsDirectGrounds
       ? trimOrNull(body.directJustification) || ""
-      : "",
-    tenderSubtype: isTender ? normalizeTenderSubtype(body.tenderSubtype) || "" : "",
-    tenderSubtypeLabel: isTender
-      ? tenderSubtypeLabel(body.tenderSubtype) || ""
       : "",
     shortlistedProviders: trimOrNull(body.shortlistedProviders) || "",
     shortlistJustification: trimOrNull(body.shortlistJustification) || "",
@@ -410,7 +435,7 @@ export function buildForm5PartII(body = {}, ctx = {}) {
     evaluationCommitteeNominees: trimOrNull(body.evaluationCommitteeNominees) || "",
     evaluationCommitteeJustification:
       trimOrNull(body.evaluationCommitteeJustification) || "",
-    biddingDocumentCost: trimOrNull(body.biddingDocumentCost) || "",
+    biddingDocumentCost: bidding ? trimOrNull(body.biddingDocumentCost) || "" : "",
     otherInformation: trimOrNull(body.otherInformation) || "",
     pduOfficerName: trimOrNull(body.pduOfficerName) || "",
     pduOfficerPosition: trimOrNull(body.pduOfficerPosition) || "Procurement Officer",
@@ -427,7 +452,7 @@ export function buildForm5PartII(body = {}, ctx = {}) {
  */
 export function buildBidDocument(procurement, body = {}) {
   const req = procurement?.requisition || {};
-  const isTender = procurement?.procurementMethod === "TENDER";
+  const isTender = isBiddingMethod(procurement?.procurementMethod);
   const approvedCost = req.form5PartII?.biddingDocumentCost ?? req.biddingDocumentCost ?? "";
   return {
     documentTitle:
@@ -688,11 +713,7 @@ export function circularPlanItemToHtml(item, sheetType) {
 <p><strong>Subject:</strong> ${escapeHtml(item?.title || "")}</p>
 <table>
 <tr><th>Currency</th><td>${escapeHtml(cf.currency)}</td><th>Source of funding</th><td>${escapeHtml(cf.sourceOfFunding)}</td></tr>
-<tr><th>Planned method</th><td>${escapeHtml(
-  cf.tenderSubtype
-    ? `${cf.plannedProcurementMethod} (${tenderSubtypeLabel(cf.tenderSubtype) || cf.tenderSubtype})`
-    : cf.plannedProcurementMethod,
-)}</td><th>Contract type</th><td>${escapeHtml(cf.contractType)}</td></tr>
+<tr><th>Planned method</th><td>${escapeHtml(cf.plannedProcurementMethod)}</td><th>Contract type</th><td>${escapeHtml(cf.contractType)}</td></tr>
 ${
   isConsultancy
     ? ""

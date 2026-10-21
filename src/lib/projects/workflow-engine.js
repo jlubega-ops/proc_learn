@@ -438,11 +438,19 @@ export async function startWorkflowFromTrigger(prisma, opts) {
             ? "Emergency Planning"
             : opts.triggerKey === WORKFLOW_TRIGGERS.MICRO_PROCUREMENT_STARTED
               ? "Micro Procurement"
-              : opts.triggerKey === WORKFLOW_TRIGGERS.QUOTATION_STARTED
-                ? "Quotation"
-                : opts.triggerKey === WORKFLOW_TRIGGERS.TENDER_STARTED
-                  ? "Tender"
-                  : "Procurement Requisition");
+              : opts.triggerKey === WORKFLOW_TRIGGERS.DIRECT_PROCUREMENT_STARTED
+                ? "Direct Procurement"
+                : opts.triggerKey === WORKFLOW_TRIGGERS.QUOTATION_STARTED
+                  ? "Quotation"
+                  : opts.triggerKey === WORKFLOW_TRIGGERS.OPEN_DOMESTIC_BIDDING_STARTED
+                    ? "Open Domestic Bidding"
+                    : opts.triggerKey === WORKFLOW_TRIGGERS.OPEN_INTERNATIONAL_BIDDING_STARTED
+                      ? "Open International Bidding"
+                      : opts.triggerKey === WORKFLOW_TRIGGERS.RESTRICTED_DOMESTIC_BIDDING_STARTED
+                        ? "Restricted Domestic Bidding"
+                        : opts.triggerKey === WORKFLOW_TRIGGERS.RESTRICTED_INTERNATIONAL_BIDDING_STARTED
+                          ? "Restricted International Bidding"
+                          : "Procurement Requisition");
     return {
       ok: false,
       error: `The ${label} Process is currently inactive for this organisation. An Organization Administrator must activate it before this procurement can proceed.`,

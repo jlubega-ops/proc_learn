@@ -15,6 +15,7 @@ import { prisma } from "@/lib/prisma";
 import { orgOpsSlateListWhere, resolveCurrentOrgSlateId } from "@/lib/academic/org-academic-slate";
 import { formatUserDisplayName } from "@/lib/user-display";
 import { PROCESS_FLOW_CODES } from "@/lib/projects/process-catalogue";
+import { METHOD_PROCESS_CODES as ALL_METHOD_PROCESS_CODES } from "@/lib/projects/procurement-methods";
 import { resolveEffectiveProcessCodes } from "@/lib/academic/programme-processes";
 
 /** @typedef {'done'|'current'|'todo'|'blocked'} StageState */
@@ -147,11 +148,7 @@ function humanStatus(status) {
     .replace(/_/g, " ");
 }
 
-const METHOD_PROCESS_CODES = [
-  PROCESS_FLOW_CODES.MICRO_PROCUREMENT,
-  PROCESS_FLOW_CODES.QUOTATION_PROCESS,
-  PROCESS_FLOW_CODES.TENDER_PROCESS,
-];
+const METHOD_PROCESS_CODES = [...ALL_METHOD_PROCESS_CODES];
 
 /** Stage → processes that make it reachable (any of). Financial Year is always tracked. */
 const STAGE_PROCESS_CODES = {
@@ -636,7 +633,7 @@ function stageDetail(p) {
           ? `Method: ${p.bestProc.procurementMethod}`
           : null,
         currentAction: !p.bestProc?.procurementMethod
-          ? "Select Micro, Quotation, or Tender"
+          ? "Select a procurement method"
           : null,
         nextAction: p.bestProc?.procurementMethod
           ? "Continue solicitation / evaluation"

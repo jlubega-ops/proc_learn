@@ -424,12 +424,12 @@ async function nextProcurementNumber(prisma, projectId, fyLabel) {
  */
 export async function createProcurementFromApprovedRequisition(prisma, opts) {
   const method = String(opts.procurementMethod || "").trim().toUpperCase();
-  if (!Object.prototype.hasOwnProperty.call(OrgProcurementMethod, method) || method === "OTHER") {
+  if (!Object.prototype.hasOwnProperty.call(OrgProcurementMethod, method)) {
     return {
       ok: false,
-      error: "Choose MICRO, QUOTATION, or TENDER as the procurement method.",
+      error: "Choose a valid procurement method.",
       status: 400,
-      fieldErrors: { procurementMethod: "Choose MICRO, QUOTATION, or TENDER." },
+      fieldErrors: { procurementMethod: "Choose a valid procurement method." },
     };
   }
 
@@ -437,8 +437,9 @@ export async function createProcurementFromApprovedRequisition(prisma, opts) {
   if (!methodMeta) {
     return {
       ok: false,
-      error: "Choose MICRO, QUOTATION, or TENDER as the procurement method.",
+      error: "Choose a valid procurement method.",
       status: 400,
+      fieldErrors: { procurementMethod: "Choose a valid procurement method." },
     };
   }
 
@@ -655,7 +656,7 @@ export async function createProcurementFromApprovedRequisition(prisma, opts) {
       ),
     });
 
-    if (method === "MICRO") {
+    if (method === "MICRO" || method === "DIRECT") {
       const partII = /** @type {any} */ (req.form5PartII);
       const selected = Array.isArray(partII?.shortlist) ? partII.shortlist[0] : null;
       await notifyProvider(prisma, {

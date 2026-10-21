@@ -27,8 +27,14 @@ import { loadPrintOrganisation } from "@/lib/projects/print-context";
 import { loadProviderHistory } from "@/lib/projects/provider-assignments";
 import { serializeClarification } from "@/lib/projects/offer-clarifications";
 import { draftQuoteForProvider } from "@/lib/projects/provider-auto-responses";
+import { PROCUREMENT_METHOD_CATALOGUE } from "@/lib/projects/procurement-methods";
 
 const ACCEPTING_STATUSES = [OrgSolicitationStatus.ISSUED, OrgSolicitationStatus.ADVERTISED, OrgSolicitationStatus.OPEN];
+
+const ELIGIBILITY_METHODS = PROCUREMENT_METHOD_CATALOGUE.map((m) => ({
+  method: m.code,
+  label: m.label,
+}));
 
 export { isProviderPortalIdentifier };
 
@@ -133,12 +139,6 @@ export function serializePortalProvider(provider) {
     organisation: provider.project ? { id: provider.project.id, name: provider.project.name } : null,
   };
 }
-
-const ELIGIBILITY_METHODS = [
-  { method: "MICRO", label: "Micro procurement" },
-  { method: "QUOTATION", label: "Quotation (RFQ)" },
-  { method: "TENDER", label: "Open tender" },
-];
 
 /**
  * What the organisation holds about the provider and how it qualifies per method.

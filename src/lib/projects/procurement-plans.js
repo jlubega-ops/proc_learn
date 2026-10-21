@@ -387,12 +387,6 @@ async function validateAndBuildPlanItems(prisma, projectId, itemsIn, financialYe
       if (!ceiling.ok) {
         fieldErrors[`items.${idx}.plannedProcurementMethod`] = ceiling.error;
       }
-      if (planMethodToEnum(circularFields.plannedProcurementMethod) === "TENDER") {
-        if (!circularFields.tenderSubtype) {
-          fieldErrors[`items.${idx}.tenderSubtype`] =
-            "Choose open or restricted bidding.";
-        }
-      }
     }
     if (!circularFields.contractType) {
       fieldErrors[`items.${idx}.contractType`] = "Choose a contract type.";

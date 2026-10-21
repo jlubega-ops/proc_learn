@@ -1,17 +1,29 @@
 /**
- * Stable process catalogue codes and triggers for the simulation engine.
+ * Stable process catalogue codes and triggers for the procurement engine.
  */
 
 import { throttleSync } from "@/lib/sync-throttle";
+import {
+  isBiddingMethod,
+  isQuotationMethod,
+  METHOD_PROCESS_BY_METHOD,
+  METHOD_PROCESS_CODES,
+  normalizeProcurementMethod,
+} from "@/lib/projects/procurement-methods";
 
 export const PROCESS_FLOW_CODES = {
   BUDGETING: "BUDGETING",
   PROCUREMENT_PLANNING: "PROCUREMENT_PLANNING",
   EMERGENCY_PLANNING: "EMERGENCY_PLANNING",
   PROCUREMENT_REQUISITION: "PROCUREMENT_REQUISITION",
-  MICRO_PROCUREMENT: "MICRO_PROCUREMENT",
+  /** Independent method engines (7). */
+  OPEN_DOMESTIC_BIDDING: "OPEN_DOMESTIC_BIDDING",
+  OPEN_INTERNATIONAL_BIDDING: "OPEN_INTERNATIONAL_BIDDING",
+  RESTRICTED_DOMESTIC_BIDDING: "RESTRICTED_DOMESTIC_BIDDING",
+  RESTRICTED_INTERNATIONAL_BIDDING: "RESTRICTED_INTERNATIONAL_BIDDING",
   QUOTATION_PROCESS: "QUOTATION_PROCESS",
-  TENDER_PROCESS: "TENDER_PROCESS",
+  MICRO_PROCUREMENT: "MICRO_PROCUREMENT",
+  DIRECT_PROCUREMENT: "DIRECT_PROCUREMENT",
   EVALUATION_PROCESS: "EVALUATION_PROCESS",
   POST_QUALIFICATION_PROCESS: "POST_QUALIFICATION_PROCESS",
   LPO_PROCESS: "LPO_PROCESS",
@@ -29,9 +41,13 @@ export const WORKFLOW_TRIGGERS = {
   REQUISITION_SUBMITTED: "REQUISITION_SUBMITTED",
   REQUISITION_APPROVED: "REQUISITION_APPROVED",
   PROCUREMENT_METHOD_SELECTED: "PROCUREMENT_METHOD_SELECTED",
-  MICRO_PROCUREMENT_STARTED: "MICRO_PROCUREMENT_STARTED",
+  OPEN_DOMESTIC_BIDDING_STARTED: "OPEN_DOMESTIC_BIDDING_STARTED",
+  OPEN_INTERNATIONAL_BIDDING_STARTED: "OPEN_INTERNATIONAL_BIDDING_STARTED",
+  RESTRICTED_DOMESTIC_BIDDING_STARTED: "RESTRICTED_DOMESTIC_BIDDING_STARTED",
+  RESTRICTED_INTERNATIONAL_BIDDING_STARTED: "RESTRICTED_INTERNATIONAL_BIDDING_STARTED",
   QUOTATION_STARTED: "QUOTATION_STARTED",
-  TENDER_STARTED: "TENDER_STARTED",
+  MICRO_PROCUREMENT_STARTED: "MICRO_PROCUREMENT_STARTED",
+  DIRECT_PROCUREMENT_STARTED: "DIRECT_PROCUREMENT_STARTED",
   EVALUATION_STARTED: "EVALUATION_STARTED",
   POST_QUALIFICATION_STARTED: "POST_QUALIFICATION_STARTED",
   LPO_STARTED: "LPO_STARTED",
@@ -46,9 +62,14 @@ export const TRIGGER_TO_PROCESS_CODE = {
   [WORKFLOW_TRIGGERS.PLANNING_SUBMITTED]: PROCESS_FLOW_CODES.PROCUREMENT_PLANNING,
   [WORKFLOW_TRIGGERS.EMERGENCY_PLANNING_SUBMITTED]: PROCESS_FLOW_CODES.EMERGENCY_PLANNING,
   [WORKFLOW_TRIGGERS.REQUISITION_SUBMITTED]: PROCESS_FLOW_CODES.PROCUREMENT_REQUISITION,
-  [WORKFLOW_TRIGGERS.MICRO_PROCUREMENT_STARTED]: PROCESS_FLOW_CODES.MICRO_PROCUREMENT,
+  [WORKFLOW_TRIGGERS.OPEN_DOMESTIC_BIDDING_STARTED]: PROCESS_FLOW_CODES.OPEN_DOMESTIC_BIDDING,
+  [WORKFLOW_TRIGGERS.OPEN_INTERNATIONAL_BIDDING_STARTED]: PROCESS_FLOW_CODES.OPEN_INTERNATIONAL_BIDDING,
+  [WORKFLOW_TRIGGERS.RESTRICTED_DOMESTIC_BIDDING_STARTED]: PROCESS_FLOW_CODES.RESTRICTED_DOMESTIC_BIDDING,
+  [WORKFLOW_TRIGGERS.RESTRICTED_INTERNATIONAL_BIDDING_STARTED]:
+    PROCESS_FLOW_CODES.RESTRICTED_INTERNATIONAL_BIDDING,
   [WORKFLOW_TRIGGERS.QUOTATION_STARTED]: PROCESS_FLOW_CODES.QUOTATION_PROCESS,
-  [WORKFLOW_TRIGGERS.TENDER_STARTED]: PROCESS_FLOW_CODES.TENDER_PROCESS,
+  [WORKFLOW_TRIGGERS.MICRO_PROCUREMENT_STARTED]: PROCESS_FLOW_CODES.MICRO_PROCUREMENT,
+  [WORKFLOW_TRIGGERS.DIRECT_PROCUREMENT_STARTED]: PROCESS_FLOW_CODES.DIRECT_PROCUREMENT,
   [WORKFLOW_TRIGGERS.EVALUATION_STARTED]: PROCESS_FLOW_CODES.EVALUATION_PROCESS,
   [WORKFLOW_TRIGGERS.POST_QUALIFICATION_STARTED]: PROCESS_FLOW_CODES.POST_QUALIFICATION_PROCESS,
   [WORKFLOW_TRIGGERS.LPO_STARTED]: PROCESS_FLOW_CODES.LPO_PROCESS,
@@ -58,26 +79,10 @@ export const TRIGGER_TO_PROCESS_CODE = {
 };
 
 /**
- * Map OrgProcurementMethod → process code / trigger for method-start.
+ * Map OrgProcurementMethod → independent process code / trigger.
  * @type {Record<string, { code: string; triggerKey: string; label: string }>}
  */
-export const METHOD_PROCESS_BY_ENUM = {
-  MICRO: {
-    code: PROCESS_FLOW_CODES.MICRO_PROCUREMENT,
-    triggerKey: WORKFLOW_TRIGGERS.MICRO_PROCUREMENT_STARTED,
-    label: "Micro Procurement",
-  },
-  QUOTATION: {
-    code: PROCESS_FLOW_CODES.QUOTATION_PROCESS,
-    triggerKey: WORKFLOW_TRIGGERS.QUOTATION_STARTED,
-    label: "Quotation",
-  },
-  TENDER: {
-    code: PROCESS_FLOW_CODES.TENDER_PROCESS,
-    triggerKey: WORKFLOW_TRIGGERS.TENDER_STARTED,
-    label: "Tender",
-  },
-};
+export const METHOD_PROCESS_BY_ENUM = METHOD_PROCESS_BY_METHOD;
 
 /** Procurement lifecycle actions that belong to a phase process. */
 export const PHASE_PROCESS_BY_ACTION = {
@@ -117,9 +122,9 @@ export function phaseProcessForTask(title, method) {
     return PROCESS_FLOW_CODES.EVALUATION_PROCESS;
   }
   if (/\blpo\b|contract|supplier acceptance/i.test(step) && !/purchase instruction/i.test(step)) {
-    const m = String(method || "").toUpperCase();
-    if (m === "TENDER") return PROCESS_FLOW_CODES.CONTRACT_PROCESS;
-    if (m === "QUOTATION") return PROCESS_FLOW_CODES.LPO_PROCESS;
+    const m = normalizeProcurementMethod(method);
+    if (isBiddingMethod(m)) return PROCESS_FLOW_CODES.CONTRACT_PROCESS;
+    if (isQuotationMethod(m)) return PROCESS_FLOW_CODES.LPO_PROCESS;
     return null;
   }
   if (/invoice/i.test(step)) return PROCESS_FLOW_CODES.INVOICE_PROCESS;
@@ -127,26 +132,32 @@ export function phaseProcessForTask(title, method) {
   return null;
 }
 
+const BIDDING_REQUIRED_PHASES = [
+  PROCESS_FLOW_CODES.EVALUATION_PROCESS,
+  PROCESS_FLOW_CODES.POST_QUALIFICATION_PROCESS,
+  PROCESS_FLOW_CODES.CONTRACT_PROCESS,
+  PROCESS_FLOW_CODES.INVOICE_PROCESS,
+  PROCESS_FLOW_CODES.PAYMENT_PROCESS,
+];
+
 /**
  * Phase processes each method needs end to end. Post-qualification on QUOTATION is
  * only needed when flagged, so it is checked when the checklist opens instead.
  * @type {Record<string, string[]>}
  */
 export const METHOD_REQUIRED_PHASES = {
-  MICRO: [PROCESS_FLOW_CODES.INVOICE_PROCESS, PROCESS_FLOW_CODES.PAYMENT_PROCESS],
+  OPEN_DOMESTIC: BIDDING_REQUIRED_PHASES,
+  OPEN_INTERNATIONAL: BIDDING_REQUIRED_PHASES,
+  RESTRICTED_DOMESTIC: BIDDING_REQUIRED_PHASES,
+  RESTRICTED_INTERNATIONAL: BIDDING_REQUIRED_PHASES,
   QUOTATION: [
     PROCESS_FLOW_CODES.EVALUATION_PROCESS,
     PROCESS_FLOW_CODES.LPO_PROCESS,
     PROCESS_FLOW_CODES.INVOICE_PROCESS,
     PROCESS_FLOW_CODES.PAYMENT_PROCESS,
   ],
-  TENDER: [
-    PROCESS_FLOW_CODES.EVALUATION_PROCESS,
-    PROCESS_FLOW_CODES.POST_QUALIFICATION_PROCESS,
-    PROCESS_FLOW_CODES.CONTRACT_PROCESS,
-    PROCESS_FLOW_CODES.INVOICE_PROCESS,
-    PROCESS_FLOW_CODES.PAYMENT_PROCESS,
-  ],
+  MICRO: [PROCESS_FLOW_CODES.INVOICE_PROCESS, PROCESS_FLOW_CODES.PAYMENT_PROCESS],
+  DIRECT: [PROCESS_FLOW_CODES.INVOICE_PROCESS, PROCESS_FLOW_CODES.PAYMENT_PROCESS],
 };
 
 /**
@@ -155,16 +166,18 @@ export const METHOD_REQUIRED_PHASES = {
  * @returns {string[]}
  */
 export function processCodesForMethod(method) {
-  const key = String(method || "").toUpperCase();
+  const key = normalizeProcurementMethod(method);
   const meta = METHOD_PROCESS_BY_ENUM[key];
   if (!meta) return [];
   return [meta.code, ...(METHOD_REQUIRED_PHASES[key] || [])];
 }
 
+export { METHOD_PROCESS_CODES };
+
 /**
  * Fixed app events the simulation engine currently listens for.
  * System Admin binds a catalogue process to one of these — rename never changes the trigger.
- * New stages (tender, quotation, …) are added here when the app wires that submit action.
+ * New stages are added here when the app wires that submit action.
  */
 export const ENGINE_PROCESS_BINDINGS = [
   {
@@ -193,22 +206,46 @@ export const ENGINE_PROCESS_BINDINGS = [
     description: "Starts when a procurement requisition is submitted.",
   },
   {
-    code: PROCESS_FLOW_CODES.MICRO_PROCUREMENT,
-    triggerKey: WORKFLOW_TRIGGERS.MICRO_PROCUREMENT_STARTED,
-    label: "Micro procurement started",
-    description: "Starts when MICRO is selected after requisition approval.",
+    code: PROCESS_FLOW_CODES.OPEN_DOMESTIC_BIDDING,
+    triggerKey: WORKFLOW_TRIGGERS.OPEN_DOMESTIC_BIDDING_STARTED,
+    label: "Open domestic bidding started",
+    description: "Starts when Open Domestic Bidding is approved after requisition.",
+  },
+  {
+    code: PROCESS_FLOW_CODES.OPEN_INTERNATIONAL_BIDDING,
+    triggerKey: WORKFLOW_TRIGGERS.OPEN_INTERNATIONAL_BIDDING_STARTED,
+    label: "Open international bidding started",
+    description: "Starts when Open International Bidding is approved after requisition.",
+  },
+  {
+    code: PROCESS_FLOW_CODES.RESTRICTED_DOMESTIC_BIDDING,
+    triggerKey: WORKFLOW_TRIGGERS.RESTRICTED_DOMESTIC_BIDDING_STARTED,
+    label: "Restricted domestic bidding started",
+    description: "Starts when Restricted Domestic Bidding is approved after requisition.",
+  },
+  {
+    code: PROCESS_FLOW_CODES.RESTRICTED_INTERNATIONAL_BIDDING,
+    triggerKey: WORKFLOW_TRIGGERS.RESTRICTED_INTERNATIONAL_BIDDING_STARTED,
+    label: "Restricted international bidding started",
+    description: "Starts when Restricted International Bidding is approved after requisition.",
   },
   {
     code: PROCESS_FLOW_CODES.QUOTATION_PROCESS,
     triggerKey: WORKFLOW_TRIGGERS.QUOTATION_STARTED,
-    label: "Quotation process started",
-    description: "Starts when QUOTATION is selected after requisition approval.",
+    label: "Quotation method started",
+    description: "Starts when Quotation Method is approved after requisition.",
   },
   {
-    code: PROCESS_FLOW_CODES.TENDER_PROCESS,
-    triggerKey: WORKFLOW_TRIGGERS.TENDER_STARTED,
-    label: "Tender process started",
-    description: "Starts when TENDER is selected after requisition approval.",
+    code: PROCESS_FLOW_CODES.MICRO_PROCUREMENT,
+    triggerKey: WORKFLOW_TRIGGERS.MICRO_PROCUREMENT_STARTED,
+    label: "Micro procurement started",
+    description: "Starts when Micro Procurement is approved after requisition.",
+  },
+  {
+    code: PROCESS_FLOW_CODES.DIRECT_PROCUREMENT,
+    triggerKey: WORKFLOW_TRIGGERS.DIRECT_PROCUREMENT_STARTED,
+    label: "Direct procurement started",
+    description: "Starts when Direct Procurement is approved after requisition (documented grounds).",
   },
   {
     code: PROCESS_FLOW_CODES.EVALUATION_PROCESS,
@@ -293,6 +330,238 @@ export const LEGACY_PROCESS_ALIASES = [
     code: PROCESS_FLOW_CODES.PROCUREMENT_REQUISITION,
     triggerKey: WORKFLOW_TRIGGERS.REQUISITION_SUBMITTED,
     legacyNames: ["requisition process"],
+  },
+];
+
+/**
+ * Independent bidding-method step list (open advert vs restricted invite).
+ * Each bidding method has its own catalogue row so steps can diverge later.
+ * @param {"open" | "restricted"} kind
+ */
+function biddingMethodSteps(kind) {
+  const solicitStep =
+    kind === "restricted"
+      ? {
+          stepNumber: 4,
+          taskDescription: "Invite Shortlisted Providers",
+          roleName: "Procurement Officer",
+          actionKey: "COMPLETE",
+        }
+      : {
+          stepNumber: 4,
+          taskDescription: "Advertise Tender",
+          roleName: "Procurement Officer",
+          actionKey: "COMPLETE",
+        };
+  return [
+    {
+      stepNumber: 1,
+      taskDescription: "Prepare Bidding Documents",
+      roleName: "Procurement Officer",
+      actionKey: "SUBMIT",
+    },
+    {
+      stepNumber: 2,
+      taskDescription: "Review Bidding Documents",
+      roleName: "Head PDU",
+      actionKey: "APPROVE",
+    },
+    {
+      stepNumber: 3,
+      taskDescription: "Approve Bidding Documents",
+      roleName: "Contracts Committee",
+      actionKey: "APPROVE",
+    },
+    solicitStep,
+    {
+      stepNumber: 5,
+      taskDescription: "Receive Bids",
+      roleName: "Procurement Officer",
+      actionKey: "COMPLETE",
+    },
+    {
+      stepNumber: 6,
+      taskDescription: "Close Bid Submission",
+      roleName: "Procurement Officer",
+      actionKey: "COMPLETE",
+    },
+    {
+      stepNumber: 7,
+      taskDescription: "Open Bids",
+      roleName: "Procurement Officer",
+      actionKey: "COMPLETE",
+    },
+    {
+      stepNumber: 8,
+      taskDescription: "Forward Bids for Evaluation",
+      roleName: "Head PDU",
+      actionKey: "COMPLETE",
+    },
+    {
+      stepNumber: 11,
+      taskDescription: "Technical Evaluation",
+      roleName: "Evaluation Committee",
+      actionKey: "COMPLETE",
+    },
+    {
+      stepNumber: 12,
+      taskDescription: "Financial Evaluation",
+      roleName: "Evaluation Committee",
+      actionKey: "COMPLETE",
+    },
+    {
+      stepNumber: 13,
+      taskDescription: "Prepare Evaluation Report",
+      roleName: "Evaluation Committee",
+      actionKey: "COMPLETE",
+    },
+    {
+      stepNumber: 14,
+      taskDescription: "Review Evaluation Report",
+      roleName: "Head PDU",
+      actionKey: "APPROVE",
+    },
+    {
+      stepNumber: 15,
+      taskDescription: "Post-Qualification where applicable",
+      roleName: "Evaluation Committee",
+      actionKey: "COMPLETE",
+    },
+    {
+      stepNumber: 16,
+      taskDescription: "Approve Evaluation/Recommendation",
+      roleName: "Contracts Committee",
+      actionKey: "APPROVE",
+    },
+    {
+      stepNumber: 17,
+      taskDescription: "Prepare Award Recommendation",
+      roleName: "Head PDU",
+      actionKey: "COMPLETE",
+    },
+    {
+      stepNumber: 18,
+      taskDescription: "Approve Award",
+      roleName: "Contracts Committee",
+      actionKey: "APPROVE",
+    },
+    {
+      stepNumber: 19,
+      taskDescription: "Communicate Award",
+      roleName: "Procurement Officer",
+      actionKey: "COMPLETE",
+    },
+    {
+      stepNumber: 20,
+      taskDescription: "Prepare Contract",
+      roleName: "Contracts Officer",
+      actionKey: "COMPLETE",
+    },
+    {
+      stepNumber: 21,
+      taskDescription: "Sign/Approve Contract",
+      roleName: "Accounting Officer",
+      actionKey: "APPROVE",
+    },
+    {
+      stepNumber: 22,
+      taskDescription: "Issue Contract",
+      roleName: "Contracts Officer",
+      actionKey: "COMPLETE",
+    },
+    {
+      stepNumber: 23,
+      taskDescription: "Supplier Acceptance",
+      roleName: "Procurement Officer",
+      actionKey: "COMPLETE",
+    },
+    {
+      stepNumber: 24,
+      taskDescription: "Delivery",
+      roleName: "User Department Officer",
+      actionKey: "COMPLETE",
+    },
+    {
+      stepNumber: 25,
+      taskDescription: "Inspection/Acceptance",
+      roleName: "Inspection/Acceptance Committee",
+      actionKey: "APPROVE",
+    },
+    {
+      stepNumber: 26,
+      taskDescription: "Invoice",
+      roleName: "Finance/Budget Officer",
+      actionKey: "COMPLETE",
+    },
+    {
+      stepNumber: 27,
+      taskDescription: "Invoice Verification",
+      roleName: "Contracts Officer",
+      actionKey: "VERIFY",
+    },
+    {
+      stepNumber: 28,
+      taskDescription: "Payment Approval",
+      roleName: "Accounting Officer",
+      actionKey: "APPROVE",
+    },
+    {
+      stepNumber: 29,
+      taskDescription: "Payment Recording",
+      roleName: "Finance/Budget Officer",
+      actionKey: "COMPLETE",
+    },
+    {
+      stepNumber: 30,
+      taskDescription: "Procurement Closure",
+      roleName: "Contracts Officer",
+      actionKey: "COMPLETE",
+    },
+  ];
+}
+
+const MICRO_STYLE_STEPS = [
+  {
+    stepNumber: 1,
+    taskDescription: "Issue Purchase Instruction",
+    roleName: "Procurement Officer",
+    actionKey: "COMPLETE",
+  },
+  {
+    stepNumber: 2,
+    taskDescription: "Record Delivery/Receipt",
+    roleName: "User Department Officer",
+    actionKey: "COMPLETE",
+  },
+  {
+    stepNumber: 3,
+    taskDescription: "Verify/Accept Delivery",
+    roleName: "Head User Department",
+    actionKey: "APPROVE",
+  },
+  {
+    stepNumber: 4,
+    taskDescription: "Process Invoice",
+    roleName: "Contracts Officer",
+    actionKey: "VERIFY",
+  },
+  {
+    stepNumber: 5,
+    taskDescription: "Approve Payment",
+    roleName: "Accounting Officer",
+    actionKey: "APPROVE",
+  },
+  {
+    stepNumber: 6,
+    taskDescription: "Record Payment",
+    roleName: "Finance/Budget Officer",
+    actionKey: "COMPLETE",
+  },
+  {
+    stepNumber: 7,
+    taskDescription: "Close Procurement",
+    roleName: "Contracts Officer",
+    actionKey: "COMPLETE",
   },
 ];
 
@@ -453,58 +722,23 @@ export const BASELINE_PROCESS_TEMPLATES = [
     code: PROCESS_FLOW_CODES.MICRO_PROCUREMENT,
     name: "Micro Procurement Process",
     description:
-      "Starts once the Contracts Committee approves MICRO: purchase instruction to one provider (confirms the supplier), delivery and user-department acceptance, invoice, payment and closure. The need, plan, funding and AO approval were already settled on the requisition.",
+      "Independent micro path: purchase instruction, delivery, acceptance, invoice, payment and closure after method approval.",
     triggerKey: WORKFLOW_TRIGGERS.MICRO_PROCUREMENT_STARTED,
-    steps: [
-      {
-        stepNumber: 1,
-        taskDescription: "Issue Purchase Instruction",
-        roleName: "Procurement Officer",
-        actionKey: "COMPLETE",
-      },
-      {
-        stepNumber: 2,
-        taskDescription: "Record Delivery/Receipt",
-        roleName: "User Department Officer",
-        actionKey: "COMPLETE",
-      },
-      {
-        stepNumber: 3,
-        taskDescription: "Verify/Accept Delivery",
-        roleName: "Head User Department",
-        actionKey: "APPROVE",
-      },
-      {
-        stepNumber: 4,
-        taskDescription: "Process Invoice",
-        roleName: "Contracts Officer",
-        actionKey: "VERIFY",
-      },
-      {
-        stepNumber: 5,
-        taskDescription: "Approve Payment",
-        roleName: "Accounting Officer",
-        actionKey: "APPROVE",
-      },
-      {
-        stepNumber: 6,
-        taskDescription: "Record Payment",
-        roleName: "Finance/Budget Officer",
-        actionKey: "COMPLETE",
-      },
-      {
-        stepNumber: 7,
-        taskDescription: "Close Procurement",
-        roleName: "Contracts Officer",
-        actionKey: "COMPLETE",
-      },
-    ],
+    steps: MICRO_STYLE_STEPS,
+  },
+  {
+    code: PROCESS_FLOW_CODES.DIRECT_PROCUREMENT,
+    name: "Direct Procurement Process",
+    description:
+      "Independent direct path (documented legal grounds only): purchase instruction to the sole/selected provider, delivery, acceptance, invoice, payment and closure.",
+    triggerKey: WORKFLOW_TRIGGERS.DIRECT_PROCUREMENT_STARTED,
+    steps: MICRO_STYLE_STEPS.map((s) => ({ ...s })),
   },
   {
     code: PROCESS_FLOW_CODES.QUOTATION_PROCESS,
-    name: "Quotation Process",
+    name: "Quotation Method Process",
     description:
-      "RFQ preparation through award, LPO, delivery, invoice, payment and closure for the quotation route.",
+      "Independent quotation path: RFQ through award, LPO, delivery, invoice, payment and closure.",
     triggerKey: WORKFLOW_TRIGGERS.QUOTATION_STARTED,
     steps: [
       {
@@ -678,187 +912,42 @@ export const BASELINE_PROCESS_TEMPLATES = [
     ],
   },
   {
-    code: PROCESS_FLOW_CODES.TENDER_PROCESS,
-    name: "Tender Process",
+    code: PROCESS_FLOW_CODES.OPEN_DOMESTIC_BIDDING,
+    name: "Open Domestic Bidding Process",
     description:
-      "Tender documentation through evaluation, award, contract, delivery, invoice, payment and closure.",
-    triggerKey: WORKFLOW_TRIGGERS.TENDER_STARTED,
-    steps: [
-      {
-        stepNumber: 1,
-        taskDescription: "Prepare Tender Documents",
-        roleName: "Procurement Officer",
-        actionKey: "SUBMIT",
-      },
-      {
-        stepNumber: 2,
-        taskDescription: "Review Tender Documents",
-        roleName: "Head PDU",
-        actionKey: "APPROVE",
-      },
-      {
-        stepNumber: 3,
-        taskDescription: "Approve Tender Documents",
-        roleName: "Contracts Committee",
-        actionKey: "APPROVE",
-      },
-      {
-        stepNumber: 4,
-        taskDescription: "Advertise Tender",
-        roleName: "Procurement Officer",
-        actionKey: "COMPLETE",
-      },
-      {
-        stepNumber: 5,
-        taskDescription: "Receive Bids",
-        roleName: "Procurement Officer",
-        actionKey: "COMPLETE",
-      },
-      {
-        stepNumber: 6,
-        taskDescription: "Close Tender Submission",
-        roleName: "Procurement Officer",
-        actionKey: "COMPLETE",
-      },
-      {
-        stepNumber: 7,
-        taskDescription: "Open Bids",
-        roleName: "Procurement Officer",
-        actionKey: "COMPLETE",
-      },
-      {
-        stepNumber: 8,
-        taskDescription: "Forward Bids for Evaluation",
-        roleName: "Head PDU",
-        actionKey: "COMPLETE",
-      },
-      {
-        stepNumber: 11,
-        taskDescription: "Technical Evaluation",
-        roleName: "Evaluation Committee",
-        actionKey: "COMPLETE",
-      },
-      {
-        stepNumber: 12,
-        taskDescription: "Financial Evaluation",
-        roleName: "Evaluation Committee",
-        actionKey: "COMPLETE",
-      },
-      {
-        stepNumber: 13,
-        taskDescription: "Prepare Evaluation Report",
-        roleName: "Evaluation Committee",
-        actionKey: "COMPLETE",
-      },
-      {
-        stepNumber: 14,
-        taskDescription: "Review Evaluation Report",
-        roleName: "Head PDU",
-        actionKey: "APPROVE",
-      },
-      {
-        stepNumber: 15,
-        taskDescription: "Post-Qualification where applicable",
-        roleName: "Evaluation Committee",
-        actionKey: "COMPLETE",
-      },
-      {
-        stepNumber: 16,
-        taskDescription: "Approve Evaluation/Recommendation",
-        roleName: "Contracts Committee",
-        actionKey: "APPROVE",
-      },
-      {
-        stepNumber: 17,
-        taskDescription: "Prepare Award Recommendation",
-        roleName: "Head PDU",
-        actionKey: "COMPLETE",
-      },
-      {
-        stepNumber: 18,
-        taskDescription: "Approve Award",
-        roleName: "Contracts Committee",
-        actionKey: "APPROVE",
-      },
-      {
-        stepNumber: 19,
-        taskDescription: "Communicate Award",
-        roleName: "Procurement Officer",
-        actionKey: "COMPLETE",
-      },
-      {
-        stepNumber: 20,
-        taskDescription: "Prepare Contract",
-        roleName: "Contracts Officer",
-        actionKey: "COMPLETE",
-      },
-      {
-        stepNumber: 21,
-        taskDescription: "Sign/Approve Contract",
-        roleName: "Accounting Officer",
-        actionKey: "APPROVE",
-      },
-      {
-        stepNumber: 22,
-        taskDescription: "Issue Contract",
-        roleName: "Contracts Officer",
-        actionKey: "COMPLETE",
-      },
-      {
-        stepNumber: 23,
-        taskDescription: "Supplier Acceptance",
-        roleName: "Procurement Officer",
-        actionKey: "COMPLETE",
-      },
-      {
-        stepNumber: 24,
-        taskDescription: "Delivery",
-        roleName: "User Department Officer",
-        actionKey: "COMPLETE",
-      },
-      {
-        stepNumber: 25,
-        taskDescription: "Inspection/Acceptance",
-        roleName: "Inspection/Acceptance Committee",
-        actionKey: "APPROVE",
-      },
-      {
-        stepNumber: 26,
-        taskDescription: "Invoice",
-        roleName: "Finance/Budget Officer",
-        actionKey: "COMPLETE",
-      },
-      {
-        stepNumber: 27,
-        taskDescription: "Invoice Verification",
-        roleName: "Contracts Officer",
-        actionKey: "VERIFY",
-      },
-      {
-        stepNumber: 28,
-        taskDescription: "Payment Approval",
-        roleName: "Accounting Officer",
-        actionKey: "APPROVE",
-      },
-      {
-        stepNumber: 29,
-        taskDescription: "Payment Recording",
-        roleName: "Finance/Budget Officer",
-        actionKey: "COMPLETE",
-      },
-      {
-        stepNumber: 30,
-        taskDescription: "Procurement Closure",
-        roleName: "Contracts Officer",
-        actionKey: "COMPLETE",
-      },
-    ],
+      "Independent ODB path: public domestic advert through evaluation, award, contract, delivery, invoice, payment and closure.",
+    triggerKey: WORKFLOW_TRIGGERS.OPEN_DOMESTIC_BIDDING_STARTED,
+    steps: biddingMethodSteps("open"),
+  },
+  {
+    code: PROCESS_FLOW_CODES.OPEN_INTERNATIONAL_BIDDING,
+    name: "Open International Bidding Process",
+    description:
+      "Independent OIB path: international advert through evaluation, award, contract, delivery, invoice, payment and closure.",
+    triggerKey: WORKFLOW_TRIGGERS.OPEN_INTERNATIONAL_BIDDING_STARTED,
+    steps: biddingMethodSteps("open"),
+  },
+  {
+    code: PROCESS_FLOW_CODES.RESTRICTED_DOMESTIC_BIDDING,
+    name: "Restricted Domestic Bidding Process",
+    description:
+      "Independent RDB path: invite domestic shortlist (no open advert) through evaluation, award, contract, delivery, invoice, payment and closure.",
+    triggerKey: WORKFLOW_TRIGGERS.RESTRICTED_DOMESTIC_BIDDING_STARTED,
+    steps: biddingMethodSteps("restricted"),
+  },
+  {
+    code: PROCESS_FLOW_CODES.RESTRICTED_INTERNATIONAL_BIDDING,
+    name: "Restricted International Bidding Process",
+    description:
+      "Independent RIB path: invite shortlist including foreign providers through evaluation, award, contract, delivery, invoice, payment and closure.",
+    triggerKey: WORKFLOW_TRIGGERS.RESTRICTED_INTERNATIONAL_BIDDING_STARTED,
+    steps: biddingMethodSteps("restricted"),
   },
   {
     code: PROCESS_FLOW_CODES.EVALUATION_PROCESS,
     name: "Evaluation Process",
     description:
-      "Evaluation of quotations/bids through to approval of the evaluation report. Required by Quotation and Tender.",
+      "Evaluation of quotations/bids through to approval of the evaluation report. Required by Quotation and bidding methods.",
     triggerKey: WORKFLOW_TRIGGERS.EVALUATION_STARTED,
     steps: [
       {
@@ -897,7 +986,7 @@ export const BASELINE_PROCESS_TEMPLATES = [
     code: PROCESS_FLOW_CODES.POST_QUALIFICATION_PROCESS,
     name: "Post-Qualification Process",
     description:
-      "Checks the best evaluated bidder before award. Required by Tender, and by Quotation when flagged.",
+      "Checks the best evaluated bidder before award. Required by bidding methods, and by Quotation when flagged.",
     triggerKey: WORKFLOW_TRIGGERS.POST_QUALIFICATION_STARTED,
     steps: [
       {
@@ -951,7 +1040,7 @@ export const BASELINE_PROCESS_TEMPLATES = [
     code: PROCESS_FLOW_CODES.CONTRACT_PROCESS,
     name: "Contract Process",
     description:
-      "Contract preparation, signature, issue and supplier acceptance. Required by Tender.",
+      "Contract preparation, signature, issue and supplier acceptance. Required by bidding methods.",
     triggerKey: WORKFLOW_TRIGGERS.CONTRACT_STARTED,
     steps: [
       {
@@ -984,7 +1073,7 @@ export const BASELINE_PROCESS_TEMPLATES = [
     code: PROCESS_FLOW_CODES.INVOICE_PROCESS,
     name: "Invoice Process",
     description:
-      "Receipt and verification of the supplier invoice. Required by Micro, Quotation and Tender.",
+      "Receipt and verification of the supplier invoice. Required by Micro, Direct, Quotation and bidding methods.",
     triggerKey: WORKFLOW_TRIGGERS.INVOICE_STARTED,
     steps: [
       {
@@ -1005,7 +1094,7 @@ export const BASELINE_PROCESS_TEMPLATES = [
     code: PROCESS_FLOW_CODES.PAYMENT_PROCESS,
     name: "Payment Process",
     description:
-      "Approval and recording of payment against a verified invoice. Required by Micro, Quotation and Tender.",
+      "Approval and recording of payment against a verified invoice. Required by Micro, Direct, Quotation and bidding methods.",
     triggerKey: WORKFLOW_TRIGGERS.PAYMENT_STARTED,
     steps: [
       {

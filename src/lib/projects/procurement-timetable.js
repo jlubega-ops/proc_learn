@@ -11,7 +11,11 @@
  *      micro / direct / quotation: 3 WD after BEB — standstill exempt)
  */
 
-import { planMethodToEnum, normalizeTenderSubtype } from "@/lib/projects/procurement-thresholds";
+import {
+  methodMinimumBiddingWorkingDays,
+  normalizeProcurementMethod,
+} from "@/lib/projects/procurement-methods";
+import { planMethodToEnum } from "@/lib/projects/procurement-thresholds";
 import { normalizeCircularSheet, normalizePlanMethod } from "@/lib/projects/ppda-forms";
 
 /**
@@ -105,23 +109,15 @@ export function addWorkingDays(date, n, holidays) {
  * Direct / Micro: no prescribed minimum (0).
  *
  * @param {string | null | undefined} methodLabelOrEnum
- * @param {string | null | undefined} tenderSubtype
  * @param {{ directProcurement?: boolean }} [opts]
  * @returns {number}
  */
-export function minimumBiddingWorkingDays(methodLabelOrEnum, tenderSubtype, opts = {}) {
-  const method = planMethodToEnum(methodLabelOrEnum) || String(methodLabelOrEnum || "").toUpperCase();
-  if (opts.directProcurement || method === "MICRO") return 0;
-  if (method === "QUOTATION") return 5;
-  if (method === "TENDER") {
-    const sub = normalizeTenderSubtype(tenderSubtype);
-    if (sub === "OPEN_INTERNATIONAL") return 20;
-    if (sub === "RESTRICTED_DOMESTIC") return 10;
-    if (sub === "RESTRICTED_INTERNATIONAL") return 15;
-    // OPEN_DOMESTIC default / unknown tender
-    return 15;
-  }
-  return 0;
+export function minimumBiddingWorkingDays(methodLabelOrEnum, opts = {}) {
+  const method = normalizeProcurementMethod(methodLabelOrEnum, {
+    directProcurement: opts.directProcurement,
+  });
+  if (!method) return 0;
+  return methodMinimumBiddingWorkingDays(method);
 }
 
 /**
@@ -143,8 +139,10 @@ export function evaluationWorkingDays(categoryOrCircular) {
  */
 export function isStandstillExempt(methodLabelOrEnum, opts = {}) {
   if (opts.directProcurement) return true;
-  const method = planMethodToEnum(methodLabelOrEnum) || String(methodLabelOrEnum || "").toUpperCase();
-  return method === "MICRO" || method === "QUOTATION";
+  const method = normalizeProcurementMethod(methodLabelOrEnum, {
+    directProcurement: opts.directProcurement,
+  });
+  return method === "MICRO" || method === "QUOTATION" || method === "DIRECT";
 }
 
 /**
@@ -153,7 +151,6 @@ export function isStandstillExempt(methodLabelOrEnum, opts = {}) {
  * @param {{
  *   bidInvitationDate?: string | null;
  *   plannedProcurementMethod?: string | null;
- *   tenderSubtype?: string | null;
  *   category?: string | null;
  *   directProcurement?: boolean;
  *   anchorDate?: string | Date | null;
@@ -203,7 +200,7 @@ export function buildGoodsWorksTimetable(input) {
     invitation = nextWorkingDayAfter(anchor, holidays);
   }
 
-  const biddingWd = minimumBiddingWorkingDays(methodKey, input.tenderSubtype, {
+  const biddingWd = minimumBiddingWorkingDays(methodKey, {
     directProcurement: Boolean(input.directProcurement),
   });
   const closing =
@@ -304,7 +301,7 @@ export function validateGoodsWorksTimetableMinimums(item, prefix, holidays) {
   const signing = parsePlanDate(item.contractSigningDate);
 
   const direct = Boolean(item.directProcurement);
-  const minBid = minimumBiddingWorkingDays(methodKey, item.tenderSubtype, {
+  const minBid = minimumBiddingWorkingDays(methodKey, {
     directProcurement: direct,
   });
   if (invitation && closing && minBid > 0) {
@@ -383,7 +380,6 @@ export function applyTimetableToPlanItem(item, opts = {}) {
   const built = buildGoodsWorksTimetable({
     bidInvitationDate: item.bidInvitationDate,
     plannedProcurementMethod: method,
-    tenderSubtype: item.tenderSubtype,
     category: item.category || item.circularSheet,
     directProcurement: Boolean(item.directProcurement),
     anchorDate: opts.anchorDate || null,

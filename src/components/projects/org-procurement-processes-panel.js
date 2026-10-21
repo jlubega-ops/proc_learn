@@ -17,6 +17,7 @@ import {
   adminMutedTextSx,
   adminOutlinedTableContainerSx,
 } from "@/lib/admin-mui-surfaces";
+import { procurementMethodLabel } from "@/lib/projects/procurement-methods";
 
 /**
  * Lists procurements that have started a method workflow after method selection.
@@ -34,12 +35,6 @@ export function OrgProcurementProcessesPanel({ projectId }) {
     await reload();
     void revalidateApi(listUrl);
   }, [listUrl, reload]);
-
-  const processLabel = {
-    MICRO: "Micro Procurement Process (started)",
-    QUOTATION: "Quotation Process (started)",
-    TENDER: "Tender Process (started)",
-  };
 
   if (loading) {
     return (
@@ -63,8 +58,8 @@ export function OrgProcurementProcessesPanel({ projectId }) {
       </div>
       {rows.length === 0 ? (
         <Typography sx={adminMutedTextSx}>
-          No method processes have started. After Accounting Officer approval, select MICRO,
-          QUOTATION, or TENDER on the requisition (and ensure that process is activated).
+          No method processes have started. After Accounting Officer approval, select a
+          procurement method on the requisition (and ensure that process is activated).
         </Typography>
       ) : (
         <ul className="space-y-2">
@@ -78,11 +73,11 @@ export function OrgProcurementProcessesPanel({ projectId }) {
                   {r.procurementNumber} — {r.title}
                 </p>
                 <p className="text-sm">
-                  {processLabel[r.procurementMethod] || r.procurementMethod} · {r.status}
+                  {procurementMethodLabel(r.procurementMethod)} · {r.status}
                 </p>
               </div>
               <div className="flex flex-wrap items-center gap-2">
-                <Chip size="small" color="info" label={r.procurementMethod} />
+                <Chip size="small" color="info" label={procurementMethodLabel(r.procurementMethod)} />
                 <Link
                   href={`/projects/${projectId}/procurements/${r.id}`}
                   className="cursor-pointer text-sm font-semibold text-primary underline"

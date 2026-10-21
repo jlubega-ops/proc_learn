@@ -221,11 +221,15 @@ enum OrgWorkflowDecision {
   SELECT_METHOD
 }
 
+/// Official PPDA-style methods — each maps to an independent process engine.
 enum OrgProcurementMethod {
-  MICRO
+  OPEN_DOMESTIC
+  OPEN_INTERNATIONAL
+  RESTRICTED_DOMESTIC
+  RESTRICTED_INTERNATIONAL
   QUOTATION
-  TENDER
-  OTHER
+  MICRO
+  DIRECT
 }
 
 /// Lifecycle status for post-requisition Procurement business records.

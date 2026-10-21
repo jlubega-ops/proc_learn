@@ -38,6 +38,7 @@ import { askOfferClarification } from "@/lib/projects/offer-clarifications";
 import { minRfqProviders } from "@/lib/projects/procurement-thresholds";
 import { phaseProcessForTask } from "@/lib/projects/process-catalogue";
 import { assertProcessActive } from "@/lib/projects/process-activation";
+import { methodUsesContract } from "@/lib/projects/procurement-methods";
 import {
   committeeTypeForWorkflowRole,
   requireCommitteeMembership,
@@ -808,7 +809,7 @@ async function actOnProcurementTaskSteps(prisma, opts) {
       where: { id: procurementId, projectId },
       select: { procurementMethod: true },
     });
-    const action = proc?.procurementMethod === "TENDER" ? "create_contract" : "create_lpo";
+    const action = methodUsesContract(proc?.procurementMethod) ? "create_contract" : "create_lpo";
     const out = await actOnProcurementLifecycle(prisma, {
       projectId,
       procurementId,

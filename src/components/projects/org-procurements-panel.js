@@ -34,6 +34,7 @@ import {
   clickableTableRowProps,
   stopRowClick,
 } from "@/lib/projects/clickable-table-row";
+import { procurementMethodLabel } from "@/lib/projects/procurement-methods";
 
 /**
  * @param {{ projectId: string }} p
@@ -149,7 +150,7 @@ export function OrgProcurementsPanel({ projectId }) {
                     </TableCell>
                     <TableCell>{r.title}</TableCell>
                     <TableCell>
-                      <Chip size="small" color="info" label={r.procurementMethod} />
+                      <Chip size="small" color="info" label={procurementMethodLabel(r.procurementMethod)} />
                     </TableCell>
                     <TableCell>{r.department?.name || "—"}</TableCell>
                     <TableCell>

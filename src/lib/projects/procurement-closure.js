@@ -5,12 +5,12 @@ import {
   OrgInvoiceStatus,
   OrgLpoStatus,
   OrgPaymentStatus,
-  OrgProcurementMethod,
   OrgProcurementStatus,
   OrgPurchaseInstructionStatus,
 } from "@prisma/client";
 import { writeAuditLog, AuditEvent } from "@/lib/audit-log";
 import { notifyOrgUsers, OrgNotificationType } from "@/lib/projects/org-notifications";
+import { isBiddingMethod, isMicroStyleMethod } from "@/lib/projects/procurement-methods";
 
 /**
  * Full lifecycle gate checks before a procurement can be marked CLOSED.
@@ -52,13 +52,13 @@ export async function evaluateClosureReadiness(prisma, projectId, procurementId)
   /** @type {string[]} */
   const blockers = [];
 
-  if (procurement.procurementMethod === OrgProcurementMethod.MICRO) {
+  if (isMicroStyleMethod(procurement.procurementMethod)) {
     const statuses = procurement.purchaseInstructions.map((pi) => pi.status);
     if (!statuses.includes(OrgPurchaseInstructionStatus.ACCEPTED)) {
       blockers.push(
         statuses.includes(OrgPurchaseInstructionStatus.ISSUED)
           ? "The purchase instruction must be accepted by the supplier."
-          : "Issue a purchase instruction before closing this Micro Procurement.",
+          : "Issue a purchase instruction before closing this procurement.",
       );
     }
   } else {
@@ -70,7 +70,7 @@ export async function evaluateClosureReadiness(prisma, projectId, procurementId)
       procurement.lpos.some((l) => l.status === OrgLpoStatus.ACCEPTED);
     if (!hasActiveOrder) {
       blockers.push(
-        procurement.procurementMethod === OrgProcurementMethod.TENDER
+        isBiddingMethod(procurement.procurementMethod)
           ? "Issue the contract and have the supplier accept it before closing."
           : "Issue and accept the LPO before closing.",
       );

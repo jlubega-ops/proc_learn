@@ -1,6 +1,7 @@
 import { format } from "date-fns";
 import { formatMoneyUGX } from "@/lib/money";
 import { presentPurchaseInstructionStatus } from "@/lib/projects/purchase-instruction-presentation";
+import { isMicroStyleMethod } from "@/lib/projects/procurement-methods";
 
 /** @typedef {{ label: string; color: "success" | "warning" | "error" | "info" | "primary"; outlined?: boolean }} StageStatus */
 
@@ -83,7 +84,7 @@ export function describeProcurementStage(key, row) {
       };
     }
     case "contract": {
-      if (row.procurementMethod === "MICRO") {
+      if (isMicroStyleMethod(row.procurementMethod)) {
         if (!pi) return { status: NOT_STARTED, summary: [] };
         return {
           status: presentPurchaseInstructionStatus(pi.status),

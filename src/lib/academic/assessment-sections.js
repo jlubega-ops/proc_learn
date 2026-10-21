@@ -37,6 +37,43 @@ const K = SCORING_COUNT_KEYS;
  * Each method step is scored once, under its phase section.
  * @type {Record<string, Array<[string, number]>>}
  */
+const BIDDING_PHASE_STEPS = {
+  11: [[C.EVALUATION_PROCESS, 1]],
+  12: [[C.EVALUATION_PROCESS, 2]],
+  13: [[C.EVALUATION_PROCESS, 3]],
+  14: [[C.EVALUATION_PROCESS, 4]],
+  15: [[C.POST_QUALIFICATION_PROCESS, 1]],
+  16: [
+    [C.EVALUATION_PROCESS, 5],
+    [C.POST_QUALIFICATION_PROCESS, 2],
+  ],
+  20: [[C.CONTRACT_PROCESS, 1]],
+  21: [[C.CONTRACT_PROCESS, 2]],
+  22: [[C.CONTRACT_PROCESS, 3]],
+  23: [[C.CONTRACT_PROCESS, 4]],
+  26: [[C.INVOICE_PROCESS, 1]],
+  27: [[C.INVOICE_PROCESS, 2]],
+  28: [[C.PAYMENT_PROCESS, 1]],
+  29: [[C.PAYMENT_PROCESS, 2]],
+};
+
+const BIDDING_PROCESS_CODES = [
+  C.OPEN_DOMESTIC_BIDDING,
+  C.OPEN_INTERNATIONAL_BIDDING,
+  C.RESTRICTED_DOMESTIC_BIDDING,
+  C.RESTRICTED_INTERNATIONAL_BIDDING,
+];
+
+const MICRO_STYLE_PHASE_STEPS = {
+  4: [
+    [C.INVOICE_PROCESS, 1],
+    [C.INVOICE_PROCESS, 2],
+  ],
+  5: [[C.PAYMENT_PROCESS, 1]],
+  6: [[C.PAYMENT_PROCESS, 2]],
+};
+
+/** @type {Record<string, Array<[string, number]>>} */
 const PHASE_STEP_MAP = {
   [`${C.QUOTATION_PROCESS}:10`]: [[C.EVALUATION_PROCESS, 1]],
   [`${C.QUOTATION_PROCESS}:11`]: [[C.EVALUATION_PROCESS, 2]],
@@ -51,29 +88,16 @@ const PHASE_STEP_MAP = {
   [`${C.QUOTATION_PROCESS}:27`]: [[C.INVOICE_PROCESS, 2]],
   [`${C.QUOTATION_PROCESS}:28`]: [[C.PAYMENT_PROCESS, 1]],
   [`${C.QUOTATION_PROCESS}:29`]: [[C.PAYMENT_PROCESS, 2]],
-  [`${C.TENDER_PROCESS}:11`]: [[C.EVALUATION_PROCESS, 1]],
-  [`${C.TENDER_PROCESS}:12`]: [[C.EVALUATION_PROCESS, 2]],
-  [`${C.TENDER_PROCESS}:13`]: [[C.EVALUATION_PROCESS, 3]],
-  [`${C.TENDER_PROCESS}:14`]: [[C.EVALUATION_PROCESS, 4]],
-  [`${C.TENDER_PROCESS}:15`]: [[C.POST_QUALIFICATION_PROCESS, 1]],
-  [`${C.TENDER_PROCESS}:16`]: [
-    [C.EVALUATION_PROCESS, 5],
-    [C.POST_QUALIFICATION_PROCESS, 2],
-  ],
-  [`${C.TENDER_PROCESS}:20`]: [[C.CONTRACT_PROCESS, 1]],
-  [`${C.TENDER_PROCESS}:21`]: [[C.CONTRACT_PROCESS, 2]],
-  [`${C.TENDER_PROCESS}:22`]: [[C.CONTRACT_PROCESS, 3]],
-  [`${C.TENDER_PROCESS}:23`]: [[C.CONTRACT_PROCESS, 4]],
-  [`${C.TENDER_PROCESS}:26`]: [[C.INVOICE_PROCESS, 1]],
-  [`${C.TENDER_PROCESS}:27`]: [[C.INVOICE_PROCESS, 2]],
-  [`${C.TENDER_PROCESS}:28`]: [[C.PAYMENT_PROCESS, 1]],
-  [`${C.TENDER_PROCESS}:29`]: [[C.PAYMENT_PROCESS, 2]],
-  [`${C.MICRO_PROCUREMENT}:4`]: [
-    [C.INVOICE_PROCESS, 1],
-    [C.INVOICE_PROCESS, 2],
-  ],
-  [`${C.MICRO_PROCUREMENT}:5`]: [[C.PAYMENT_PROCESS, 1]],
-  [`${C.MICRO_PROCUREMENT}:6`]: [[C.PAYMENT_PROCESS, 2]],
+  ...Object.fromEntries(
+    BIDDING_PROCESS_CODES.flatMap((code) =>
+      Object.entries(BIDDING_PHASE_STEPS).map(([step, targets]) => [`${code}:${step}`, targets]),
+    ),
+  ),
+  ...Object.fromEntries(
+    [C.MICRO_PROCUREMENT, C.DIRECT_PROCUREMENT].flatMap((code) =>
+      Object.entries(MICRO_STYLE_PHASE_STEPS).map(([step, targets]) => [`${code}:${step}`, targets]),
+    ),
+  ),
 };
 
 /** Record a process section starts with, scored before its workflow is submitted. */

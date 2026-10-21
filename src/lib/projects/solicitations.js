@@ -14,6 +14,7 @@ import { serializeProviderSummary } from "@/lib/projects/providers";
 import { buildBidDocument } from "@/lib/projects/ppda-forms";
 import { validateStartEndDateRange } from "@/lib/validation/date-range";
 import { INACTIVE_OFFER_STATUSES, priceOfferLines } from "@/lib/projects/offer-line-items";
+import { isBiddingMethod } from "@/lib/projects/procurement-methods";
 
 /** Ordinal position used to guard against moving a solicitation status backwards. */
 const STATUS_ORDER = [
@@ -207,10 +208,9 @@ export async function saveBidDocumentForProcurement(prisma, opts) {
 
   let solicitation = procurement.solicitations?.[0] || null;
   if (!solicitation) {
-    const type =
-      procurement.procurementMethod === "TENDER"
-        ? OrgSolicitationType.TENDER
-        : OrgSolicitationType.RFQ;
+    const type = isBiddingMethod(procurement.procurementMethod)
+      ? OrgSolicitationType.TENDER
+      : OrgSolicitationType.RFQ;
     const created = await getOrCreateDraftSolicitation(prisma, {
       projectId: opts.projectId,
       procurementId: opts.procurementId,

@@ -91,7 +91,9 @@ function resolveAdoptionCode(flow) {
   if (name === "quotations process" || name === "quotation process") {
     return PROCESS_FLOW_CODES.QUOTATION_PROCESS;
   }
-  if (name === "tender process") return PROCESS_FLOW_CODES.TENDER_PROCESS;
+  if (name === "tender process" || name === "open domestic bidding process") {
+    return PROCESS_FLOW_CODES.OPEN_DOMESTIC_BIDDING;
+  }
   if (name === "evaluation process") return PROCESS_FLOW_CODES.EVALUATION_PROCESS;
   if (name === "post qualification process" || name === "post-qualification process") {
     return PROCESS_FLOW_CODES.POST_QUALIFICATION_PROCESS;

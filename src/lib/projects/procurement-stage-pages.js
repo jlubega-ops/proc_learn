@@ -1,4 +1,8 @@
 import { NAV_LABELS } from "@/lib/nav-labels";
+import {
+  isMicroStyleMethod,
+  normalizeProcurementMethod,
+} from "@/lib/projects/procurement-methods";
 
 /**
  * Procurements sidebar sub-pages, in lifecycle order. `section` maps to
@@ -35,10 +39,10 @@ export const PROCUREMENT_STAGE_PAGES = {
   },
   "purchase-instructions": {
     label: NAV_LABELS.purchaseInstructions,
-    title: "Purchase instructions for Micro procurements",
+    title: "Purchase instructions for Micro and Direct",
     section: "contract",
     stage: "contract",
-    description: "Purchase instructions for Micro procurements.",
+    description: "Purchase instructions for Micro and Direct.",
     recordedLabel: "Issued",
     pendingLabel: "Not issued",
   },
@@ -108,7 +112,10 @@ export function canViewProcurementStage(stage, sections) {
  */
 export function procurementSectionSlug(stage, method) {
   if (!stage) return null;
-  if (stage === "contract") return method === "MICRO" ? "purchase-instructions" : "contracts";
+  if (stage === "contract") {
+    const m = normalizeProcurementMethod(method);
+    return isMicroStyleMethod(m) ? "purchase-instructions" : "contracts";
+  }
   for (const [slug, page] of Object.entries(PROCUREMENT_STAGE_PAGES)) {
     if (page.stage === stage) return slug;
   }

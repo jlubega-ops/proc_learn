@@ -4,9 +4,14 @@
  * process while turning off what it needs.
  */
 import { PROCESS_FLOW_CODES } from "@/lib/projects/process-catalogue";
+import { METHOD_PROCESS_CODES, PROCUREMENT_METHOD_CATALOGUE } from "@/lib/projects/procurement-methods";
 
 export const DEFAULT_ASSESSMENT_TOTAL_MARKS = 100;
 export const DEFAULT_ASSESSMENT_PASS_MARK = 50;
+
+const BIDDING_PROCESS_CODES = PROCUREMENT_METHOD_CATALOGUE.filter((m) => m.family === "BIDDING").map(
+  (m) => m.processCode,
+);
 
 /**
  * Educational A–Z order for examiner scoring (engine process codes).
@@ -50,33 +55,19 @@ export const ASSESSMENT_PROCESS_CATALOGUE = [
     dependsOn: [PROCESS_FLOW_CODES.BUDGETING, PROCESS_FLOW_CODES.PROCUREMENT_PLANNING],
     group: "CORE",
   },
-  {
-    code: PROCESS_FLOW_CODES.MICRO_PROCUREMENT,
-    name: "Micro procurement",
-    summary: "Run a micro procurement after requisition approval.",
+  ...PROCUREMENT_METHOD_CATALOGUE.map((m) => ({
+    code: m.processCode,
+    name: m.label,
+    summary: m.whenToUse,
     dependsOn: [PROCESS_FLOW_CODES.PROCUREMENT_REQUISITION],
-    group: "METHOD",
-  },
-  {
-    code: PROCESS_FLOW_CODES.QUOTATION_PROCESS,
-    name: "Quotation",
-    summary: "Run a quotation process after requisition approval.",
-    dependsOn: [PROCESS_FLOW_CODES.PROCUREMENT_REQUISITION],
-    group: "METHOD",
-  },
-  {
-    code: PROCESS_FLOW_CODES.TENDER_PROCESS,
-    name: "Tender",
-    summary: "Run a tender process after requisition approval.",
-    dependsOn: [PROCESS_FLOW_CODES.PROCUREMENT_REQUISITION],
-    group: "METHOD",
-  },
+    group: /** @type {"METHOD"} */ ("METHOD"),
+  })),
   {
     code: PROCESS_FLOW_CODES.EVALUATION_PROCESS,
     name: "Evaluation",
     summary: "Evaluate bids or quotations.",
     dependsOn: [],
-    dependsOnAny: [PROCESS_FLOW_CODES.QUOTATION_PROCESS, PROCESS_FLOW_CODES.TENDER_PROCESS],
+    dependsOnAny: [PROCESS_FLOW_CODES.QUOTATION_PROCESS, ...BIDDING_PROCESS_CODES],
     group: "AWARD",
   },
   {
@@ -96,8 +87,9 @@ export const ASSESSMENT_PROCESS_CATALOGUE = [
   {
     code: PROCESS_FLOW_CODES.CONTRACT_PROCESS,
     name: "Contract",
-    summary: "Draft a contract after a tender award.",
-    dependsOn: [PROCESS_FLOW_CODES.TENDER_PROCESS],
+    summary: "Draft a contract after a bidding-method award.",
+    dependsOn: [],
+    dependsOnAny: BIDDING_PROCESS_CODES,
     group: "AWARD",
   },
   {
@@ -107,6 +99,7 @@ export const ASSESSMENT_PROCESS_CATALOGUE = [
     dependsOn: [],
     dependsOnAny: [
       PROCESS_FLOW_CODES.MICRO_PROCUREMENT,
+      PROCESS_FLOW_CODES.DIRECT_PROCUREMENT,
       PROCESS_FLOW_CODES.LPO_PROCESS,
       PROCESS_FLOW_CODES.CONTRACT_PROCESS,
     ],
@@ -121,11 +114,7 @@ export const ASSESSMENT_PROCESS_CATALOGUE = [
   },
 ];
 
-const METHOD_CODES = new Set([
-  PROCESS_FLOW_CODES.MICRO_PROCUREMENT,
-  PROCESS_FLOW_CODES.QUOTATION_PROCESS,
-  PROCESS_FLOW_CODES.TENDER_PROCESS,
-]);
+const METHOD_CODES = new Set(METHOD_PROCESS_CODES);
 
 /**
  * @param {string} code
@@ -161,14 +150,18 @@ export function processDisableBlockers(code, allowedCodes) {
     if ((item.dependsOnAny || []).includes(code)) {
       const others = (item.dependsOnAny || []).filter((c) => c !== code && allowed.has(c));
       if (others.length === 0) {
-        blockers.push(`${item.name} needs at least one of: ${(item.dependsOnAny || []).map((c) => assessmentProcessMeta(c)?.name || c).join(", ")}.`);
+        blockers.push(
+          `${item.name} needs at least one of: ${(item.dependsOnAny || [])
+            .map((c) => assessmentProcessMeta(c)?.name || c)
+            .join(", ")}.`,
+        );
       }
     }
   }
   if (METHOD_CODES.has(code) && allowed.has(PROCESS_FLOW_CODES.PROCUREMENT_REQUISITION)) {
     const otherMethods = [...METHOD_CODES].filter((c) => c !== code && allowed.has(c));
     if (otherMethods.length === 0) {
-      blockers.push("Keep at least one method (Micro, Quotation, or Tender) while Requisition is allowed.");
+      blockers.push("Keep at least one procurement method while Requisition is allowed.");
     }
   }
   return blockers;
@@ -217,7 +210,7 @@ export function validateAllowedProcessSet(allowedCodes) {
   if (allowed.has(PROCESS_FLOW_CODES.PROCUREMENT_REQUISITION)) {
     const methodOn = [...METHOD_CODES].some((c) => allowed.has(c));
     if (!methodOn) {
-      errors.push("Requisition needs at least one procurement method (Micro, Quotation, or Tender).");
+      errors.push("Requisition needs at least one procurement method.");
     }
   }
   return errors;

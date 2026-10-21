@@ -1,7 +1,6 @@
 import {
   OrgCommitteeType,
   OrgEvaluationReportStatus,
-  OrgProcurementMethod,
   OrgProcurementStatus,
   Prisma,
 } from "@prisma/client";
@@ -11,9 +10,10 @@ import { notifyOrgUsers, OrgNotificationType } from "@/lib/projects/org-notifica
 import { requireCommitteeMembership, resolveCommitteeContext } from "@/lib/projects/committee-context";
 import { PROCESS_FLOW_CODES } from "@/lib/projects/process-catalogue";
 import { assertProcessActive } from "@/lib/projects/process-activation";
+import { isMicroStyleMethod } from "@/lib/projects/procurement-methods";
 
 /**
- * Evaluation reports compare offers received for QUOTATION / TENDER procurements
+ * Evaluation reports compare offers for quotation / bidding procurements
  * and recommend a supplier. Authoring is gated on Evaluation Committee membership;
  * approval is a Contracts Committee decision (PPDA: the committee, not an individual
  * officer, approves the evaluation report and the award).
@@ -100,11 +100,11 @@ export async function createEvaluationReport(prisma, opts) {
   if (!procurement) {
     return { ok: false, error: "Procurement not found in this organisation.", status: 404 };
   }
-  if (procurement.procurementMethod === OrgProcurementMethod.MICRO) {
+  if (isMicroStyleMethod(procurement.procurementMethod)) {
     return {
       ok: false,
       error:
-        "Micro Procurement does not require an evaluation report — it moves straight to a purchase instruction.",
+        "Micro and Direct procurement do not require an evaluation report — they move straight to a purchase instruction.",
       status: 400,
     };
   }

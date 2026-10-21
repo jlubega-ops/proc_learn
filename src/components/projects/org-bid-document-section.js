@@ -22,6 +22,7 @@ import {
   latestStepSignOff,
 } from "@/lib/projects/invoice-match";
 import { calendarDateInputConstraints, validateStartEndDateRange } from "@/lib/validation/date-range";
+import { isBiddingMethod } from "@/lib/projects/procurement-methods";
 
 /** @param {any} procurement */
 function savedBidDocument(procurement) {
@@ -114,7 +115,7 @@ function RequirementsList({ items }) {
 export function OrgBidDocumentSection({ projectId, procurement, organisation, issuer, editable = false, ref }) {
   const { showToast } = useToast();
   const confirm = useConfirm();
-  const isTender = procurement?.procurementMethod === "TENDER";
+  const isTender = isBiddingMethod(procurement?.procurementMethod);
   const heading = isTender ? "Tender document" : "Request for Quotations (RFQ) document";
   const saved = savedBidDocument(procurement);
   const reqItems = Array.isArray(procurement?.requisition?.items) ? procurement.requisition.items : [];

@@ -15,6 +15,7 @@ import {
   offersLockedByDecision,
 } from "@/lib/projects/solicitations";
 import { notifyProvider } from "@/lib/projects/provider-notifications";
+import { isBiddingMethod } from "@/lib/projects/procurement-methods";
 
 export const OFFER_SOURCE = Object.freeze({ OFFICER: "OFFICER", PORTAL: "PORTAL", AUTO: "AUTO" });
 
@@ -174,7 +175,9 @@ export async function loadQuotePool(prisma, opts) {
   });
   if (!procurement) return null;
   const solicitationType =
-    procurement.procurementMethod === "TENDER" ? OrgSolicitationType.TENDER : OrgSolicitationType.RFQ;
+    isBiddingMethod(procurement.procurementMethod)
+      ? OrgSolicitationType.TENDER
+      : OrgSolicitationType.RFQ;
   const solicitation = await findSolicitationForProcurement(prisma, { ...opts, solicitationType });
   if (!solicitation) return null;
   const pool = await solicitationResponders(prisma, {

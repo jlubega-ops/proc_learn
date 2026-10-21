@@ -12,6 +12,7 @@
     "db:seed": "node prisma/seed.cjs",
     "db:seed:deploy": "node --import ./scripts/register-path-alias.mjs scripts/seed-deploy-defaults.mjs",
     "db:seed:presentation": "node --import ./scripts/register-path-alias.mjs scripts/seed-presentation.mjs",
+    "db:wipe:keep-users": "node --import ./scripts/register-path-alias.mjs scripts/wipe-non-user-data.mjs --reseed",
     "db:backfill:audit": "node scripts/backfill-audit-project-id.mjs",
     "db:migrate:logins": "node --import ./scripts/register-path-alias.mjs scripts/migrate-org-login-emails.mjs",
     "test:routes": "node --import ./scripts/register-path-alias.mjs scripts/run-route-access-acceptance.mjs"

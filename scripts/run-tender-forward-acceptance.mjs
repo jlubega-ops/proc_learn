@@ -73,7 +73,7 @@ async function main() {
   });
   const projectId = project.id;
   const flow = await prisma.projectOrgProcessFlow.findFirst({
-    where: { code: PROCESS_FLOW_CODES.TENDER_PROCESS },
+    where: { code: PROCESS_FLOW_CODES.OPEN_DOMESTIC_BIDDING },
   });
   if (flow) {
     await prisma.projectOrgProcessFlowAdoption.upsert({
@@ -145,10 +145,10 @@ async function main() {
     actorRoleName: users.Peter.projectOrgRole.name,
     actorDepartmentId: users.Peter.departmentId,
     decision: OrgWorkflowDecision.SELECT_METHOD,
-    procurementMethod: "TENDER",
-    comment: "Tender method.",
+    procurementMethod: "OPEN_DOMESTIC",
+    comment: "Open domestic bidding.",
   });
-  assert(selected.ok, "Tender documents prepared (workflow started)", selected.error);
+  assert(selected.ok, "Bidding workflow started", selected.error);
   const procurementId =
     selected.procurementId ||
     selected.procurement?.id ||

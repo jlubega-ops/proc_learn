@@ -61,10 +61,6 @@ import {
   planMethodOptionState,
   planMethodToEnum,
   suggestPlanMethodLabel,
-  suggestTenderSubtype,
-  tenderSubtypeOptionState,
-  TENDER_SUBTYPE_OPTIONS,
-  normalizeTenderSubtype,
 } from "@/lib/projects/procurement-thresholds";
 import {
   buildGoodsWorksTimetable,
@@ -72,6 +68,7 @@ import {
   evaluationWorkingDays,
   validateGoodsWorksTimetableMinimums,
 } from "@/lib/projects/procurement-timetable";
+import { isBiddingMethod } from "@/lib/projects/procurement-methods";
 import { usePersistedFormDraft } from "@/hooks/use-persisted-form-draft";
 import { useApi } from "@/hooks/use-api";
 import { revalidateApi } from "@/lib/api-client-cache";
@@ -97,7 +94,6 @@ function emptyItem(circularSheet = "Goods") {
     currency: "UGX",
     sourceOfFunding: DEFAULT_FUNDING_SOURCE,
     plannedProcurementMethod: "",
-    tenderSubtype: "",
     contractType: "",
     prequalification: "",
     applyReservationScheme: "",
@@ -149,7 +145,6 @@ function formItemFromApi(item) {
     currency: cf.currency || "UGX",
     sourceOfFunding: cf.sourceOfFunding || DEFAULT_FUNDING_SOURCE,
     plannedProcurementMethod: normalizePlanMethod(cf.plannedProcurementMethod) || "",
-    tenderSubtype: normalizeTenderSubtype(cf.tenderSubtype) || "",
     contractType: cf.contractType || "",
     prequalification: cf.prequalification || "",
     applyReservationScheme: cf.applyReservationScheme || "",
@@ -277,7 +272,6 @@ export function OrgProcurementPlanCreateForm({ projectId, planId = "" }) {
                     unitOfMeasure: item?.unitOfMeasure || DEFAULT_UNIT_OF_MEASURE,
                     category: circular,
                     plannedProcurementMethod: normalizePlanMethod(item?.plannedProcurementMethod),
-                    tenderSubtype: normalizeTenderSubtype(item?.tenderSubtype) || "",
                     expectedProcurementPeriod: item?.expectedProcurementPeriod || "Q1",
                   };
                 })
@@ -422,7 +416,6 @@ export function OrgProcurementPlanCreateForm({ projectId, planId = "" }) {
         const built = buildGoodsWorksTimetable({
           bidInvitationDate: item.bidInvitationDate,
           plannedProcurementMethod: item.plannedProcurementMethod,
-          tenderSubtype: item.tenderSubtype,
           category: item.category || item.circularSheet,
           holidays: holidaySet,
         });
@@ -476,45 +469,16 @@ export function OrgProcurementPlanCreateForm({ projectId, planId = "" }) {
           const total = computeLineTotal(next.quantity, next.estimatedUnitPrice);
           const cat = next.category || next.circularSheet;
           const current = normalizePlanMethod(next.plannedProcurementMethod);
-          const microState = planMethodOptionState("Micro procurement", total, cat);
-          const quotationState = planMethodOptionState("Quotation", total, cat);
-          if (current === "Micro procurement" && !microState.enabled) {
-            next.plannedProcurementMethod =
-              suggestPlanMethodLabel(total, cat) || "Quotation";
-          } else if (current === "Quotation" && !quotationState.enabled) {
-            next.plannedProcurementMethod = "Tender";
-          } else if (!current) {
+          const state = current
+            ? planMethodOptionState(current, total, cat)
+            : { enabled: true };
+          if (!current || !state.enabled) {
             next.plannedProcurementMethod = suggestPlanMethodLabel(total, cat);
-          }
-          const methodNow = normalizePlanMethod(next.plannedProcurementMethod);
-          if (methodNow === "Tender") {
-            const sub = normalizeTenderSubtype(next.tenderSubtype);
-            const subState = sub
-              ? tenderSubtypeOptionState(sub, total, cat)
-              : { enabled: false };
-            if (!sub || !subState.enabled) {
-              next.tenderSubtype = suggestTenderSubtype(total, cat);
-            }
-          } else {
-            next.tenderSubtype = "";
-          }
-        }
-        if ("plannedProcurementMethod" in patch) {
-          const methodNow = normalizePlanMethod(next.plannedProcurementMethod);
-          const total = computeLineTotal(next.quantity, next.estimatedUnitPrice);
-          const cat = next.category || next.circularSheet;
-          if (methodNow === "Tender") {
-            next.tenderSubtype =
-              normalizeTenderSubtype(next.tenderSubtype) ||
-              suggestTenderSubtype(total, cat);
-          } else {
-            next.tenderSubtype = "";
           }
         }
         const sheetNow = normalizePlanSheetType(next.category || next.sheetType);
         const timetableDrivers =
           "plannedProcurementMethod" in patch ||
-          "tenderSubtype" in patch ||
           "category" in patch ||
           "circularSheet" in patch ||
           "bidInvitationDate" in patch;
@@ -522,7 +486,6 @@ export function OrgProcurementPlanCreateForm({ projectId, planId = "" }) {
           const built = buildGoodsWorksTimetable({
             bidInvitationDate: next.bidInvitationDate,
             plannedProcurementMethod: next.plannedProcurementMethod,
-            tenderSubtype: next.tenderSubtype,
             category: next.category || next.circularSheet,
             holidays: holidaySetRef.current,
           });
@@ -602,18 +565,6 @@ export function OrgProcurementPlanCreateForm({ projectId, planId = "" }) {
         if (!state.enabled) {
           errors[`items.${idx}.plannedProcurementMethod`] =
             state.reason || "This method is not allowed for the estimated amount.";
-        }
-        if (method === "Tender") {
-          const sub = normalizeTenderSubtype(item.tenderSubtype);
-          if (!sub) {
-            errors[`items.${idx}.tenderSubtype`] = "Choose open or restricted bidding.";
-          } else {
-            const subState = tenderSubtypeOptionState(sub, total, circular);
-            if (!subState.enabled) {
-              errors[`items.${idx}.tenderSubtype`] =
-                subState.reason || "This bidding type is not allowed for the amount.";
-            }
-          }
         }
         if (itemSheet !== PLAN_SHEET_TYPE.CONSULTANCY && method) {
           Object.assign(
@@ -1175,33 +1126,6 @@ export function OrgProcurementPlanCreateForm({ projectId, planId = "" }) {
                   );
                 })}
               </TextField>
-              {normalizePlanMethod(item.plannedProcurementMethod) === "Tender" ? (
-                <TextField
-                  select
-                  label="Bidding type"
-                  value={normalizeTenderSubtype(item.tenderSubtype) || ""}
-                  onChange={(e) => updateItem(idx, { tenderSubtype: e.target.value })}
-                  fullWidth
-                  error={Boolean(fieldErrors[`items.${idx}.tenderSubtype`])}
-                  helperText={
-                    fieldErrors[`items.${idx}.tenderSubtype`] ||
-                    "PPDA open / restricted (same Tender process)"
-                  }
-                  sx={themedTextFieldSx}
-                >
-                  <MenuItem value="">Select…</MenuItem>
-                  {TENDER_SUBTYPE_OPTIONS.map((o) => {
-                    const state = tenderSubtypeOptionState(o.value, lineTotal, item.category);
-                    return (
-                      <MenuItem key={o.value} value={o.value} disabled={!state.enabled}>
-                        {o.label}
-                        {state.recommended ? " (recommended)" : ""}
-                        {!state.enabled && state.reason ? ` — ${state.reason}` : ""}
-                      </MenuItem>
-                    );
-                  })}
-                </TextField>
-              ) : null}
               <TextField
                 select
                 label="Contract type"
@@ -1327,10 +1251,7 @@ export function OrgProcurementPlanCreateForm({ projectId, planId = "" }) {
                     helperText={
                       fieldErrors[`items.${idx}.bidClosingOpeningDate`] ||
                       (() => {
-                        const n = minimumBiddingWorkingDays(
-                          item.plannedProcurementMethod,
-                          item.tenderSubtype,
-                        );
+                        const n = minimumBiddingWorkingDays(item.plannedProcurementMethod);
                         return n > 0
                           ? `Min ${n} working days after invitation`
                           : "No prescribed minimum (micro / direct)";
@@ -1472,7 +1393,7 @@ export function OrgProcurementPlanCreateForm({ projectId, planId = "" }) {
                 helperText={
                   fieldErrors[`items.${idx}.contractSigningDate`] ||
                   (!isConsultancy
-                    ? planMethodToEnum(item.plannedProcurementMethod) === "TENDER"
+                    ? isBiddingMethod(planMethodToEnum(item.plannedProcurementMethod))
                       ? "After 10-day standstill from BEB + 3 working days"
                       : "3 working days after BEB (standstill exempt)"
                     : undefined)

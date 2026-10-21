@@ -215,7 +215,7 @@ async function main() {
   const dup = await createProcurementFromApprovedRequisition(prisma, {
     projectId,
     requisitionId: q.requisitionId,
-    procurementMethod: "TENDER",
+    procurementMethod: "OPEN_DOMESTIC",
     actorOrgUserId: users.Peter.id,
     actorRoleName: users.Peter.projectOrgRole.name,
   });
@@ -226,9 +226,9 @@ async function main() {
     dup.error,
   );
 
-  // 4) Inactive process blocks (deactivate Tender, try TENDER)
+  // 4) Inactive process blocks (deactivate open domestic bidding, try that method)
   const tenderFlow = await prisma.projectOrgProcessFlow.findFirst({
-    where: { code: PROCESS_FLOW_CODES.TENDER_PROCESS },
+    where: { code: PROCESS_FLOW_CODES.OPEN_DOMESTIC_BIDDING },
   });
   const adoption = await prisma.projectOrgProcessFlowAdoption.findFirst({
     where: { projectId, processFlowId: tenderFlow.id },
@@ -238,22 +238,22 @@ async function main() {
     data: { isActive: false, deactivatedAt: new Date() },
   });
 
-  const t = await driveToApproved(prisma, users, ctx, "Desktops for Tender inactive test");
-  assert(t.ok, "drive tender case to APPROVED", t.error);
+  const t = await driveToApproved(prisma, users, ctx, "Desktops for bidding inactive test");
+  assert(t.ok, "drive bidding case to APPROVED", t.error);
   const methodTaskT = await pendingTask(users.Peter.id, "Method");
-  assert(Boolean(methodTaskT), "method task for tender inactive case");
+  assert(Boolean(methodTaskT), "method task for bidding inactive case");
   r = await actOnRequisitionTask(prisma, {
     taskId: methodTaskT.id,
     actorOrgUserId: users.Peter.id,
     actorRoleName: users.Peter.projectOrgRole.name,
     actorDepartmentId: users.Peter.departmentId,
     decision: OrgWorkflowDecision.SELECT_METHOD,
-    procurementMethod: "TENDER",
+    procurementMethod: "OPEN_DOMESTIC",
   });
-  assert(!r.ok, "inactive tender process blocks selection");
+  assert(!r.ok, "inactive bidding process blocks selection");
   assert(/inactive/i.test(r.error || ""), "clear inactive message", r.error);
 
-  // Reactivate tender for cleanliness
+  // Reactivate bidding process for cleanliness
   await prisma.projectOrgProcessFlowAdoption.update({
     where: { id: adoption.id },
     data: { isActive: true, activatedAt: new Date(), deactivatedAt: null },

@@ -5,17 +5,20 @@ import CheckCircleRounded from "@mui/icons-material/CheckCircleRounded";
 import BlockRounded from "@mui/icons-material/BlockRounded";
 import { formatMoneyUGX } from "@/lib/money";
 import {
+  methodRequiresDirectGrounds,
+  PROCUREMENT_METHOD_CATALOGUE,
+} from "@/lib/projects/procurement-methods";
+import {
   bandsForThresholdCategory,
   checkMethodValueCeiling,
   planMethodOptionState,
   resolveThresholdCategory,
 } from "@/lib/projects/procurement-thresholds";
 
-const METHODS = [
-  { value: "MICRO", label: "Micro Procurement" },
-  { value: "QUOTATION", label: "Quotation" },
-  { value: "TENDER", label: "Tender" },
-];
+const METHODS = PROCUREMENT_METHOD_CATALOGUE.map((m) => ({
+  value: m.code,
+  label: m.label,
+}));
 
 /**
  * @param {unknown} method
@@ -26,6 +29,7 @@ export function methodAllowedForValue(method, value, opts = {}) {
   return checkMethodValueCeiling(String(method || ""), value, {
     category: opts.category,
     allowDirectMicro: opts.allowDirectMicro,
+    directProcurement: methodRequiresDirectGrounds(method),
   }).ok;
 }
 
@@ -81,7 +85,7 @@ export function OrgMethodEligibility({
       <div className="text-xs opacity-80">
         Guideline 1/2025 ({catKey.replace(/_/g, " ").toLowerCase()}): Micro ≤{" "}
         {formatMoneyUGX(bands.microMax)} · Quotation ≤ {formatMoneyUGX(bands.quotationMax)} ·
-        Restricted ≤ {formatMoneyUGX(bands.restrictedMax)} · Open above
+        Restricted ≤ {formatMoneyUGX(bands.restrictedMax)} · Open above · Direct with grounds
       </div>
       <div className="flex flex-wrap items-center gap-2">
         <span className="font-semibold">
@@ -93,7 +97,7 @@ export function OrgMethodEligibility({
           });
           const isChosen = selecting ? chosen === m.value : recorded === m.value;
           const suffix = state.directOnly
-            ? " (Direct only)"
+            ? " (grounds required)"
             : state.recommended
               ? " (recommended)"
               : "";

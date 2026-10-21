@@ -2,7 +2,6 @@ import {
   OrgAwardStatus,
   OrgContractStatus,
   OrgLpoStatus,
-  OrgProcurementMethod,
   OrgProcurementStatus,
   OrgWorkflowInstanceStatus,
   OrgWorkflowTaskStatus,
@@ -18,15 +17,19 @@ import { serializeProviderSummary } from "@/lib/projects/providers";
 import { PROCESS_FLOW_CODES } from "@/lib/projects/process-catalogue";
 import { assertProcessActive } from "@/lib/projects/process-activation";
 import {
+  isMicroStyleMethod,
+  methodUsesContract,
+  methodUsesLpo,
+} from "@/lib/projects/procurement-methods";
+import {
   normalizeDeliveryAddress,
   resolveDeliveryAddress,
   validateDeliveryAddressInput,
 } from "@/lib/projects/delivery-address";
 
 /**
- * Contracts are used for the TENDER path; LPOs (Local Purchase Orders) for QUOTATION.
- * Micro Procurement never reaches this stage — it is completed entirely by a
- * Purchase Instruction (see purchase-instructions.js).
+ * Contracts for bidding methods; LPOs for quotation.
+ * Micro / Direct never reach this stage — they use a Purchase Instruction.
  */
 
 /** @param {any} row */
@@ -136,21 +139,21 @@ export async function createContract(prisma, opts) {
   });
   if (!procurement) return { ok: false, error: "Procurement not found in this organisation.", status: 404 };
 
-  if (procurement.procurementMethod === OrgProcurementMethod.MICRO) {
+  if (isMicroStyleMethod(procurement.procurementMethod)) {
     return {
       ok: false,
       error:
-        "Micro Procurement does not use contracts or LPOs — it is completed by issuing a Purchase Instruction.",
+        "Micro and Direct procurement do not use contracts or LPOs — issue a Purchase Instruction instead.",
       status: 400,
       code: "MICRO_USES_PI_ONLY",
     };
   }
-  if (procurement.procurementMethod !== OrgProcurementMethod.TENDER) {
+  if (!methodUsesContract(procurement.procurementMethod)) {
     return {
       ok: false,
-      error: "Contracts are only issued for the Tender path. Quotation procurements use an LPO instead.",
+      error: "Contracts are only issued for bidding methods. Quotation procurements use an LPO instead.",
       status: 400,
-      code: "CONTRACT_REQUIRES_TENDER",
+      code: "CONTRACT_REQUIRES_BIDDING",
     };
   }
   const contractOff = await assertProcessActive(prisma, opts.projectId, PROCESS_FLOW_CODES.CONTRACT_PROCESS);
@@ -313,19 +316,19 @@ export async function createLpo(prisma, opts) {
   });
   if (!procurement) return { ok: false, error: "Procurement not found in this organisation.", status: 404 };
 
-  if (procurement.procurementMethod === OrgProcurementMethod.MICRO) {
+  if (isMicroStyleMethod(procurement.procurementMethod)) {
     return {
       ok: false,
       error:
-        "Micro Procurement does not use contracts or LPOs — it is completed by issuing a Purchase Instruction.",
+        "Micro and Direct procurement do not use contracts or LPOs — issue a Purchase Instruction instead.",
       status: 400,
       code: "MICRO_USES_PI_ONLY",
     };
   }
-  if (procurement.procurementMethod !== OrgProcurementMethod.QUOTATION) {
+  if (!methodUsesLpo(procurement.procurementMethod)) {
     return {
       ok: false,
-      error: "LPOs are only issued for the Quotation path. Tender procurements use a contract instead.",
+      error: "LPOs are only issued for the Quotation path. Bidding methods use a contract instead.",
       status: 400,
       code: "LPO_REQUIRES_QUOTATION",
     };

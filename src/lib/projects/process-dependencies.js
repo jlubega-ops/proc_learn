@@ -8,12 +8,9 @@ import {
   ASSESSMENT_PROCESS_CATALOGUE,
   assessmentProcessMeta,
 } from "@/lib/academic/assessment-process-catalogue";
+import { METHOD_PROCESS_CODES } from "@/lib/projects/procurement-methods";
 
-const METHOD_CODES = [
-  PROCESS_FLOW_CODES.MICRO_PROCUREMENT,
-  PROCESS_FLOW_CODES.QUOTATION_PROCESS,
-  PROCESS_FLOW_CODES.TENDER_PROCESS,
-];
+const METHOD_CODES = [...METHOD_PROCESS_CODES];
 
 /** Procurement-path order for listing processes. */
 export const PROCESS_PATH_ORDER = ASSESSMENT_PROCESS_CATALOGUE.map((p) => p.code);

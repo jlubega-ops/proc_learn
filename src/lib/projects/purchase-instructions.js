@@ -1,5 +1,4 @@
 import {
-  OrgProcurementMethod,
   OrgProviderStatus,
   OrgPurchaseInstructionStatus,
   OrgWorkflowInstanceStatus,
@@ -16,6 +15,7 @@ import {
   validatePurchaseInstructionResponse,
   validatePurchaseInstructionTerms,
 } from "@/lib/validation/purchase-instruction";
+import { isMicroStyleMethod } from "@/lib/projects/procurement-methods";
 
 /**
  * @param {any} row
@@ -105,10 +105,10 @@ export async function issuePurchaseInstruction(prisma, opts) {
   if (!procurement) {
     return { ok: false, error: "Procurement not found in this organisation.", status: 404 };
   }
-  if (procurement.procurementMethod !== OrgProcurementMethod.MICRO) {
+  if (!isMicroStyleMethod(procurement.procurementMethod)) {
     return {
       ok: false,
-      error: "Purchase instructions can only be issued for Micro Procurement.",
+      error: "Purchase instructions can only be issued for Micro or Direct procurement.",
       status: 400,
     };
   }

@@ -38,6 +38,7 @@ import {
 } from "@/lib/admin-mui-surfaces";
 import { clickableTableRowProps, stopRowClick } from "@/lib/projects/clickable-table-row";
 import { formatMoneyUGX } from "@/lib/money";
+import { procurementMethodLabel } from "@/lib/projects/procurement-methods";
 import { PROCUREMENT_STAGE_PAGES } from "@/lib/projects/procurement-stage-pages";
 /** @param {string | null | undefined} value */
 function shortDate(value) {
@@ -246,7 +247,12 @@ export function OrgProcurementStageList({ projectId, stage }) {
                         <span className="font-semibold">{r.procurementNumber}</span>
                         <div className="text-xs opacity-80">{r.title}</div>
                         <div className="mt-1 flex flex-wrap items-center gap-1">
-                          <Chip size="small" color="info" variant="outlined" label={r.procurementMethod} />
+                          <Chip
+                            size="small"
+                            color="info"
+                            variant="outlined"
+                            label={procurementMethodLabel(r.procurementMethod)}
+                          />
                           {r.department ? <span className="text-xs opacity-70">{r.department}</span> : null}
                         </div>
                       </TableCell>
