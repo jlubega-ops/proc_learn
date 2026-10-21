@@ -214,13 +214,23 @@ export function serializeRequisition(row) {
       : null,
     isEmergency: Boolean(row.procurementPlan?.isEmergency),
     procurementPlanItem: row.procurementPlanItem
-      ? {
-          id: row.procurementPlanItem.id,
-          title: row.procurementPlanItem.title,
-          quantity: row.procurementPlanItem.quantity?.toString?.(),
-          estimatedTotal: row.procurementPlanItem.estimatedTotal?.toString?.(),
-          unitOfMeasure: row.procurementPlanItem.unitOfMeasure || null,
-        }
+      ? (() => {
+          const cf =
+            row.procurementPlanItem.circularFields &&
+            typeof row.procurementPlanItem.circularFields === "object"
+              ? row.procurementPlanItem.circularFields
+              : {};
+          return {
+            id: row.procurementPlanItem.id,
+            title: row.procurementPlanItem.title,
+            quantity: row.procurementPlanItem.quantity?.toString?.(),
+            estimatedTotal: row.procurementPlanItem.estimatedTotal?.toString?.(),
+            unitOfMeasure: row.procurementPlanItem.unitOfMeasure || null,
+            category: row.procurementPlanItem.category || cf.circularSheet || null,
+            sourceOfFunding: cf.sourceOfFunding || null,
+            plannedProcurementMethod: cf.plannedProcurementMethod || null,
+          };
+        })()
       : null,
     budgetLine: budget,
     form5PartI: row.form5PartI || null,
@@ -265,6 +275,8 @@ export const requisitionInclude = {
       quantity: true,
       estimatedTotal: true,
       unitOfMeasure: true,
+      category: true,
+      circularFields: true,
     },
   },
   budgetLine: {
@@ -592,6 +604,20 @@ export async function createOrUpdateRequisitionDraft(prisma, opts) {
     form5Body.fundingItem = "";
     form5Body.balanceRemaining = "";
   }
+  const planItemCf =
+    planItem?.circularFields && typeof planItem.circularFields === "object"
+      ? planItem.circularFields
+      : {};
+  if (!String(form5Body.sourceOfFunding || "").trim() && planItemCf.sourceOfFunding) {
+    form5Body.sourceOfFunding = planItemCf.sourceOfFunding;
+  }
+  if (
+    !String(form5Body.categorySuppliesWorksServices || "").trim() &&
+    (category || planItem?.category || planItemCf.circularSheet)
+  ) {
+    form5Body.categorySuppliesWorksServices =
+      category || planItem?.category || planItemCf.circularSheet || "";
+  }
   const form5Snap = buildForm5PartI(
     {
       title,
@@ -603,6 +629,13 @@ export async function createOrUpdateRequisitionDraft(prisma, opts) {
       financialYear: fy ? { label: fy.label } : null,
       department: dept ? { code: dept.code, name: dept.name } : null,
       procurementPlan: plan ? { planReference: plan.planReference || null } : null,
+      procurementPlanItem: planItem
+        ? {
+            category: planItem.category || planItemCf.circularSheet || null,
+            sourceOfFunding: planItemCf.sourceOfFunding || null,
+            circularFields: planItemCf,
+          }
+        : null,
       items: itemRows.map((it) => ({
         lineNumber: it.lineNumber,
         itemName: it.itemName,

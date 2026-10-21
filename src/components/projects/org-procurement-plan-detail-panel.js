@@ -123,7 +123,7 @@ const PLAN_ITEM_COLUMNS = [
   { id: "title", label: "Title" },
   {
     id: "category",
-    label: "Circular sheet",
+    label: "Category",
     render: (row) => row.circularFields?.circularSheet || row.category || "—",
   },
   {
@@ -214,7 +214,7 @@ function planPrintSections(plan) {
       columns: [
         { id: "no", label: "No.", width: "5%" },
         { id: "item", label: "Item" },
-        { id: "sheet", label: "Circular sheet" },
+        { id: "category", label: "Category" },
         { id: "quantity", label: "Qty", align: "right" },
         { id: "unit", label: "Unit" },
         { id: "unitPrice", label: `Unit price (${currency})`, align: "right" },
@@ -232,7 +232,7 @@ function planPrintSections(plan) {
         cells: {
           no: `${idx + 1}.`,
           item: item.title || "—",
-          sheet:
+          category:
             item.circularFields?.circularSheet ||
             item.category ||
             SHEET_LABELS[item.circularFields?.sheetType] ||
@@ -278,7 +278,15 @@ function PlanDetailsGrid({ plan }) {
       value: dept ? `${dept.name}${dept.code ? ` (${dept.code})` : ""}` : null,
     },
     { label: "Current stage", value: plan.stageLabel || plan.status },
-    { label: "Circular sheet", value: SHEET_LABELS[plan.sheetType] || plan.sheetType, wide: true },
+    {
+      label: "Category",
+      value:
+        plan.items?.[0]?.circularFields?.circularSheet ||
+        plan.items?.[0]?.category ||
+        SHEET_LABELS[plan.sheetType] ||
+        plan.sheetType,
+      wide: true,
+    },
     {
       label: "Planning period",
       value:

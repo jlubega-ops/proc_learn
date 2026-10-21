@@ -256,6 +256,13 @@ function SignaturesSection({ signatures }) {
  *   sections: PrintSection[];
  *   signatures?: PrintSignature[];
  *   printedBy?: { name?: string | null; role?: string | null } | null;
+ *   formalHeader?: {
+ *     formCode?: string | null;
+ *     regulationRef?: string | null;
+ *     actTitle?: string | null;
+ *     documentHeading?: string | null;
+ *     partHeading?: string | null;
+ *   } | null;
  * }} p
  */
 export function PrintDocument({
@@ -266,6 +273,7 @@ export function PrintDocument({
   sections,
   signatures = [],
   printedBy,
+  formalHeader = null,
 }) {
   const mounted = useSyncExternalStore(
     noopSubscribe,
@@ -303,7 +311,9 @@ export function PrintDocument({
               <td className={`${CELL} text-center`}>
                 <p className="text-[14pt] font-extrabold uppercase">{organisation.name || "—"}</p>
                 {organisation.code ? <p className="text-[9pt]">Org code: {organisation.code}</p> : null}
-                <p className="mt-1 text-[12pt] font-bold uppercase">{documentTitle}</p>
+                {!formalHeader ? (
+                  <p className="mt-1 text-[12pt] font-bold uppercase">{documentTitle}</p>
+                ) : null}
               </td>
               <td className={`${CELL} w-[22%] text-[9pt]`}>
                 <p>
@@ -319,6 +329,42 @@ export function PrintDocument({
             </tr>
           </tbody>
         </table>
+
+        {formalHeader ? (
+          <table className="print-section mt-1 w-full border-collapse">
+            <tbody>
+              <tr>
+                <td className={`${CELL} w-[28%] text-center text-[12pt] font-extrabold uppercase`}>
+                  {formalHeader.formCode || "—"}
+                </td>
+                <td className={`${CELL} text-right text-[8pt] font-semibold`}>
+                  {formalHeader.regulationRef || ""}
+                </td>
+              </tr>
+              {formalHeader.actTitle ? (
+                <tr>
+                  <td className={`${CELL} text-center text-[10pt] font-extrabold uppercase`} colSpan={2}>
+                    {formalHeader.actTitle}
+                  </td>
+                </tr>
+              ) : null}
+              {formalHeader.documentHeading ? (
+                <tr>
+                  <td className={`${CELL} text-center text-[11pt] font-extrabold uppercase underline`} colSpan={2}>
+                    {formalHeader.documentHeading}
+                  </td>
+                </tr>
+              ) : null}
+              {formalHeader.partHeading ? (
+                <tr>
+                  <td className={`${CELL} text-center text-[10pt] font-bold uppercase`} colSpan={2}>
+                    {formalHeader.partHeading}
+                  </td>
+                </tr>
+              ) : null}
+            </tbody>
+          </table>
+        ) : null}
 
         {sections.map((s) =>
           s.type === "fields" ? (

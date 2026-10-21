@@ -88,6 +88,14 @@ import {
 } from "@/lib/projects/procurement-thresholds";
 import { useProcessActivation } from "@/hooks/use-process-activation";
 import { processCodesForMethod } from "@/lib/projects/process-catalogue";
+import {
+  FORM5_ACT_TITLE,
+  FORM5_FORM_CODE,
+  FORM5_PART_I_TITLE,
+  FORM5_PART_II_TITLE,
+  FORM5_REGULATION_REF,
+  FORM5_REQUEST_TITLE,
+} from "@/lib/projects/ppda-forms";
 
 const REQUISITION_ITEM_COLUMNS = [
   {
@@ -135,11 +143,15 @@ function budgetLineLabel(row) {
  */
 function requisitionDetailFields(row, history) {
   const endorsed = stepSignOff(history, ENDORSE_STEP_RE);
+  const planItem = row.procurementPlanItem || {};
+  const category = row.category || planItem.category || null;
+  const sourceOfFunding = planItem.sourceOfFunding || null;
   return [
     { label: "Current stage", value: row.stageLabel || row.statusLabel || row.status, wide: true },
     { label: "Financial year", value: row.financialYear?.label },
     { label: "Department", value: deptLabel(row) },
-    { label: "Category", value: row.category },
+    { label: "Category", value: category },
+    { label: "Source of funding", value: sourceOfFunding },
     { label: "Required by", value: row.requiredByDate ? formatPrintDate(row.requiredByDate) : null },
     ...(row.procurementMethod
       ? [{ label: "Procurement method", value: procurementMethodLabel(row.procurementMethod) }]
@@ -337,39 +349,66 @@ function requisitionNeedFields(row) {
 /**
  * @param {any} row
  * @param {any[]} history
+ * @param {{ code?: string | null } | null} [organisation]
  */
-function requisitionPrintSections(row, history) {
+function requisitionPrintSections(row, history, organisation = null) {
   const partI = row.form5PartI && typeof row.form5PartI === "object" ? row.form5PartI : {};
   const shortlist = Array.isArray(row.form5PartII?.shortlist) ? row.form5PartII.shortlist : [];
+  const planItem = row.procurementPlanItem || {};
+  const category =
+    partI.categorySuppliesWorksServices || row.category || planItem.category || null;
+  const sourceOfFunding = planItem.sourceOfFunding || partI.sourceOfFunding || null;
+  const pdeCode = partI.pdeCode || row.department?.code || organisation?.code || null;
   /** @type {any[]} */
   const sections = [
     {
       type: "fields",
-      title: "Section A: Requisition details",
+      title: "Procurement Reference Number",
       fields: [
-        { label: "Subject of procurement", value: row.title, full: true },
-        { label: "Reference", value: row.requisitionReference },
-        { label: "Financial year", value: row.financialYear?.label },
+        { label: "Code of Procuring and Disposing Entity", value: pdeCode },
+        { label: "Supplies / Works / Non-consultancy", value: category },
+        { label: "Financial year", value: partI.financialYearLabel || row.financialYear?.label },
+        { label: "Sequence number", value: partI.sequenceNumber || row.requisitionReference },
+      ],
+    },
+    {
+      type: "fields",
+      title: "Particulars of Procurement",
+      fields: [
+        { label: "Subject of Procurement", value: partI.subjectOfProcurement || row.title, full: true },
+        {
+          label: "Procurement Plan Reference",
+          value: partI.procurementPlanReference || row.procurementPlan?.planReference || planLabel(row),
+          full: true,
+        },
+        { label: "Category", value: category },
+        { label: "Source of funding", value: sourceOfFunding },
+        {
+          label: "Location for Delivery",
+          value: partI.locationForDelivery || row.deliveryLocation,
+        },
+        {
+          label: "Date Required",
+          value:
+            partI.dateRequired ||
+            (row.requiredByDate ? formatPrintDate(row.requiredByDate) : null),
+        },
         { label: "Department", value: deptLabel(row) },
-        { label: "Category", value: row.category },
         { label: "Current stage", value: row.stageLabel || row.statusLabel || row.status },
         {
           label: "Procurement method",
           value: procurementMethodLabel(row.procurementMethod) || null,
         },
-        { label: "Required by", value: row.requiredByDate ? formatPrintDate(row.requiredByDate) : null },
-        { label: "Delivery location", value: row.deliveryLocation },
-        { label: "Procurement plan", value: planLabel(row), full: true },
-        { label: "Plan item", value: row.procurementPlanItem?.title, full: true },
+        { label: "Plan item", value: planItem.title, full: true },
         ...(row.planCheck
           ? [
               {
                 label: "Planned",
-                value: `${qtyLabel(row.planCheck.plannedQuantity, row.procurementPlanItem?.unitOfMeasure)} · ${formatMoneyUGX(row.planCheck.plannedAmount)}`,
+                value: `${qtyLabel(row.planCheck.plannedQuantity, planItem.unitOfMeasure)} · ${formatMoneyUGX(row.planCheck.plannedAmount)}`,
               },
               {
                 label: "Remaining on plan",
-                value: `${qtyLabel(row.planCheck.remainingQuantity, row.procurementPlanItem?.unitOfMeasure)} · ${formatMoneyUGX(row.planCheck.remainingPlannedValue)} (${planCheckResult(row)?.label})`,
+                value: `${qtyLabel(row.planCheck.remainingQuantity, planItem.unitOfMeasure)} · ${formatMoneyUGX(row.planCheck.remainingPlannedValue)} (${planCheckResult(row)?.label})`,
               },
             ]
           : []),
@@ -384,8 +423,9 @@ function requisitionPrintSections(row, history) {
     },
     {
       type: "fields",
-      title: "Section B: Funds availability",
+      title: "Availability of funds (prior to Accounting Officer approval)",
       fields: [
+        { label: "Source of funding", value: sourceOfFunding },
         { label: "Vote / head no.", value: partI.voteHeadNo },
         { label: "Programme", value: partI.programme },
         { label: "Sub-programme", value: partI.subProgramme },
@@ -428,14 +468,15 @@ function requisitionPrintSections(row, history) {
     },
     {
       type: "table",
-      title: "Section C: Items",
+      title: "Details relating to the Procurement (attach specifications / TOR / scope as needed)",
       columns: [
-        { id: "no", label: "No.", width: "5%" },
-        { id: "item", label: "Item" },
-        { id: "quantity", label: "Qty", align: "right" },
-        { id: "unit", label: "Unit" },
-        { id: "unitPrice", label: "Unit price (UGX)", align: "right" },
-        { id: "total", label: "Total (UGX)", align: "right" },
+        { id: "no", label: "Item No.", width: "6%" },
+        { id: "item", label: "Item Description" },
+        { id: "quantity", label: "Qnty", align: "right" },
+        { id: "unit", label: "Unit of Measure" },
+        { id: "unitPrice", label: "Estimated Unit Cost", align: "right" },
+        { id: "total", label: "Market price of the procurement", align: "right" },
+        { id: "currency", label: "Currency", width: "10%" },
       ],
       rows: (row.items || []).map((item, idx) => ({
         key: item.id || idx,
@@ -447,10 +488,14 @@ function requisitionPrintSections(row, history) {
           unit: item.unitOfMeasure || "—",
           unitPrice: formatMoneyAmount(item.estimatedUnitPrice) || "—",
           total: formatMoneyAmount(item.estimatedTotal) || "—",
+          currency: partI.currency || "UGX",
         },
       })),
       empty: "No items.",
-      footer: { label: "Estimated total", value: formatMoneyUGX(row.estimatedTotalValue) },
+      footer: {
+        label: "Estimated Total Cost",
+        value: formatMoneyUGX(row.estimatedTotalValue),
+      },
     },
   ];
   if (shortlist.length) {
@@ -491,7 +536,7 @@ function requisitionPrintSections(row, history) {
   if (partII.methodJustification || partII.ccChairName || partII.ccSecretaryName || committeeActions.length) {
     sections.push({
       type: "fields",
-      title: "Section E: Procurement method approval",
+      title: FORM5_PART_II_TITLE,
       fields: [
         {
           label: "Procurement method",
@@ -989,11 +1034,18 @@ export function OrgRequisitionDetailPanel({ projectId, requisitionId }) {
       </div>
 
       <PrintDocument
-        documentTitle="Requisition for procurement (PP Form 5)"
+        documentTitle="PP Form 5"
         reference={row.requisitionReference}
         status={row.stageLabel || row.statusLabel || row.status}
         organisation={organisation}
-        sections={requisitionPrintSections(row, history)}
+        formalHeader={{
+          formCode: FORM5_FORM_CODE,
+          regulationRef: FORM5_REGULATION_REF,
+          actTitle: FORM5_ACT_TITLE,
+          documentHeading: FORM5_REQUEST_TITLE,
+          partHeading: FORM5_PART_I_TITLE,
+        }}
+        sections={requisitionPrintSections(row, history, organisation)}
         signatures={requisitionSignatures(row, history)}
         printedBy={printedBy}
       />
@@ -1011,6 +1063,24 @@ export function OrgRequisitionDetailPanel({ projectId, requisitionId }) {
             ) : null}
           </div>
           <div className="flex flex-wrap gap-1">
+            {row.category || row.procurementPlanItem?.category ? (
+              <Chip
+                size="small"
+                color="info"
+                variant="outlined"
+                label={row.category || row.procurementPlanItem?.category}
+                title="Category"
+              />
+            ) : null}
+            {row.procurementPlanItem?.sourceOfFunding ? (
+              <Chip
+                size="small"
+                color="warning"
+                variant="outlined"
+                label={row.procurementPlanItem.sourceOfFunding}
+                title="Source of funding"
+              />
+            ) : null}
             {row.procurementMethod ? (
               <Chip
                 size="small"

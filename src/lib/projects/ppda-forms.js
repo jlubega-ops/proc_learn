@@ -16,6 +16,18 @@ import {
   procurementMethodLabel,
 } from "@/lib/projects/procurement-methods";
 
+/** Official Form 5 heading block (PPDA Act / Regulations). */
+export const FORM5_FORM_CODE = "PP FORM 5";
+export const FORM5_REGULATION_REF =
+  "Regulation 3(5), 12(3), 13(3), 14(4), 15(4), 17(2), 44(5), 45(4)";
+export const FORM5_ACT_TITLE =
+  "THE PUBLIC PROCUREMENT AND DISPOSAL OF PUBLIC ASSETS ACT, 2003";
+export const FORM5_REQUEST_TITLE = "REQUEST FOR APPROVAL OF PROCUREMENT";
+export const FORM5_PART_I_TITLE =
+  "PART I: REQUEST BY USER DEPARTMENT FOR APPROVAL OF PROCUREMENT";
+export const FORM5_PART_II_TITLE =
+  "PART II: SUBMISSION BY THE PROCUREMENT AND DISPOSAL UNIT TO THE CONTRACTS COMMITTEE";
+
 export const PLAN_SHEET_TYPE = {
   GOODS_WORKS_NON_CONSULTANCY: "GOODS_WORKS_NON_CONSULTANCY",
   CONSULTANCY: "CONSULTANCY",
@@ -345,7 +357,9 @@ export function buildForm5PartI(requisition, body = {}) {
     categorySuppliesWorksServices:
       trimOrNull(body.categorySuppliesWorksServices) ||
       trimOrNull(requisition?.category) ||
-      "Supplies",
+      trimOrNull(requisition?.procurementPlanItem?.category) ||
+      trimOrNull(requisition?.procurementPlanItem?.circularFields?.circularSheet) ||
+      "",
     financialYearLabel:
       trimOrNull(body.financialYearLabel) ||
       trimOrNull(requisition?.financialYear?.label) ||
@@ -387,6 +401,11 @@ export function buildForm5PartI(requisition, body = {}) {
     programme: trimOrNull(body.programme) || "",
     subProgramme: trimOrNull(body.subProgramme) || "",
     fundingItem: trimOrNull(body.fundingItem) || "",
+    sourceOfFunding:
+      trimOrNull(body.sourceOfFunding) ||
+      trimOrNull(requisition?.procurementPlanItem?.sourceOfFunding) ||
+      trimOrNull(requisition?.procurementPlanItem?.circularFields?.sourceOfFunding) ||
+      "",
     balanceRemaining: trimOrNull(body.balanceRemaining) || "",
     lineItems,
     memberName: trimOrNull(body.memberName) || "",
