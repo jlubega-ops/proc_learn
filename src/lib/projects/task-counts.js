@@ -1,4 +1,5 @@
 import { getActiveCommittee, partitionTasksForActingMode } from "@/lib/projects/committee-context";
+import { isNextProcessHandoffTaskTitle } from "@/lib/projects/next-process-handoffs";
 import { procurementSectionSlug } from "@/lib/projects/procurement-stage-pages";
 import { procurementTaskStage } from "@/lib/projects/procurement-task-stage";
 
@@ -55,14 +56,16 @@ export async function countPendingTasksForNav(prisma, { projectId, orgUserId }) 
   ]);
 
   const { visible } = partitionTasksForActingMode(tasks, activeCommittee);
+  // Cross-process handoffs are bell-only — do not badge My Tasks or sidebar sections.
+  const actionable = visible.filter((t) => !isNextProcessHandoffTaskTitle(t.title));
   const base = `/projects/${projectId}`;
   /** @type {Record<string, number>} */
-  const byHref = { [`${base}/tasks`]: visible.length };
-  for (const t of visible) {
+  const byHref = { [`${base}/tasks`]: actionable.length };
+  for (const t of actionable) {
     for (const path of navPathsForTaskInstance(t.instance, t.title)) {
       const href = `${base}/${path}`;
       byHref[href] = (byHref[href] || 0) + 1;
     }
   }
-  return { total: visible.length, byHref };
+  return { total: actionable.length, byHref };
 }

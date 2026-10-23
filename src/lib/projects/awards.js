@@ -30,6 +30,7 @@ export function serializeAward(row) {
     communicatedAt: row.communicatedAt || null,
     acceptedAt: row.acceptedAt || null,
     acceptedByName: row.acceptedByName || null,
+    responseSource: row.responseSource || null,
     declinedAt: row.declinedAt || null,
     declineReason: row.declineReason || null,
     approvalReference: row.approvalReference || null,
@@ -235,11 +236,12 @@ export async function communicateAward(prisma, opts) {
  * The winning provider accepts or declines its COMMUNICATED award in the provider portal.
  * Acceptance lets the PDU prepare the LPO / contract; a decline goes back to the PDU.
  * @param {import("@prisma/client").PrismaClient} prisma
- * @param {{ projectId: string; providerId: string; procurementId: string; body: any }} opts
+ * @param {{ projectId: string; providerId: string; procurementId: string; body: any; responseSource?: string }} opts
  */
 export async function respondToAward(prisma, opts) {
   const v = validatePurchaseInstructionResponse(opts.body || {});
   if (!v.ok) return { ok: false, status: 400, error: "Please fix the highlighted fields.", fieldErrors: v.errors };
+  const responseSource = opts.responseSource === "OFFICER" ? "OFFICER" : "PORTAL";
 
   const row = await prisma.projectOrgAward.findFirst({
     where: { projectId: opts.projectId, procurementId: opts.procurementId, supplierId: opts.providerId },
@@ -272,8 +274,18 @@ export async function respondToAward(prisma, opts) {
   const claimed = await prisma.projectOrgAward.updateMany({
     where: { id: row.id, status: OrgAwardStatus.COMMUNICATED },
     data: accept
-      ? { status: OrgAwardStatus.ACCEPTED, acceptedAt: now, acceptedByName: v.values.acceptedByName }
-      : { status: OrgAwardStatus.DECLINED, declinedAt: now, declineReason: v.values.declineReason },
+      ? {
+          status: OrgAwardStatus.ACCEPTED,
+          acceptedAt: now,
+          acceptedByName: v.values.acceptedByName,
+          responseSource,
+        }
+      : {
+          status: OrgAwardStatus.DECLINED,
+          declinedAt: now,
+          declineReason: v.values.declineReason,
+          responseSource,
+        },
   });
   if (claimed.count !== 1) {
     return { ok: false, status: 409, error: "You have already responded to this award." };
@@ -290,7 +302,8 @@ export async function respondToAward(prisma, opts) {
       awardId: row.id,
       supplierId: opts.providerId,
       actorName: accept ? `${v.values.acceptedByName} — ${providerLabel}` : providerLabel,
-      actorRoleName: "Provider",
+      actorRoleName: responseSource === "OFFICER" ? "Officer (on behalf)" : "Provider",
+      responseSource,
       newStatus: accept ? OrgAwardStatus.ACCEPTED : OrgAwardStatus.DECLINED,
       remarks: accept ? null : v.values.declineReason,
     },

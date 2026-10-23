@@ -64,7 +64,9 @@ function itemsTotal(items) {
  * @param {{ doc: PurchaseInstructionDoc; title?: string; action?: import("react").ReactNode }} p
  */
 export function PurchaseInstructionView({ doc, title = "Purchase instruction", action = null }) {
-  const status = presentPurchaseInstructionStatus(doc.pi?.status);
+  const status = presentPurchaseInstructionStatus(doc.pi?.status, {
+    responseSource: doc.pi?.responseSource,
+  });
   return (
     <Paper variant="outlined" sx={{ p: 2, ...adminOutlinedTableContainerSx }}>
       <div className="flex flex-wrap items-start justify-between gap-2">

@@ -147,13 +147,15 @@ export function serializePlanItem(item) {
       budgetStatus: bl.budget?.status || null,
     };
   }
+  const cf =
+    item.circularFields && typeof item.circularFields === "object" ? item.circularFields : {};
   return {
     id: item.id,
     itemNumber: item.itemNumber,
     title: item.title,
     description: item.description || null,
     specification: item.specification || null,
-    category: item.category || null,
+    category: item.category || cf.circularSheet || null,
     quantity: item.quantity?.toString?.() ?? String(item.quantity),
     unitOfMeasure: item.unitOfMeasure,
     estimatedUnitPrice: item.estimatedUnitPrice?.toString?.() ?? String(item.estimatedUnitPrice),

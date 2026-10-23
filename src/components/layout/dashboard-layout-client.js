@@ -11,6 +11,7 @@ import MenuRounded from "@mui/icons-material/MenuRounded";
 import MenuOpenRounded from "@mui/icons-material/MenuOpenRounded";
 import Tooltip from "@mui/material/Tooltip";
 import { APP_NAME, COPYRIGHT_YEAR, ORG_NAME } from "@/lib/appConfig";
+import { AppBrandLockup } from "@/components/brand/app-brand-lockup";
 import { useAppTheme } from "@/components/providers/theme-provider";
 import { useAuthSession } from "@/components/providers/auth-session-provider";
 import { formatRoleLabel } from "@/lib/roles";
@@ -552,9 +553,12 @@ export default function DashboardLayoutClient({ children }) {
             />
           </div>
           <div className="min-w-0 flex-1">
-            <p className="truncate text-base font-extrabold tracking-tight text-primary">
-              {APP_NAME}
-            </p>
+            <AppBrandLockup
+              className="text-base"
+              nameClassName="font-extrabold tracking-tight text-primary"
+              taglineClassName="text-[0.78em] font-medium tracking-tight text-zinc-500 dark:text-zinc-400"
+              separatorClassName="mx-1 text-[0.78em] font-normal text-zinc-400 dark:text-zinc-500"
+            />
             <p className="truncate text-xs text-zinc-500 dark:text-zinc-400">
               {ORG_NAME}
             </p>

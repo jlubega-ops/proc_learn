@@ -620,9 +620,9 @@ export async function updateDraftBudget(prisma, opts) {
       return;
     }
     codes.add(codeKey);
+    // Nested under budget.lines.create — do not set budgetId (Prisma rejects the scalar FK).
     lineRows.push({
       projectId: opts.projectId,
-      budgetId: existing.id,
       financialYearId: existing.financialYearId,
       departmentId: existing.departmentId,
       code: identity.code,

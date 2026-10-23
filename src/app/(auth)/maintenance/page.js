@@ -4,6 +4,7 @@ import { MaintenanceStatusWatcher } from "@/components/site/maintenance-status-w
 import { APP_NAME } from "@/lib/appConfig";
 import { readSiteSettings } from "@/lib/site-settings";
 import { BrandLogoImage } from "@/components/providers/site-branding-provider";
+import { AppBrandLockup } from "@/components/brand/app-brand-lockup";
 
 export const dynamic = "force-dynamic";
 
@@ -34,7 +35,12 @@ export default async function MaintenancePage() {
                 <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-zinc-500">
                   Makerere University Business School
                 </p>
-                <p className="text-2xl font-extrabold tracking-tight text-primary">{APP_NAME}</p>
+                <AppBrandLockup
+                  className="text-2xl"
+                  nameClassName="font-extrabold tracking-tight text-primary"
+                  taglineClassName="text-[0.55em] font-medium tracking-tight text-zinc-500"
+                  separatorClassName="mx-1.5 text-[0.55em] font-normal text-zinc-400"
+                />
               </div>
             </div>
 

@@ -49,6 +49,22 @@ import { revalidateApi } from "@/lib/api-client-cache";
 import { useProcessActivation } from "@/hooks/use-process-activation";
 import { ProcessGateTooltip } from "@/components/projects/process-gate";
 import { PROCESS_FLOW_CODES } from "@/lib/projects/process-catalogue";
+import {
+  DEFAULT_UNIT_OF_MEASURE,
+  unitOptionsFor,
+} from "@/lib/projects/line-item-options";
+
+/** @param {any} planItem */
+function planItemCategory(planItem) {
+  if (!planItem) return "";
+  return String(planItem.category || planItem.circularFields?.circularSheet || "").trim();
+}
+
+/** @param {any} planItem */
+function planItemUnit(planItem) {
+  if (!planItem) return DEFAULT_UNIT_OF_MEASURE;
+  return String(planItem.unitOfMeasure || "").trim() || DEFAULT_UNIT_OF_MEASURE;
+}
 
 /**
  * @param {unknown} current
@@ -157,7 +173,7 @@ export function OrgRequisitionCreateForm({ projectId, requisitionId = "" }) {
       {
         itemName: "",
         quantity: "1",
-        unitOfMeasure: "Unit",
+        unitOfMeasure: DEFAULT_UNIT_OF_MEASURE,
         estimatedUnitPrice: "",
         lineTotal: "",
       },
@@ -204,7 +220,7 @@ export function OrgRequisitionCreateForm({ projectId, requisitionId = "" }) {
             return {
               itemName: item.itemName || item.title || "",
               quantity: formatMoneyAmount(quantity) || String(quantity || "1"),
-              unitOfMeasure: item.unitOfMeasure || "Unit",
+              unitOfMeasure: item.unitOfMeasure || DEFAULT_UNIT_OF_MEASURE,
               estimatedUnitPrice:
                 formatMoneyAmount(estimatedUnitPrice) || String(estimatedUnitPrice || ""),
               lineTotal: total != null ? formatMoneyAmount(total) : "",
@@ -235,11 +251,12 @@ export function OrgRequisitionCreateForm({ projectId, requisitionId = "" }) {
     },
   });
 
-  function emptyReqLine() {
+  /** @param {string} [unitOfMeasure] */
+  function emptyReqLine(unitOfMeasure = DEFAULT_UNIT_OF_MEASURE) {
     return {
       itemName: "",
       quantity: "1",
-      unitOfMeasure: "Unit",
+      unitOfMeasure: unitOfMeasure || DEFAULT_UNIT_OF_MEASURE,
       estimatedUnitPrice: "",
       lineTotal: "",
     };
@@ -387,22 +404,14 @@ export function OrgRequisitionCreateForm({ projectId, requisitionId = "" }) {
               return {
                 itemName: item.itemName || "",
                 quantity,
-                unitOfMeasure: item.unitOfMeasure || "Unit",
+                unitOfMeasure: item.unitOfMeasure || DEFAULT_UNIT_OF_MEASURE,
                 estimatedUnitPrice,
                 lineTotal:
                   formatMoneyAmount(item.estimatedTotal) ||
                   (total != null ? formatMoneyAmount(total) : ""),
               };
             })
-          : [
-              {
-                itemName: "",
-                quantity: "1",
-                unitOfMeasure: "Unit",
-                estimatedUnitPrice: "",
-                lineTotal: "",
-              },
-            ];
+          : [emptyReqLine()];
         setForm({
           title: req.title || "",
           requisitionReference: req.requisitionReference || "",
@@ -410,7 +419,10 @@ export function OrgRequisitionCreateForm({ projectId, requisitionId = "" }) {
           procurementPlanId: req.procurementPlan?.id || req.procurementPlanId || "",
           procurementPlanItemId: req.procurementPlanItem?.id || req.procurementPlanItemId || "",
           budgetLineId: req.budgetLine?.id || req.budgetLineId || "",
-          category: req.category || "",
+          category:
+            req.category ||
+            req.procurementPlanItem?.category ||
+            "",
           justification: req.justification || "",
           needDescription: req.needDescription || "",
           requiredByDate: req.requiredByDate
@@ -554,7 +566,7 @@ export function OrgRequisitionCreateForm({ projectId, requisitionId = "" }) {
       if (!item.itemName.trim()) errors[`items.${idx}.itemName`] = "Enter an item name.";
       const qtyErr = validatePositiveNumber(item.quantity, "Quantity");
       if (qtyErr) errors[`items.${idx}.quantity`] = qtyErr;
-      if (!item.unitOfMeasure.trim()) errors[`items.${idx}.unitOfMeasure`] = "Enter a unit.";
+      if (!item.unitOfMeasure.trim()) errors[`items.${idx}.unitOfMeasure`] = "Choose a unit.";
       const priceErr = validatePositiveMoney(item.estimatedUnitPrice, "Unit price");
       if (priceErr) errors[`items.${idx}.estimatedUnitPrice`] = priceErr;
     });
@@ -615,6 +627,7 @@ export function OrgRequisitionCreateForm({ projectId, requisitionId = "" }) {
       const next = {
         ...f,
         procurementPlanItemId: planItemId,
+        category: planItemCategory(item),
       };
       if (!item) return next;
       const qty = formatMoneyAmount(item.quantity) || String(item.quantity ?? "1");
@@ -622,7 +635,8 @@ export function OrgRequisitionCreateForm({ projectId, requisitionId = "" }) {
         formatMoneyAmount(item.estimatedUnitPrice) ||
         String(item.estimatedUnitPrice ?? "");
       const total = computeLineTotal(qty, unitPrice);
-      const first = f.items[0] || emptyReqLine();
+      const uom = planItemUnit(item);
+      const first = f.items[0] || emptyReqLine(uom);
       const firstIsBlank =
         !String(first.itemName || "").trim() &&
         !String(first.estimatedUnitPrice || "").trim();
@@ -631,16 +645,19 @@ export function OrgRequisitionCreateForm({ projectId, requisitionId = "" }) {
             {
               itemName: item.title || first.itemName || "",
               quantity: qty || first.quantity || "1",
-              unitOfMeasure: item.unitOfMeasure || first.unitOfMeasure || "Unit",
+              unitOfMeasure: uom,
               estimatedUnitPrice: unitPrice || first.estimatedUnitPrice || "",
               lineTotal: total != null ? formatMoneyAmount(total) : "",
             },
             ...f.items.slice(1),
           ]
-        : f.items;
+        : f.items.map((line, i) =>
+            i === 0 && !String(line.unitOfMeasure || "").trim()
+              ? { ...line, unitOfMeasure: uom }
+              : line,
+          );
       const cf = item.circularFields || {};
       next.title = fillIfBlank(f.title, item.title);
-      next.category = fillIfBlank(f.category, item.category);
       next.justification = fillIfBlank(f.justification, item.justification);
       next.needDescription = fillIfBlank(
         f.needDescription,
@@ -656,7 +673,7 @@ export function OrgRequisitionCreateForm({ projectId, requisitionId = "" }) {
       return next;
     });
     clearFieldError("procurementPlanItemId");
-    for (const key of ["title", "justification", "needDescription", "requiredByDate"]) {
+    for (const key of ["title", "justification", "needDescription", "requiredByDate", "category"]) {
       clearFieldError(key);
     }
     if (item?.budgetLineId) clearFieldError("budgetLineId");
@@ -676,6 +693,7 @@ export function OrgRequisitionCreateForm({ projectId, requisitionId = "" }) {
       ...f,
       procurementPlanId,
       procurementPlanItemId: "",
+      category: "",
       ...(fyChanged ? { financialYearId: planFyId, budgetLineId: "" } : {}),
       ...(nextRef ? { requisitionReference: nextRef } : {}),
     }));
@@ -701,9 +719,11 @@ export function OrgRequisitionCreateForm({ projectId, requisitionId = "" }) {
     try {
       const payload = {
         ...form,
+        category: planItemCategory(selectedPlanItem) || form.category || "",
         requisitionReference: form.requisitionReference.trim(),
         items: form.items.map((item) => ({
           ...item,
+          unitOfMeasure: item.unitOfMeasure || planItemUnit(selectedPlanItem),
           quantity: parseMoneyInput(item.quantity),
           estimatedUnitPrice: parseMoneyInput(item.estimatedUnitPrice),
         })),
@@ -1087,9 +1107,17 @@ export function OrgRequisitionCreateForm({ projectId, requisitionId = "" }) {
         </TextField>
         <TextField
           label="Category"
-          value={form.category}
-          onChange={(e) => setForm((f) => ({ ...f, category: e.target.value }))}
+          value={form.category || (selectedPlanItem ? planItemCategory(selectedPlanItem) : "")}
           fullWidth
+          slotProps={{
+            input: { readOnly: true },
+            inputLabel: { shrink: true },
+          }}
+          helperText={
+            selectedPlanItem
+              ? "From the selected plan item"
+              : "Select a plan item"
+          }
           sx={themedTextFieldSx}
         />
         <TextField
@@ -1207,15 +1235,22 @@ export function OrgRequisitionCreateForm({ projectId, requisitionId = "" }) {
                     sx={{ ...lineFieldSx, minWidth: 100, width: 110, flex: "0 0 110px" }}
                   />
                   <TextField
+                    select
                     name={`items.${idx}.unitOfMeasure`}
                     label="UoM"
-                    value={item.unitOfMeasure}
+                    value={item.unitOfMeasure || DEFAULT_UNIT_OF_MEASURE}
                     onChange={(e) => updateReqLine(idx, { unitOfMeasure: e.target.value })}
                     error={Boolean(fieldErrors[`items.${idx}.unitOfMeasure`])}
                     helperText={fieldErrors[`items.${idx}.unitOfMeasure`] || undefined}
                     slotProps={{ inputLabel: { shrink: true } }}
-                    sx={{ ...lineFieldSx, minWidth: 90, width: 100, flex: "0 0 100px" }}
-                  />
+                    sx={{ ...lineFieldSx, minWidth: 120, width: 130, flex: "0 0 130px" }}
+                  >
+                    {unitOptionsFor(item.unitOfMeasure).map((v) => (
+                      <MenuItem key={v} value={v}>
+                        {v}
+                      </MenuItem>
+                    ))}
+                  </TextField>
                   <TextField
                     name={`items.${idx}.estimatedUnitPrice`}
                     label="Unit price"
@@ -1264,7 +1299,10 @@ export function OrgRequisitionCreateForm({ projectId, requisitionId = "" }) {
               onClick={() =>
                 setForm((f) => ({
                   ...f,
-                  items: [...f.items, emptyReqLine()],
+                  items: [
+                    ...f.items,
+                    emptyReqLine(planItemUnit(selectedPlanItem)),
+                  ],
                 }))
               }
             >

@@ -118,6 +118,7 @@ import {
   LIFECYCLE_ACTION_ROLES,
   committeeMayPerformLifecycleAction,
 } from "@/lib/projects/procurement-lifecycle-roles";
+import { OrgOnBehalfProviderAction } from "@/components/projects/org-on-behalf-provider-action";
 import AssignmentTurnedInRounded from "@mui/icons-material/AssignmentTurnedInRounded";
 import CheckCircleRounded from "@mui/icons-material/CheckCircleRounded";
 import FactCheckRounded from "@mui/icons-material/FactCheckRounded";
@@ -1636,6 +1637,7 @@ export function OrgProcurementDetailPanel({ projectId, procurementId, stage = nu
                 busy={busy}
                 setBusy={setBusy}
                 onChanged={load}
+                viewerRole={viewerRole}
               />
             </div>
           ) : null}
@@ -1882,7 +1884,28 @@ export function OrgProcurementDetailPanel({ projectId, procurementId, stage = nu
         </Paper>
       ) : null}
 
-      {piDoc && (overview || on("contract")) ? <PurchaseInstructionView doc={piDoc} /> : null}
+      {piDoc && (overview || on("contract")) ? (
+        <div className="space-y-2">
+          <PurchaseInstructionView doc={piDoc} />
+          {pi?.status === "ISSUED" &&
+          (LIFECYCLE_ACTION_ROLES.on_behalf_accept_pi || []).includes(viewerRole || "") ? (
+            <div className="flex flex-wrap items-center gap-2">
+              <OrgOnBehalfProviderAction
+                label="Accept PI on behalf"
+                confirmLabel="Accept purchase instruction on behalf"
+                action="on_behalf_accept_pi"
+                projectId={projectId}
+                procurementId={procurementId}
+                providerName={pi?.supplier?.name || orderProvider}
+                formKind="accept"
+                busy={busy}
+                runLifecycle={runLifecycle}
+                onDone={() => void load()}
+              />
+            </div>
+          ) : null}
+        </div>
+      ) : null}
 
       {on("sourcing") || sourcingOnOverview ? (
       <ProcurementSectionGate access={sections?.sourcing}>
@@ -1982,6 +2005,24 @@ export function OrgProcurementDetailPanel({ projectId, procurementId, stage = nu
                     >
                       Communicate award
                     </Button>
+                  ) : null}
+                  {row.award.status === "COMMUNICATED" &&
+                  (LIFECYCLE_ACTION_ROLES.on_behalf_accept_award || []).includes(viewerRole || "") ? (
+                    <OrgOnBehalfProviderAction
+                      label="Accept award on behalf"
+                      confirmLabel="Accept award on behalf"
+                      action="on_behalf_accept_award"
+                      projectId={projectId}
+                      procurementId={procurementId}
+                      providerName={row.award.supplier?.name || orderProvider}
+                      formKind="accept"
+                      busy={busy}
+                      runLifecycle={runLifecycle}
+                      onDone={() => void load()}
+                    />
+                  ) : null}
+                  {row.award?.responseSource && row.award.status === "ACCEPTED" ? (
+                    <SubmissionSourceChip source={row.award.responseSource} />
                   ) : null}
                   {awardCancellable ? (
                     <div className="flex w-full flex-wrap items-end gap-2 pt-1">
@@ -2297,12 +2338,70 @@ export function OrgProcurementDetailPanel({ projectId, procurementId, stage = nu
               )}
             </>
           ) : allReceived ? null : (
-            <Typography variant="body2" sx={{ ...adminMutedTextSx, mt: 1 }}>
-              {orderNotOpen ||
-                (deliveries.length
-                  ? `Waiting for the next delivery from ${orderProvider}.`
-                  : `Waiting for ${orderProvider} to deliver.`)}
-            </Typography>
+            <div className="mt-1 space-y-2">
+              <Typography variant="body2" sx={adminMutedTextSx}>
+                {orderNotOpen ||
+                  (deliveries.length
+                    ? `Waiting for the next delivery from ${orderProvider}.`
+                    : `Waiting for ${orderProvider} to deliver.`)}
+              </Typography>
+              {orderNotOpen &&
+              pi?.status === "ISSUED" &&
+              (LIFECYCLE_ACTION_ROLES.on_behalf_accept_pi || []).includes(viewerRole || "") ? (
+                <OrgOnBehalfProviderAction
+                  label="Accept PI on behalf"
+                  confirmLabel="Accept purchase instruction on behalf"
+                  action="on_behalf_accept_pi"
+                  projectId={projectId}
+                  procurementId={procurementId}
+                  providerName={orderProvider}
+                  formKind="accept"
+                  busy={busy}
+                  runLifecycle={runLifecycle}
+                  onDone={() => void load()}
+                />
+              ) : null}
+              {orderNotOpen &&
+              ((row.lpo?.status === "ISSUED" && methodUsesLpo(row.procurementMethod)) ||
+                (row.contract?.status === "ISSUED" && methodUsesContract(row.procurementMethod))) &&
+              (LIFECYCLE_ACTION_ROLES.on_behalf_accept_order || []).includes(viewerRole || "") ? (
+                <OrgOnBehalfProviderAction
+                  label={row.contract?.status === "ISSUED" ? "Accept contract on behalf" : "Accept LPO on behalf"}
+                  confirmLabel={
+                    row.contract?.status === "ISSUED" ? "Accept contract on behalf" : "Accept LPO on behalf"
+                  }
+                  action="on_behalf_accept_order"
+                  projectId={projectId}
+                  procurementId={procurementId}
+                  providerName={orderProvider}
+                  formKind="accept"
+                  busy={busy}
+                  runLifecycle={runLifecycle}
+                  onDone={() => void load()}
+                />
+              ) : null}
+              {!orderNotOpen &&
+              !pendingDeliveryNote &&
+              (LIFECYCLE_ACTION_ROLES.on_behalf_submit_delivery_note || []).includes(viewerRole || "") ? (
+                <OrgOnBehalfProviderAction
+                  label="Submit delivery note on behalf"
+                  confirmLabel="Submit delivery note on behalf"
+                  action="on_behalf_submit_delivery_note"
+                  projectId={projectId}
+                  procurementId={procurementId}
+                  providerName={orderProvider}
+                  formKind="delivery"
+                  busy={busy}
+                  runLifecycle={runLifecycle}
+                  onDone={() => void load()}
+                  deliveryLines={reqItems.map((it) => ({
+                    itemName: it.itemName,
+                    outstanding: Math.max(0, Number(it.quantity || 0) - (receivedByItem[it.itemName] || 0)),
+                    unitOfMeasure: it.unitOfMeasure || null,
+                  })).filter((l) => l.outstanding > 0.009)}
+                />
+              ) : null}
+            </div>
           )}
 
           {deliveries.length ? (
@@ -2763,9 +2862,26 @@ export function OrgProcurementDetailPanel({ projectId, procurementId, stage = nu
             )}
           </>
         ) : latestInvoice && latestInvoice.status !== "REJECTED" ? null : (
-          <Typography variant="body2" sx={{ ...adminMutedTextSx, mt: 1 }}>
-            {`Waiting for ${orderProvider} to send an invoice.`}
-          </Typography>
+          <div className="mt-1 space-y-2">
+            <Typography variant="body2" sx={adminMutedTextSx}>
+              {`Waiting for ${orderProvider} to send an invoice.`}
+            </Typography>
+            {(LIFECYCLE_ACTION_ROLES.on_behalf_submit_invoice || []).includes(viewerRole || "") ? (
+              <OrgOnBehalfProviderAction
+                label="Submit invoice on behalf"
+                confirmLabel="Submit invoice on behalf"
+                action="on_behalf_submit_invoice"
+                projectId={projectId}
+                procurementId={procurementId}
+                providerName={orderProvider}
+                formKind="invoice"
+                defaultAmount={activeOrder?.value || ""}
+                busy={busy}
+                runLifecycle={runLifecycle}
+                onDone={() => void load()}
+              />
+            ) : null}
+          </div>
         )}
 
         {processedInvoices.length ? (

@@ -1486,7 +1486,7 @@ export async function completeWorkflowTask(prisma, opts) {
         previousStatus !== OrgRequisitionStatus.APPROVED;
       const isFinalApprove = budgetJustApproved || planJustApproved || reqJustApproved;
 
-      // Budget/plan final approve: department handoff (My Tasks + notify) covers the creator.
+      // Budget/plan final approve: department gets a bell notification only (no My Tasks / badge).
       // Other advances / requisition approve: notify the creator only.
       if (budgetJustApproved || planJustApproved) {
         try {

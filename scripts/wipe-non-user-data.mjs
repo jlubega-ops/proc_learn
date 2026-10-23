@@ -19,7 +19,7 @@
  */
 import { prisma } from "../src/lib/prisma.js";
 import { ensureCoreProjectOrgRoles } from "../src/lib/project-org-role.js";
-import { ensureBaselineProcessTemplates } from "../src/lib/projects/process-catalogue.js";
+import { syncBaselineProcessTemplates } from "../src/lib/projects/process-catalogue.js";
 
 const RESEED = process.argv.includes("--reseed");
 
@@ -37,17 +37,67 @@ async function main() {
   });
 
   // Restrict FKs inside org graphs block plain cascade deletes — disable briefly for wipe.
+  // IMPORTANT: with FOREIGN_KEY_CHECKS=0, ON DELETE CASCADE does not run. Delete every
+  // project_org_* child table explicitly, or ghost users/tasks/items remain and Prisma
+  // throws "projectOrgRole is required … got null".
   await prisma.$executeRawUnsafe("SET FOREIGN_KEY_CHECKS=0");
   try {
     const pyp = await prisma.programmeYearProcess.deleteMany({});
     console.log(`Deleted programme_year_process: ${pyp.count}`);
 
+    /** @type {string[]} */
+    const projectScopedTables = [
+      "project_org_workflow_action",
+      "project_org_workflow_task",
+      "project_org_workflow_instance",
+      "project_org_form_draft",
+      "project_org_notification",
+      "project_org_provider_notification",
+      "project_org_payment",
+      "project_org_invoice",
+      "project_org_inspection",
+      "project_org_delivery_line",
+      "project_org_delivery_note",
+      "project_org_delivery",
+      "project_org_lpo",
+      "project_org_contract",
+      "project_org_award",
+      "project_org_post_qualification_report",
+      "project_org_evaluation_participation",
+      "project_org_evaluation_report",
+      "project_org_offer_clarification",
+      "project_org_offer",
+      "project_org_solicitation_invite",
+      "project_org_solicitation",
+      "project_org_procurement_recommendation",
+      "project_org_purchase_instruction",
+      "project_org_requisition_item",
+      "project_org_requisition",
+      "project_org_procurement_plan_item",
+      "project_org_procurement_plan",
+      "project_org_procurement",
+      "project_org_budget_line",
+      "project_org_budget",
+      "project_org_supplier",
+      "project_org_committee_member",
+      "project_org_committee",
+      "project_org_process_flow_adoption",
+      "project_org_planning_period",
+      "project_org_financial_year",
+      "project_org_user",
+      "project_org_department",
+    ];
+    for (const table of projectScopedTables) {
+      const n = await prisma.$executeRawUnsafe(`DELETE FROM \`${table}\``);
+      console.log(`Deleted ${table}: ${n}`);
+    }
+
     const projects = await prisma.project.deleteMany({});
     console.log(`Deleted projects: ${projects.count}`);
 
-    const adoptions = await prisma.projectOrgProcessFlowAdoption.deleteMany({});
+    const flowItems = await prisma.projectOrgProcessFlowItem.deleteMany({});
     const flows = await prisma.projectOrgProcessFlow.deleteMany({});
-    console.log(`Deleted process flows: ${flows.count} (adoptions cleared=${adoptions.count})`);
+    console.log(`Deleted process catalogue: flows=${flows.count}, items=${flowItems.count}`);
 
     const roles = await prisma.projectOrgRole.deleteMany({});
     console.log(`Deleted org roles: ${roles.count}`);
@@ -61,10 +111,12 @@ async function main() {
   if (RESEED) {
     console.log("\nReseeding org roles + process catalogue…");
     await ensureCoreProjectOrgRoles(prisma);
-    await ensureBaselineProcessTemplates(prisma);
+    // Unthrottled sync so wipe/reseed always rebuilds steps (not skipped by 10‑min throttle).
+    await syncBaselineProcessTemplates(prisma);
     const roles = await prisma.projectOrgRole.count();
     const flows = await prisma.projectOrgProcessFlow.count();
-    console.log(`Reseeded: orgRoles=${roles}, processFlows=${flows}`);
+    const items = await prisma.projectOrgProcessFlowItem.count();
+    console.log(`Reseeded: orgRoles=${roles}, processFlows=${flows}, flowItems=${items}`);
   } else {
     console.log("\nSkipped reseed (pass --reseed to recreate roles + process templates).");
   }

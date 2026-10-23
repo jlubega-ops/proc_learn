@@ -57,6 +57,7 @@ function answerChip({ offer, noResponseAt }) {
  *   busy: boolean;
  *   setBusy: (b: boolean) => void;
  *   onChanged: () => Promise<void> | void;
+ *   viewerRole?: string | null;
  * }} p
  */
 export function OrgReceiveOffersPanel({
@@ -73,6 +74,7 @@ export function OrgReceiveOffersPanel({
   busy,
   setBusy,
   onChanged,
+  viewerRole = null,
 }) {
   const { showToast } = useToast();
   const confirm = useConfirm();
@@ -184,12 +186,12 @@ export function OrgReceiveOffersPanel({
                   ) : null}
                   <Chip size="small" color={chip.color} label={chip.label} />
                   {accepting && !answered(r) ? (
-                    <Tooltip title={`Record ${word}`}>
+                    <Tooltip title={`Submit ${word} on behalf — study shortcut`}>
                       <span>
                         <IconButton
                           size="small"
-                          color="primary"
-                          aria-label={`Record ${word} from ${r.name}`}
+                          color="warning"
+                          aria-label={`Submit ${word} on behalf of ${r.name}`}
                           disabled={busy}
                           onClick={() => setRecordFor({ id: r.id, name: r.name })}
                         >
@@ -229,7 +231,14 @@ export function OrgReceiveOffersPanel({
                   </details>
                 ) : null}
                 {offer?.remarks ? <p className="text-xs opacity-70 wrap-break-word">{offer.remarks}</p> : null}
-                <OfferClarificationThread clarifications={offer?.clarifications} />
+                <OfferClarificationThread
+                  clarifications={offer?.clarifications}
+                  projectId={projectId}
+                  procurementId={procurementId}
+                  providerName={r.name}
+                  viewerRole={viewerRole}
+                  onChanged={onChanged}
+                />
               </li>
             );
           })}
@@ -278,14 +287,22 @@ export function OrgReceiveOffersPanel({
             >
               <span className="w-full sm:w-auto">
                 <Button
-                  variant="outlined"
-                  startIcon={busy ? <CircularProgress size={16} /> : <AutoAwesomeRounded />}
+                  variant="text"
+                  color="warning"
+                  startIcon={busy ? <CircularProgress size={16} color="inherit" /> : <AutoAwesomeRounded />}
                   disabled={busy || !effectiveTarget || (single ? answered(single) : !generateAll)}
                   onClick={() => (single ? openRecord() : void generate())}
-                  className="w-full sm:w-auto"
-                  sx={{ mt: { sm: 0.25 } }}
+                  className="w-full normal-case sm:w-auto"
+                  sx={{
+                    mt: { sm: 0.25 },
+                    fontWeight: 600,
+                    textDecoration: "underline",
+                    textUnderlineOffset: 3,
+                    "&:hover": { textDecoration: "underline" },
+                  }}
+                  title="Study shortcut — same effect as provider portal"
                 >
-                  {single ? `Generate for ${single.name}` : "Generate for all"}
+                  {single ? `Submit on behalf (${single.name})` : "Submit on behalf (all remaining)"}
                 </Button>
               </span>
             </Tooltip>

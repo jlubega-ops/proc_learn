@@ -460,6 +460,7 @@ export function OrgProcurementPlanCreateForm({ projectId, planId = "" }) {
           next.category = circular;
           next.sheetType = normalizePlanSheetType(circular);
         }
+        const methodBefore = normalizePlanMethod(item.plannedProcurementMethod);
         if (
           "quantity" in patch ||
           "estimatedUnitPrice" in patch ||
@@ -476,12 +477,15 @@ export function OrgProcurementPlanCreateForm({ projectId, planId = "" }) {
             next.plannedProcurementMethod = suggestPlanMethodLabel(total, cat);
           }
         }
+        const methodAfter = normalizePlanMethod(next.plannedProcurementMethod);
         const sheetNow = normalizePlanSheetType(next.category || next.sheetType);
+        // Auto-suggested method is not in `patch`, so also rebuild when the method value changes.
         const timetableDrivers =
           "plannedProcurementMethod" in patch ||
           "category" in patch ||
           "circularSheet" in patch ||
-          "bidInvitationDate" in patch;
+          "bidInvitationDate" in patch ||
+          methodBefore !== methodAfter;
         if (timetableDrivers && sheetNow !== PLAN_SHEET_TYPE.CONSULTANCY) {
           const built = buildGoodsWorksTimetable({
             bidInvitationDate: next.bidInvitationDate,

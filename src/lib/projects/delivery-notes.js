@@ -17,6 +17,7 @@ export function serializeDeliveryNote(row) {
     vehicleNumber: row.vehicleNumber || null,
     remarks: row.remarks || null,
     status: row.status,
+    source: row.source || "PORTAL",
     deliveryId: row.deliveryId || null,
     supplier: row.supplier ? { id: row.supplier.id, name: row.supplier.name } : null,
     lines: lines.map((l) => ({
@@ -107,10 +108,12 @@ async function nextNoteNumber(prisma, procurementId, procurementNumber) {
  *   procurementId: string;
  *   providerId: string;
  *   body: any;
+ *   source?: string;
  * }} opts
  */
 export async function submitDeliveryNote(prisma, opts) {
   const body = opts.body || {};
+  const source = opts.source === "OFFICER" ? "OFFICER" : "PORTAL";
   const order = await getActiveOrderValue(prisma, opts.projectId, opts.procurementId);
   if (!order || order.supplierId !== opts.providerId) {
     return { ok: false, status: 404, error: "No order to deliver against." };
@@ -202,6 +205,7 @@ export async function submitDeliveryNote(prisma, opts) {
       vehicleNumber: vehicleNumber || null,
       remarks: remarks || null,
       lines,
+      source,
     },
     include: { supplier: { select: { id: true, name: true } } },
   });
@@ -217,7 +221,8 @@ export async function submitDeliveryNote(prisma, opts) {
       noteNumber: note.noteNumber,
       supplierId: opts.providerId,
       actorName: providerLabel,
-      actorRoleName: "Provider",
+      actorRoleName: source === "OFFICER" ? "Officer (on behalf)" : "Provider",
+      source,
       lineCount: lines.length,
       remarks: remarks || null,
     },

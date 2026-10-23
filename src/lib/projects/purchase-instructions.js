@@ -36,6 +36,7 @@ export function serializePurchaseInstruction(row) {
     specialInstructions: row.specialInstructions || null,
     acceptedAt: row.acceptedAt || null,
     acceptedByName: row.acceptedByName || null,
+    responseSource: row.responseSource || null,
     declinedAt: row.declinedAt || null,
     declineReason: row.declineReason || null,
     supplier: row.supplier ? serializeProviderSummary(row.supplier) : null,
@@ -326,11 +327,12 @@ export async function afterPurchaseInstructionIssued(prisma, opts) {
  * Decline hands the case back to the Procurement Officer to re-issue or recommend a change to the Contracts Committee.
  *
  * @param {import("@prisma/client").PrismaClient} prisma
- * @param {{ projectId: string; providerId: string; procurementId: string; body: any }} opts
+ * @param {{ projectId: string; providerId: string; procurementId: string; body: any; responseSource?: string }} opts
  */
 export async function respondToPurchaseInstruction(prisma, opts) {
   const v = validatePurchaseInstructionResponse(opts.body || {});
   if (!v.ok) return { ok: false, status: 400, error: "Please fix the highlighted fields.", fieldErrors: v.errors };
+  const responseSource = opts.responseSource === "OFFICER" ? "OFFICER" : "PORTAL";
 
   const pi = await prisma.projectOrgPurchaseInstruction.findFirst({
     where: { projectId: opts.projectId, procurementId: opts.procurementId, supplierId: opts.providerId },
@@ -362,8 +364,18 @@ export async function respondToPurchaseInstruction(prisma, opts) {
   const claimed = await prisma.projectOrgPurchaseInstruction.updateMany({
     where: { id: pi.id, status: OrgPurchaseInstructionStatus.ISSUED },
     data: accept
-      ? { status: OrgPurchaseInstructionStatus.ACCEPTED, acceptedAt: now, acceptedByName: v.values.acceptedByName }
-      : { status: OrgPurchaseInstructionStatus.DECLINED, declinedAt: now, declineReason: v.values.declineReason },
+      ? {
+          status: OrgPurchaseInstructionStatus.ACCEPTED,
+          acceptedAt: now,
+          acceptedByName: v.values.acceptedByName,
+          responseSource,
+        }
+      : {
+          status: OrgPurchaseInstructionStatus.DECLINED,
+          declinedAt: now,
+          declineReason: v.values.declineReason,
+          responseSource,
+        },
   });
   if (claimed.count !== 1) {
     return { ok: false, status: 409, error: "You have already responded to this purchase instruction." };
@@ -383,7 +395,8 @@ export async function respondToPurchaseInstruction(prisma, opts) {
       instructionNumber: pi.instructionNumber,
       supplierId: opts.providerId,
       actorName: accept ? `${v.values.acceptedByName} — ${providerLabel}` : providerLabel,
-      actorRoleName: "Provider",
+      actorRoleName: responseSource === "OFFICER" ? "Officer (on behalf)" : "Provider",
+      responseSource,
       newStatus: accept ? OrgPurchaseInstructionStatus.ACCEPTED : OrgPurchaseInstructionStatus.DECLINED,
       remarks: accept ? null : v.values.declineReason,
     },

@@ -31,7 +31,10 @@ import {
   partitionTasksForActingMode,
   committeeModeWorkspaceHint,
 } from "@/lib/projects/committee-context";
-import { nextStepDetailHref } from "@/lib/projects/next-process-handoffs";
+import {
+  isNextProcessHandoffTaskTitle,
+  nextStepDetailHref,
+} from "@/lib/projects/next-process-handoffs";
 
 export const runtime = "nodejs";
 
@@ -109,6 +112,8 @@ export async function GET(_request, context) {
 
   const out = [];
   for (const t of tasks) {
+    // Cross-process handoffs are bell notifications only — hide from My Tasks.
+    if (isNextProcessHandoffTaskTitle(t.title)) continue;
     const req = t.instance?.requisition || null;
     const plan = t.instance?.procurementPlan || null;
     const budget = t.instance?.budget || null;

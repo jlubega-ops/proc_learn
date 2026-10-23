@@ -31,6 +31,14 @@ import {
   runPostQualification,
   saveEvaluationWithEligibility,
 } from "@/lib/projects/evaluation-eligibility";
+import {
+  onBehalfAcceptAward,
+  onBehalfAcceptOrder,
+  onBehalfAcceptPurchaseInstruction,
+  onBehalfAnswerClarification,
+  onBehalfSubmitDeliveryNote,
+  onBehalfSubmitInvoice,
+} from "@/lib/projects/on-behalf-provider";
 
 import {
   COMMITTEE_LIFECYCLE_AUTHORITY,
@@ -250,6 +258,23 @@ async function performLifecycleAction(prisma, opts) {
 
     case "accept_award":
       return { ok: false, error: "The provider accepts the award from the provider portal.", status: 403 };
+
+    case "on_behalf_accept_award":
+      return onBehalfAcceptAward(prisma, { ...base, procurementId: opts.procurementId, body });
+    case "on_behalf_accept_pi":
+      return onBehalfAcceptPurchaseInstruction(prisma, {
+        ...base,
+        procurementId: opts.procurementId,
+        body,
+      });
+    case "on_behalf_accept_order":
+      return onBehalfAcceptOrder(prisma, { ...base, procurementId: opts.procurementId, body });
+    case "on_behalf_submit_delivery_note":
+      return onBehalfSubmitDeliveryNote(prisma, { ...base, procurementId: opts.procurementId, body });
+    case "on_behalf_submit_invoice":
+      return onBehalfSubmitInvoice(prisma, { ...base, procurementId: opts.procurementId, body });
+    case "on_behalf_answer_clarification":
+      return onBehalfAnswerClarification(prisma, { ...base, body });
 
     case "cancel_award": {
       const awardId =

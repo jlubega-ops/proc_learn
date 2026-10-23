@@ -1607,6 +1607,8 @@ model ProjectOrgPurchaseInstruction {
   specialInstructions  String?                      @map("special_instructions") @db.Text
   acceptedAt           DateTime?                    @map("accepted_at")
   acceptedByName       String?                      @map("accepted_by_name") @db.VarChar(160)
+  /// PORTAL | OFFICER — how acceptance/decline was recorded.
+  responseSource       String?                      @map("response_source") @db.VarChar(16)
   declinedAt           DateTime?                    @map("declined_at")
   declineReason        String?                      @map("decline_reason") @db.Text
   createdAt            DateTime                     @default(now()) @map("created_at")
@@ -1838,6 +1840,8 @@ model ProjectOrgAward {
   acceptedAt          DateTime?             @map("accepted_at")
   /// Name of the provider's representative who accepted the award.
   acceptedByName      String?               @map("accepted_by_name") @db.VarChar(160)
+  /// PORTAL | OFFICER — how acceptance/decline was recorded.
+  responseSource      String?               @map("response_source") @db.VarChar(16)
   declinedAt          DateTime?             @map("declined_at")
   declineReason       String?               @map("decline_reason") @db.Text
   approvalReference   String?               @map("approval_reference") @db.VarChar(128)
@@ -1872,6 +1876,8 @@ model ProjectOrgContract {
   acceptedAt      DateTime?             @map("accepted_at")
   /// Name of the provider's signatory who accepted in the portal.
   acceptedByName  String?               @map("accepted_by_name") @db.VarChar(160)
+  /// PORTAL | OFFICER — how acceptance/decline was recorded.
+  responseSource  String?               @map("response_source") @db.VarChar(16)
   declinedAt      DateTime?             @map("declined_at")
   declineReason   String?               @map("decline_reason") @db.Text
   deliveryAddress String?               @map("delivery_address") @db.VarChar(255)
@@ -1899,6 +1905,8 @@ model ProjectOrgLpo {
   acceptedAt      DateTime?             @map("accepted_at")
   /// Name of the provider's signatory who accepted in the portal.
   acceptedByName  String?               @map("accepted_by_name") @db.VarChar(160)
+  /// PORTAL | OFFICER — how acceptance/decline was recorded.
+  responseSource  String?               @map("response_source") @db.VarChar(16)
   declinedAt      DateTime?             @map("declined_at")
   declineReason   String?               @map("decline_reason") @db.Text
   deliveryAddress String?               @map("delivery_address") @db.VarChar(255)
@@ -1951,6 +1959,8 @@ model ProjectOrgDeliveryNote {
   /// [{ itemName, quantity, unitOfMeasure }]
   lines         Json
   status        OrgDeliveryNoteStatus @default(SUBMITTED)
+  /// PORTAL | OFFICER — how the note was recorded.
+  source        String                @default("PORTAL") @db.VarChar(16)
   deliveryId    String?               @unique @map("delivery_id")
   delivery      ProjectOrgDelivery?   @relation(fields: [deliveryId], references: [id], onDelete: SetNull)
   createdAt     DateTime              @default(now()) @map("created_at")

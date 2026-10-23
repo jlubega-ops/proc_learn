@@ -23,6 +23,7 @@
 - **One acting mode:** committee banner on → only that committee’s work. Use **Switch back to organisation role** for org tasks. Yellow note if a task waits in the other mode.
 - **Procurements menu:** All Procurements, RFQs & Bids, Evaluations, Awards, Purchase Instructions, Contracts / LPO, Deliveries & Inspections, Invoices, Payments, Closures — stage pages match role / seat.
 - **Provider portal:** Assignments (accept PI / award / LPO / contract, delivery notes, invoices), Opportunities (quotations / bids). Same `/login` page.
+- **Study shortcuts (optional):** On the officer procurement record, quiet **… on behalf** actions appear only while waiting on the provider (quotes/bids, clarifications, award/PI/LPO/contract accept, delivery note, invoice). Same status as the portal; marked **Generated** (not Provider portal). Decline / edit / withdraw stay portal-only.
 
 **Shared password** (org users + providers): `password123`
 

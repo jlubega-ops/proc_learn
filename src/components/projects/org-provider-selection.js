@@ -40,6 +40,47 @@ import { RecordDetailsGrid } from "@/components/projects/record-details-grid";
 const PICKER_PAGE_SIZE = 6;
 const VERIFY_MS = 3000;
 
+/** Only providers that pass every check may be confirmed. */
+export const PROVIDER_ACTION_RULE_PASS_ONLY = "PASS_ONLY";
+/** Failed checks may continue after confirmation; warnings are recorded. */
+export const PROVIDER_ACTION_RULE_ALLOW_WARNINGS = "ALLOW_WARNINGS";
+
+/**
+ * Toggle: Pass only (default) vs Allow with warnings for recommend / select / shortlist.
+ *
+ * @param {{
+ *   value: string;
+ *   onChange: (rule: string) => void;
+ *   disabled?: boolean;
+ * }} p
+ */
+export function ProviderActionRuleToggle({ value, onChange, disabled = false }) {
+  return (
+    <ToggleButtonGroup
+      exclusive
+      size="small"
+      value={value}
+      disabled={disabled}
+      onChange={(_e, v) => {
+        if (v) onChange(v);
+      }}
+      aria-label="Provider action rule"
+      className="flex-wrap"
+    >
+      <ToggleButton value={PROVIDER_ACTION_RULE_PASS_ONLY} className="cursor-pointer disabled:cursor-not-allowed">
+        <Tooltip title="Only providers that pass every check can continue">
+          <span>Pass only</span>
+        </Tooltip>
+      </ToggleButton>
+      <ToggleButton value={PROVIDER_ACTION_RULE_ALLOW_WARNINGS} className="cursor-pointer disabled:cursor-not-allowed">
+        <Tooltip title="Failed checks can continue; warnings are recorded">
+          <span>Allow with warnings</span>
+        </Tooltip>
+      </ToggleButton>
+    </ToggleButtonGroup>
+  );
+}
+
 /**
  * @param {string} projectId
  * @param {Record<string, string>} params
@@ -56,10 +97,12 @@ async function fetchProviders(projectId, params) {
 
 /**
  * System-run eligibility validation ("Run validation"). Opens a dialog where
- * every check spins for a few seconds (simulated register lookups), then shows
- * the results and offers the stage-named action (e.g. "Select supplier"). Learning mode:
- * failed checks never block — the action becomes "… with warnings" and asks for
- * confirmation in the same dialog. The dialog closes once the action completes.
+ * every check spins for a few seconds (register lookups), then shows the results
+ * and offers the stage-named action (e.g. "Select supplier").
+ *
+ * Default rule is Pass only: failed eligibility blocks confirm. With
+ * `allowWithWarnings`, failed checks can continue after a confirmation step
+ * (extra warnings alone remain confirmable under either rule).
  *
  * @param {{
  *   providers: any[];
@@ -75,6 +118,7 @@ async function fetchProviders(projectId, params) {
  *   autoStart?: boolean;
  *   hideAction?: boolean;
  *   dialogOnly?: boolean;
+ *   allowWithWarnings?: boolean;
  * }} p
  */
 export function OrgProviderRunValidation({
@@ -91,6 +135,7 @@ export function OrgProviderRunValidation({
   autoStart = false,
   hideAction = false,
   dialogOnly = false,
+  allowWithWarnings = false,
 }) {
   const [open, setOpen] = useState(() => autoStart && !confirmed);
   const [verifying, setVerifying] = useState(true);
@@ -106,15 +151,22 @@ export function OrgProviderRunValidation({
     return () => clearTimeout(t);
   }, [running]);
 
+  useEffect(() => {
+    if (!allowWithWarnings) setConfirmStep(false);
+  }, [allowWithWarnings]);
+
   const failedProviders = providers.filter((p) => p.qualification && !p.qualification.qualifies);
   const expiringCount = providers.filter(
     (p) => p.qualification?.qualifies && p.qualification?.warningCount > 0,
   ).length;
-  const warnings = [
-    ...failedProviders.map((p) => `${p.name}: ${(p.qualification.failedReasons || []).join("; ")}`),
-    ...extraWarnings,
-  ];
+  const failureWarnings = failedProviders.map(
+    (p) => `${p.name}: ${(p.qualification.failedReasons || []).join("; ")}`,
+  );
+  const warnings = [...failureWarnings, ...extraWarnings];
   const hasWarnings = warnings.length > 0;
+  /** Pass only blocks when any provider failed eligibility; extra warnings alone stay confirmable. */
+  const hardBlocked = failedProviders.length > 0 && !allowWithWarnings;
+  const needsConfirm = !hardBlocked && hasWarnings;
 
   if (!providers.length) return null;
 
@@ -243,7 +295,13 @@ export function OrgProviderRunValidation({
                   variant="outlined"
                 >
                   {failedProviders.length
-                    ? `${providers.length - failedProviders.length} of ${providers.length} passed all checks.${hideAction ? "" : ` ${failedProviders.length} did not — you can still continue; the warnings will be recorded.`}`
+                    ? `${providers.length - failedProviders.length} of ${providers.length} passed all checks. ${failedProviders.length} did not.${
+                        hideAction
+                          ? ""
+                          : hardBlocked
+                            ? " Pass only — switch to Allow with warnings to continue, or choose providers that pass."
+                            : " You can continue; the warnings will be recorded."
+                      }`
                     : expiringCount
                       ? "All selected providers passed. Some documents expire soon."
                       : "All selected providers passed every check."}
@@ -285,23 +343,33 @@ export function OrgProviderRunValidation({
               Run again
             </Button>
             {!confirmed && !hideAction ? (
-              <Button
-                variant="contained"
-                color={hasWarnings ? "warning" : "success"}
-                startIcon={
-                  working ? (
-                    <CircularProgress size={16} color="inherit" />
-                  ) : hasWarnings ? (
-                    <WarningAmberRounded />
-                  ) : (
-                    <CheckCircleRounded />
-                  )
-                }
-                disabled={working}
-                onClick={() => (hasWarnings ? setConfirmStep(true) : void doConfirm())}
-              >
-                {working ? busyLabel : hasWarnings ? `${actionLabel} with warnings` : actionLabel}
-              </Button>
+              hardBlocked ? (
+                <Tooltip title="Pass only — switch to Allow with warnings, or choose providers that pass">
+                  <span>
+                    <Button variant="contained" color="error" disabled startIcon={<WarningAmberRounded />}>
+                      {actionLabel}
+                    </Button>
+                  </span>
+                </Tooltip>
+              ) : (
+                <Button
+                  variant="contained"
+                  color={needsConfirm ? "warning" : "success"}
+                  startIcon={
+                    working ? (
+                      <CircularProgress size={16} color="inherit" />
+                    ) : needsConfirm ? (
+                      <WarningAmberRounded />
+                    ) : (
+                      <CheckCircleRounded />
+                    )
+                  }
+                  disabled={working}
+                  onClick={() => (needsConfirm ? setConfirmStep(true) : void doConfirm())}
+                >
+                  {working ? busyLabel : needsConfirm ? `${actionLabel} with warnings` : actionLabel}
+                </Button>
+              )
             ) : null}
           </>
         )}
@@ -401,6 +469,7 @@ export function OrgProviderRunValidation({
  *   locked?: boolean;
  *   optionalValidation?: boolean;
  *   onQualificationChange?: (failed: { id: string; name: string; reasons: string[] }[]) => void;
+ *   actionRule?: string;
  * }} p
  */
 export function OrgProviderSelection({
@@ -424,6 +493,7 @@ export function OrgProviderSelection({
   locked = false,
   optionalValidation = false,
   onQualificationChange,
+  actionRule: actionRuleProp,
 }) {
   const { showToast } = useToast();
   const term = providerTerm(category);
@@ -441,6 +511,10 @@ export function OrgProviderSelection({
   const [validationRun, setValidationRun] = useState(0);
   const [refreshing, setRefreshing] = useState(false);
   const [infoProvider, setInfoProvider] = useState(/** @type {any} */ (null));
+  const [actionRuleLocal, setActionRuleLocal] = useState(PROVIDER_ACTION_RULE_PASS_ONLY);
+  const actionRule = actionRuleProp || actionRuleLocal;
+  const allowWithWarnings = actionRule === PROVIDER_ACTION_RULE_ALLOW_WARNINGS;
+  const showRuleToggle = !optionalValidation && !confirmed;
 
   const baseParams = useMemo(() => {
     /** @type {Record<string, string>} */
@@ -617,6 +691,7 @@ export function OrgProviderSelection({
             busyLabel={busyLabel}
             extraWarnings={extraWarnings}
             hideAction={optionalValidation}
+            allowWithWarnings={allowWithWarnings}
             dialogOnly
             autoStart
           />
@@ -628,14 +703,23 @@ export function OrgProviderSelection({
 
   return (
     <div className="space-y-3">
-      <div>
-        <Typography variant="subtitle2">
-          {label || (mode === "single" ? `Select ${term}` : `Shortlist ${termPlural}`)}
-        </Typography>
-        {helperText ? (
-          <Typography variant="caption" sx={adminMutedTextSx}>
-            {helperText}
+      <div className="flex flex-wrap items-start justify-between gap-2">
+        <div>
+          <Typography variant="subtitle2">
+            {label || (mode === "single" ? `Select ${term}` : `Shortlist ${termPlural}`)}
           </Typography>
+          {helperText ? (
+            <Typography variant="caption" sx={adminMutedTextSx}>
+              {helperText}
+            </Typography>
+          ) : null}
+        </div>
+        {showRuleToggle ? (
+          <ProviderActionRuleToggle
+            value={actionRule}
+            onChange={setActionRuleLocal}
+            disabled={Boolean(busy)}
+          />
         ) : null}
       </div>
 
@@ -759,6 +843,7 @@ export function OrgProviderSelection({
             confirmed={confirmed}
             confirmedLabel={confirmedLabel}
             extraWarnings={extraWarnings}
+            allowWithWarnings={allowWithWarnings}
             autoStart
           />
         ) : optionalValidation ? (

@@ -14,6 +14,9 @@ import HelpOutlineRounded from "@mui/icons-material/HelpOutlineRounded";
 import { useToast } from "@/components/providers/toast-provider";
 import { useDraftState } from "@/hooks/use-draft-state";
 import { adminDialogPaperSx, themedTextFieldSx } from "@/lib/admin-mui-surfaces";
+import { OrgOnBehalfProviderAction } from "@/components/projects/org-on-behalf-provider-action";
+import { SubmissionSourceChip } from "@/components/projects/org-procurement-supply-cards";
+import { LIFECYCLE_ACTION_ROLES } from "@/lib/projects/procurement-lifecycle-roles";
 
 const LIVE = new Set(["SUBMITTED", "OPENED"]);
 
@@ -143,20 +146,57 @@ export function OfferClarifyButton({ projectId, procurementId, offer, allowed, o
   );
 }
 
-/** @param {{ clarifications?: any[] }} p */
-export function OfferClarificationThread({ clarifications }) {
+/**
+ * @param {{
+ *   clarifications?: any[];
+ *   projectId?: string;
+ *   procurementId?: string;
+ *   providerName?: string;
+ *   viewerRole?: string | null;
+ *   onChanged?: () => Promise<void> | void;
+ * }} p
+ */
+export function OfferClarificationThread({
+  clarifications,
+  projectId,
+  procurementId,
+  providerName = "provider",
+  viewerRole = null,
+  onChanged,
+}) {
   if (!clarifications?.length) return null;
+  const canAnswerOnBehalf =
+    Boolean(projectId && procurementId) &&
+    (LIFECYCLE_ACTION_ROLES.on_behalf_answer_clarification || []).includes(viewerRole || "");
   return (
     <>
       {clarifications.map((c) => (
-        <div key={c.id} className="w-full rounded-md bg-(--nav-active-bg) p-2 text-xs">
+        <div key={c.id} className="w-full space-y-1 rounded-md bg-(--nav-active-bg) p-2 text-xs">
           <p className="wrap-break-word">
             <span className="font-semibold">Q:</span> {c.question}
           </p>
           <p className="wrap-break-word">
             <span className="font-semibold">A:</span>{" "}
             {c.response || <span className="italic opacity-70">Awaiting answer</span>}
+            {c.response && c.responseSource ? (
+              <span className="ml-2 inline-flex align-middle">
+                <SubmissionSourceChip source={c.responseSource} />
+              </span>
+            ) : null}
           </p>
+          {!c.response && canAnswerOnBehalf ? (
+            <OrgOnBehalfProviderAction
+              label="Answer on behalf"
+              confirmLabel="Answer clarification on behalf"
+              action="on_behalf_answer_clarification"
+              projectId={projectId}
+              procurementId={procurementId}
+              providerName={providerName}
+              formKind="clarification"
+              clarificationId={c.id}
+              onDone={onChanged}
+            />
+          ) : null}
         </div>
       ))}
     </>

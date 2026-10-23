@@ -1,9 +1,10 @@
 /**
- * After a process (or lifecycle gate) completes, nudge the next actors:
- * in-app notification + a My Tasks reminder that opens the next screen.
+ * After a process (or lifecycle gate) completes, nudge the next actors with an
+ * in-app (bell) notification only. Status stays Approved / Ready — no My Tasks
+ * reminder and no sidebar badge for the next process.
  *
  * Cross-process starts (budget→plan, plan→requisition, payment→closure) use
- * these handoffs. In-method steps already get My Tasks via createTasksForStep.
+ * these handoffs. In-method steps still get My Tasks via createTasksForStep.
  */
 import { OrgWorkflowTaskStatus } from "@prisma/client";
 import { notifyOrgUsers, OrgNotificationType } from "@/lib/projects/org-notifications";
@@ -37,7 +38,7 @@ export const NEXT_STEP = {
     ],
     scope: "department",
     notifyTitle: "Budget approved",
-    body: (label) => `${label} is approved. You can submit a procurement plan against it.`,
+    body: (label) => `${label} is approved. You can go ahead and submit your procurement plan.`,
     href: (projectId) => `/projects/${projectId}/procurement-plans/new`,
   },
   SUBMIT_REQUISITION: {
@@ -52,7 +53,7 @@ export const NEXT_STEP = {
     ],
     scope: "department",
     notifyTitle: "Plan approved",
-    body: (label) => `${label} is approved. You can submit a procurement requisition.`,
+    body: (label) => `${label} is approved. You can go ahead and submit your procurement requisition.`,
     href: (projectId) => `/projects/${projectId}/requisitions/new`,
   },
   CLOSE_PROCUREMENT: {
@@ -62,7 +63,7 @@ export const NEXT_STEP = {
     roles: ["Contracts Officer", "Procurement Officer"],
     scope: "project",
     notifyTitle: "Ready for closure",
-    body: (label) => `${label} is fully paid. You can start the closure process.`,
+    body: (label) => `${label} is fully paid. You can go ahead and close the procurement.`,
     href: (projectId, relatedEntityId) =>
       relatedEntityId
         ? `/projects/${projectId}/procurements/closures/${relatedEntityId}`
@@ -79,6 +80,15 @@ function defForKind(kind) {
   if (kind === "CLOSE_PROCUREMENT") return NEXT_STEP.CLOSE_PROCUREMENT;
   if (kind === "SUBMIT_PLAN") return NEXT_STEP.SUBMIT_PLAN;
   return null;
+}
+
+/**
+ * True when a task title is a cross-process handoff reminder (not a real workflow step).
+ * @param {string | null | undefined} title
+ */
+export function isNextProcessHandoffTaskTitle(title) {
+  const t = String(title || "");
+  return Object.values(NEXT_STEP).some((def) => t.startsWith(def.titlePrefix));
 }
 
 /**
@@ -124,7 +134,7 @@ async function findHandoffRecipients(db, opts) {
 }
 
 /**
- * Create My Tasks + notifications for the next process after a gate opens.
+ * Bell notification only after a gate opens. Does not create My Tasks or change status.
  *
  * @param {import("@prisma/client").PrismaClient | import("@prisma/client").Prisma.TransactionClient} db
  * @param {{
@@ -143,6 +153,15 @@ export async function createNextProcessHandoff(db, opts) {
   const def = defForKind(opts.kind);
   if (!def) return { tasks: 0, notified: 0 };
 
+  // Drop legacy handoff My Tasks so they stop driving badges / “Approved · pending…”.
+  await completeNextProcessHandoffs(db, {
+    projectId: opts.projectId,
+    kind: opts.kind,
+    departmentId: opts.departmentId,
+    instanceId: opts.instanceId,
+    relatedEntityId: opts.relatedEntityId,
+  });
+
   const recipients = await findHandoffRecipients(db, {
     projectId: opts.projectId,
     roleNames: def.roles,
@@ -158,57 +177,8 @@ export async function createNextProcessHandoff(db, opts) {
   }
   if (!recipients.length) return { tasks: 0, notified: 0 };
 
-  // If the method workflow already queued a Close Procurement step task, only notify.
-  let skipTasks = false;
-  if (opts.kind === "CLOSE_PROCUREMENT") {
-    const existingStep = await db.projectOrgWorkflowTask.findFirst({
-      where: {
-        projectId: opts.projectId,
-        instanceId: opts.instanceId,
-        stepNumber: { gt: 0 },
-        status: { in: [OrgWorkflowTaskStatus.PENDING, OrgWorkflowTaskStatus.IN_PROGRESS] },
-        title: { startsWith: "Close Procurement" },
-      },
-      select: { id: true },
-    });
-    skipTasks = Boolean(existingStep);
-  }
-
-  const title = `${def.titlePrefix}: ${opts.recordLabel}`.slice(0, 255);
   const linkUrl = def.href(opts.projectId, opts.relatedEntityId);
   const body = def.body(opts.recordLabel);
-
-  let tasks = 0;
-  if (!skipTasks) {
-    for (const recipient of recipients) {
-      if (opts.excludeOrgUserId && recipient.id === opts.excludeOrgUserId) continue;
-      const existing = await db.projectOrgWorkflowTask.findFirst({
-        where: {
-          projectId: opts.projectId,
-          instanceId: opts.instanceId,
-          assigneeOrgUserId: recipient.id,
-          stepNumber: 0,
-          status: { in: [OrgWorkflowTaskStatus.PENDING, OrgWorkflowTaskStatus.IN_PROGRESS] },
-          title: { startsWith: def.titlePrefix },
-        },
-        select: { id: true },
-      });
-      if (existing) continue;
-      await db.projectOrgWorkflowTask.create({
-        data: {
-          projectId: opts.projectId,
-          instanceId: opts.instanceId,
-          processFlowItemId: null,
-          stepNumber: 0,
-          title,
-          requiredRoleName: def.requiredRoleName,
-          assigneeOrgUserId: recipient.id,
-          status: OrgWorkflowTaskStatus.PENDING,
-        },
-      });
-      tasks += 1;
-    }
-  }
 
   const notifyRecipients = recipients.filter(
     (r) => !opts.excludeOrgUserId || r.id !== opts.excludeOrgUserId,
@@ -226,11 +196,11 @@ export async function createNextProcessHandoff(db, opts) {
     });
   }
 
-  return { tasks, notified: notifyRecipients.length };
+  return { tasks: 0, notified: notifyRecipients.length };
 }
 
 /**
- * Clear next-step reminders once the next process has been started.
+ * Clear any leftover next-step My Tasks (legacy) once the next process starts or on notify.
  *
  * @param {import("@prisma/client").PrismaClient | import("@prisma/client").Prisma.TransactionClient} db
  * @param {{
@@ -267,7 +237,6 @@ export async function completeNextProcessHandoffs(db, opts) {
   }
   if (opts.relatedEntityId && opts.kind === "CLOSE_PROCUREMENT") {
     where.title = { startsWith: `${def.titlePrefix}:` };
-    // Narrow by instance when possible; title includes procurement label which may collide.
   }
 
   const result = await db.projectOrgWorkflowTask.updateMany({
@@ -278,7 +247,7 @@ export async function completeNextProcessHandoffs(db, opts) {
 }
 
 /**
- * Resolve the method workflow instance for a procurement (needed for handoff tasks).
+ * Resolve the method workflow instance for a procurement (needed for handoff cleanup).
  *
  * @param {import("@prisma/client").PrismaClient | import("@prisma/client").Prisma.TransactionClient} db
  * @param {{ projectId: string; procurementId: string; includeCompleted?: boolean }} opts

@@ -127,7 +127,7 @@ export async function askOfferClarification(prisma, opts) {
 /**
  * Provider answers an open clarification from the portal.
  * @param {import("@prisma/client").PrismaClient} prisma
- * @param {{ projectId: string; providerId: string; clarificationId: string; response: unknown }} opts
+ * @param {{ projectId: string; providerId: string; clarificationId: string; response: unknown; responseSource?: string }} opts
  */
 export async function answerOfferClarification(prisma, opts) {
   const response = typeof opts.response === "string" ? opts.response.trim() : "";
@@ -137,6 +137,7 @@ export async function answerOfferClarification(prisma, opts) {
   if (response.length > 2000) {
     return { ok: false, error: "Keep the answer under 2000 characters.", status: 400, fieldErrors: { response: "Too long." } };
   }
+  const responseSource = opts.responseSource === "OFFICER" ? "OFFICER" : "PORTAL";
   const row = await prisma.projectOrgOfferClarification.findFirst({
     where: { id: opts.clarificationId, projectId: opts.projectId, supplierId: opts.providerId },
     include: { offer: { include: { solicitation: true } } },
@@ -148,7 +149,7 @@ export async function answerOfferClarification(prisma, opts) {
   }
   const updated = await prisma.projectOrgOfferClarification.update({
     where: { id: row.id },
-    data: { response, responseSource: "PORTAL", respondedAt: new Date() },
+    data: { response, responseSource, respondedAt: new Date() },
   });
   await writeAuditLog({
     eventType: AuditEvent.PROJECT_ORG_OFFER_CLARIFICATION_ANSWERED,
@@ -159,8 +160,8 @@ export async function answerOfferClarification(prisma, opts) {
       offerId: row.offerId,
       supplierId: opts.providerId,
       clarificationId: row.id,
-      source: "PORTAL",
-      actorRoleName: "Provider (portal)",
+      source: responseSource,
+      actorRoleName: responseSource === "OFFICER" ? "Officer (on behalf)" : "Provider (portal)",
       comment: response,
     },
   });

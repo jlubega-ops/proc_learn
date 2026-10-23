@@ -38,6 +38,7 @@ import {
 import { DASHBOARD_MAIN_INNER_CLASS } from "@/lib/dashboard-content-width";
 import { formatPortalDateTime, portalFetch } from "@/components/provider-portal/portal-fetch";
 import { BrandLogoImage } from "@/components/providers/site-branding-provider";
+import { AppBrandLockup } from "@/components/brand/app-brand-lockup";
 
 export const PORTAL_NAV = [
   { href: "/provider-portal", label: "Assignments", subtitle: "Orders and work assigned to you", Icon: AssignmentRounded },
@@ -376,7 +377,12 @@ export function ProviderPortalShell({ children }) {
             <BrandLogoImage  alt="MUBS logo" fill sizes="40px" className="object-contain" priority />
           </div>
           <div className="min-w-0">
-            <p className="truncate text-base font-extrabold tracking-tight text-primary">Proc Learn</p>
+            <AppBrandLockup
+              className="text-base"
+              nameClassName="font-extrabold tracking-tight text-primary"
+              taglineClassName="text-[0.78em] font-medium tracking-tight text-zinc-500"
+              separatorClassName="mx-1 text-[0.78em] font-normal text-zinc-400"
+            />
             <p className="truncate text-xs text-zinc-500">Provider portal</p>
           </div>
         </div>

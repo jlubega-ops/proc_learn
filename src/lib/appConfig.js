@@ -2,6 +2,10 @@
 export const APP_NAME =
   process.env.NEXT_PUBLIC_APP_NAME?.trim() || "Proc Learn";
 
+/** Secondary slogan next to the product name (not the hero wordmark). */
+export const APP_TAGLINE =
+  process.env.NEXT_PUBLIC_APP_TAGLINE?.trim() || "Digital Procurement";
+
 export const ORG_SHORT =
   process.env.NEXT_PUBLIC_ORG_SHORT?.trim() || "MUBS";
 

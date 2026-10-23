@@ -50,6 +50,7 @@ export function serializeContract(row) {
     issuedAt: row.issuedAt || null,
     acceptedAt: row.acceptedAt || null,
     acceptedByName: row.acceptedByName || null,
+    responseSource: row.responseSource || null,
     declinedAt: row.declinedAt || null,
     declineReason: row.declineReason || null,
     createdAt: row.createdAt,
@@ -73,6 +74,7 @@ export function serializeLpo(row) {
     issuedAt: row.issuedAt || null,
     acceptedAt: row.acceptedAt || null,
     acceptedByName: row.acceptedByName || null,
+    responseSource: row.responseSource || null,
     declinedAt: row.declinedAt || null,
     declineReason: row.declineReason || null,
     createdAt: row.createdAt,
@@ -450,11 +452,12 @@ export async function issueLpo(prisma, opts) {
  * The provider accepts or declines its ISSUED LPO / contract in the provider portal.
  * Acceptance opens the order for delivery (CONTRACT_ACTIVE); a decline goes back to the PDU.
  * @param {import("@prisma/client").PrismaClient} prisma
- * @param {{ projectId: string; providerId: string; procurementId: string; body: any }} opts
+ * @param {{ projectId: string; providerId: string; procurementId: string; body: any; responseSource?: string }} opts
  */
 export async function respondToOrder(prisma, opts) {
   const v = validatePurchaseInstructionResponse(opts.body || {});
   if (!v.ok) return { ok: false, status: 400, error: "Please fix the highlighted fields.", fieldErrors: v.errors };
+  const responseSource = opts.responseSource === "OFFICER" ? "OFFICER" : "PORTAL";
 
   const where = { projectId: opts.projectId, procurementId: opts.procurementId, supplierId: opts.providerId };
   const [contract, lpo] = await Promise.all([
@@ -481,8 +484,8 @@ export async function respondToOrder(prisma, opts) {
   const accept = v.values.decision === "ACCEPT";
   const now = new Date();
   const data = accept
-    ? { acceptedAt: now, acceptedByName: v.values.acceptedByName }
-    : { declinedAt: now, declineReason: v.values.declineReason };
+    ? { acceptedAt: now, acceptedByName: v.values.acceptedByName, responseSource }
+    : { declinedAt: now, declineReason: v.values.declineReason, responseSource };
   const claimed = await runInTx(prisma, async (tx) => {
     const res = isContract
       ? await tx.projectOrgContract.updateMany({
@@ -520,7 +523,8 @@ export async function respondToOrder(prisma, opts) {
       ...(isContract ? { contractId: row.id } : { lpoId: row.id }),
       supplierId: opts.providerId,
       actorName: accept ? `${v.values.acceptedByName} — ${providerLabel}` : providerLabel,
-      actorRoleName: "Provider",
+      actorRoleName: responseSource === "OFFICER" ? "Officer (on behalf)" : "Provider",
+      responseSource,
       remarks: accept ? null : v.values.declineReason,
     },
   });

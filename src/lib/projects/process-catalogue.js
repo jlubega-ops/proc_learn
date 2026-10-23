@@ -1114,14 +1114,10 @@ export const BASELINE_PROCESS_TEMPLATES = [
 ];
 
 /**
- * Ensures baseline process templates exist with steps. Runs at most every 10 minutes per server
- * process (deploy seeding does the first full sync).
- * @type {(prisma: import("@prisma/client").PrismaClient) => Promise<void>}
+ * Full (unthrottled) catalogue sync — use from wipe/seed scripts.
+ * @param {import("@prisma/client").PrismaClient} prisma
  */
-export const ensureBaselineProcessTemplates = throttleSync(10 * 60_000, syncBaselineProcessTemplates);
-
-/** @param {import("@prisma/client").PrismaClient} prisma */
-async function syncBaselineProcessTemplates(prisma) {
+export async function syncBaselineProcessTemplates(prisma) {
   const { ensureCoreProjectOrgRoles } = await import("@/lib/project-org-role");
   await ensureCoreProjectOrgRoles(prisma);
 
@@ -1178,7 +1174,21 @@ async function syncBaselineProcessTemplates(prisma) {
       },
     });
   }
+
+  // Ghost rows left when FK checks were off during wipe (CASCADE does not run).
+  await prisma.$executeRaw`
+    DELETE i FROM project_org_process_flow_item i
+    WHERE NOT EXISTS (SELECT 1 FROM project_org_process_flow f WHERE f.id = i.process_flow_id)
+       OR NOT EXISTS (SELECT 1 FROM project_org_role r WHERE r.id = i.project_org_role_id)
+  `;
 }
+
+/**
+ * Ensures baseline process templates exist with steps. Runs at most every 10 minutes per server
+ * process (deploy seeding does the first full sync).
+ * @type {(prisma: import("@prisma/client").PrismaClient) => Promise<void>}
+ */
+export const ensureBaselineProcessTemplates = throttleSync(10 * 60_000, syncBaselineProcessTemplates);
 
 /**
  * Re-point organisation adoptions from legacy name-only catalogue rows to the

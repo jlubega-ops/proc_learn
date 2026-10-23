@@ -335,7 +335,6 @@ export async function createOrUpdateRequisitionDraft(prisma, opts) {
   const procurementPlanItemId =
     typeof b.procurementPlanItemId === "string" ? b.procurementPlanItemId.trim() : "";
   const budgetLineId = typeof b.budgetLineId === "string" ? b.budgetLineId.trim() : "";
-  const category = typeof b.category === "string" ? b.category.trim() || null : null;
   const deliveryLocation =
     typeof b.deliveryLocation === "string" ? b.deliveryLocation.trim() || null : null;
   const remarks = typeof b.remarks === "string" ? b.remarks.trim() || null : null;
@@ -456,6 +455,17 @@ export async function createOrUpdateRequisitionDraft(prisma, opts) {
     fieldErrors.procurementPlanItemId = "Choose a valid plan item.";
   }
 
+  // Category is taken from the selected plan item — not free-typed on the form.
+  const planItemCf =
+    planItem?.circularFields && typeof planItem.circularFields === "object"
+      ? planItem.circularFields
+      : {};
+  const category = planItem
+    ? String(planItem.category || planItemCf.circularSheet || "").trim() || null
+    : typeof b.category === "string"
+      ? b.category.trim() || null
+      : null;
+
   let budgetLine = null;
   if (budgetLineId) {
     budgetLine = await prisma.projectOrgBudgetLine.findFirst({
@@ -490,7 +500,7 @@ export async function createOrUpdateRequisitionDraft(prisma, opts) {
       fieldErrors[`items.${idx}.quantity`] = "Enter a quantity greater than zero.";
     }
     if (!uom) {
-      fieldErrors[`items.${idx}.unitOfMeasure`] = "Enter a unit.";
+      fieldErrors[`items.${idx}.unitOfMeasure`] = "Choose a unit.";
     }
     if (!unitPrice) {
       fieldErrors[`items.${idx}.estimatedUnitPrice`] = "Enter a unit price greater than zero.";
@@ -604,10 +614,6 @@ export async function createOrUpdateRequisitionDraft(prisma, opts) {
     form5Body.fundingItem = "";
     form5Body.balanceRemaining = "";
   }
-  const planItemCf =
-    planItem?.circularFields && typeof planItem.circularFields === "object"
-      ? planItem.circularFields
-      : {};
   if (!String(form5Body.sourceOfFunding || "").trim() && planItemCf.sourceOfFunding) {
     form5Body.sourceOfFunding = planItemCf.sourceOfFunding;
   }

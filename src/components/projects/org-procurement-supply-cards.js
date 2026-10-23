@@ -27,8 +27,9 @@ import {
 import { formatMoneyUGX } from "@/lib/money";
 import { OfferClarificationThread, OfferClarifyButton } from "@/components/projects/org-offer-clarification";
 
+/** Non-portal submissions (officer shortcut or auto-response) show as Generated. */
 const SOURCE_META = {
-  OFFICER: { label: "Recorded by officer", color: "info" },
+  OFFICER: { label: "Generated", color: "warning" },
   PORTAL: { label: "Provider portal", color: "primary" },
   AUTO: { label: "Generated", color: "warning" },
 };

@@ -119,6 +119,7 @@ export async function nextInvoiceNumber(prisma, projectId, procurementId) {
  *   invoiceDate?: string | Date | null;
  *   deliveryId?: string | null;
  *   source?: "OFFICER" | "PORTAL" | "AUTO";
+ *   allowOfficerShortcut?: boolean;
  *   supplierReference?: string | null;
  *   notes?: string | null;
  *   portalProviderId?: string | null;
@@ -126,7 +127,7 @@ export async function nextInvoiceNumber(prisma, projectId, procurementId) {
  */
 export async function createInvoice(prisma, opts) {
   const source = Object.values(INVOICE_SOURCE).includes(opts.source) ? opts.source : INVOICE_SOURCE.OFFICER;
-  if (source === INVOICE_SOURCE.OFFICER) {
+  if (source === INVOICE_SOURCE.OFFICER && !opts.allowOfficerShortcut) {
     return { ok: false, error: "Invoices are sent by the provider.", status: 400, code: "PROVIDER_INVOICE_ONLY" };
   }
   const procurement = await prisma.projectOrgProcurement.findFirst({

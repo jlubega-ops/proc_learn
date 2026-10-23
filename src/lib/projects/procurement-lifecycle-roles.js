@@ -10,6 +10,13 @@ export const LIFECYCLE_ACTION_ROLES = {
   communicate_award: ["Procurement Officer", "Head PDU"],
   // The winning provider accepts or declines the award itself in the provider portal.
   accept_award: [],
+  // Study shortcut: accept on behalf of the provider (same status as portal).
+  on_behalf_accept_award: ["Procurement Officer", "Head PDU"],
+  on_behalf_accept_pi: ["Procurement Officer", "Head PDU", "Contracts Officer"],
+  on_behalf_accept_order: ["Procurement Officer", "Contracts Officer", "Head PDU"],
+  on_behalf_submit_delivery_note: ["User Department Officer", "Head User Department"],
+  on_behalf_submit_invoice: ["Contracts Officer", "Finance/Budget Officer", "Procurement Officer"],
+  on_behalf_answer_clarification: ["Procurement Officer", "Head PDU"],
   cancel_award: ["Accounting Officer", "Contracts Officer", "Head PDU"],
   update_delivery_address: ["Procurement Officer", "Contracts Officer", "Head PDU"],
   create_lpo: ["Procurement Officer", "Contracts Officer", "Head PDU"],
@@ -22,7 +29,7 @@ export const LIFECYCLE_ACTION_ROLES = {
   issue_contract: ["Contracts Officer", "Procurement Officer", "Head PDU"],
   record_delivery: ["User Department Officer", "Head User Department"],
   record_inspection: ["Head User Department", "User Department Officer", "Contracts Officer"],
-  // Invoices come from the provider portal, never from org users.
+  // Invoices come from the provider portal; officer create only via on_behalf_submit_invoice.
   create_invoice: [],
   certify_invoice: ["Head User Department", "Contracts Officer", "Finance/Budget Officer"],
   verify_invoice: ["Contracts Officer", "Finance/Budget Officer"],

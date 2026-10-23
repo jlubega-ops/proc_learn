@@ -733,6 +733,9 @@ export function PortalAssignmentDetail({ procurementId }) {
                 <dt className="text-xs text-zinc-500">Accepted by</dt>
                 <dd className="wrap-break-word">
                   {orderDoc.acceptedByName || "—"} · {formatPortalDate(orderDoc.acceptedAt)}
+                  {orderDoc.responseSource && orderDoc.responseSource !== "PORTAL" ? (
+                    <span className="ml-2 text-zinc-600">· Generated</span>
+                  ) : null}
                 </dd>
               </div>
             ) : null}
@@ -814,6 +817,9 @@ export function PortalAssignmentDetail({ procurementId }) {
                 <dt className="text-xs text-zinc-500">Accepted by</dt>
                 <dd className="wrap-break-word">
                   {data.award.acceptedByName || "—"} · {formatPortalDate(data.award.acceptedAt)}
+                  {data.award.responseSource && data.award.responseSource !== "PORTAL" ? (
+                    <span className="ml-2 text-zinc-600">· Generated</span>
+                  ) : null}
                 </dd>
               </div>
             ) : null}

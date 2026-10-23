@@ -28,6 +28,7 @@ import {
 import { useToast } from "@/components/providers/toast-provider";
 import { validateLoginFields } from "@/lib/validation/login";
 import { BrandLogoImage } from "@/components/providers/site-branding-provider";
+import { AppBrandLockup } from "@/components/brand/app-brand-lockup";
 
 /** Turn API / lowercased strings into readable toast sentences. */
 function copyForToast(raw) {
@@ -257,15 +258,18 @@ export function LoginForm({
                   priority
                 />
               </div>
-              <p
-                className="font-extrabold tracking-tight text-[#008bd0]"
-                style={{
-                  fontSize: "clamp(1.35rem, 5vw, 1.85rem)",
-                  lineHeight: 1.1,
-                }}
+              <div
+                className="max-w-full text-center"
+                style={{ fontSize: "clamp(1.35rem, 5vw, 1.85rem)", lineHeight: 1.15 }}
               >
-                {APP_NAME}
-              </p>
+                <AppBrandLockup
+                  className="block"
+                  nameClassName="font-extrabold tracking-tight text-[#008bd0]"
+                  taglineClassName="text-[0.55em] font-medium tracking-tight text-zinc-500"
+                  separatorClassName="mx-1.5 text-[0.55em] font-normal text-zinc-400"
+                  as="p"
+                />
+              </div>
               <p className="mt-0.5 max-w-sm text-[10px] font-semibold uppercase leading-tight tracking-[0.12em] text-zinc-600 sm:text-[11px]">
                 {ORG_SHORT} · {ORG_NAME}
               </p>

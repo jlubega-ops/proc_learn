@@ -6,9 +6,19 @@ export const PI_STATUS_PRESENTATION = {
   DECLINED: { label: "Declined by provider", color: "error" },
 };
 
-/** @param {string | null | undefined} status */
-export function presentPurchaseInstructionStatus(status) {
-  return PI_STATUS_PRESENTATION[String(status || "")] || { label: String(status || "—"), color: "info" };
+/**
+ * @param {string | null | undefined} status
+ * @param {{ responseSource?: string | null }} [opts]
+ */
+export function presentPurchaseInstructionStatus(status, opts = {}) {
+  const key = String(status || "");
+  const base = PI_STATUS_PRESENTATION[key] || { label: key || "—", color: /** @type {"info"} */ ("info") };
+  const src = opts.responseSource ? String(opts.responseSource) : "";
+  const generated = Boolean(src && src !== "PORTAL");
+  if (generated && (key === "ACCEPTED" || key === "DECLINED")) {
+    return { ...base, label: `${base.label} - (Generated)` };
+  }
+  return base;
 }
 
 /** @type {Record<string, { label: string; color: "success" | "warning" | "error" | "info" | "primary" }>} */

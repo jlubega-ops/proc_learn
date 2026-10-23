@@ -938,8 +938,10 @@ export function PortalInvoices({ reloadKey = 0 }) {
                     Amount <span className="font-semibold">{formatMoneyUGX(inv.amount)}</span>
                   </span>
                   <span className="text-zinc-600">Paid {formatMoneyUGX(inv.paidAmount)}</span>
-                  {inv.source === "OFFICER" ? (
-                    <span className="text-zinc-600">Recorded by the procurement unit</span>
+                  {inv.source && inv.source !== "PORTAL" ? (
+                    <span className="text-zinc-600">Generated</span>
+                  ) : inv.source === "PORTAL" ? (
+                    <span className="text-zinc-600">Provider portal</span>
                   ) : null}
                 </div>
                 {inv.rejectionReason ? (

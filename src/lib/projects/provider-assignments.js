@@ -273,6 +273,7 @@ function orderOf(r) {
       issuedAt: doc.issuedAt || null,
       acceptedAt: doc.acceptedAt || null,
       acceptedByName: doc.acceptedByName || null,
+      responseSource: doc.responseSource || null,
       declinedAt: doc.declinedAt || null,
       declineReason: doc.declineReason || null,
       deliveryAddress: doc.deliveryAddress || null,
@@ -280,7 +281,19 @@ function orderOf(r) {
       endDate: contract?.endDate || null,
     };
   }
-  if (pi) return { kind: "PURCHASE_INSTRUCTION", number: pi.instructionNumber, value: pi.amount?.toString?.(), status: pi.status };
+  if (pi) {
+    return {
+      kind: "PURCHASE_INSTRUCTION",
+      number: pi.instructionNumber,
+      value: pi.amount?.toString?.(),
+      status: pi.status,
+      acceptedAt: pi.acceptedAt || null,
+      acceptedByName: pi.acceptedByName || null,
+      responseSource: pi.responseSource || null,
+      declinedAt: pi.declinedAt || null,
+      declineReason: pi.declineReason || null,
+    };
+  }
   return null;
 }
 
@@ -477,6 +490,7 @@ export async function loadProviderAssignment(prisma, opts) {
           communicatedAt: award.communicatedAt || null,
           acceptedAt: award.acceptedAt || null,
           acceptedByName: award.acceptedByName || null,
+          responseSource: award.responseSource || null,
           declinedAt: award.declinedAt || null,
           declineReason: award.declineReason || null,
           approvalReference: award.approvalReference || null,

@@ -26,7 +26,12 @@ import {
 } from "@/lib/admin-mui-surfaces";
 import { formatMoneyUGX } from "@/lib/money";
 import { formatPrintDate } from "@/components/print/print-document";
-import { OrgProviderRunValidation } from "@/components/projects/org-provider-selection";
+import {
+  OrgProviderRunValidation,
+  PROVIDER_ACTION_RULE_ALLOW_WARNINGS,
+  PROVIDER_ACTION_RULE_PASS_ONLY,
+  ProviderActionRuleToggle,
+} from "@/components/projects/org-provider-selection";
 import { ProviderComplianceChecklist } from "@/components/projects/org-provider-compliance";
 import { OrgAwardDecisionTrail } from "@/components/projects/org-award-recommendation-summary";
 import { actingRoleLabel } from "@/lib/projects/committee-labels";
@@ -70,7 +75,8 @@ function lowestEligible(bidders) {
 
 /**
  * Evaluation Committee eligibility + recommendation, and tender post-qualification.
- * Eligibility is always run by the system ("Run validation"); learning mode never blocks.
+ * Eligibility is always run by the system ("Run validation"). Default rule is Pass only;
+ * Allow with warnings lets failed checks continue after confirmation.
  *
  * With `step`, renders only that workflow step's work inside the task card; the step's
  * own action (validation dialog or the task button via `ref`) completes the task.
@@ -114,6 +120,8 @@ export function OrgEvaluationPanel({
   /** @type {[Record<string, string>, Function]} */
   const [errors, setErrors] = useState({});
   const [confirmSubmit, setConfirmSubmit] = useState(/** @type {string[] | null} */ (null));
+  const [actionRule, setActionRule] = useState(PROVIDER_ACTION_RULE_PASS_ONLY);
+  const allowWithWarnings = actionRule === PROVIDER_ACTION_RULE_ALLOW_WARNINGS;
   const refreshKey = `${procurement?.updatedAt || ""}-${(procurement?.offers || []).length}`;
   const reportStatus = ctx?.evaluationReport?.status;
   const reportDraft = useDraftSync(
@@ -217,6 +225,14 @@ export function OrgEvaluationPanel({
       if (!validate(true)) return false;
       const w = recommendationWarnings();
       if (!w.length) return true;
+      const eligibilityFails = Boolean(chosen && !chosen.qualification?.qualifies);
+      if (eligibilityFails && !allowWithWarnings) {
+        showToast({
+          message: "Pass only — choose an eligible bidder, or switch to Allow with warnings.",
+          severity: "error",
+        });
+        return false;
+      }
       return new Promise((resolve) => {
         warnResolveRef.current = resolve;
         setConfirmSubmit(w);
@@ -323,8 +339,7 @@ export function OrgEvaluationPanel({
       <DialogTitle>Continue with warnings?</DialogTitle>
       <DialogContent dividers>
         <Typography variant="body2" sx={{ mb: 1 }}>
-          This is learning mode, so you can continue. The warnings below are recorded on the
-          procurement file for review.
+          Warnings will be recorded on the file.
         </Typography>
         <ul className="list-disc space-y-1 pl-5 text-sm">
           {(confirmSubmit || []).map((w) => (
@@ -507,14 +522,26 @@ export function OrgEvaluationPanel({
             </div>
           ) : null}
           {canEvaluate ? (
-            <OrgProviderRunValidation
-              providers={bidders}
-              actionLabel={stepActionLabel || "Complete technical evaluation"}
-              busy={stepBusy || busy}
-              busyLabel="Completing…"
-              hideAction={hideStepAction || phaseLocked}
-              onConfirm={() => onStepAction?.()}
-            />
+            <div className="space-y-2">
+              {!hideStepAction && !phaseLocked ? (
+                <div className="flex flex-wrap justify-end">
+                  <ProviderActionRuleToggle
+                    value={actionRule}
+                    onChange={setActionRule}
+                    disabled={stepBusy || busy}
+                  />
+                </div>
+              ) : null}
+              <OrgProviderRunValidation
+                providers={bidders}
+                actionLabel={stepActionLabel || "Complete technical evaluation"}
+                busy={stepBusy || busy}
+                busyLabel="Completing…"
+                hideAction={hideStepAction || phaseLocked}
+                allowWithWarnings={allowWithWarnings}
+                onConfirm={() => onStepAction?.()}
+              />
+            </div>
           ) : (
             notMemberAlert
           )}
@@ -756,6 +783,13 @@ export function OrgEvaluationPanel({
               {returned.comment ? `: ${returned.comment}` : ""}
             </Alert>
           ) : null}
+          <div className="flex flex-wrap justify-end">
+            <ProviderActionRuleToggle
+              value={actionRule}
+              onChange={setActionRule}
+              disabled={busy || stepBusy || phaseLocked}
+            />
+          </div>
           {results}
           {reportFields}
           <div className="flex flex-wrap items-center justify-between gap-2">
@@ -827,14 +861,26 @@ export function OrgEvaluationPanel({
             </div>
           </div>
           {stepActionInside && recommended ? (
-            <OrgProviderRunValidation
-              providers={[recommended]}
-              actionLabel={stepActionLabel || "Submit post-qualification"}
-              busy={stepBusy || busy}
-              busyLabel="Submitting post-qualification…"
-              hideAction={hideStepAction || phaseLocked}
-              onConfirm={() => runPostQualificationStep()}
-            />
+            <div className="space-y-2">
+              {!hideStepAction && !phaseLocked ? (
+                <div className="flex flex-wrap justify-end">
+                  <ProviderActionRuleToggle
+                    value={actionRule}
+                    onChange={setActionRule}
+                    disabled={stepBusy || busy}
+                  />
+                </div>
+              ) : null}
+              <OrgProviderRunValidation
+                providers={[recommended]}
+                actionLabel={stepActionLabel || "Submit post-qualification"}
+                busy={stepBusy || busy}
+                busyLabel="Submitting post-qualification…"
+                hideAction={hideStepAction || phaseLocked}
+                allowWithWarnings={allowWithWarnings}
+                onConfirm={() => runPostQualificationStep()}
+              />
+            </div>
           ) : !canEvaluate ? (
             notMemberAlert
           ) : null}

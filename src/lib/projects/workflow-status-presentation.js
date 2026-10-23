@@ -240,6 +240,8 @@ export async function mapEntityWorkflowContexts(prisma, opts) {
     where: {
       projectId: opts.projectId,
       status: { in: ["PENDING", "IN_PROGRESS"] },
+      // Ignore cross-process handoff reminders (step 0) — status stays Approved; bell only.
+      stepNumber: { gt: 0 },
       instance: {
         [field]: { in: ids },
         status: { in: ["ACTIVE", "IN_PROGRESS", "SUSPENDED"] },
